@@ -2019,6 +2019,16 @@ RecreationCompositorValues RecreationCompositorValuesOf(std::string_view text) {
       });
 }
 
+RecreationPreferences RecreationPreferencesOf(std::string_view text) {
+  if (!IsRecreationMode()) {
+    return {};
+  }
+  return ParseRecreationPreferences(
+      text, [](std::string_view number, double* value) {
+        return base::StringToDouble(number, value);
+      });
+}
+
 RecreationPaintWorkletValues RecreationPaintWorkletValuesOf(
     std::string_view text) {
   if (!IsRecreationMode()) {
@@ -8097,6 +8107,9 @@ struct BrowserPreferenceStorage {
   base::Lock lock;
   // The fields last sent to each view, by the view's identity.
   std::unordered_map<uintptr_t, base::DictValue> view_fields;
+  // The color maps last sent to each view, by the view's identity (protocol
+  // 0.57).
+  std::unordered_map<uintptr_t, base::DictValue> view_color_maps;
   // The reading last recorded for each preference, by profile and name.
   std::map<std::pair<std::string, std::string>, base::DictValue> readings;
 };
@@ -8156,6 +8169,56 @@ void RecordBrowserWebPreferencesSent(int page_frame_tree_node_id,
   payload.Set("first", first);
   payload.Set("fields", std::move(changed));
   SendBlinkEvidence("browser.preferences", "web-preferences-sent",
+                    std::move(payload));
+}
+
+void RecordBrowserColorMapsSent(int page_frame_tree_node_id,
+                                bool primary_page,
+                                int renderer_process_id,
+                                uintptr_t view_identity,
+                                std::string point,
+                                base::DictValue maps) {
+  A11Y_RECORDER_COST("RecordBrowserColorMapsSent");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || view_identity == 0 ||
+      !IsOneOf(point, {"view-created", "color-providers"})) {
+    return;
+  }
+  const bool created = point == "view-created";
+  base::DictValue changed;
+  bool first = false;
+  {
+    BrowserPreferenceStorage& storage = GetBrowserPreferenceStorage();
+    base::AutoLock lock(storage.lock);
+    auto existing = storage.view_color_maps.find(view_identity);
+    if (created || existing == storage.view_color_maps.end()) {
+      first = true;
+      storage.view_color_maps[view_identity] = maps.Clone();
+      changed = std::move(maps);
+    } else {
+      base::DictValue& last = existing->second;
+      for (auto [name, map] : maps) {
+        const base::Value* previous = last.Find(name);
+        if (!previous || *previous != map) {
+          changed.Set(name, map.Clone());
+          last.Set(name, map.Clone());
+        }
+      }
+    }
+  }
+  if (!first && changed.empty()) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("pageFrameTreeNodeId", page_frame_tree_node_id);
+  payload.Set("primaryPage", primary_page);
+  payload.Set("rendererProcessId", renderer_process_id);
+  payload.Set("viewId", base::NumberToString(view_identity));
+  payload.Set("point", std::move(point));
+  payload.Set("first", first);
+  payload.Set("maps", std::move(changed));
+  SendBlinkEvidence("browser.preferences", "color-maps-sent",
                     std::move(payload));
 }
 

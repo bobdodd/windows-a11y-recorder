@@ -17,6 +17,7 @@
 #include "chromium/recorder_bridge/recorder_switches.h"
 #include "chromium/recorder_bridge/recreation_compositor_values.h"
 #include "chromium/recorder_bridge/recreation_paint_worklet_values.h"
+#include "chromium/recorder_bridge/recreation_preferences.h"
 #include "chromium/recorder_bridge/recreation_image_frames.h"
 
 namespace base {
@@ -111,6 +112,15 @@ RecreationCompositorValues RecreationCompositorValuesOf(std::string_view text);
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 RecreationPaintWorkletValues RecreationPaintWorkletValuesOf(
     std::string_view text);
+
+// Stage 3 of accessibility preferences ("Stage 3: the recreation" in
+// docs/architecture/accessibility-preferences.md): in the recreation mode,
+// the recorded preferences of the data-a11y-recorded-preferences attribute
+// of a recreated document's root element, which Blink gives the page in
+// place of those the recreation browser sends. Text not of the attribute's
+// form gives none. Gives none outside the recreation mode.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+RecreationPreferences RecreationPreferencesOf(std::string_view text);
 
 // Appends a non-secret startup diagnostic when the opt-in bridge log
 // environment variable is present. This works before Chromium logging starts.
@@ -2584,6 +2594,25 @@ void RecordBrowserZoomLevelChanged(std::string mode,
                                    std::string host,
                                    std::string scheme,
                                    double zoom_level);
+
+// Protocol 0.57 (accessibility preferences, stage 3). Records the color maps
+// a page's view is sent, on browser.preferences as color-maps-sent. The
+// point is "view-created" (RenderViewHostImpl::CreateRenderView, all three
+// maps) or "color-providers" (WebContentsImpl::
+// HandleColorRelatedStateChanges, after UpdateColorProviders). The maps are
+// a dictionary of "light", "dark", and "forcedColors", each a dictionary of
+// RendererColorId names to colors written "#AARRGGBB". The bridge keeps the
+// last maps sent to each view and records only the maps that differ from
+// them, each whole; a send that changes none is not recorded. The view
+// identity is as for RecordBrowserWebPreferencesSent, and "view-created"
+// starts a new set for it.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserColorMapsSent(int page_frame_tree_node_id,
+                                bool primary_page,
+                                int renderer_process_id,
+                                uintptr_t view_identity,
+                                std::string point,
+                                base::DictValue maps);
 
 }  // namespace a11y_recorder
 

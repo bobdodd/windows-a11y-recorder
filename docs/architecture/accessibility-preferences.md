@@ -19,7 +19,8 @@ same day; the owner checked them by mouse and keyboard on the target
 machine 2026-10-08, and they remain to check with a head pointer and eye
 tracking (see "Change buttons and counts"). Stage 2 was built and
 checked on the target machine 2026-10-08, and stage 3 proposed the same
-day, not agreed (see "Stage 3: the recreation"). Listed in
+day, then agreed and built that day, not yet run on the target machine
+(see "Stage 3: the recreation"). Listed in
 [outstanding work](analysis-outstanding-work.md). It accompanies
 [assistive technology detection](assistive-technology-detection.md), whose
 approach was agreed on 2026-10-07, and takes over that design's Windows
@@ -1076,9 +1077,13 @@ Checked by the owner 2026-10-08 on 45a500c.
   equipment was not available. The details of the check, such as each
   item of "To check by the owner" above, were not reported separately.
 
-## Stage 3: the recreation (proposed)
+## Stage 3: the recreation
 
-Proposed 2026-10-08, for agreement before it is built. Stage 3 applies
+Proposed 2026-10-08, for agreement before it is built; agreed by the owner
+the same day, with its three proposals: the color maps recorded at
+protocol 0.57, the recorded values applied in the renderer's recreation
+mode, and the values carried in a root element attribute. Built
+2026-10-08 (see "As built" below). Stage 3 applies
 the recorded preferences to the recreation, as "Build stages" and
 [page recreation](page-recreation.md), "The environment", require: every
 recorded preference that changes how the page is drawn or laid out is
@@ -1209,7 +1214,108 @@ were used; one made before 0.57 says the same of the color maps.
   recorded scheme or contrast colors, and the Styles pane shows the
   matching `@media` rules applying.
 
+### As built
+
+Built 2026-10-08 to the design above, with these decisions and limits.
+
+- `color-maps-sent` (protocol 0.57) is recorded by the bridge's
+  `RecordBrowserColorMapsSent`, from two hooks `integrate.py` adds to
+  `content/browser`: in `RenderViewHostImpl::CreateRenderView`, after
+  `params->color_provider_colors` is set (point `view-created`), and in
+  `WebContentsImpl::HandleColorRelatedStateChanges`, after
+  `UpdateColorProviders` is broadcast (point `color-providers`). A view's
+  first record holds the three maps; a later one only the maps that differ
+  from the view's last, each whole, and no record is written when none
+  differs. Each map holds the 67 `RendererColorId` values by name, as
+  `#AARRGGBB`; a value the bridge has no name for is left out, and the
+  validator refuses a map that lacks a listed name.
+- The values are carried in `data-a11y-recorded-preferences` on the served
+  document's `<html>` element. Its text is a list of entries separated by
+  `; `: `field NAME TYPE VALUE` (`b`, `i`, `n`, or `t`, text
+  percent-encoded), `zoom LEVEL`, and `color MAP NAME AARRGGBB`
+  (`chromium/recorder_bridge/recreation_preferences.h`, which the
+  recorder's `RecordedPreferences` writes and the renderer reads). Text
+  that does not follow the form gives no values at all, so a damaged
+  attribute leaves the recreation browser's own values rather than some of
+  the recorded ones.
+- The renderer reads the attribute only in recreation mode and only from
+  the outermost main frame's document. The trigger is
+  `HTMLHtmlElement::InsertedByParser`, the first moment the served root
+  and its attribute exist, before anything is laid out: it applies the web
+  preferences, renderer preferences, color maps, and zoom again, now with
+  the recorded values. `WebViewImpl::UpdateWebPreferences` and
+  `UpdateRendererPreferences` replace each recorded field after every
+  later send, `Page::UpdateColorProviders` takes the recorded maps in
+  place of those sent, and `WebFrameWidgetImpl::SetZoomInternal` sets the
+  recorded level after its test override, so the recreation browser
+  cannot undo them. The auditor's own zoom keys therefore do not zoom the
+  recreation.
+- The builder script copies the attribute from the served root to the
+  recorded root that replaces it, as the renderer reads it again at each
+  later send.
+- The page's values are found as "Which values" says, at the time the
+  recreated state is read at (its basis), and the document's page is the
+  frame tree node id of its page commit, as the properties panel finds it
+  (`RecordingFileDocuments.PageFrameTreeNodeIdOf`).
+- The zoom is chosen as `HostZoomMapImpl` chooses it: the temporary level,
+  else the scheme and host's, else the host's, else the default, else
+  level 0. A temporary record names its host but not its tab, so one is
+  taken only from the page's own commit on; a host record made because
+  the host follows the default gives way to the default.
+- The recreation's viewport is emulated at the recorded CSS size times the
+  zoom factor, 1.2 to the power of the level, with a device scale factor
+  of the recorded device pixel ratio over the factor, and its window is
+  sized for that, so the zoomed page has the recorded CSS size and
+  `devicePixelRatio`. The note that browser zoom is not set is written
+  only when no zoom was recorded.
+- The evidence panel lists each value with the time of its record, the
+  zoom and where it came from, each map, that the attribute was not part
+  of the recorded page, and the limits: a recording before 0.56, or before
+  0.57 for the maps, says the recreation browser's own values were used.
+- A child frame the recreation browser puts in a renderer process of its
+  own, such as a frame of another site, is given the recreation browser's
+  own values: its process has the page's main frame only as a remote
+  frame, with no attribute to read. A child frame in the page's process,
+  and the popups, which the recreation draws in the page, share the
+  page's values.
+- Tests: `RecreationPreferencesTests` (the contract and validator, the
+  page's values from its first and later sends, the maps, the zoom from
+  host, scheme and host, temporary, and default records, the attribute
+  and its encoding, the served markup, the panel's notes for a recording
+  before 0.56 and one before 0.57, the emulated viewport, and a
+  document's page); the database round trip of the new samples; the
+  bridge header's own test, `recreation_preferences_test.cc`; and
+  `RecreationPreferencesIntegrationTests` in
+  `chromium/test_integrate.py`, each hook applied once and refused on
+  code it does not match. Not yet run: the build in the owner's checkout
+  and the check on the target machine, with
+  `scripts/Test-RecreationPreferences.ps1`.
+
+### The check on the target machine
+
+`scripts/Test-RecreationPreferences.ps1` runs the check "Required tests"
+lists, in two runs. The first is a recording of the fixture page in which
+the font size, Windows dark mode, animation effects, a contrast theme, and
+the default zoom are each changed and put back; the script checks the
+`color-maps-sent` records and writes `inspect.csv`, the player time to
+inspect after each change with the recorded values there. The second, with
+`-Recreation`, sets the viewing machine's dark mode and animation effects
+to the opposite of each recorded value, and for each change asks the owner
+to open the recreation at its time, paste a line into DevTools' Console,
+which reads `matchMedia()` for the color scheme, forced colors, and
+reduced motion, the default font size, the `Canvas` system color, and
+`devicePixelRatio`, and to say whether the Styles pane shows the matching
+`@media` rules and whether the scroll bars have the recorded colors.
+
 ## Decisions
+
+Agreed 2026-10-08, stage 3 (see "Stage 3: the recreation"):
+
+1. The color maps are recorded, as `color-maps-sent` at protocol 0.57.
+2. The recorded values are applied in the instrumented Chromium's
+   recreation mode, in the renderer, not by DevTools' emulation.
+3. They are carried in the recreated document's root element, in its
+   `data-a11y-recorded-preferences` attribute.
 
 Agreed 2026-10-07:
 

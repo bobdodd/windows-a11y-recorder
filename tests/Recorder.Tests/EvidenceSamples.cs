@@ -38,6 +38,20 @@ internal static class EvidenceSamples
 
     private static string J(string json) => json.Replace('\'', '"');
 
+    // A color-maps-sent record: all three maps in a first one, the forced
+    // colors map alone in a later one.
+    internal static string ColorMapsSample(bool first)
+    {
+        static string Map(string color) =>
+            "{" + string.Join(",", Recorder.Contracts.BrowserPreferenceSettings.RendererColorNames
+                .Select(name => $"\"{name}\":\"{color}\"")) + "}";
+        var maps = first
+            ? $"{{\"light\":{Map("#FFFFFFFF")},\"dark\":{Map("#FF202124")},\"forcedColors\":{Map("#FF000000")}}}"
+            : $"{{\"forcedColors\":{Map("#FFFFFF00")}}}";
+        return "{\"context\":{\"browserInstanceId\":\"browser-1\",\"processId\":4000,\"processType\":\"browser\",\"profileId\":null,\"browserContextId\":null,\"pageId\":null,\"frameId\":null,\"documentId\":null,\"executionWorldId\":null,\"documentToken\":null}," +
+            $"\"pageFrameTreeNodeId\":12,\"primaryPage\":true,\"rendererProcessId\":7,\"viewId\":\"2199023255552\",\"point\":\"{(first ? "view-created" : "color-providers")}\",\"first\":{(first ? "true" : "false")},\"maps\":{maps}}}";
+    }
+
     private static readonly string WorldContext =
         J("{'browserInstanceId':'browser-1','processId':4100,'processType':'renderer','profileId':null,'browserContextId':'context-1','pageId':'page-1','frameId':'frame-1','documentId':'document-1','executionWorldId':'world-1','documentToken':'TOKEN-1'}");
 
@@ -169,6 +183,10 @@ internal static class EvidenceSamples
             """
             {"context":{"browserInstanceId":"browser-1","processId":4000,"processType":"browser","profileId":null,"browserContextId":null,"pageId":null,"frameId":null,"documentId":null,"executionWorldId":null,"documentToken":null},"mode":"default","followsDefault":false,"host":"","scheme":"","zoomLevel":2.223901085741545,"zoomPercent":150}
             """),
+        // Added with 0024_browser_color_maps.sql (protocol 0.57): a view's
+        // first color maps and a later send of its forced colors map.
+        ("browser.preferences", "color-maps-sent", ColorMapsSample(true)),
+        ("browser.preferences", "color-maps-sent", ColorMapsSample(false)),
         ("browser.preferences", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
         // Added with 0022_magnifier_changes.sql: a level and position change,
         // a pan, a color effect turned on, and readings that failed.

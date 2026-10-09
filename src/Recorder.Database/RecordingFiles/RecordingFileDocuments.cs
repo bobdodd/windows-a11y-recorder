@@ -47,6 +47,10 @@ public sealed class RecordingFileDocuments
     private readonly RecordingFileReader _reader;
     private readonly PlaybackIndex _index;
     private readonly List<(long Time, string Token, string Url)> _navigations = [];
+    // Accessibility preferences stage 3: the page of each document committed
+    // in a primary main frame, by its document token, as the frame tree node
+    // id its navigation's context names it by ("frame-N").
+    private readonly Dictionary<string, int> _pages;
     // Slice 5b: every navigation-completed record's time and address, by the
     // document token of the document it committed, in any frame.
     private readonly Dictionary<string, List<long>> _commits = new(StringComparer.Ordinal);
@@ -90,6 +94,39 @@ public sealed class RecordingFileDocuments
             _navigations.Add((item.MonotonicNanoseconds, token, url));
         }
         _navigations.Sort((a, b) => a.Time.CompareTo(b.Time));
+        _pages = PagesByDocumentToken(index.Events);
+    }
+
+    // The page of each document a page commit committed, as the properties
+    // panel's "Sent to the page" group finds a page's commits.
+    internal static Dictionary<string, int> PagesByDocumentToken(IEnumerable<PlaybackIndexEvent> events)
+    {
+        var pages = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var item in events.OrderBy(item => item.MonotonicNanoseconds))
+        {
+            if (item.EventType == "navigation-completed" &&
+                SessionPlaybackArchiveBuilder.PageCommitOf(item.MonotonicNanoseconds, item.Payload) is { } commit &&
+                item.Payload.GetProperty("context") is var context &&
+                Text(context, "documentToken") is { } token)
+            {
+                pages[token] = commit.PageFrameTreeNodeId;
+            }
+        }
+
+        return pages;
+    }
+
+    /// <summary>
+    /// The page of a top-level document, as the frame tree node id its
+    /// primary main frame navigation names it by, which the
+    /// <c>browser.preferences</c> records name the page by; null when its
+    /// navigation named none. See docs/architecture/accessibility-preferences.md,
+    /// "Stage 3".
+    /// </summary>
+    public int? PageFrameTreeNodeIdOf(string documentKey)
+    {
+        ArgumentNullException.ThrowIfNull(documentKey);
+        return _pages.TryGetValue(documentKey.Split(' ', 2)[0], out var page) ? page : null;
     }
 
     /// <summary>The state reader, made when first asked for.</summary>

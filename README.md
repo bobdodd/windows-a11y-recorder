@@ -431,6 +431,17 @@ the values last sent to the page in a "Sent to the page" group. See
 "Stage 2" in
 [accessibility preferences](docs/architecture/accessibility-preferences.md).
 
+Protocol 0.57 records the color maps each page is given, light, dark, and
+forced colors, which hold the CSS system colors and the colors of native
+controls and scroll bars, and a contrast theme's colors. A recreation then
+gives its page the participant's values at the frame: the preferences
+last sent to the page, its color maps, and its zoom level, applied by the
+instrumented Chromium's renderer in place of the viewing machine's, so
+media queries, `matchMedia()`, DevTools' rule matching, native controls,
+scroll bars, and system colors follow the participant's. The evidence
+panel lists each value with the time of its record. See "Stage 3" in
+[accessibility preferences](docs/architecture/accessibility-preferences.md).
+
 Protocol 0.55 records the frames of each document: a DOM walk names the
 DevTools frame token of its document's frame and whether it is a main frame,
 and the frame each frame owner element (`iframe`, `frame`, `object`,

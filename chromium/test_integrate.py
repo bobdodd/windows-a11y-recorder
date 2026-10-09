@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.56"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.56"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.57"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.57"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -9828,3 +9828,382 @@ class BrowserPreferencesIntegrationTests(unittest.TestCase):
         self.assertIn('const bool created = point == "view-created";', body)
         self.assertIn("if (!first && changed.empty()) {", body)
         self.assertIn('"browser.preferences", "web-preferences-sent"', body)
+
+
+class RecreationPreferencesIntegrationTests(unittest.TestCase):
+    """Protocol 0.57 and stage 3: the color maps recorded, and the recorded
+    preferences given to a recreated page."""
+
+    def signatures(self):
+        return INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+
+    def patch_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            patch(path)
+            first = path.read_text(encoding="utf-8")
+            patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def refuses(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                patch(path)
+
+    def no_mismatches(self, text):
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "patched", text, self.signatures()
+            ),
+        )
+
+    def render_view_host_source(self):
+        return (
+            INTEGRATE.CONTENT_RENDER_VIEW_HOST_OWN_INCLUDE
+            + "\n\nnamespace content {\n\n"
+            + INTEGRATE.CONTENT_RENDER_VIEW_HOST_HELPER_ANCHOR
+            + "    int proxy_route_id) {\n"
+            + INTEGRATE.CONTENT_RENDER_VIEW_HOST_COLOR_CREATED_ANCHOR
+            + INTEGRATE.CONTENT_RENDER_VIEW_HOST_CREATED_ANCHOR
+            + "  return true;\n}\n\n}  // namespace content\n"
+        )
+
+    def test_the_color_maps_a_view_is_created_with_are_recorded(self):
+        first = self.patch_twice(
+            "render_view_host_impl.cc",
+            self.render_view_host_source(),
+            INTEGRATE.patch_content_render_view_host_color_maps,
+        )
+        self.assertEqual(
+            1, first.count(INTEGRATE.CONTENT_RENDER_VIEW_HOST_COLOR_HELPER)
+        )
+        self.assertEqual(
+            1, first.count(INTEGRATE.CONTENT_RENDER_VIEW_HOST_COLOR_CREATED_HOOK)
+        )
+        for include in INTEGRATE.CONTENT_RENDER_VIEW_HOST_COLOR_INCLUDES:
+            self.assertEqual(1, first.count(include + "\n"))
+        # The helper is defined before its use, and the maps are recorded
+        # once they are set on the parameters, before these are moved away.
+        self.assertLess(
+            first.index("void RecorderRecordColorMapsSent(RenderViewHostImpl* view,"),
+            first.index("bool RenderViewHostImpl::CreateRenderView("),
+        )
+        self.assertLess(
+            first.index('RecorderRecordColorMapsSent(this, "view-created",'),
+            first.index("CreateView(std::move(params));"),
+        )
+        # Nothing is read for a browser started without the recorder.
+        helper = INTEGRATE.CONTENT_RENDER_VIEW_HOST_COLOR_HELPER
+        self.assertLess(
+            helper.index("if (!a11y_recorder::IsRecorderActive() || !view)"),
+            helper.index("base::DictValue value;"),
+        )
+        for name in ("kLightColorMap", "kDarkColorMap", "kForcedColorsColorMap"):
+            self.assertIn(f"a11y_recorder::{name}", helper)
+        self.no_mismatches(first)
+
+    def test_refuses_a_render_view_host_without_the_color_maps_line(self):
+        source = self.render_view_host_source().replace(
+            "delegate_->GetColorProviderColorMaps();",
+            "GetColorProviderColorMaps();",
+        )
+        self.refuses(
+            "render_view_host_impl.cc",
+            source,
+            INTEGRATE.patch_content_render_view_host_color_maps,
+        )
+
+    def web_contents_source(self):
+        return (
+            "namespace content {\n\n"
+            + INTEGRATE.CONTENT_WEB_CONTENTS_COLOR_DECLARATION_ANCHOR
+            + "  if (blink::ColorProviderColorMaps color_maps = GetColorProviderColorMaps();\n"
+            "      color_maps_ != color_maps) {\n"
+            "    color_maps_.swap(color_maps);\n"
+            "    ExecutePageBroadcastMethodForAllPages([this](RenderViewHostImpl* rvh) {\n"
+            + INTEGRATE.CONTENT_WEB_CONTENTS_COLOR_ANCHOR
+            + "    });\n  }\n}\n\n}  // namespace content\n"
+        )
+
+    def test_each_change_of_the_color_maps_sent_is_recorded(self):
+        first = self.patch_twice(
+            "web_contents_impl.cc",
+            self.web_contents_source(),
+            INTEGRATE.patch_content_web_contents_color_maps,
+        )
+        self.assertEqual(
+            1, first.count(INTEGRATE.CONTENT_WEB_CONTENTS_COLOR_DECLARATION)
+        )
+        self.assertEqual(1, first.count(INTEGRATE.CONTENT_WEB_CONTENTS_COLOR_HOOK))
+        # Declared before use, and recorded after each page is sent them.
+        self.assertLess(
+            first.index("void RecorderRecordColorMapsSent("),
+            first.index("void WebContentsImpl::HandleColorRelatedStateChanges()"),
+        )
+        self.assertLess(
+            first.index("broadcast->UpdateColorProviders(color_maps_);"),
+            first.index('RecorderRecordColorMapsSent(rvh, "color-providers"'),
+        )
+        # The declaration matches the definition.
+        self.assertIn(
+            INTEGRATE.CONTENT_WEB_CONTENTS_COLOR_DECLARATION.split("\n", 1)[1]
+            .strip(),
+            INTEGRATE.CONTENT_RENDER_VIEW_HOST_COLOR_HELPER,
+        )
+        self.no_mismatches(first)
+
+    def test_refuses_web_contents_it_does_not_recognise(self):
+        source = self.web_contents_source().replace(
+            "broadcast->UpdateColorProviders(color_maps_);",
+            "broadcast->UpdateColorProviders(std::move(color_maps));",
+        )
+        self.refuses(
+            "web_contents_impl.cc",
+            source,
+            INTEGRATE.patch_content_web_contents_color_maps,
+        )
+
+    def web_view_source(self):
+        return (
+            INTEGRATE.BLINK_WEB_VIEW_OWN_INCLUDE
+            + "\n\nnamespace blink {\n\n"
+            + INTEGRATE.BLINK_WEB_VIEW_PREFERENCES_HELPER_ANCHOR
+            + "    const RendererPreferences& preferences) {\n"
+            "  std::string old_accept_languages = renderer_preferences_.accept_languages;\n"
+            + INTEGRATE.BLINK_WEB_VIEW_RENDERER_PREFERENCES_ANCHOR
+            + "}\n\n"
+            + INTEGRATE.BLINK_WEB_VIEW_WEB_PREFERENCES_ANCHOR
+            + "  ApplyWebPreferences(web_preferences_, this);\n}\n\n"
+            "}  // namespace blink\n"
+        )
+
+    def test_a_recreated_page_takes_the_recorded_preferences(self):
+        first = self.patch_twice(
+            "web_view_impl.cc",
+            self.web_view_source(),
+            INTEGRATE.patch_blink_web_view_preferences,
+        )
+        self.assertEqual(
+            1, first.count(INTEGRATE.BLINK_WEB_VIEW_PREFERENCES_HELPER)
+        )
+        for hook in (
+            INTEGRATE.BLINK_WEB_VIEW_WEB_PREFERENCES_HOOK,
+            INTEGRATE.BLINK_WEB_VIEW_RENDERER_PREFERENCES_HOOK,
+        ):
+            self.assertEqual(1, first.count(hook))
+        for include in INTEGRATE.BLINK_WEB_VIEW_PREFERENCES_INCLUDES:
+            self.assertEqual(1, first.count(include + "\n"))
+        # The page is given the preferences with the recorded values.
+        self.assertIn(
+            "GetPage()->SetRendererPreferences(renderer_preferences_);", first
+        )
+        self.assertNotIn("GetPage()->SetRendererPreferences(preferences);", first)
+        self.assertLess(
+            first.index("RecorderOverrideWebPreferences(MainFrameImpl(), web_preferences_);"),
+            first.index("ApplyWebPreferences(web_preferences_, this);"),
+        )
+        helper = INTEGRATE.BLINK_WEB_VIEW_PREFERENCES_HELPER
+        # Only in the recreation mode, and only for the outermost main frame.
+        self.assertIn("!a11y_recorder::IsRecreationMode() || !frame ||", helper)
+        self.assertIn("!frame->IsOutermostMainFrame()", helper)
+        self.assertIn('"data-a11y-recorded-preferences"', helper)
+        for field in (
+            "standardFontFamily", "fixedFontFamily", "serifFontFamily",
+            "sansSerifFontFamily", "cursiveFontFamily", "fantasyFontFamily",
+            "mathFontFamily", "defaultFontSize", "defaultFixedFontSize",
+            "minimumFontSize", "minimumLogicalFontSize",
+            "prefersReducedMotion", "prefersReducedTransparency",
+            "invertedColors", "textTrackTextSize", "textTrackFontFamily",
+            "inForcedColors", "isForcedColorsDisabled",
+            "preferredRootScrollbarColorScheme", "preferredColorScheme",
+            "preferredContrast", "focusRingColor",
+            "hasCaretBlinkInterval", "caretBlinkIntervalMilliseconds",
+            "caretBrowsingEnabled",
+            "useOverlayScrollbar", "captionFontFamily", "captionFontHeight",
+            "smallCaptionFontFamily", "smallCaptionFontHeight",
+            "menuFontFamily", "menuFontHeight", "statusFontFamily",
+            "statusFontHeight", "messageFontFamily", "messageFontHeight",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(f'"{field}"', helper)
+                # Every field the recording names is one the recorder sends.
+                self.assertIn(f'"{field}"', INTEGRATE.CONTENT_RENDER_VIEW_HOST_HELPER)
+        self.no_mismatches(first)
+
+    def test_refuses_a_web_view_it_does_not_recognise(self):
+        source = self.web_view_source().replace(
+            "GetPage()->SetRendererPreferences(preferences);",
+            "GetPage()->SetRendererPreferences(std::move(preferences));",
+        )
+        self.refuses(
+            "web_view_impl.cc", source, INTEGRATE.patch_blink_web_view_preferences
+        )
+
+    def test_a_recreated_page_takes_the_recorded_color_maps(self):
+        source = (
+            "namespace blink {\n\n"
+            + INTEGRATE.BLINK_PAGE_COLOR_MAPS_ANCHOR
+            + "  CHECK(!color_provider_colors.IsEmpty());\n"
+            "  SetColorProviderColorMaps(color_provider_colors);\n"
+            "  return true;\n}\n\n}  // namespace blink\n"
+        )
+        first = self.patch_twice("page.cc", source, INTEGRATE.patch_blink_page_color_maps)
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_PAGE_COLOR_MAPS_HOOK))
+        # The rest of the function reads the recorded maps by the old name.
+        self.assertLess(
+            first.index("const ColorProviderColorMaps color_provider_colors ="),
+            first.index("CHECK(!color_provider_colors.IsEmpty());"),
+        )
+        self.refuses(
+            "page.cc",
+            source.replace("bool Page::UpdateColorProviders(", "void Page::UpdateColorProviders("),
+            INTEGRATE.patch_blink_page_color_maps,
+        )
+
+    def test_a_recreated_page_takes_the_recorded_zoom_level(self):
+        source = (
+            "namespace blink {\n\n"
+            + INTEGRATE.BLINK_FRAME_WIDGET_ZOOM_DECLARATION_ANCHOR
+            + "  SetZoomInternal(zoom_level, css_zoom_factor_);\n}\n\n"
+            "void WebFrameWidgetImpl::SetZoomInternal(double zoom_level,\n"
+            "                                         double css_zoom_factor) {\n"
+            + INTEGRATE.BLINK_FRAME_WIDGET_ZOOM_ANCHOR
+            + "  bool zoom_changed = zoom_level != zoom_level_;\n}\n\n"
+            "}  // namespace blink\n"
+        )
+        first = self.patch_twice(
+            "web_frame_widget_impl.cc", source, INTEGRATE.patch_blink_frame_widget_zoom
+        )
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_FRAME_WIDGET_ZOOM_HOOK))
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_FRAME_WIDGET_ZOOM_DECLARATION))
+        # The recorded level wins over the one sent and the testing one.
+        self.assertLess(
+            first.index("zoom_level = zoom_level_for_testing_;"),
+            first.index("zoom_level = *recorder_zoom;"),
+        )
+        self.assertLess(
+            first.index("zoom_level = *recorder_zoom;"),
+            first.index("bool zoom_changed"),
+        )
+        self.refuses(
+            "web_frame_widget_impl.cc",
+            source.replace("zoom_level_for_testing_ != -INFINITY", "HasZoomLevelForTesting()"),
+            INTEGRATE.patch_blink_frame_widget_zoom,
+        )
+
+    def test_the_recorded_preferences_are_applied_as_the_root_is_parsed(self):
+        source = (
+            "namespace blink {\n\n"
+            + INTEGRATE.BLINK_HTML_ELEMENT_PREFERENCES_ANCHOR
+            + "\n  GetDocument().Parser()->DocumentElementAvailable();\n}\n\n"
+            "}  // namespace blink\n"
+        )
+        first = self.patch_twice(
+            "html_html_element.cc", source, INTEGRATE.patch_blink_html_element_preferences
+        )
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_HTML_ELEMENT_PREFERENCES_HOOK))
+        self.assertLess(
+            first.index("RecorderApplyRecordedPreferences(GetDocument());"),
+            first.index("DocumentElementAvailable();"),
+        )
+        self.refuses(
+            "html_html_element.cc",
+            source.replace("if (!GetDocument().Parser())\n    return;", "if (!GetDocument().Parser()) {\n    return;\n  }"),
+            INTEGRATE.patch_blink_html_element_preferences,
+        )
+
+    def test_the_blink_declarations_match_their_definitions(self):
+        helper = INTEGRATE.BLINK_WEB_VIEW_PREFERENCES_HELPER
+        self.assertIn(
+            "std::optional<double> RecorderRecordedZoomLevel(WebLocalFrameImpl* frame);",
+            INTEGRATE.BLINK_FRAME_WIDGET_ZOOM_DECLARATION,
+        )
+        self.assertIn(
+            "std::optional<double> RecorderRecordedZoomLevel(WebLocalFrameImpl* frame) {",
+            helper,
+        )
+        self.assertIn("void RecorderApplyRecordedPreferences(Document& document);", helper)
+        self.assertIn(
+            "void RecorderApplyRecordedPreferences(Document& document);",
+            INTEGRATE.BLINK_HTML_ELEMENT_PREFERENCES_HOOK,
+        )
+        declaration = (
+            "ColorProviderColorMaps RecorderRecordedColorMaps(\n"
+            "    LocalFrame* main_frame,\n"
+            "    const ColorProviderColorMaps& sent);"
+        )
+        self.assertIn(declaration, helper)
+        self.assertIn(declaration, INTEGRATE.BLINK_PAGE_COLOR_MAPS_HOOK)
+
+    def test_main_applies_the_stage_3_hooks(self):
+        source = Path(INTEGRATE.__file__).read_text(encoding="utf-8")
+        main = source[source.index("def main() -> int:"):]
+        for patch in (
+            "patch_content_render_view_host_color_maps(",
+            "patch_content_web_contents_color_maps(",
+            "patch_blink_web_view_preferences(",
+            "patch_blink_page_color_maps(",
+            "patch_blink_frame_widget_zoom(",
+            "patch_blink_html_element_preferences(",
+        ):
+            with self.subTest(patch=patch):
+                self.assertEqual(1, main.count(patch))
+        # The color maps of a view are recorded after its 0.56 hooks apply.
+        self.assertLess(
+            main.index("patch_content_render_view_host("),
+            main.index("patch_content_render_view_host_color_maps("),
+        )
+
+    def test_the_bridge_records_only_the_maps_that_changed_for_a_view(self):
+        bridge = (
+            MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.cc"
+        ).read_text(encoding="utf-8")
+        start = bridge.index("void RecordBrowserColorMapsSent(")
+        end = bridge.index("\n}\n", start)
+        body = bridge[start:end]
+        self.assertIn('const bool created = point == "view-created";', body)
+        self.assertIn('{"view-created", "color-providers"}', body)
+        self.assertIn("if (!first && changed.empty()) {", body)
+        self.assertIn('"browser.preferences", "color-maps-sent"', body)
+        self.assertIn('payload.Set("maps", std::move(changed));', body)
+        self.assertIn("RecreationPreferences RecreationPreferencesOf(", bridge)
+
+    def test_the_recreation_preferences_pass_their_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        build = (bridge / "BUILD.gn").read_text(encoding="utf-8")
+        self.assertIn('"recreation_preferences.h",', build)
+        header = (bridge / "browser_bridge.h").read_text(encoding="utf-8")
+        self.assertIn(
+            '#include "chromium/recorder_bridge/recreation_preferences.h"', header
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "recreation_preferences_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "recreation_preferences_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)

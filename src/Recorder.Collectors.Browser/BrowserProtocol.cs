@@ -230,6 +230,10 @@ internal static class BrowserProtocol
                 BrowserPreferenceSettings.ZoomEventType) =>
                 payload.Deserialize<BrowserZoomLevelChangedPayload>(
                     JsonOptions) as object,
+            (BrowserEvidenceChannels.Preferences,
+                BrowserPreferenceSettings.ColorMapsEventType) =>
+                payload.Deserialize<BrowserColorMapsSentPayload>(
+                    JsonOptions) as object,
             (BrowserEvidenceChannels.Interaction,
                 BrowserEvidenceEventTypes.PopupWidgetCreated) =>
                 payload.Deserialize<BrowserPopupWidgetCreatedPayload>(

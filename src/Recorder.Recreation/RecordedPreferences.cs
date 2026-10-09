@@ -1,0 +1,186 @@
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
+using Recorder.Contracts;
+using Recorder.Session;
+
+namespace Recorder.Recreation;
+
+/// <summary>
+/// The recorded page values a recreation gives its page (accessibility
+/// preferences stage 3): the text of the root element's
+/// data-a11y-recorded-preferences attribute, which the instrumented renderer
+/// reads in recreation mode (chromium/recorder_bridge/recreation_preferences.h
+/// gives its form), and the evidence panel's notes on them. See
+/// docs/architecture/accessibility-preferences.md, "Stage 3".
+/// </summary>
+public static class RecordedPreferences
+{
+    public const string AttributeName = "data-a11y-recorded-preferences";
+
+    /// <summary>
+    /// The attribute's text: each field as "field NAME TYPE VALUE", the zoom
+    /// as "zoom LEVEL", and each color as "color MAP NAME AARRGGBB",
+    /// separated by "; ". A value not of its field's kind, and a color not
+    /// written "#AARRGGBB", is left out. Empty when there is nothing to
+    /// apply.
+    /// </summary>
+    public static string AttributeText(BrowserPageValues values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        var entries = new List<string>();
+        foreach (var field in values.Fields)
+        {
+            if (Field(field.Setting, field.Value) is { } entry)
+            {
+                entries.Add(entry);
+            }
+        }
+
+        if (values.Zoom is { } zoom && double.IsFinite(zoom.ZoomLevel))
+        {
+            entries.Add("zoom " + zoom.ZoomLevel.ToString("R", CultureInfo.InvariantCulture));
+        }
+
+        foreach (var map in values.ColorMaps)
+        {
+            if (!BrowserPreferenceSettings.ColorMapNames.Contains(map.Name))
+            {
+                continue;
+            }
+
+            foreach (var name in BrowserPreferenceSettings.RendererColorNames)
+            {
+                if (map.Colors.TryGetValue(name, out var color) && IsArgbColor(color))
+                {
+                    entries.Add($"color {map.Name} {name} {color[1..].ToUpperInvariant()}");
+                }
+            }
+        }
+
+        return string.Join("; ", entries);
+    }
+
+    /// <summary>
+    /// Percent-encodes a text value: every UTF-8 byte other than an ASCII
+    /// letter, a digit, "-", ".", "_", and "~" as "%" and two hexadecimal
+    /// digits.
+    /// </summary>
+    public static string Encode(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        var encoded = new StringBuilder();
+        foreach (var value in Encoding.UTF8.GetBytes(text))
+        {
+            var character = (char)value;
+            if (character is (>= 'A' and <= 'Z') or (>= 'a' and <= 'z') or (>= '0' and <= '9') or '-' or '.' or '_' or '~')
+            {
+                encoded.Append(character);
+            }
+            else
+            {
+                encoded.Append('%').Append(value.ToString("X2", CultureInfo.InvariantCulture));
+            }
+        }
+
+        return encoded.ToString();
+    }
+
+    private static string? Field(BrowserPreferenceSetting setting, JsonElement value) =>
+        setting.Kind switch
+        {
+            BrowserPreferenceKind.Boolean when value.ValueKind is JsonValueKind.True or JsonValueKind.False =>
+                $"field {setting.Name} b {(value.GetBoolean() ? "true" : "false")}",
+            BrowserPreferenceKind.Integer when value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number) =>
+                $"field {setting.Name} i {number.ToString(CultureInfo.InvariantCulture)}",
+            BrowserPreferenceKind.Number when value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var real) &&
+                double.IsFinite(real) =>
+                $"field {setting.Name} n {real.ToString("R", CultureInfo.InvariantCulture)}",
+            BrowserPreferenceKind.Text when value.ValueKind == JsonValueKind.String =>
+                $"field {setting.Name} t {Encode(value.GetString()!)}",
+            _ => null
+        };
+
+    private static bool IsArgbColor(string text) =>
+        text.Length == 9 && text[0] == '#' && text.Skip(1).All(Uri.IsHexDigit);
+
+    /// <summary>The evidence panel's notes on the values the recreation gives the page.</summary>
+    public static IReadOnlyList<string> Notes(BrowserPageValues? values)
+    {
+        if (values is null || (!values.PreferencesRecorded && values.Zoom is null && !values.ColorMapsRecorded))
+        {
+            return
+            [
+                "The page's preferences were not recorded, as in a recording made before protocol 0.56 or without the browser, so the recreation is given the recreation browser's own preferences, color maps, and zoom, those of the viewing machine: its media queries, native controls, scroll bars, and system colors may differ from the participant's."
+            ];
+        }
+
+        var notes = new List<string>();
+        if (!values.PreferencesRecorded)
+        {
+            notes.Add("No preferences sent to a page were recorded, so the recreation is given the recreation browser's own, those of the viewing machine.");
+        }
+        else if (values.Fields.Count == 0)
+        {
+            notes.Add("No preferences were recorded as sent to this page by the frame, so the recreation is given the recreation browser's own, those of the viewing machine.");
+        }
+        else
+        {
+            var listed = string.Join(
+                "; ",
+                values.Fields.Select(field =>
+                    $"{field.Setting.Label}: {BrowserPreferenceTimeline.DescribeValue(field.Setting, field.Value)}, from the record at {Seconds(field.Time)} s"));
+            notes.Add($"The page is given the recorded values of the {values.Fields.Count.ToString(CultureInfo.InvariantCulture)} preferences last sent to it at or before the frame, in place of the recreation browser's: {listed}.");
+            var missing = BrowserPreferenceSettings.Page
+                .Where(setting => values.Fields.All(field => field.Setting.Name != setting.Name))
+                .Select(setting => setting.Label)
+                .ToList();
+            if (missing.Count > 0)
+            {
+                notes.Add($"These preferences were not recorded as sent to the page, so the recreation browser's own are used: {string.Join(", ", missing)}.");
+            }
+        }
+
+        if (values.Zoom is { } zoom)
+        {
+            var percent = (zoom.Factor * 100).ToString("0.#", CultureInfo.InvariantCulture);
+            var level = zoom.ZoomLevel.ToString("0.###", CultureInfo.InvariantCulture);
+            notes.Add(zoom.Source switch
+            {
+                "none" => "The page is shown at 100 percent zoom, zoom level 0: no zoom record named its host and no default zoom was recorded by the frame.",
+                "default" => $"The page is shown at the recorded default zoom, {percent} percent, zoom level {level}, from the record at {Seconds(zoom.Time)} s; no zoom record set its host's own level.",
+                "temporary" => $"The page is shown at the tab's recorded zoom, {percent} percent, zoom level {level}, from the record at {Seconds(zoom.Time)} s. The record names the page's host but not its tab, so it is taken only when made after the page was committed.",
+                _ => $"The page is shown at its host's recorded zoom, {percent} percent, zoom level {level}, from the {zoom.Source} record at {Seconds(zoom.Time)} s."
+            });
+            notes.Add("The recreation's viewport is emulated at the recorded CSS size times the zoom factor and a device scale factor of the recorded device pixel ratio over it, so the page has the recorded CSS size and devicePixelRatio.");
+        }
+
+        if (!values.ColorMapsRecorded)
+        {
+            notes.Add("The page's color maps were not recorded, as in a recording made before protocol 0.57, so the recreation is given the recreation browser's own light, dark, and forced colors maps, those of the viewing machine: system colors, native controls, and scroll bars, and a contrast theme's colors, may differ from the participant's.");
+        }
+        else
+        {
+            foreach (var name in BrowserPreferenceSettings.ColorMapNames)
+            {
+                var map = values.ColorMaps.FirstOrDefault(item => item.Name == name);
+                notes.Add(map is null
+                    ? $"No {MapLabel(name)} color map was recorded as sent to the page by the frame, so the recreation browser's own is used."
+                    : $"The page is given the recorded {MapLabel(name)} color map, {map.Colors.Count.ToString(CultureInfo.InvariantCulture)} colors, from the record at {Seconds(map.Time)} s.");
+            }
+        }
+
+        notes.Add($"The values are written in the root element's {AttributeName} attribute, which DevTools' Elements pane shows but which was not an attribute of the recorded page. The instrumented renderer reads it and applies the values in place of those the recreation browser sends, at the first application and at every later send.");
+        notes.Add("Only the listed preferences are applied; anything else Chromium gives a page is the recreation browser's. A child frame the recreation browser shows in the page's renderer process, and the page's popups, which the recreation draws in the page, share the page's values; a child frame it puts in a renderer process of its own, such as a frame of another site, is given the recreation browser's own preferences. Windows effects on the screen, such as Magnifier and color filters, are not part of the page; the participant's view shows them.");
+        return notes;
+    }
+
+    private static string MapLabel(string name) => name switch
+    {
+        "forcedColors" => "forced colors",
+        _ => name
+    };
+
+    private static string Seconds(long? nanoseconds) =>
+        nanoseconds is { } value ? (value / 1e9).ToString("0.000", CultureInfo.InvariantCulture) : "an unknown time";
+}

@@ -103,6 +103,9 @@ internal static class EventPayloadValidator
             case ("browser.preferences", "web-preferences-sent"):
                 ValidateWebPreferencesSent(payload, issues);
                 break;
+            case ("browser.preferences", "color-maps-sent"):
+                ValidateColorMapsSent(payload, issues);
+                break;
             case ("browser.preferences", "zoom-level-changed"):
                 ValidateZoomLevelChange(payload, issues);
                 break;
@@ -866,6 +869,92 @@ internal static class EventPayloadValidator
             }
         }
     }
+
+    // Protocol 0.57: the color maps sent to a page's view. A first record
+    // holds all three maps; a later one at least one. Each map holds every
+    // listed color, written "#AARRGGBB".
+    private static void ValidateColorMapsSent(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredInteger("pageFrameTreeNodeId"),
+                RequiredBoolean("primaryPage"),
+                RequiredInteger("rendererProcessId"),
+                RequiredDecimalText("viewId"),
+                RequiredEnum("point", [.. Recorder.Contracts.BrowserPreferenceSettings.ColorMapSendPoints]),
+                RequiredBoolean("first"),
+                RequiredObject("maps")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(payload, false, issues, "browser-preference-context-invalid", "Browser preference evidence");
+        if (!payload.TryGetProperty("maps", out var maps) || maps.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        ValidateShape(
+            maps,
+            [
+                .. Recorder.Contracts.BrowserPreferenceSettings.ColorMapNames.Select(name => new PropertyRule(
+                    name,
+                    false,
+                    false,
+                    value => value.ValueKind == JsonValueKind.Object,
+                    "must be an object"))
+            ],
+            issues,
+            "#/payload/maps");
+        var first = payload.TryGetProperty("first", out var firstValue) && firstValue.ValueKind == JsonValueKind.True;
+        var present = Recorder.Contracts.BrowserPreferenceSettings.ColorMapNames
+            .Where(name => maps.TryGetProperty(name, out _))
+            .ToList();
+        if (first && present.Count != Recorder.Contracts.BrowserPreferenceSettings.ColorMapNames.Count)
+        {
+            AddError(
+                issues,
+                "browser-color-maps-sent-incomplete",
+                "#/payload/maps",
+                "A view's first record holds the light, dark, and forced colors maps.");
+        }
+        else if (!first && present.Count == 0)
+        {
+            AddError(
+                issues,
+                "browser-color-maps-sent-empty",
+                "#/payload/maps",
+                "A record after the first holds at least one changed map.");
+        }
+
+        foreach (var name in present)
+        {
+            var map = maps.GetProperty(name);
+            if (map.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            ValidateShape(
+                map,
+                [
+                    .. Recorder.Contracts.BrowserPreferenceSettings.RendererColorNames.Select(color => new PropertyRule(
+                        color,
+                        true,
+                        false,
+                        value => value.ValueKind == JsonValueKind.String && IsArgbColor(value.GetString()!),
+                        "must be a color written #AARRGGBB"))
+                ],
+                issues,
+                $"#/payload/maps/{name}");
+        }
+    }
+
+    private static bool IsArgbColor(string text) =>
+        text.Length == 9 && text[0] == '#' && text.Skip(1).All(Uri.IsHexDigit);
 
     private static void ValidateZoomLevelChange(
         JsonElement payload,

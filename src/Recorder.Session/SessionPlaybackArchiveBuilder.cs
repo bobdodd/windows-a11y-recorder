@@ -483,6 +483,11 @@ public sealed class SessionPlaybackArchiveBuilder
                     : null;
                 var isFirst = payload.TryGetProperty("first", out var first) && first.ValueKind == JsonValueKind.True;
                 return JoinSummary(eventType, ReadString(payload, "point"), isFirst ? "all fields" : fields);
+            case BrowserPreferenceSettings.ColorMapsEventType:
+                var maps = payload.TryGetProperty("maps", out var sentMaps) && sentMaps.ValueKind == JsonValueKind.Object
+                    ? string.Join(" ", sentMaps.EnumerateObject().Select(map => map.Name))
+                    : null;
+                return JoinSummary(eventType, ReadString(payload, "point"), maps);
             case BrowserPreferenceSettings.SnapshotEventType:
                 return JoinSummary(eventType, ReadString(payload, "profileDirectory"));
             default:

@@ -146,9 +146,11 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   scripts other than the common one; and showing the foreground tab in the
   "Sent to the page" group once the foreground tab is recorded.
 - Stage 3, the recorded preferences applied to the recreation, with a
-  `color-maps-sent` record at protocol 0.57: proposed 2026-10-08, not
-  agreed (see "Stage 3: the recreation" in
-  [accessibility preferences](accessibility-preferences.md)).
+  `color-maps-sent` record at protocol 0.57: proposed 2026-10-08, agreed
+  and built 2026-10-08 (see "As built" in "Stage 3: the recreation" in
+  [accessibility preferences](accessibility-preferences.md)). To build in
+  the owner's checkout and check on the target machine with
+  `scripts/Test-RecreationPreferences.ps1`.
 - Left open by the owner's decision 2026-10-08, to start stage 2 first:
   the Magnifier change records on a real Magnifier recording
   (`scripts/Test-MagnifierChanges.ps1`); applying a Windows color filter
@@ -156,7 +158,9 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   contrast theme is in the desktop frames.
 - Page recreation: applying the recorded preferences that change how a
   page is drawn or laid out, designed with this work, as revised in
-  [page recreation](page-recreation.md), "The environment".
+  [page recreation](page-recreation.md), "The environment"; built as
+  stage 3, 2026-10-08. A child frame in a renderer process of its own is
+  still given the recreation browser's values.
 - Player: properties panels for the participant's accessibility
   settings at the current frame, including Magnifier's current level and
   position and color effect; designed 2026-10-08 in its "The properties

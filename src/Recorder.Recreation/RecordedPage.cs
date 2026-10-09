@@ -68,14 +68,23 @@ public static class RecordedPage
     // when there is one, is written by its name only, since its identifiers
     // are not recorded: standards mode with a document type, quirks mode
     // without.
-    public static string Markup(byte[] tree, string? documentTypeName, string nonce)
+    // From accessibility preferences stage 3, the top document's root also
+    // carries the recorded page's values for the instrumented renderer
+    // (see RecordedPreferences).
+    public static string Markup(byte[] tree, string? documentTypeName, string nonce, string? preferences = null)
     {
         var markup = new StringBuilder();
         if (documentTypeName is not null)
         {
             markup.Append("<!DOCTYPE ").Append(documentTypeName).Append('>');
         }
-        markup.Append("<html><head><meta charset=\"utf-8\"><script type=\"application/json\" id=\"")
+        markup.Append("<html");
+        if (!string.IsNullOrEmpty(preferences))
+        {
+            markup.Append(' ').Append(RecordedPreferences.AttributeName).Append("=\"")
+                .Append(System.Net.WebUtility.HtmlEncode(preferences)).Append('"');
+        }
+        markup.Append("><head><meta charset=\"utf-8\"><script type=\"application/json\" id=\"")
             .Append(TreeElementId)
             .Append("\">")
             .Append(Encoding.UTF8.GetString(tree))
@@ -109,7 +118,8 @@ public static class RecordedPage
         string basis,
         RecordedPageResources? resources = null,
         IReadOnlyList<RecordedPopup>? popups = null,
-        IReadOnlyList<RecordedFrame>? frames = null)
+        IReadOnlyList<RecordedFrame>? frames = null,
+        BrowserPageValues? preferences = null)
     {
         var tree = state.Dom ?? throw new InvalidOperationException("The document has no DOM state.");
         var nonce = RecreationServer.NewToken();
@@ -142,13 +152,19 @@ public static class RecordedPage
         var fontAddress = RecreationServer.FontAddress(RecreationServer.NewToken());
         var notes = StateNotes(state);
         RecreationViewport? viewport = null;
+        // Accessibility preferences stage 3: the page's recorded zoom, which
+        // the instrumented renderer applies, scales the emulated viewport.
+        var zoomFactor = preferences?.Zoom?.Factor ?? 1.0;
         if (state.Viewport is { } recorded)
         {
-            viewport = new RecreationViewport(recorded.Width, recorded.Height, recorded.DevicePixelRatio, recorded.LayoutZoomFactor);
+            viewport = new RecreationViewport(recorded.Width, recorded.Height, recorded.DevicePixelRatio, recorded.LayoutZoomFactor)
+            {
+                BrowserZoomFactor = zoomFactor,
+            };
             notes.Add($"The viewport is shown at {recorded.Width.ToString(CultureInfo.InvariantCulture)} by {recorded.Height.ToString(CultureInfo.InvariantCulture)} CSS pixels and a device pixel ratio of {recorded.DevicePixelRatio.ToString(CultureInfo.InvariantCulture)}, from the page's latest layout checkpoint, recorded at {(recorded.Time / 1e9).ToString("0.000", CultureInfo.InvariantCulture)} s. The window may have been resized after it.");
             // Chromium's layout zoom factor includes the device pixel ratio,
             // so a factor other than the ratio means the page was zoomed.
-            if (Math.Abs(recorded.LayoutZoomFactor - recorded.DevicePixelRatio) > 1e-6)
+            if (preferences?.Zoom is null && Math.Abs(recorded.LayoutZoomFactor - recorded.DevicePixelRatio) > 1e-6)
             {
                 notes.Add($"The recorded layout zoom factor, {recorded.LayoutZoomFactor.ToString(CultureInfo.InvariantCulture)}, differs from the device pixel ratio, so the page may have been zoomed; browser zoom is not set in the recreation.");
             }
@@ -157,6 +173,7 @@ public static class RecordedPage
         {
             notes.Add("No layout checkpoint of the page was recorded at or before the frame, so the viewport is the browser window's.");
         }
+        notes.AddRange(RecordedPreferences.Notes(preferences));
         var elements = tree.Nodes.Values.Where(node => node.NodeType == "element").ToList();
         var withLayout = elements.Count(node => state.Layout.Nodes.ContainsKey(node.Id));
         notes.Add($"{withLayout.ToString(CultureInfo.InvariantCulture)} of the {elements.Count.ToString(CultureInfo.InvariantCulture)} recorded elements have a layout record, whose recorded style and box fragments the recreation imposes. They are written on each element in its data-a11y-recorded-style and data-a11y-recorded-layout attributes, which are shown in the Elements pane but were not attributes of the recorded page. Pseudo-elements, such as ::before, take no recorded style: they appear only as far as the page's recorded style sheets make them.");
@@ -235,7 +252,11 @@ public static class RecordedPage
             animations,
             scripts);
         return new RecreationContent(
-            Markup(Tree(state, used.Faces, fontAddress, placed, compositorValues, used.StyleSheets, used.StyleSheetText, inPlace), DocumentTypeName(tree, documentId), nonce),
+            Markup(
+                Tree(state, used.Faces, fontAddress, placed, compositorValues, used.StyleSheets, used.StyleSheetText, inPlace),
+                DocumentTypeName(tree, documentId),
+                nonce,
+                preferences is null ? null : RecordedPreferences.AttributeText(preferences)),
             evidence,
             nonce)
         {

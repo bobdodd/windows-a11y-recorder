@@ -20049,6 +20049,626 @@ def patch_chrome_profiles_build(path: Path) -> None:
     write_patched(path, text)
 
 
+# Protocol 0.57 (accessibility preferences, stage 3): the color maps each
+# page's view is sent, and, in the recreation mode, the recorded page's
+# preferences, zoom level, and color maps given to the recreated page in
+# place of those the recreation browser sends. See
+# docs/architecture/accessibility-preferences.md, "Stage 3".
+CONTENT_RENDER_VIEW_HOST_COLOR_INCLUDES = (
+    '#include "third_party/blink/public/common/page/color_provider_color_maps.h"',
+)
+CONTENT_RENDER_VIEW_HOST_COLOR_HELPER_MARKER = (
+    "void RecorderRecordColorMapsSent(RenderViewHostImpl* view,\n"
+    "                                 const char* point,\n"
+    "                                 const blink::ColorProviderColorMaps& maps) {\n"
+)
+CONTENT_RENDER_VIEW_HOST_COLOR_HELPER = """\
+// Windows A11y Recorder (protocol 0.57, accessibility preferences stage 3):
+// the color maps a page's view is sent. WebContentsImpl::
+// HandleColorRelatedStateChanges calls this too. See
+// docs/architecture/accessibility-preferences.md.
+void RecorderRecordColorMapsSent(RenderViewHostImpl* view,
+                                 const char* point,
+                                 const blink::ColorProviderColorMaps& maps);
+
+namespace {
+
+// Each listed color of a map, by its RendererColorId name, as "#AARRGGBB".
+base::DictValue RecorderColorMapValue(const ui::RendererColorMap& map) {
+  base::DictValue colors;
+  for (const auto& [id, color] : map) {
+    if (const char* name =
+            a11y_recorder::RendererColorName<color::mojom::RendererColorId>(
+                id)) {
+      colors.Set(name, base::StringPrintf("#%08X", color));
+    }
+  }
+  return colors;
+}
+
+}  // namespace
+
+void RecorderRecordColorMapsSent(RenderViewHostImpl* view,
+                                 const char* point,
+                                 const blink::ColorProviderColorMaps& maps) {
+  if (!a11y_recorder::IsRecorderActive() || !view) {
+    return;
+  }
+  base::DictValue value;
+  value.Set(a11y_recorder::kLightColorMap,
+            RecorderColorMapValue(maps.light_colors_map));
+  value.Set(a11y_recorder::kDarkColorMap,
+            RecorderColorMapValue(maps.dark_colors_map));
+  value.Set(a11y_recorder::kForcedColorsColorMap,
+            RecorderColorMapValue(maps.forced_colors_map));
+  FrameTree* frame_tree = view->frame_tree();
+  RenderProcessHost* process = view->GetProcess();
+  a11y_recorder::RecordBrowserColorMapsSent(
+      frame_tree ? frame_tree->root()->frame_tree_node_id().GetUnsafeValue()
+                 : -1,
+      frame_tree && frame_tree->is_primary(),
+      process ? process->GetDeprecatedID() : -1,
+      reinterpret_cast<uintptr_t>(view), point, std::move(value));
+}
+
+"""
+CONTENT_RENDER_VIEW_HOST_COLOR_CREATED_ANCHOR = """\
+  params->color_provider_colors = delegate_->GetColorProviderColorMaps();
+"""
+CONTENT_RENDER_VIEW_HOST_COLOR_CREATED_HOOK = """\
+  params->color_provider_colors = delegate_->GetColorProviderColorMaps();
+  // Windows A11y Recorder (protocol 0.57): the color maps the new view is
+  // created with.
+  RecorderRecordColorMapsSent(this, "view-created",
+                              params->color_provider_colors);
+"""
+
+
+def patch_content_render_view_host_color_maps(path: Path) -> None:
+    """Protocol 0.57: the color maps each page's view is created with."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        CONTENT_RENDER_VIEW_HOST_OWN_INCLUDE,
+        CONTENT_RENDER_VIEW_HOST_INCLUDES
+        + CONTENT_RENDER_VIEW_HOST_EXTRA_INCLUDES
+        + CONTENT_RENDER_VIEW_HOST_COLOR_INCLUDES,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        CONTENT_RENDER_VIEW_HOST_HELPER_ANCHOR,
+        CONTENT_RENDER_VIEW_HOST_COLOR_HELPER,
+        CONTENT_RENDER_VIEW_HOST_COLOR_HELPER_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        CONTENT_RENDER_VIEW_HOST_COLOR_CREATED_ANCHOR,
+        CONTENT_RENDER_VIEW_HOST_COLOR_CREATED_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+CONTENT_WEB_CONTENTS_COLOR_DECLARATION_ANCHOR = (
+    "void WebContentsImpl::HandleColorRelatedStateChanges() {\n"
+)
+CONTENT_WEB_CONTENTS_COLOR_DECLARATION_MARKER = (
+    "Windows A11y Recorder (protocol 0.57): defined in"
+)
+CONTENT_WEB_CONTENTS_COLOR_DECLARATION = """\
+// Windows A11y Recorder (protocol 0.57): defined in render_view_host_impl.cc.
+void RecorderRecordColorMapsSent(RenderViewHostImpl* view,
+                                 const char* point,
+                                 const blink::ColorProviderColorMaps& maps);
+
+"""
+CONTENT_WEB_CONTENTS_COLOR_ANCHOR = """\
+      if (auto& broadcast = rvh->GetAssociatedPageBroadcast()) {
+        broadcast->UpdateColorProviders(color_maps_);
+      }
+"""
+CONTENT_WEB_CONTENTS_COLOR_HOOK = """\
+      if (auto& broadcast = rvh->GetAssociatedPageBroadcast()) {
+        broadcast->UpdateColorProviders(color_maps_);
+        // Windows A11y Recorder (protocol 0.57): the color maps sent.
+        RecorderRecordColorMapsSent(rvh, "color-providers", color_maps_);
+      }
+"""
+
+
+def patch_content_web_contents_color_maps(path: Path) -> None:
+    """Protocol 0.57: the color maps sent to each page when they change."""
+    text = read_source(path)
+    text = insert_before_once(
+        text,
+        CONTENT_WEB_CONTENTS_COLOR_DECLARATION_ANCHOR,
+        CONTENT_WEB_CONTENTS_COLOR_DECLARATION,
+        CONTENT_WEB_CONTENTS_COLOR_DECLARATION_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        CONTENT_WEB_CONTENTS_COLOR_ANCHOR,
+        CONTENT_WEB_CONTENTS_COLOR_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+BLINK_WEB_VIEW_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/exported/web_view_impl.h"'
+)
+BLINK_WEB_VIEW_PREFERENCES_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "base/strings/string_number_conversions.h"',
+    '#include "base/strings/utf_string_conversions.h"',
+    '#include "third_party/blink/renderer/core/dom/element.h"',
+)
+BLINK_WEB_VIEW_PREFERENCES_HELPER_ANCHOR = (
+    "void WebViewImpl::UpdateRendererPreferences(\n"
+)
+BLINK_WEB_VIEW_PREFERENCES_HELPER_MARKER = "RecorderRecordedPreferencesOf("
+BLINK_WEB_VIEW_PREFERENCES_HELPER = """\
+// Windows A11y Recorder recreation mode (accessibility preferences stage 3,
+// "Stage 3: the recreation" in docs/architecture/accessibility-preferences.md):
+// a recreated page is given the recorded page's preferences, zoom level, and
+// color maps, which the recorder writes in the
+// data-a11y-recorded-preferences attribute of the recreated document's root
+// element, in place of those the recreation browser sends. They are read
+// from the outermost main frame's document each time, so a later send from
+// the recreation browser cannot undo them. page.cc, web_frame_widget_impl.cc,
+// and html_html_element.cc declare and call these.
+std::optional<a11y_recorder::RecreationPreferences>
+RecorderRecordedPreferencesOf(LocalFrame* frame);
+std::optional<double> RecorderRecordedZoomLevel(WebLocalFrameImpl* frame);
+ColorProviderColorMaps RecorderRecordedColorMaps(
+    LocalFrame* main_frame,
+    const ColorProviderColorMaps& sent);
+void RecorderApplyRecordedPreferences(Document& document);
+
+std::optional<a11y_recorder::RecreationPreferences>
+RecorderRecordedPreferencesOf(LocalFrame* frame) {
+  if (!a11y_recorder::IsRecreationMode() || !frame ||
+      !frame->IsOutermostMainFrame()) {
+    return std::nullopt;
+  }
+  Document* recorder_document = frame->GetDocument();
+  Element* recorder_root =
+      recorder_document ? recorder_document->documentElement() : nullptr;
+  if (!recorder_root) {
+    return std::nullopt;
+  }
+  const AtomicString& recorder_text = recorder_root->getAttribute(
+      AtomicString("data-a11y-recorded-preferences"));
+  if (recorder_text.IsNull()) {
+    return std::nullopt;
+  }
+  a11y_recorder::RecreationPreferences recorder_values =
+      a11y_recorder::RecreationPreferencesOf(recorder_text.Utf8());
+  if (recorder_values.empty()) {
+    return std::nullopt;
+  }
+  return recorder_values;
+}
+
+std::optional<double> RecorderRecordedZoomLevel(WebLocalFrameImpl* frame) {
+  if (!frame) {
+    return std::nullopt;
+  }
+  const std::optional<a11y_recorder::RecreationPreferences> recorder_values =
+      RecorderRecordedPreferencesOf(frame->GetFrame());
+  return recorder_values ? recorder_values->zoom_level : std::nullopt;
+}
+
+ColorProviderColorMaps RecorderRecordedColorMaps(
+    LocalFrame* main_frame,
+    const ColorProviderColorMaps& sent) {
+  ColorProviderColorMaps recorder_maps = sent;
+  const std::optional<a11y_recorder::RecreationPreferences> recorder_values =
+      RecorderRecordedPreferencesOf(main_frame);
+  if (!recorder_values) {
+    return recorder_maps;
+  }
+  // Each recorded color replaces the one sent; a color the recording does
+  // not hold keeps the one sent.
+  const auto recorder_apply = [&](const char* map_name,
+                                  ui::RendererColorMap& map) {
+    const auto found = recorder_values->color_maps.find(map_name);
+    if (found == recorder_values->color_maps.end()) {
+      return;
+    }
+    for (const auto& [name, color] : found->second) {
+      if (const auto id =
+              a11y_recorder::RendererColorIdNamed<color::mojom::RendererColorId>(
+                  name)) {
+        map[*id] = static_cast<SkColor>(color);
+      }
+    }
+  };
+  recorder_apply(a11y_recorder::kLightColorMap, recorder_maps.light_colors_map);
+  recorder_apply(a11y_recorder::kDarkColorMap, recorder_maps.dark_colors_map);
+  recorder_apply(a11y_recorder::kForcedColorsColorMap,
+                 recorder_maps.forced_colors_map);
+  return recorder_maps;
+}
+
+namespace {
+
+void RecorderSetFamily(const a11y_recorder::RecreationPreferences& values,
+                       const char* name,
+                       web_pref::ScriptFontFamilyMap& map) {
+  const std::optional<std::string> family = values.Text(name);
+  if (!family) {
+    return;
+  }
+  if (family->empty()) {
+    map.erase(web_pref::kCommonScript);
+  } else {
+    map[web_pref::kCommonScript] = base::UTF8ToUTF16(*family);
+  }
+}
+
+void RecorderSetInteger(const a11y_recorder::RecreationPreferences& values,
+                        const char* name,
+                        int& field) {
+  if (const std::optional<int64_t> value = values.Integer(name)) {
+    field = static_cast<int>(*value);
+  }
+}
+
+void RecorderSetBoolean(const a11y_recorder::RecreationPreferences& values,
+                        const char* name,
+                        bool& field) {
+  if (const std::optional<bool> value = values.Boolean(name)) {
+    field = *value;
+  }
+}
+
+void RecorderSetText(const a11y_recorder::RecreationPreferences& values,
+                     const char* name,
+                     std::string& field) {
+  if (std::optional<std::string> value = values.Text(name)) {
+    field = std::move(*value);
+  }
+}
+
+void RecorderSetText16(const a11y_recorder::RecreationPreferences& values,
+                       const char* name,
+                       std::u16string& field) {
+  if (const std::optional<std::string> value = values.Text(name)) {
+    field = base::UTF8ToUTF16(*value);
+  }
+}
+
+void RecorderSetColorScheme(const a11y_recorder::RecreationPreferences& values,
+                            const char* name,
+                            mojom::PreferredColorScheme& field) {
+  if (const std::optional<std::string> value = values.Text(name)) {
+    field = *value == "dark" ? mojom::PreferredColorScheme::kDark
+                             : mojom::PreferredColorScheme::kLight;
+  }
+}
+
+void RecorderOverrideWebPreferences(WebLocalFrameImpl* main_frame,
+                                    web_pref::WebPreferences& preferences) {
+  const std::optional<a11y_recorder::RecreationPreferences> recorder_values =
+      main_frame ? RecorderRecordedPreferencesOf(main_frame->GetFrame())
+                 : std::nullopt;
+  if (!recorder_values) {
+    return;
+  }
+  const a11y_recorder::RecreationPreferences& values = *recorder_values;
+  RecorderSetFamily(values, "standardFontFamily",
+                    preferences.standard_font_family_map);
+  RecorderSetFamily(values, "fixedFontFamily",
+                    preferences.fixed_font_family_map);
+  RecorderSetFamily(values, "serifFontFamily",
+                    preferences.serif_font_family_map);
+  RecorderSetFamily(values, "sansSerifFontFamily",
+                    preferences.sans_serif_font_family_map);
+  RecorderSetFamily(values, "cursiveFontFamily",
+                    preferences.cursive_font_family_map);
+  RecorderSetFamily(values, "fantasyFontFamily",
+                    preferences.fantasy_font_family_map);
+  RecorderSetFamily(values, "mathFontFamily",
+                    preferences.math_font_family_map);
+  RecorderSetInteger(values, "defaultFontSize", preferences.default_font_size);
+  RecorderSetInteger(values, "defaultFixedFontSize",
+                     preferences.default_fixed_font_size);
+  RecorderSetInteger(values, "minimumFontSize", preferences.minimum_font_size);
+  RecorderSetInteger(values, "minimumLogicalFontSize",
+                     preferences.minimum_logical_font_size);
+  RecorderSetBoolean(values, "prefersReducedMotion",
+                     preferences.prefers_reduced_motion);
+  RecorderSetBoolean(values, "prefersReducedTransparency",
+                     preferences.prefers_reduced_transparency);
+  RecorderSetBoolean(values, "invertedColors", preferences.inverted_colors);
+  RecorderSetText(values, "textTrackTextSize",
+                  preferences.text_track_text_size);
+  RecorderSetText(values, "textTrackFontFamily",
+                  preferences.text_track_font_family);
+  RecorderSetBoolean(values, "inForcedColors", preferences.in_forced_colors);
+  RecorderSetBoolean(values, "isForcedColorsDisabled",
+                     preferences.is_forced_colors_disabled);
+  RecorderSetColorScheme(values, "preferredRootScrollbarColorScheme",
+                         preferences.preferred_root_scrollbar_color_scheme);
+  RecorderSetColorScheme(values, "preferredColorScheme",
+                         preferences.preferred_color_scheme);
+  if (const std::optional<std::string> contrast =
+          values.Text("preferredContrast")) {
+    preferences.preferred_contrast =
+        *contrast == "more"     ? mojom::PreferredContrast::kMore
+        : *contrast == "less"   ? mojom::PreferredContrast::kLess
+        : *contrast == "custom" ? mojom::PreferredContrast::kCustom
+                                : mojom::PreferredContrast::kNoPreference;
+  }
+}
+
+void RecorderOverrideRendererPreferences(WebLocalFrameImpl* main_frame,
+                                         RendererPreferences& preferences) {
+  const std::optional<a11y_recorder::RecreationPreferences> recorder_values =
+      main_frame ? RecorderRecordedPreferencesOf(main_frame->GetFrame())
+                 : std::nullopt;
+  if (!recorder_values) {
+    return;
+  }
+  const a11y_recorder::RecreationPreferences& values = *recorder_values;
+  // The focus ring color is recorded as "#AARRGGBB".
+  if (const std::optional<std::string> color = values.Text("focusRingColor");
+      color && color->size() == 9 && (*color)[0] == '#') {
+    uint32_t recorder_color = 0;
+    if (base::HexStringToUInt(std::string_view(*color).substr(1),
+                              &recorder_color)) {
+      preferences.focus_ring_color = recorder_color;
+    }
+  }
+  if (const std::optional<bool> has_interval =
+          values.Boolean("hasCaretBlinkInterval")) {
+    if (!*has_interval) {
+      preferences.caret_blink_interval = std::nullopt;
+    } else if (const std::optional<double> milliseconds =
+                   values.Number("caretBlinkIntervalMilliseconds")) {
+      preferences.caret_blink_interval = base::Milliseconds(*milliseconds);
+    }
+  }
+  RecorderSetBoolean(values, "caretBrowsingEnabled",
+                     preferences.caret_browsing_enabled);
+#if BUILDFLAG(IS_WIN)
+  RecorderSetBoolean(values, "useOverlayScrollbar",
+                     preferences.use_overlay_scrollbar);
+  RecorderSetText16(values, "captionFontFamily",
+                    preferences.caption_font_family_name);
+  RecorderSetInteger(values, "captionFontHeight",
+                     preferences.caption_font_height);
+  RecorderSetText16(values, "smallCaptionFontFamily",
+                    preferences.small_caption_font_family_name);
+  RecorderSetInteger(values, "smallCaptionFontHeight",
+                     preferences.small_caption_font_height);
+  RecorderSetText16(values, "menuFontFamily",
+                    preferences.menu_font_family_name);
+  RecorderSetInteger(values, "menuFontHeight", preferences.menu_font_height);
+  RecorderSetText16(values, "statusFontFamily",
+                    preferences.status_font_family_name);
+  RecorderSetInteger(values, "statusFontHeight",
+                     preferences.status_font_height);
+  RecorderSetText16(values, "messageFontFamily",
+                    preferences.message_font_family_name);
+  RecorderSetInteger(values, "messageFontHeight",
+                     preferences.message_font_height);
+#else
+  (void)RecorderSetText16;
+#endif
+}
+
+}  // namespace
+
+// Called as the recreated document's root element is inserted by the
+// parser, before anything of it is laid out: the page's preferences, color
+// maps, and zoom level are applied again, each now with the recorded values.
+void RecorderApplyRecordedPreferences(Document& document) {
+  LocalFrame* frame = document.GetFrame();
+  if (!RecorderRecordedPreferencesOf(frame)) {
+    return;
+  }
+  WebLocalFrameImpl* web_frame = WebLocalFrameImpl::FromFrame(frame);
+  WebViewImpl* view = web_frame ? web_frame->ViewImpl() : nullptr;
+  if (!view) {
+    return;
+  }
+  view->UpdateWebPreferences(
+      web_pref::WebPreferences(view->GetWebPreferences()));
+  view->UpdateRendererPreferences(
+      RendererPreferences(view->GetRendererPreferences()));
+  if (Page* page = view->GetPage();
+      page && !page->GetColorProviderColorMaps().IsEmpty()) {
+    page->UpdateColorProviders(
+        ColorProviderColorMaps(page->GetColorProviderColorMaps()));
+  }
+  if (WebFrameWidgetImpl* widget = web_frame->FrameWidgetImpl()) {
+    widget->SetZoomLevel(widget->GetZoomLevel());
+  }
+}
+
+"""
+BLINK_WEB_VIEW_WEB_PREFERENCES_ANCHOR = """\
+void WebViewImpl::UpdateWebPreferences(
+    const blink::web_pref::WebPreferences& preferences) {
+  web_preferences_ = preferences;
+"""
+BLINK_WEB_VIEW_WEB_PREFERENCES_HOOK = """\
+void WebViewImpl::UpdateWebPreferences(
+    const blink::web_pref::WebPreferences& preferences) {
+  web_preferences_ = preferences;
+  // Windows A11y Recorder recreation mode (accessibility preferences stage
+  // 3): the recorded page's values in place of those sent.
+  RecorderOverrideWebPreferences(MainFrameImpl(), web_preferences_);
+"""
+BLINK_WEB_VIEW_RENDERER_PREFERENCES_ANCHOR = """\
+  renderer_preferences_ = preferences;
+
+  if (GetPage()) {
+    GetPage()->SetRendererPreferences(preferences);
+  }
+"""
+BLINK_WEB_VIEW_RENDERER_PREFERENCES_HOOK = """\
+  renderer_preferences_ = preferences;
+  // Windows A11y Recorder recreation mode (accessibility preferences stage
+  // 3): the recorded page's values in place of those sent, which the page
+  // is then given.
+  RecorderOverrideRendererPreferences(MainFrameImpl(), renderer_preferences_);
+
+  if (GetPage()) {
+    GetPage()->SetRendererPreferences(renderer_preferences_);
+  }
+"""
+
+
+def patch_blink_web_view_preferences(path: Path) -> None:
+    """Stage 3: a recreated page takes the recorded preferences."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_WEB_VIEW_OWN_INCLUDE,
+        BLINK_WEB_VIEW_PREFERENCES_INCLUDES,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_WEB_VIEW_PREFERENCES_HELPER_ANCHOR,
+        BLINK_WEB_VIEW_PREFERENCES_HELPER,
+        BLINK_WEB_VIEW_PREFERENCES_HELPER_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_WEB_VIEW_WEB_PREFERENCES_ANCHOR,
+        BLINK_WEB_VIEW_WEB_PREFERENCES_HOOK,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_WEB_VIEW_RENDERER_PREFERENCES_ANCHOR,
+        BLINK_WEB_VIEW_RENDERER_PREFERENCES_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+BLINK_PAGE_COLOR_MAPS_ANCHOR = """\
+bool Page::UpdateColorProviders(
+    const ColorProviderColorMaps& color_provider_colors) {
+"""
+BLINK_PAGE_COLOR_MAPS_HOOK = """\
+// Windows A11y Recorder recreation mode (accessibility preferences stage 3):
+// defined in web_view_impl.cc.
+ColorProviderColorMaps RecorderRecordedColorMaps(
+    LocalFrame* main_frame,
+    const ColorProviderColorMaps& sent);
+
+bool Page::UpdateColorProviders(
+    const ColorProviderColorMaps& recorder_sent_colors) {
+  // Windows A11y Recorder recreation mode: the recorded page's color maps in
+  // place of those sent.
+  const ColorProviderColorMaps color_provider_colors =
+      RecorderRecordedColorMaps(DynamicTo<LocalFrame>(MainFrame()),
+                                recorder_sent_colors);
+"""
+
+
+def patch_blink_page_color_maps(path: Path) -> None:
+    """Stage 3: a recreated page takes the recorded color maps."""
+    text = read_source(path)
+    text = apply_cookie_hook(
+        text, BLINK_PAGE_COLOR_MAPS_ANCHOR, BLINK_PAGE_COLOR_MAPS_HOOK, path
+    )
+    write_patched(path, text)
+
+
+BLINK_FRAME_WIDGET_ZOOM_ANCHOR = """\
+  zoom_level = View()->ClampZoomLevel(zoom_level);
+  if (zoom_level_for_testing_ != -INFINITY) {
+    zoom_level = zoom_level_for_testing_;
+  }
+"""
+BLINK_FRAME_WIDGET_ZOOM_HOOK = """\
+  zoom_level = View()->ClampZoomLevel(zoom_level);
+  if (zoom_level_for_testing_ != -INFINITY) {
+    zoom_level = zoom_level_for_testing_;
+  }
+  // Windows A11y Recorder recreation mode (accessibility preferences stage
+  // 3): the recorded page's zoom level in place of the one sent.
+  if (const std::optional<double> recorder_zoom =
+          RecorderRecordedZoomLevel(LocalRootImpl())) {
+    zoom_level = *recorder_zoom;
+  }
+"""
+BLINK_FRAME_WIDGET_ZOOM_DECLARATION_ANCHOR = (
+    "void WebFrameWidgetImpl::SetZoomLevel(double zoom_level) {\n"
+)
+BLINK_FRAME_WIDGET_ZOOM_DECLARATION_MARKER = (
+    "std::optional<double> RecorderRecordedZoomLevel(WebLocalFrameImpl* frame);"
+)
+BLINK_FRAME_WIDGET_ZOOM_DECLARATION = """\
+// Windows A11y Recorder recreation mode (accessibility preferences stage 3):
+// defined in web_view_impl.cc.
+std::optional<double> RecorderRecordedZoomLevel(WebLocalFrameImpl* frame);
+
+"""
+
+
+def patch_blink_frame_widget_zoom(path: Path) -> None:
+    """Stage 3: a recreated page takes the recorded zoom level."""
+    text = read_source(path)
+    text = insert_before_once(
+        text,
+        BLINK_FRAME_WIDGET_ZOOM_DECLARATION_ANCHOR,
+        BLINK_FRAME_WIDGET_ZOOM_DECLARATION,
+        BLINK_FRAME_WIDGET_ZOOM_DECLARATION_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text, BLINK_FRAME_WIDGET_ZOOM_ANCHOR, BLINK_FRAME_WIDGET_ZOOM_HOOK, path
+    )
+    write_patched(path, text)
+
+
+BLINK_HTML_ELEMENT_PREFERENCES_ANCHOR = """\
+void HTMLHtmlElement::InsertedByParser() {
+  // When parsing a fragment, its dummy document has a null parser.
+  if (!GetDocument().Parser())
+    return;
+"""
+BLINK_HTML_ELEMENT_PREFERENCES_HOOK = """\
+// Windows A11y Recorder recreation mode (accessibility preferences stage 3):
+// defined in web_view_impl.cc.
+void RecorderApplyRecordedPreferences(Document& document);
+
+void HTMLHtmlElement::InsertedByParser() {
+  // When parsing a fragment, its dummy document has a null parser.
+  if (!GetDocument().Parser())
+    return;
+
+  // Windows A11y Recorder recreation mode: a recreated page's recorded
+  // preferences, carried on this element, are given to the page before
+  // anything of it is laid out.
+  RecorderApplyRecordedPreferences(GetDocument());
+"""
+
+
+def patch_blink_html_element_preferences(path: Path) -> None:
+    """Stage 3: the recorded preferences are applied as the root is parsed."""
+    text = read_source(path)
+    text = apply_cookie_hook(
+        text,
+        BLINK_HTML_ELEMENT_PREFERENCES_ANCHOR,
+        BLINK_HTML_ELEMENT_PREFERENCES_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -20459,6 +21079,27 @@ def main() -> int:
     )
     patch_content_host_zoom_map(
         source / "content" / "browser" / "host_zoom_map_impl.cc"
+    )
+    patch_content_render_view_host_color_maps(
+        source
+        / "content"
+        / "browser"
+        / "renderer_host"
+        / "render_view_host_impl.cc"
+    )
+    patch_content_web_contents_color_maps(
+        source / "content" / "browser" / "web_contents" / "web_contents_impl.cc"
+    )
+    blink_core = source / "third_party" / "blink" / "renderer" / "core"
+    patch_blink_web_view_preferences(
+        blink_core / "exported" / "web_view_impl.cc"
+    )
+    patch_blink_page_color_maps(blink_core / "page" / "page.cc")
+    patch_blink_frame_widget_zoom(
+        blink_core / "frame" / "web_frame_widget_impl.cc"
+    )
+    patch_blink_html_element_preferences(
+        blink_core / "html" / "html_html_element.cc"
     )
     patch_chrome_profile_impl(
         source / "chrome" / "browser" / "profiles" / "profile_impl.cc"

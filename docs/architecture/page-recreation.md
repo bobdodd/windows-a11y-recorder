@@ -938,6 +938,16 @@ preferences are recorded as designed in
 [accessibility preferences](accessibility-preferences.md); applying them
 here is designed with that work.
 
+Built 2026-10-08 as stage 3 of
+[accessibility preferences](accessibility-preferences.md) ("Stage 3: the
+recreation"): the recreated page is given the preferences last sent to the
+recorded page, its color maps, and its zoom level, applied by the
+instrumented renderer in recreation mode from the root element's
+`data-a11y-recorded-preferences` attribute. With a recorded zoom, the
+viewport is emulated at the recorded CSS size times the zoom factor and a
+device scale factor of the recorded device pixel ratio over it, and the
+layout zoom factor is no longer listed as a difference.
+
 ### Leaving the recreation
 
 A recreation is a static copy of a recorded page, but its links and forms

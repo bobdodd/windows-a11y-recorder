@@ -129,9 +129,9 @@ public sealed class RecreationControl : IAsyncDisposable
                 await control.FitWindowAsync(session, viewport, cancellationToken);
                 await connection.SendAsync("Emulation.setDeviceMetricsOverride", new
                 {
-                    width = (int)Math.Round(viewport.Width),
-                    height = (int)Math.Round(viewport.Height),
-                    deviceScaleFactor = viewport.DevicePixelRatio,
+                    width = (int)Math.Round(viewport.EmulatedWidth),
+                    height = (int)Math.Round(viewport.EmulatedHeight),
+                    deviceScaleFactor = viewport.EmulatedDeviceScaleFactor,
                     mobile = false
                 }, session, cancellationToken);
             }
@@ -181,8 +181,8 @@ public sealed class RecreationControl : IAsyncDisposable
     // The window size whose page area is the recorded viewport, given the
     // window's frame, in whole pixels, rounded up.
     public static (int Width, int Height) WindowSize(RecreationViewport viewport, double frameWidth, double frameHeight) =>
-        ((int)Math.Ceiling(viewport.Width + Math.Max(0, frameWidth)),
-         (int)Math.Ceiling(viewport.Height + Math.Max(0, frameHeight)));
+        ((int)Math.Ceiling(viewport.EmulatedWidth + Math.Max(0, frameWidth)),
+         (int)Math.Ceiling(viewport.EmulatedHeight + Math.Max(0, frameHeight)));
 
     // True for a request the browser's own session lets continue: one of
     // DevTools, of an extension, such as the evidence panel, of a browser
@@ -644,5 +644,23 @@ public sealed class RecreationControl : IAsyncDisposable
     }
 }
 
-// The recorded viewport the recreation is shown at, in CSS pixels.
-public sealed record RecreationViewport(double Width, double Height, double DevicePixelRatio, double LayoutZoomFactor);
+// The recorded viewport the recreation is shown at, in CSS pixels. From
+// accessibility preferences stage 3 the instrumented renderer zooms the page
+// by the recorded browser zoom factor, so the viewport is emulated at the
+// CSS size times the factor in device-independent pixels, at a device scale
+// factor of the recorded device pixel ratio over the factor: the page then
+// has the recorded CSS size and devicePixelRatio.
+public sealed record RecreationViewport(double Width, double Height, double DevicePixelRatio, double LayoutZoomFactor)
+{
+    /// <summary>The recorded browser zoom factor the page is shown at; 1 when none is applied.</summary>
+    public double BrowserZoomFactor { get; init; } = 1.0;
+
+    /// <summary>The emulated width, in device-independent pixels.</summary>
+    public double EmulatedWidth => Width * BrowserZoomFactor;
+
+    /// <summary>The emulated height, in device-independent pixels.</summary>
+    public double EmulatedHeight => Height * BrowserZoomFactor;
+
+    /// <summary>The emulated device scale factor.</summary>
+    public double EmulatedDeviceScaleFactor => DevicePixelRatio / BrowserZoomFactor;
+}

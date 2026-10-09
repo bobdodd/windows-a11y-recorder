@@ -526,6 +526,30 @@ reading, for the record's `previous`, and writes no record when the
 reading is unchanged. `chrome/browser/profiles/BUILD.gn` gains the bridge
 dependency in `source_set("misc")`.
 
+Protocol 0.57 (accessibility preferences, stage 3) adds `color-maps-sent`
+on `browser.preferences`. `RenderViewHostImpl::CreateRenderView` calls
+`RecordBrowserColorMapsSent` through a helper `integrate.py` adds,
+`RecorderRecordColorMapsSent`, after `params->color_provider_colors` is
+set, with the point `view-created`, and
+`WebContentsImpl::HandleColorRelatedStateChanges` calls it for each view
+after `UpdateColorProviders` is broadcast (`color-providers`). The helper
+writes each map's colors by their `RendererColorId` names, from
+`recreation_preferences.h`, as `#AARRGGBB`. The bridge keeps each view's
+last maps, by the view's address, and writes a later record only with the
+maps that differ, each whole.
+
+`recreation_preferences.h` holds the form of the
+`data-a11y-recorded-preferences` attribute, its parser, and the color
+names, with the C++ standard library alone; `recreation_preferences_test.cc`
+tests it outside a Chromium build. In recreation mode,
+`web_view_impl.cc` reads the attribute from the outermost main frame's
+root element and replaces the listed fields of `WebPreferences` and
+`RendererPreferences` with the recorded values after each send;
+`Page::UpdateColorProviders` takes the recorded maps;
+`WebFrameWidgetImpl::SetZoomInternal` sets the recorded zoom level; and
+`HTMLHtmlElement::InsertedByParser` applies all of them again once the
+served root, with its attribute, is inserted.
+
 Protocol 0.55 (slice 5a) records frames on `browser.dom`. The DOM walk
 helper in `document.cc` passes `BeginBlinkDomCheckpoint` the walked
 document's frame's `GetDevToolsFrameToken().ToString()` and `IsMainFrame()`,

@@ -38,6 +38,8 @@ public sealed class BrowserPreferenceTimeline
     private readonly List<(long Time, string Preference, JsonElement Reading)> _changes = [];
     private readonly List<(long Time, double Percent)> _defaultZoom = [];
     private readonly Dictionary<int, List<(long Time, JsonElement Fields)>> _sent = [];
+    private readonly List<(long Time, string Mode, bool FollowsDefault, string Host, string Scheme, double Level)> _zoom = [];
+    private readonly Dictionary<int, List<(long Time, JsonElement Maps)>> _colorMaps = [];
     private readonly List<BrowserPageCommit> _commits;
 
     public BrowserPreferenceTimeline(
@@ -79,6 +81,36 @@ public sealed class BrowserPreferenceTimeline
                         mode.GetString() == "default" &&
                         payload.TryGetProperty("zoomPercent", out var percent) && percent.TryGetDouble(out var value):
                     _defaultZoom.Add((record.MonotonicNanoseconds, value));
+                    if (payload.TryGetProperty("zoomLevel", out var defaultLevel) && defaultLevel.TryGetDouble(out var defaultZoomLevel))
+                    {
+                        _zoom.Add((record.MonotonicNanoseconds, "default", false, string.Empty, string.Empty, defaultZoomLevel));
+                    }
+
+                    break;
+                case BrowserPreferenceSettings.ZoomEventType
+                    when payload.TryGetProperty("mode", out var anyMode) && anyMode.ValueKind == JsonValueKind.String &&
+                        payload.TryGetProperty("zoomLevel", out var level) && level.TryGetDouble(out var zoomLevel) &&
+                        payload.TryGetProperty("host", out var host) && host.ValueKind == JsonValueKind.String &&
+                        payload.TryGetProperty("scheme", out var scheme) && scheme.ValueKind == JsonValueKind.String:
+                    _zoom.Add((
+                        record.MonotonicNanoseconds,
+                        anyMode.GetString()!,
+                        payload.TryGetProperty("followsDefault", out var follows) && follows.ValueKind == JsonValueKind.True,
+                        host.GetString()!,
+                        scheme.GetString()!,
+                        zoomLevel));
+                    break;
+                case BrowserPreferenceSettings.ColorMapsEventType
+                    when payload.TryGetProperty("pageFrameTreeNodeId", out var mapsPage) && mapsPage.TryGetInt32(out var mapsPageId) &&
+                        payload.TryGetProperty("maps", out var maps) && maps.ValueKind == JsonValueKind.Object:
+                    HasColorMapRecords = true;
+                    if (!_colorMaps.TryGetValue(mapsPageId, out var mapSends))
+                    {
+                        mapSends = [];
+                        _colorMaps[mapsPageId] = mapSends;
+                    }
+
+                    mapSends.Add((record.MonotonicNanoseconds, maps.Clone()));
                     break;
                 case BrowserPreferenceSettings.SentEventType
                     when payload.TryGetProperty("pageFrameTreeNodeId", out var page) && page.TryGetInt32(out var pageId) &&
@@ -101,6 +133,12 @@ public sealed class BrowserPreferenceTimeline
 
     /// <summary>Whether the recording holds any browser preference record.</summary>
     public bool HasRecords { get; }
+
+    /// <summary>
+    /// Whether the recording holds any <c>color-maps-sent</c> record, which
+    /// protocol 0.57 added.
+    /// </summary>
+    public bool HasColorMapRecords { get; }
 
     /// <summary>Whether the recording holds the browser preferences at the profile's load.</summary>
     public bool Recorded => _start.Count > 0;
@@ -250,6 +288,131 @@ public sealed class BrowserPreferenceTimeline
         }
     }
 
+    /// <summary>
+    /// The values a recreation gives a page at a time (stage 3): the fields
+    /// last sent to its view at or before the time, each with the time of its
+    /// record; its zoom level; and the color maps last sent to it. The page
+    /// is named by its frame tree node id, its address gives the host and
+    /// scheme its zoom is chosen by. See
+    /// docs/architecture/accessibility-preferences.md, "Stage 3".
+    /// </summary>
+    public BrowserPageValues PageValuesAt(int? pageFrameTreeNodeId, string? url, long time)
+    {
+        var fields = new List<BrowserPageValue>();
+        if (pageFrameTreeNodeId is { } fieldsPage && _sent.TryGetValue(fieldsPage, out var sends))
+        {
+            foreach (var setting in BrowserPreferenceSettings.Page)
+            {
+                BrowserPageValue? found = null;
+                foreach (var send in sends)
+                {
+                    if (send.Time > time)
+                    {
+                        break;
+                    }
+
+                    if (send.Fields.TryGetProperty(setting.Name, out var field))
+                    {
+                        found = new BrowserPageValue(setting, field, send.Time);
+                    }
+                }
+
+                if (found is not null)
+                {
+                    fields.Add(found);
+                }
+            }
+        }
+
+        var colorMaps = new List<BrowserPageColorMap>();
+        if (pageFrameTreeNodeId is { } mapsPage && _colorMaps.TryGetValue(mapsPage, out var mapSends))
+        {
+            foreach (var name in BrowserPreferenceSettings.ColorMapNames)
+            {
+                BrowserPageColorMap? found = null;
+                foreach (var send in mapSends)
+                {
+                    if (send.Time > time)
+                    {
+                        break;
+                    }
+
+                    if (send.Maps.TryGetProperty(name, out var map) && map.ValueKind == JsonValueKind.Object)
+                    {
+                        found = new BrowserPageColorMap(
+                            name,
+                            map.EnumerateObject()
+                                .Where(color => color.Value.ValueKind == JsonValueKind.String)
+                                .ToDictionary(color => color.Name, color => color.Value.GetString()!, StringComparer.Ordinal),
+                            send.Time);
+                    }
+                }
+
+                if (found is not null)
+                {
+                    colorMaps.Add(found);
+                }
+            }
+        }
+
+        return new BrowserPageValues(
+            fields,
+            HasRecords ? ZoomAt(pageFrameTreeNodeId, url, time) : null,
+            colorMaps,
+            _sent.Count > 0,
+            HasColorMapRecords);
+    }
+
+    // The zoom level Chromium gives a page, as HostZoomMapImpl chooses it
+    // (content/browser/host_zoom_map_impl.cc): the tab's temporary level,
+    // else the level for the scheme and host, else for the host, else the
+    // default, which starts at 0, 100 percent. A temporary record names its
+    // host but not its tab, so one is taken only from the page's own commit
+    // on. A class whose last record follows the default gives way to it.
+    private BrowserPageZoom ZoomAt(int? pageFrameTreeNodeId, string? url, long time)
+    {
+        string host = string.Empty;
+        string scheme = string.Empty;
+        if (url is not null && Uri.TryCreate(url, UriKind.Absolute, out var address))
+        {
+            host = address.IdnHost.ToLowerInvariant();
+            scheme = address.Scheme.ToLowerInvariant();
+        }
+
+        var committed = pageFrameTreeNodeId is { } page
+            ? _commits.LastOrDefault(commit => commit.PageFrameTreeNodeId == page && commit.MonotonicNanoseconds <= time)?.MonotonicNanoseconds
+            : null;
+        var byThen = _zoom.Where(record => record.Time <= time).ToList();
+        (long Time, string Mode, bool FollowsDefault, string Host, string Scheme, double Level)? Last(
+            Func<(long Time, string Mode, bool FollowsDefault, string Host, string Scheme, double Level), bool> match)
+        {
+            var found = byThen.LastOrDefault(record => match(record));
+            return found.Mode is null ? null : found;
+        }
+
+        if (host.Length > 0)
+        {
+            var candidates = new (string Source, (long Time, string Mode, bool FollowsDefault, string Host, string Scheme, double Level)? Record)[]
+            {
+                ("temporary", Last(record => record.Mode == "temporary" && record.Host == host &&
+                    (committed is not { } since || record.Time >= since))),
+                ("scheme-and-host", Last(record => record.Mode == "scheme-and-host" && record.Host == host && record.Scheme == scheme)),
+                ("host", Last(record => record.Mode == "host" && record.Host == host))
+            };
+            foreach (var (source, record) in candidates)
+            {
+                if (record is { FollowsDefault: false } chosen)
+                {
+                    return new BrowserPageZoom(chosen.Level, source, chosen.Time);
+                }
+            }
+        }
+
+        return Last(record => record.Mode == "default") is { } defaultRecord
+            ? new BrowserPageZoom(defaultRecord.Level, "default", defaultRecord.Time)
+            : new BrowserPageZoom(0, "none", null);
+    }
+
     private static bool IsChanged(long? setAt, long time) =>
         setAt is { } at && time - at < ChangedWindowNanoseconds;
 
@@ -327,3 +490,33 @@ public sealed class BrowserPreferenceTimeline
 
     private static string Clock(long nanoseconds) => WindowsPreferenceTimeline.Clock(nanoseconds);
 }
+
+/// <summary>A field last sent to a page's view, and the time of its record.</summary>
+public sealed record BrowserPageValue(BrowserPreferenceSetting Setting, JsonElement Value, long Time);
+
+/// <summary>
+/// A page's zoom level and where it came from: "temporary",
+/// "scheme-and-host", "host", "default", or "none" for no record, which is
+/// level 0, 100 percent.
+/// </summary>
+public sealed record BrowserPageZoom(double ZoomLevel, string Source, long? Time)
+{
+    /// <summary>The zoom factor, 1.2 to the power of the level, as Chromium works it out.</summary>
+    public double Factor => Math.Pow(1.2, ZoomLevel);
+}
+
+/// <summary>A color map last sent to a page's view: its colors by name, "#AARRGGBB".</summary>
+public sealed record BrowserPageColorMap(string Name, IReadOnlyDictionary<string, string> Colors, long Time);
+
+/// <summary>
+/// The values a recreation gives a page at a time. Zoom is null for a
+/// recording without browser preference records. PreferencesRecorded says
+/// whether the recording holds web-preferences-sent records (protocol
+/// 0.56), ColorMapsRecorded whether it holds color-maps-sent ones (0.57).
+/// </summary>
+public sealed record BrowserPageValues(
+    IReadOnlyList<BrowserPageValue> Fields,
+    BrowserPageZoom? Zoom,
+    IReadOnlyList<BrowserPageColorMap> ColorMaps,
+    bool PreferencesRecorded,
+    bool ColorMapsRecorded);

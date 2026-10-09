@@ -37,6 +37,65 @@ public static class BrowserPreferenceSettings
     public const string SentEventType = "web-preferences-sent";
     public const string ZoomEventType = "zoom-level-changed";
 
+    /// <summary>
+    /// The color maps a page's view is sent (protocol 0.57, accessibility
+    /// preferences stage 3). See docs/architecture/accessibility-preferences.md,
+    /// "Stage 3".
+    /// </summary>
+    public const string ColorMapsEventType = "color-maps-sent";
+
+    /// <summary>The points at which a page's view is sent color maps.</summary>
+    public static IReadOnlyList<string> ColorMapSendPoints { get; } =
+        ["view-created", "color-providers"];
+
+    /// <summary>The color maps Chromium gives each page, by their record names.</summary>
+    public static IReadOnlyList<string> ColorMapNames { get; } =
+        ["light", "dark", "forcedColors"];
+
+    /// <summary>
+    /// The colors of each map, by their RendererColorId names
+    /// (ui/color/color_id.mojom), in the enumeration's order.
+    /// </summary>
+    public static IReadOnlyList<string> RendererColorNames { get; } =
+    [
+        "kColorCssSystemActiveText", "kColorCssSystemBtnFace", "kColorCssSystemBtnText",
+        "kColorCssSystemField", "kColorCssSystemFieldText", "kColorCssSystemGrayText",
+        "kColorCssSystemHighlight", "kColorCssSystemHighlightText", "kColorCssSystemHotlight",
+        "kColorCssSystemLinkText", "kColorCssSystemMenuHilight", "kColorCssSystemScrollbar",
+        "kColorCssSystemVisitedText", "kColorCssSystemWindow", "kColorCssSystemWindowText",
+        "kColorMenuBackground", "kColorMenuItemBackgroundSelected", "kColorMenuSeparator",
+        "kColorOverlayScrollbarFill", "kColorOverlayScrollbarFillHovered",
+        "kColorOverlayScrollbarStroke", "kColorOverlayScrollbarStrokeHovered",
+        "kColorWebNativeControlAccent", "kColorWebNativeControlAccentDisabled",
+        "kColorWebNativeControlAccentHovered", "kColorWebNativeControlAccentPressed",
+        "kColorWebNativeControlAutoCompleteBackground", "kColorWebNativeControlBorder",
+        "kColorWebNativeControlBorderDisabled", "kColorWebNativeControlBorderHovered",
+        "kColorWebNativeControlBorderPressed", "kColorWebNativeControlButtonBorder",
+        "kColorWebNativeControlButtonBorderDisabled", "kColorWebNativeControlButtonBorderHovered",
+        "kColorWebNativeControlButtonBorderPressed", "kColorWebNativeControlButtonFill",
+        "kColorWebNativeControlButtonFillDisabled", "kColorWebNativeControlButtonFillHovered",
+        "kColorWebNativeControlButtonFillPressed", "kColorWebNativeControlCheckboxBackground",
+        "kColorWebNativeControlCheckboxBackgroundDisabled", "kColorWebNativeControlFill",
+        "kColorWebNativeControlFillDisabled", "kColorWebNativeControlFillHovered",
+        "kColorWebNativeControlFillPressed", "kColorWebNativeControlLightenLayer",
+        "kColorWebNativeControlProgressValue",
+        "kColorWebNativeControlScrollbarArrowBackgroundDisabled",
+        "kColorWebNativeControlScrollbarArrowBackgroundHovered",
+        "kColorWebNativeControlScrollbarArrowBackgroundPressed",
+        "kColorWebNativeControlScrollbarArrowForeground",
+        "kColorWebNativeControlScrollbarArrowForegroundDisabled",
+        "kColorWebNativeControlScrollbarArrowForegroundHovered",
+        "kColorWebNativeControlScrollbarArrowForegroundPressed",
+        "kColorWebNativeControlScrollbarCorner", "kColorWebNativeControlScrollbarThumb",
+        "kColorWebNativeControlScrollbarThumbHovered",
+        "kColorWebNativeControlScrollbarThumbOverlayMinimalMode",
+        "kColorWebNativeControlScrollbarThumbPressed", "kColorWebNativeControlScrollbarTrack",
+        "kColorWebNativeControlSlider", "kColorWebNativeControlSliderBorder",
+        "kColorWebNativeControlSliderBorderHovered", "kColorWebNativeControlSliderBorderPressed",
+        "kColorWebNativeControlSliderDisabled", "kColorWebNativeControlSliderHovered",
+        "kColorWebNativeControlSliderPressed"
+    ];
+
     /// <summary>The points at which a page's view is sent preferences.</summary>
     public static IReadOnlyList<string> SendPoints { get; } =
         ["view-created", "web-preferences", "renderer-preferences"];

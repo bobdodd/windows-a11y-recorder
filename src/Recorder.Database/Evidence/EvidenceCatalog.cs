@@ -225,6 +225,28 @@ internal static class EvidenceCatalog
         Double("zoomLevel"),
         Double("zoomPercent"));
 
+    // Added by 0024_browser_color_maps.sql (protocol 0.57). The color maps
+    // each page's view is sent, each map's colors in a child table of its
+    // own, by color name. See docs/architecture/accessibility-preferences.md,
+    // "Stage 3".
+    public static readonly EvidenceTable BrowserColorMapsSent = Evidence(
+        "browser_color_maps_sent",
+        Context(),
+        Int("pageFrameTreeNodeId"),
+        Bool("primaryPage"),
+        Int("rendererProcessId"),
+        Text("viewId"),
+        Name("point"),
+        Bool("first"),
+        new InlineField(
+            "maps",
+            R,
+            [
+                ColorMap("light", "browser_color_maps_sent_light"),
+                ColorMap("dark", "browser_color_maps_sent_dark"),
+                ColorMap("forcedColors", "browser_color_maps_sent_forced_colors")
+            ]));
+
     public static readonly EvidenceTable UiaEvents = Evidence(
         "uia_events",
             Name("eventId"),
@@ -1287,7 +1309,8 @@ internal static class EvidenceCatalog
         [
             BrowserPreferenceSnapshots, BrowserPreferenceChanges, BrowserWebPreferencesSent,
             BrowserZoomLevelChanges
-        ])
+        ]),
+        (24, "browser_color_maps", [BrowserColorMapsSent])
     ];
 
     /// <summary>
@@ -1317,6 +1340,7 @@ internal static class EvidenceCatalog
             [("browser.preferences", "browser-preference-changed")] = BrowserPreferenceChanges,
             [("browser.preferences", "web-preferences-sent")] = BrowserWebPreferencesSent,
             [("browser.preferences", "zoom-level-changed")] = BrowserZoomLevelChanges,
+            [("browser.preferences", "color-maps-sent")] = BrowserColorMapsSent,
             [("browser.lifecycle", "browser-connected")] = BrowserConnections,
             [("browser.lifecycle", "browser-exited")] = BrowserExits,
             [("browser.lifecycle", "browser-clock-synchronized")] = BrowserClockSynchronizations,
@@ -1549,6 +1573,19 @@ internal static class EvidenceCatalog
             }
         }
     }
+
+    // One color map of a color-maps-sent record: its colors by name, each
+    // "#AARRGGBB".
+    private static Field ColorMap(string json, string table) =>
+        new MapField(
+            json,
+            O,
+            new EvidenceTable(
+                table,
+                TableKind.Child,
+                [Text(string.Empty, R, "value")],
+                scalarItem: true,
+                mapEntry: true));
 
     // Each listed browser preference as {value, isDefault, problem}, the
     // value stored by the preference's type.

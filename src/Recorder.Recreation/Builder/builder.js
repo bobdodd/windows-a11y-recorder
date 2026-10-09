@@ -232,6 +232,16 @@ document.addEventListener("DOMContentLoaded", async () => {
         continue;
       }
       if (child.type === "element" && !placedElement) {
+        // Accessibility preferences stage 3: the recorded page's values,
+        // which the served root carries for the instrumented renderer, stay
+        // on the root that replaces it, where the renderer reads them again
+        // at each later send of the preferences.
+        const preferences = served
+          ? served.getAttribute("data-a11y-recorded-preferences")
+          : null;
+        if (preferences !== null && made.nodeType === Node.ELEMENT_NODE) {
+          made.setAttribute("data-a11y-recorded-preferences", preferences);
+        }
         if (served) {
           document.replaceChild(made, served);
         } else {

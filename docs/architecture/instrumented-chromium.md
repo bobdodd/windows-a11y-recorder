@@ -1183,7 +1183,21 @@ are in `content/browser` and in `chrome/browser/profiles`, whose `misc`
 target gains a dependency on the bridge. The design is in
 [accessibility preferences](accessibility-preferences.md), "Stage 2".
 
-Live 0.56 connections require an exact protocol-version match.
+Protocol version 0.57 adds `color-maps-sent` to `browser.preferences`: the
+light, dark, and forced colors maps of 67 colors each that a page's view is
+sent when it is created and when `WebContentsImpl` sends new color
+providers, all three in a view's first record and only those that changed
+in later ones. In recreation mode the renderer gives the recreated page
+the recorded values carried in its root element's
+`data-a11y-recorded-preferences` attribute: its listed preferences, color
+maps, and zoom level, in place of those the recreation browser sends. The
+hooks are in `content/browser` (`render_view_host_impl.cc`,
+`web_contents_impl.cc`) and `third_party/blink/renderer`
+(`web_view_impl.cc`, `page.cc`, `web_frame_widget_impl.cc`,
+`html_html_element.cc`). The design is in
+[accessibility preferences](accessibility-preferences.md), "Stage 3".
+
+Live 0.57 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

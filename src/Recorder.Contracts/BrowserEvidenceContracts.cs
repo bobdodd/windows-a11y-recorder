@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.56";
+    public const string CurrentVersion = "0.57";
 }
 
 public static class BrowserEvidenceChannels
@@ -2269,3 +2269,17 @@ public sealed record BrowserZoomLevelChangedPayload(
     string Scheme,
     double ZoomLevel,
     double ZoomPercent);
+
+// Protocol 0.57 (accessibility preferences, stage 3). The color maps sent
+// to a page's view: a first record holds all three maps; a later one only
+// the maps that differ from the last sent to the same view, each whole.
+// Each map holds RendererColorId names and colors written "#AARRGGBB".
+public sealed record BrowserColorMapsSentPayload(
+    BrowserContext Context,
+    int PageFrameTreeNodeId,
+    bool PrimaryPage,
+    int RendererProcessId,
+    string ViewId,
+    string Point,
+    bool First,
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> Maps);

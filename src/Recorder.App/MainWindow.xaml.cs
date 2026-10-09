@@ -1720,6 +1720,7 @@ public partial class MainWindow : Window
             return;
         }
         var frame = _playbackArchive.Frames[_displayedFrameIndex].MonotonicNanoseconds;
+        var browserPreferences = _playbackArchive.BrowserPreferences;
         var chromium = ChromiumPathTextBox.Text.Trim();
         InspectPageButton.IsEnabled = false;
         PausePlayback();
@@ -1798,7 +1799,13 @@ public partial class MainWindow : Window
                         frames = RecordedFrames.Read(documents, documents.Frames(chosen.Key, found.State, frame), frame, FormatTime);
                         timings.Add(new RecreationTiming("Reading the page's frames, their states, and their fonts and images from the recording", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
                         clock.Restart();
-                        var written = RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis, resources, popups, frames: frames);
+                        // Accessibility preferences stage 3: the page's
+                        // recorded values at the state's time.
+                        var pageValues = browserPreferences.PageValuesAt(
+                            documents.PageFrameTreeNodeIdOf(chosen.Key),
+                            chosen.Url,
+                            found.Basis.CutTime);
+                        var written = RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis, resources, popups, frames: frames, preferences: pageValues);
                         timings.Add(new RecreationTiming("Writing the page", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
                         return written;
                     }
