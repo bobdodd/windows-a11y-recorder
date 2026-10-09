@@ -12,6 +12,10 @@
 # browser profile folder empty:
 #   powershell -ExecutionPolicy Bypass -File .\scripts\Test-BrowserPreferences.ps1
 #
+# Page colors is not a step: this Chromium has no setting that changes it
+# while it runs, so it is tested by the prepared profile run, with the
+# number Set-PageColors.ps1 stores in the folder (run of 2026-10-08).
+#
 # The script asks you to make each browser change and put it back, makes
 # Windows dark mode and animation effects changes itself and puts them
 # back, and asks you to turn a contrast theme on and off. After each change
@@ -23,7 +27,10 @@
 # recording with that folder as the browser profile folder, then run the
 # script with -ProfileFolder; it asks you to stop the recording and checks
 # that the profile's preferences were recorded at the start, from that
-# folder, and that only the listed preferences were.
+# folder, and that only the listed preferences were. With
+# -PreparedPageColors, the number Set-PageColors.ps1 stored in the folder
+# beforehand, it also checks that number was recorded and that the fixture
+# page's first values had forced colors on (from 2) or off (1).
 #
 # -ResultsPath and -SessionFolder analyse an earlier run again.
 # -EventsPath uses events already exported. -Steps runs only the named
@@ -40,43 +47,40 @@ param(
     [string]$EventsPath,
     [string]$ResultsPath,
     [string]$ProfileFolder,
+    [int]$PreparedPageColors = -1,
     [string[]]$Steps
 )
 
 $ErrorActionPreference = 'Stop'
 
 # Each step: its name, who makes it, the browser preference whose change
-# record it expects (or the zoom mode), the field of the values sent to the
-# page it expects, the change and the restore, and what the fixture page
-# shows when it is made.
+# records it expects (or the zoom mode), a preference Chromium changes with
+# it (companion), the field of the values sent to the page it expects, the
+# change and the restore, and what the fixture page shows when it is made.
 $AllSteps = @(
-    [pscustomobject]@{ name = 'font size'; by = 'you'; preference = 'defaultFontSize'; zoom = ''; field = 'defaultFontSize'
+    [pscustomobject]@{ name = 'font size'; by = 'you'; preference = 'defaultFontSize'; companion = 'defaultFixedFontSize'; zoom = ''; field = 'defaultFontSize'
         change = 'In the Settings window, search for "font size" and set Font size to Large.'
         restore = 'Set Font size back to Medium (Recommended).'
         page = 'the Default font size row reads 20px and the bar is wider' }
-    [pscustomobject]@{ name = 'default zoom'; by = 'you'; preference = ''; zoom = 'default'; field = ''
+    [pscustomobject]@{ name = 'default zoom'; by = 'you'; preference = ''; companion = ''; zoom = 'default'; field = ''
         change = 'In the Settings window, search for "page zoom" and set Page zoom to 125%.'
         restore = 'Set Page zoom back to 100%.'
         page = 'the page is larger and the Zoom row reads 1.25 times the display scale' }
-    [pscustomobject]@{ name = 'page zoom'; by = 'you'; preference = ''; zoom = 'host'; field = ''
+    [pscustomobject]@{ name = 'page zoom'; by = 'you'; preference = ''; companion = ''; zoom = 'host'; field = ''
         change = 'Click in the fixture page window and press Ctrl and the plus key once.'
         restore = 'Press Ctrl and 0 in the fixture page window.'
         page = 'the page is larger' }
-    [pscustomobject]@{ name = 'page colors'; by = 'you'; preference = 'requestedPageColors'; zoom = ''; field = ''
-        change = 'In the Settings window, search for "page colors" and choose any setting other than Off. If there is no such setting, press Enter and answer n.'
-        restore = 'Set page colors back to Off.'
-        page = 'the page colors change' }
-    [pscustomobject]@{ name = 'browser color mode'; by = 'you'; preference = 'colorScheme'; zoom = ''; field = 'preferredColorScheme'
+    [pscustomobject]@{ name = 'browser color mode'; by = 'you'; preference = 'colorScheme'; companion = ''; zoom = ''; field = 'preferredColorScheme'
         change = 'In the Settings window, search for "mode" and set Mode to Dark, or to Light if Windows is in dark mode.'
         restore = 'Set Mode back to Device.'
         page = 'the prefers-color-scheme row changes and the page background changes' }
-    [pscustomobject]@{ name = 'windows dark mode'; by = 'code'; preference = ''; zoom = ''; field = 'preferredColorScheme'
+    [pscustomobject]@{ name = 'windows dark mode'; by = 'code'; preference = ''; companion = ''; zoom = ''; field = 'preferredColorScheme'
         change = ''; restore = ''
         page = 'the prefers-color-scheme row changes' }
-    [pscustomobject]@{ name = 'animation effects'; by = 'code'; preference = ''; zoom = ''; field = 'prefersReducedMotion'
+    [pscustomobject]@{ name = 'animation effects'; by = 'code'; preference = ''; companion = ''; zoom = ''; field = 'prefersReducedMotion'
         change = ''; restore = ''
         page = 'the prefers-reduced-motion row reads reduce and the spinner stops' }
-    [pscustomobject]@{ name = 'contrast theme'; by = 'you'; preference = ''; zoom = ''; field = 'inForcedColors'
+    [pscustomobject]@{ name = 'contrast theme'; by = 'you'; preference = ''; companion = ''; zoom = ''; field = 'inForcedColors'
         change = 'Turn on a contrast theme: in Settings, Ease of Access, High contrast, turn on high contrast.'
         restore = 'Turn high contrast off.'
         page = 'the forced-colors row reads active' }
@@ -107,6 +111,10 @@ function Say([string]$text) {
 function Read-Utc([string]$text) {
     return [DateTime]::Parse($text, [Globalization.CultureInfo]::InvariantCulture,
         [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+}
+
+function Get-Percent($value) {
+    return ([double]$value).ToString('0.#', [Globalization.CultureInfo]::InvariantCulture)
 }
 
 function Get-JsonText($value) {
@@ -169,13 +177,24 @@ function Invoke-Analysis([string]$results, [string]$events) {
             Add-Check 'the profile was not new' (-not $first.newProfile) "newProfile $($first.newProfile)"
             $size = $first.preferences.defaultFontSize
             Add-Check 'the prepared font size is recorded' ($size.value -eq 20 -and -not $size.isDefault) "value $($size.value), default $($size.isDefault)"
+            if ($PreparedPageColors -ge 0) {
+                $colors = $first.preferences.requestedPageColors
+                Add-Check 'the prepared page colors are recorded' ($colors.value -eq $PreparedPageColors -and -not $colors.isDefault) "value $($colors.value), default $($colors.isDefault)"
+            }
         }
         else {
             Add-Check 'the profile was new' ([bool]$first.newProfile) "newProfile $($first.newProfile)"
         }
     }
-    $defaults = @($zooms | Where-Object { $_.Payload.mode -eq 'default' } | Select-Object -First 1)
-    Say ("First default zoom record: {0}" -f $(if ($defaults.Count) { "$($defaults[0].Payload.zoomPercent)% at $($defaults[0].Utc.ToString('o'))" } else { 'none (100 percent)' }))
+    # The default zoom at the start: a default record before the first step,
+    # or 100 percent, as the zoom map records no change to the level it has.
+    $defaults = @($zooms | Where-Object { $_.Payload.mode -eq 'default' })
+    $stepsFile = Join-Path $results 'steps.csv'
+    $firstStep = if (Test-Path -LiteralPath $stepsFile) { Read-Utc (@(Import-Csv -LiteralPath $stepsFile)[0].startUtc) } else { [DateTime]::MaxValue }
+    $before = @($defaults | Where-Object { $_.Utc -lt $firstStep })
+    Say ("Default zoom at the start: {0}; default zoom records: {1}" -f
+        $(if ($before.Count) { "$(Get-Percent $before[-1].Payload.zoomPercent)%" } else { '100% (no record before the first step)' }),
+        $(if ($defaults.Count) { ($defaults | ForEach-Object { "$(Get-Percent $_.Payload.zoomPercent)% at $($_.Utc.ToString('HH:mm:ss'))" }) -join ', ' } else { 'none' }))
 
     # The fixture page, by the frame tree node id its navigations name it by.
     $fixturePages = @($records | Where-Object {
@@ -185,6 +204,11 @@ function Invoke-Analysis([string]$results, [string]$events) {
     Add-Check 'the fixture page was loaded' ($fixturePages.Count -ge 1) "pages $($fixturePages -join ', ')"
     $firstSends = @($sends | Where-Object { $_.Payload.first -and $fixturePages -contains [int]$_.Payload.pageFrameTreeNodeId })
     Add-Check 'the fixture page was sent its first values' ($firstSends.Count -ge 1) "$($firstSends.Count) first sends"
+    if ($ProfileFolder -and $PreparedPageColors -ge 1) {
+        $forced = @($firstSends | ForEach-Object { $_.Payload.fields.inForcedColors })
+        Add-Check 'the first values had forced colors as the page colors set' (
+            $forced.Count -ge 1 -and @($forced | Where-Object { [bool]$_ -ne ($PreparedPageColors -ge 2) }).Count -eq 0) "inForcedColors $(($forced | ForEach-Object { Get-JsonText $_ }) -join ', ')"
+    }
 
     if ($ProfileFolder) { Write-Results $results $checks $null; return }
 
@@ -192,27 +216,32 @@ function Invoke-Analysis([string]$results, [string]$events) {
     $rows = New-Object System.Collections.Generic.List[object]
     for ($i = 0; $i -lt $steps.Count; $i++) {
         $step = $steps[$i]
+        $definition = $AllSteps | Where-Object { $step.step -eq "$($_.name) change" -or $step.step -eq "$($_.name) restore" } | Select-Object -First 1
+        $companion = if ($definition) { $definition.companion } else { '' }
         $from = Read-Utc $step.startUtc
         $to = if ($i + 1 -lt $steps.Count) { Read-Utc $steps[$i + 1].startUtc } else { (Read-Utc $step.endUtc).AddSeconds(5) }
         $inStep = @($records | Where-Object { $_.Utc -ge $from -and $_.Utc -lt $to })
         $mine = @($inStep | Where-Object { $_.EventType -eq 'browser-preference-changed' -and $step.preference -and $_.Payload.preference -eq $step.preference })
-        $otherChanges = @($inStep | Where-Object { $_.EventType -eq 'browser-preference-changed' -and $_.Payload.preference -ne $step.preference } |
-            ForEach-Object { $_.Payload.preference })
+        $companions = @($inStep | Where-Object { $_.EventType -eq 'browser-preference-changed' -and $companion -and $_.Payload.preference -eq $companion })
+        $otherChanges = @($inStep | Where-Object { $_.EventType -eq 'browser-preference-changed' -and $_.Payload.preference -ne $step.preference -and $_.Payload.preference -ne $companion } |
+            ForEach-Object { "{0} {1} to {2}" -f $_.Payload.preference, (Get-JsonText $_.Payload.previous.($_.Payload.preference).value), (Get-JsonText $_.Payload.current.($_.Payload.preference).value) })
         $zoomed = @($inStep | Where-Object { $_.EventType -eq 'zoom-level-changed' })
         $myZoom = @($zoomed | Where-Object { $step.zoom -and $_.Payload.mode -eq $step.zoom })
         $toPage = @($inStep | Where-Object { $_.EventType -eq 'web-preferences-sent' -and $fixturePages -contains [int]$_.Payload.pageFrameTreeNodeId })
         $withField = @($toPage | Where-Object { $step.field -and $null -ne $_.Payload.fields.PSObject.Properties[$step.field] })
         $passed = $true
-        if ($step.preference) { $passed = $passed -and $mine.Count -eq 1 }
-        if ($step.zoom) { $passed = $passed -and $myZoom.Count -eq 1 }
+        if ($step.preference) { $passed = $passed -and $mine.Count -ge 1 }
+        if ($step.zoom) { $passed = $passed -and $myZoom.Count -ge 1 }
         if ($step.field) { $passed = $passed -and $withField.Count -ge 1 }
         $rows.Add([pscustomobject]@{
             step = $step.step
             passed = $passed
             changeRecords = ($mine | ForEach-Object {
                     "{0} to {1}" -f (Get-JsonText $_.Payload.previous.($step.preference).value), (Get-JsonText $_.Payload.current.($step.preference).value) }) -join '; '
-            otherChanges = $otherChanges -join ', '
-            zoomRecords = ($zoomed | ForEach-Object { "{0} {1} {2}%" -f $_.Payload.mode, $_.Payload.host, $_.Payload.zoomPercent }) -join '; '
+            companionChanges = ($companions | ForEach-Object {
+                    "{0} {1} to {2}" -f $companion, (Get-JsonText $_.Payload.previous.$companion.value), (Get-JsonText $_.Payload.current.$companion.value) }) -join '; '
+            otherChanges = $otherChanges -join '; '
+            zoomRecords = ($zoomed | ForEach-Object { "{0} {1} {2}%" -f $_.Payload.mode, $_.Payload.host, (Get-Percent $_.Payload.zoomPercent) }) -join '; '
             sentToFixture = ($toPage | ForEach-Object {
                     $fields = if ($_.Payload.first) { 'all fields' } else { ($_.Payload.fields.PSObject.Properties | ForEach-Object { "$($_.Name)=$(Get-JsonText $_.Value)" }) -join ' ' }
                     "{0}: {1}" -f $_.Payload.point, $fields }) -join '; '
@@ -220,8 +249,10 @@ function Invoke-Analysis([string]$results, [string]$events) {
             youSaw = $step.youSaw })
     }
     Write-Results $results $checks $rows
-    Say ('A step passes with exactly one change record of its preference, or one zoom record of its mode, ' +
-        'and, where it reaches the page, at least one send to the fixture page holding its field. ' +
+    Say ('A step passes with at least one change record of its preference, or at least one zoom record of its mode, ' +
+        'and, where it reaches the page, at least one send to the fixture page holding its field. Each choice made ' +
+        'in a menu is a change, so a step can hold several. companionChanges are the changes Chromium makes with ' +
+        'the step''s preference; otherChanges are other changes made in the step''s time. ' +
         'youSaw is your answer to whether the fixture page showed the change.')
 }
 

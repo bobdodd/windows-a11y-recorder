@@ -132,11 +132,15 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   records at protocol 0.56, the `ProfileDirectory` option in the session
   settings, and the Browser groups of the properties panel: proposed and
   agreed 2026-10-08, built 2026-10-08 (see "As built" in its "Stage 2").
-  To build in the owner's checkout, and to test on the target machine
-  with `scripts/Test-BrowserPreferences.ps1` and the fixture page
-  `tests/fixtures/accessibility-preferences/index.html`, then with a
-  prepared profile folder. Open: the meaning of each stored
-  `requestedPageColors` number, shown as its number; the font families of
+  Built in the owner's checkout and run on the target machine 2026-10-08
+  (see "The first run on the target machine" in its "Stage 2"): every
+  change recorded; the script's step checks corrected after and the
+  recording analysed again, 13 of 16 steps passing, the others explained
+  there. Open: page colors
+  by a prepared profile (`scripts/Set-PageColors.ps1`), as the build has
+  no setting that changes them while it runs; the player's Browser rows,
+  change buttons, and lane on the target machine; naming the stored
+  `requestedPageColors` numbers, now known, in the player; the font families of
   scripts other than the common one; and showing the foreground tab in the
   "Sent to the page" group once the foreground tab is recorded.
 - Left open by the owner's decision 2026-10-08, to start stage 2 first:

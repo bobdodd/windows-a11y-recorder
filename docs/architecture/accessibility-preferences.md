@@ -728,13 +728,16 @@ Protocol 0.56, on the browser channel:
 - On the target machine, with a Chromium build and a fixture page that
   responds to `prefers-color-scheme`, `prefers-reduced-motion`,
   `forced-colors`, `prefers-contrast`, and the default font size: during
-  one recording, the browser's font size, zoom, page colors, and color
-  scheme are changed, then Windows dark mode, animation effects, and a
-  contrast theme. Each browser change gives one change record, and each
-  change that reaches the page a `web-preferences-sent` record with the
-  values the page's style changes show. Then a recording with a prepared
-  profile folder, its preferences recorded at the start and its browsing
-  data not recorded.
+  one recording, the browser's font size, zoom, and color scheme are
+  changed, then Windows dark mode, animation effects, and a contrast
+  theme. Each choice made in the browser gives one change record, and
+  each change that reaches the page a `web-preferences-sent` record with
+  the values the page's style changes show. Then a recording with a
+  prepared profile folder, its preferences recorded at the start and its
+  browsing data not recorded, with page colors stored in the folder
+  beforehand. Page colors moved from the first recording to the prepared
+  profile 2026-10-08, as the build has no setting that changes them while
+  it runs (see "Page colors").
 
 ### As built
 
@@ -778,7 +781,8 @@ Built 2026-10-08 to the design above, with these differences and limits.
   only on Windows.
 - `requestedPageColors` is shown as its stored number, "value 1" for
   example, as the meaning of each number was not confirmed in the
-  owner's checkout. `colorScheme` is shown as system, light, or dark,
+  owner's checkout when this was built. It was confirmed after (see
+  "Page colors"); the player still shows the number. `colorScheme` is shown as system, light, or dark,
   from `ThemeService::BrowserColorScheme`
   (`chrome/browser/themes/theme_service.h`: `kSystem` 0, `kLight` 1,
   `kDark` 2).
@@ -851,6 +855,107 @@ above, then the prepared profile recording (`-ProfileFolder`), and in
 the player the Browser and Sent to the page rows following playback,
 the Browser rows' change buttons by mouse, and the Browser settings lane
 and filter.
+
+### The first run on the target machine
+
+Run by the owner 2026-10-08 with Chromium built at a5e1e91: the
+recording of "Required tests" (results
+`browser-preferences-test-20261008-202129`) and the prepared profile
+recording (`browser-preferences-test-20261008-205032`). Every change
+made in the browser was recorded, and every Windows change reached the
+fixture page with the values its style showed. The script marked four of
+sixteen steps failed; none was a fault of the records.
+
+- Font size: four choices made in the menu, Large, Very small, Large,
+  then Medium, gave four change records of `defaultFontSize` (16 to 20,
+  20 to 9, 9 to 20, 20 to 16), each with a change of
+  `defaultFixedFontSize` (13 to 17, 17 to 6, 6 to 17, 17 to 13), as
+  Chromium's font size menu sets both, and a send of both to the fixture
+  page. The script expected exactly one change record a step.
+- Default zoom: four choices, 125, 50, 125, then 100 percent, gave four
+  `default` records, each with a `host` record for each page that uses
+  the default, the fixture page and the settings page. The script
+  expected exactly one.
+- Page zoom: Ctrl and plus gave one `host` record of the fixture page at
+  110 percent, and Ctrl and 0 one at 100. The script showed the first as
+  110.00000000000001 percent, the double's full digits; the player rounds
+  it.
+- Browser color mode: the owner made the change while the script was at
+  the page colors step, so that step listed the color scheme changes and
+  the color mode step none. The records: device to dark (0 to 2) at
+  00:36:17 UTC, dark to light (2 to 1) at 00:36:31, light to device (1 to
+  0) at 00:37:42. The first sent nothing to the page, as Windows was in
+  dark mode and the page already had dark; the second sent light, the
+  third dark.
+- Page colors: no setting found, answered n, no record. See "Page
+  colors".
+- Windows dark mode, animation effects, and the contrast theme: each
+  change and restore sent its field with the expected value
+  (`preferredColorScheme` light and dark, `prefersReducedMotion` true and
+  false, `inForcedColors` true with `preferredContrast` more, then false
+  with no preference), and the owner saw each change on the page.
+- Opening the Customize Chrome side panel gave four `temporary` zoom
+  records of `customize-chrome-side-panel.top-chrome` at 100 percent:
+  Chromium's own panel, recorded as any other page.
+- The prepared profile run: one `browser-preferences` record, from the
+  prepared folder's `Default`, not new, with `defaultFontSize` 20 and not
+  the default; no default zoom record, so 100 percent; one first send to
+  the fixture page.
+- The script's line "First default zoom record" showed the first change,
+  125 percent, which read as the start value; the start was 100 percent.
+
+Changed in `scripts/Test-BrowserPreferences.ps1` after the run: a step
+passes with at least one change record of its preference, or at least
+one zoom record of its mode, as each choice in a menu is a change;
+`defaultFixedFontSize` is listed as the font size step's companion, not
+as another change; other changes in a step's time are listed with their
+values; zoom percentages are rounded to one decimal; the summary gives
+the default zoom at the start, from a default record before the first
+step or 100 percent, and lists every default record; the page colors step
+is removed; and the prepared profile run checks page colors stored with
+`scripts/Set-PageColors.ps1` (`-PreparedPageColors`).
+
+The first recording analysed again 2026-10-08 with the changed script
+and `-ResultsPath`, from the events already exported: 13 of 16 steps
+pass. Failed: the page colors change and restore, a step of that run, as
+no page colors record could be made; and the browser color mode change,
+as the change was made in the page colors step's time, where it is
+listed under otherChanges ("colorScheme 0 to 2; colorScheme 2 to 1").
+The default zoom at the start reads 100 percent, with no record before
+the first step. Not checked yet: page colors by a prepared profile, and
+the player.
+
+### Page colors
+
+Found in the owner's checkout 2026-10-08. `PageColorsController`
+(`chrome/browser/accessibility/page_colors_controller.h` and `.cc`)
+watches `settings.a11y.requested_page_colors` and
+`settings.a11y.apply_page_colors_only_on_increased_contrast` and sets
+the web theme's forced colors, color scheme, and contrast from them. The
+numbers, from its `PageColors`: 0 no preference, the default (the page
+follows Windows); 1 off (never forced, contrast no preference); 2 Dusk,
+3 Desert, 4 Night Sky, 5 Aquatic, 6 White (each forced, with contrast
+more, in the colors of that Windows contrast theme; Dusk, Night Sky, and
+Aquatic dark, Desert and White light). With the second preference true,
+its default false, page colors apply only while Windows asks for more
+contrast.
+
+Nothing in the build changes the preference while it runs: no source in
+`chrome/browser/resources/settings` or `chrome/browser/ui` names it,
+`settings_private`'s `prefs_util.cc` does not list it, so the settings
+pages cannot set it, and no policy maps to it. In Microsoft Edge, built
+on Chromium, it is Settings, Accessibility, Page colors
+([iTechGuides](https://www.itechguides.com/how-to-change-the-accent-color-in-microsoft-edge-chromium/)).
+
+So it is tested by the prepared profile: `scripts/Set-PageColors.ps1`
+stores a number in the folder's `Default\Preferences` while Chromium is
+closed, and the prepared profile run with `-PreparedPageColors` checks
+that the number is recorded at the start and that the fixture page's
+first values have forced colors on, from 2, or off, for 1. A change
+during a recording is not tested on the target machine. Its record
+comes from the same profile registrar as the font size and color mode
+changes, which were, and its effect on the page from the same web theme
+as the contrast theme, which was.
 
 ## Change buttons and counts
 
