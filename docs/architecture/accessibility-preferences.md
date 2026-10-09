@@ -1369,6 +1369,21 @@ machine.
    `innerWidth`, `innerHeight`, and `devicePixelRatio` from the page once it
    has painted and lists them beside the values the page is meant to have,
    saying when they differ by more than a CSS pixel or 0.001 of the ratio.
+   The owner's check of cc61845 (2026-10-09): recreation works at frames
+   during and after 200 percent text size, but a frame at 200 percent
+   showed scroll bars the recording did not have, in a window of the right
+   size. Taken to mean that the emulated device scale factor, 2, did not
+   reach the recreation's renderer, on a screen at a factor of 1, so that
+   the 932 pixel wide page, laid out at the imposed layout zoom of 2, was
+   466 CSS pixels wide; the same would explain the layout zoom of 1 that
+   stopped the renderer. From the next revision no device scale factor is
+   emulated (`deviceScaleFactor` 0, which turns the override off): the
+   blank tab's `devicePixelRatio` gives the viewing machine's own scale
+   factor, and the page and window are sized at the recorded window's size
+   in screen pixels, the CSS size times the layout zoom, over that factor
+   (`RecreationViewport.WindowWidthAt`), 1864 by 818 for that frame. The
+   renderer's imposed layout zoom then gives the recorded CSS size and
+   `devicePixelRatio`, which the Viewport as shown section checks.
 3. Whatever the zoom, an inline box's item keeps its box fragment's size,
    at the recorded offset, and the console says, for the block, that an
    inline box it lays out was recorded at another size, so a mismatch is

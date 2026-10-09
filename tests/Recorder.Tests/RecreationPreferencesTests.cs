@@ -362,6 +362,19 @@ public sealed class RecreationPreferencesTests
         Assert.Equal(800, zoomed.ShownWidth, 9);
         Assert.Equal(2.5, zoomed.ShownLayoutZoomFactor, 9);
 
+        // On the owner's screen, at a scale factor of 1, the page is sized
+        // in screen pixels, 1864 wide, both before and after the change,
+        // as the window kept its size; at 1.5 it is 1242.67.
+        Assert.Equal(1864, before.WindowWidthAt(1), 9);
+        Assert.Equal(818, before.WindowHeightAt(1), 9);
+        Assert.Equal(1864, after.WindowWidthAt(1), 9);
+        Assert.Equal(818, after.WindowHeightAt(1), 9);
+        Assert.Equal(1864 / 1.5, before.WindowWidthAt(1.5), 9);
+        Assert.Equal((1880, 898), RecreationControl.WindowSize(before, 16, 80, 1));
+        // A scale factor that is not above 0 is taken as the frame's.
+        Assert.Equal(932, before.WindowWidthAt(0), 9);
+        Assert.Equal(before.EmulatedWidth, before.WindowWidthAt(before.FrameScaleFactor), 9);
+
         // With no change set, the checkpoint's.
         var none = new RecreationViewport(800, 600, 1.5, 1.5);
         Assert.Equal(1.5, none.ShownLayoutZoomFactor, 9);

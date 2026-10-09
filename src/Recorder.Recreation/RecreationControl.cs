@@ -126,12 +126,18 @@ public sealed class RecreationControl : IAsyncDisposable
             var session = await control._firstTab.Task.WaitAsync(timeout.Token);
             if (viewport is { Width: > 0, Height: > 0 })
             {
-                await control.FitWindowAsync(session, viewport, cancellationToken);
+                var hostScale = await control.FitWindowAsync(session, viewport, cancellationToken);
+                // The page is sized in this machine's device-independent
+                // pixels at its own scale factor, which the renderer keeps:
+                // an emulated device scale factor did not reach the
+                // recreation's renderer (owner's check of 2026-10-09), and
+                // the renderer is given the recorded layout zoom. So no
+                // scale factor is emulated (0 turns the override off).
                 await connection.SendAsync("Emulation.setDeviceMetricsOverride", new
                 {
-                    width = (int)Math.Round(viewport.EmulatedWidth),
-                    height = (int)Math.Round(viewport.EmulatedHeight),
-                    deviceScaleFactor = viewport.EmulatedDeviceScaleFactor,
+                    width = (int)Math.Round(viewport.WindowWidthAt(hostScale)),
+                    height = (int)Math.Round(viewport.WindowHeightAt(hostScale)),
+                    deviceScaleFactor = 0,
                     mobile = false
                 }, session, cancellationToken);
             }
@@ -149,14 +155,15 @@ public sealed class RecreationControl : IAsyncDisposable
     // viewport, so the whole recorded page and its scroll bars show. The
     // window's frame, its size less the page area, is read from the blank
     // tab before the viewport is emulated, in CSS pixels, which are the
-    // window's own units at the default zoom. The viewport is still
-    // emulated after, so a window the screen cannot hold keeps the recorded
-    // layout.
-    private async Task FitWindowAsync(string session, RecreationViewport viewport, CancellationToken cancellationToken)
+    // window's own units at the default zoom, with the blank tab's
+    // devicePixelRatio, which is this machine's scale factor, and is
+    // returned. The viewport is still emulated after, so a window the screen
+    // cannot hold keeps the recorded layout.
+    private async Task<double> FitWindowAsync(string session, RecreationViewport viewport, CancellationToken cancellationToken)
     {
         var measured = await _connection.SendAsync("Runtime.evaluate", new
         {
-            expression = "JSON.stringify([outerWidth - innerWidth, outerHeight - innerHeight])",
+            expression = "JSON.stringify([outerWidth - innerWidth, outerHeight - innerHeight, devicePixelRatio])",
             returnByValue = true
         }, session, cancellationToken);
         using var frame = JsonDocument.Parse(measured.GetProperty("result").GetProperty("value").GetString()!);
@@ -165,7 +172,8 @@ public sealed class RecreationControl : IAsyncDisposable
         {
             targetId = target.GetProperty("targetInfo").GetProperty("targetId").GetString()
         }, null, cancellationToken);
-        var size = WindowSize(viewport, frame.RootElement[0].GetDouble(), frame.RootElement[1].GetDouble());
+        var hostScale = frame.RootElement[2].GetDouble();
+        var size = WindowSize(viewport, frame.RootElement[0].GetDouble(), frame.RootElement[1].GetDouble(), hostScale);
         await _connection.SendAsync("Browser.setWindowBounds", new
         {
             windowId = window.GetProperty("windowId").GetInt32(),
@@ -176,13 +184,15 @@ public sealed class RecreationControl : IAsyncDisposable
             windowId = window.GetProperty("windowId").GetInt32(),
             bounds = new { width = size.Width, height = size.Height }
         }, null, cancellationToken);
+        return hostScale;
     }
 
     // The window size whose page area is the recorded viewport, given the
-    // window's frame, in whole pixels, rounded up.
-    public static (int Width, int Height) WindowSize(RecreationViewport viewport, double frameWidth, double frameHeight) =>
-        ((int)Math.Ceiling(viewport.EmulatedWidth + Math.Max(0, frameWidth)),
-         (int)Math.Ceiling(viewport.EmulatedHeight + Math.Max(0, frameHeight)));
+    // window's frame, in whole pixels, rounded up, at this machine's scale
+    // factor; when none is given, at the frame's.
+    public static (int Width, int Height) WindowSize(RecreationViewport viewport, double frameWidth, double frameHeight, double? hostScale = null) =>
+        ((int)Math.Ceiling(viewport.WindowWidthAt(hostScale ?? viewport.FrameScaleFactor) + Math.Max(0, frameWidth)),
+         (int)Math.Ceiling(viewport.WindowHeightAt(hostScale ?? viewport.FrameScaleFactor) + Math.Max(0, frameHeight)));
 
     // True for a request the browser's own session lets continue: one of
     // DevTools, of an extension, such as the evidence panel, of a browser
@@ -666,6 +676,17 @@ public sealed class RecreationControl : IAsyncDisposable
 // to have kept its size in screen pixels, as a text size change leaves it,
 // so the emulated width and height are scaled by the checkpoint's factor
 // over the frame's; this is inferred, not recorded.
+//
+// No device scale factor is emulated. In the owner's check of 2026-10-09 an
+// emulated factor of 2 did not reach the recreation's renderer, on a screen
+// at a factor of 1: a frame recorded at 200 percent text size, laid out at
+// the recorded layout zoom of 2 in a 932 pixel wide page, showed scroll bars
+// the recording did not have, as the page was 466 CSS pixels wide. So the
+// page is sized in the viewing machine's own device-independent pixels, at
+// its own scale factor, which the blank tab's devicePixelRatio gives: the
+// recorded window's size in screen pixels, the CSS size times the layout
+// zoom, over that factor (WindowWidthAt). The renderer's layout zoom, which
+// it is given, then makes the CSS size the recorded one.
 public sealed record RecreationViewport(double Width, double Height, double DevicePixelRatio, double LayoutZoomFactor)
 {
     /// <summary>The recorded browser zoom factor the page is shown at; 1 when none is applied.</summary>
@@ -703,6 +724,21 @@ public sealed record RecreationViewport(double Width, double Height, double Devi
 
     /// <summary>The layout zoom factor the renderer lays the page out at.</summary>
     public double ShownLayoutZoomFactor => FrameScaleFactor * BrowserZoomFactor;
+
+    /// <summary>
+    /// The page's width in device-independent pixels of a machine whose scale
+    /// factor is the one given, unemulated: the recorded window's size in
+    /// screen pixels, the CSS width times the layout zoom it is laid out at,
+    /// over that scale factor. A scale factor that is not above 0 is taken
+    /// as the frame's.
+    /// </summary>
+    public double WindowWidthAt(double hostScale) => ShownWidth * ShownLayoutZoomFactor / HostScale(hostScale);
+
+    /// <summary>The page's height, as <see cref="WindowWidthAt"/>.</summary>
+    public double WindowHeightAt(double hostScale) => ShownHeight * ShownLayoutZoomFactor / HostScale(hostScale);
+
+    private double HostScale(double hostScale) =>
+        double.IsFinite(hostScale) && hostScale > 0 ? hostScale : FrameScaleFactor;
 
     /// <summary>The page's CSS width once the renderer zooms it.</summary>
     public double ShownWidth => EmulatedWidth / BrowserZoomFactor;
