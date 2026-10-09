@@ -28,8 +28,18 @@ public static class RecordedPreferences
     public static string AttributeText(BrowserPageValues values)
     {
         ArgumentNullException.ThrowIfNull(values);
+        return AttributeText(values, null)!;
+    }
+
+    /// <summary>
+    /// The attribute's text for the page's values, when recorded, and the
+    /// recorded layout zoom factor the recreation is laid out at, when
+    /// known, as a "layoutZoom" entry; null when there is neither.
+    /// </summary>
+    public static string? AttributeText(BrowserPageValues? values, double? layoutZoomFactor)
+    {
         var entries = new List<string>();
-        foreach (var field in values.Fields)
+        foreach (var field in values?.Fields ?? [])
         {
             if (Field(field.Setting, field.Value) is { } entry)
             {
@@ -37,9 +47,19 @@ public static class RecordedPreferences
             }
         }
 
-        if (values.Zoom is { } zoom && double.IsFinite(zoom.ZoomLevel))
+        if (values?.Zoom is { } zoom && double.IsFinite(zoom.ZoomLevel))
         {
             entries.Add("zoom " + zoom.ZoomLevel.ToString("R", CultureInfo.InvariantCulture));
+        }
+
+        if (layoutZoomFactor is { } layoutZoom && double.IsFinite(layoutZoom) && layoutZoom > 0)
+        {
+            entries.Add("layoutZoom " + layoutZoom.ToString("R", CultureInfo.InvariantCulture));
+        }
+
+        if (values is null)
+        {
+            return entries.Count == 0 ? null : string.Join("; ", entries);
         }
 
         foreach (var map in values.ColorMaps)

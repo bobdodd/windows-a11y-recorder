@@ -164,12 +164,18 @@ public static class RecordedPage
                 // The zoom at the checkpoint, when zoom was recorded; a
                 // checkpoint before any zoom record was at 100 percent.
                 CheckpointZoomFactor = preferences?.Zoom is null ? null : checkpointZoom?.Factor ?? 1.0,
+                FrameLayoutZoomFactor = state.Layout.LayoutZoomFactor,
             };
             notes.Add($"The viewport is shown at {recorded.Width.ToString(CultureInfo.InvariantCulture)} by {recorded.Height.ToString(CultureInfo.InvariantCulture)} CSS pixels and a device pixel ratio of {recorded.DevicePixelRatio.ToString(CultureInfo.InvariantCulture)}, from the page's latest layout checkpoint, recorded at {(recorded.Time / 1e9).ToString("0.000", CultureInfo.InvariantCulture)} s. The window may have been resized after it.");
             if (Math.Abs(viewport.ShownWidth - recorded.Width) > 1e-6 || Math.Abs(viewport.ShownDevicePixelRatio - recorded.DevicePixelRatio) > 1e-6)
             {
                 notes.Add($"The page's zoom at the frame, {(zoomFactor * 100).ToString("0.##", CultureInfo.InvariantCulture)} percent, differs from its zoom at that checkpoint, {((viewport.CheckpointZoomFactor ?? zoomFactor) * 100).ToString("0.##", CultureInfo.InvariantCulture)} percent, so the page is shown at {viewport.ShownWidth.ToString("0.##", CultureInfo.InvariantCulture)} by {viewport.ShownHeight.ToString("0.##", CultureInfo.InvariantCulture)} CSS pixels and a device pixel ratio of {viewport.ShownDevicePixelRatio.ToString("0.####", CultureInfo.InvariantCulture)}, as the same window zoomed to the frame's zoom.");
             }
+            if (Math.Abs(viewport.FrameScaleFactor - viewport.CheckpointScaleFactor) > 1e-6)
+            {
+                notes.Add($"The screen's scale factor, with Windows' text size, was {viewport.CheckpointScaleFactor.ToString("0.####", CultureInfo.InvariantCulture)} at that checkpoint and {viewport.FrameScaleFactor.ToString("0.####", CultureInfo.InvariantCulture)} at the frame, from the layout zoom factor of the document's latest layout change set, {viewport.ShownLayoutZoomFactor.ToString("0.####", CultureInfo.InvariantCulture)}. No checkpoint recorded the viewport after the change, so the window is taken to have kept its size in screen pixels, as a text size change leaves it, and the page is shown at {viewport.ShownWidth.ToString("0.##", CultureInfo.InvariantCulture)} by {viewport.ShownHeight.ToString("0.##", CultureInfo.InvariantCulture)} CSS pixels and a device pixel ratio of {viewport.ShownDevicePixelRatio.ToString("0.####", CultureInfo.InvariantCulture)}. This size is inferred, not recorded.");
+            }
+            notes.Add($"The page is laid out at the recorded layout zoom factor at the frame, {viewport.ShownLayoutZoomFactor.ToString("0.####", CultureInfo.InvariantCulture)}, which the instrumented renderer applies from the layoutZoom entry of the root element's {RecordedPreferences.AttributeName} attribute, so that its layout units are the recorded ones. The evidence panel's Viewport as shown section compares the page's size and device pixel ratio with these.");
             // Chromium's layout zoom factor includes the device pixel ratio,
             // so a factor other than the ratio means the page was zoomed.
             if (preferences?.Zoom is null && Math.Abs(recorded.LayoutZoomFactor - recorded.DevicePixelRatio) > 1e-6)
@@ -258,13 +264,18 @@ public static class RecordedPage
             new RecreationFidelity("not-checked", "The recreation is not yet compared with the recording.", []),
             notes,
             animations,
-            scripts);
+            scripts) with
+        {
+            ShownViewport = viewport is null
+                ? null
+                : new RecreationShownViewport(viewport.ShownWidth, viewport.ShownHeight, viewport.ShownDevicePixelRatio, viewport.ShownLayoutZoomFactor),
+        };
         return new RecreationContent(
             Markup(
                 Tree(state, used.Faces, fontAddress, placed, compositorValues, used.StyleSheets, used.StyleSheetText, inPlace),
                 DocumentTypeName(tree, documentId),
                 nonce,
-                preferences is null ? null : RecordedPreferences.AttributeText(preferences)),
+                RecordedPreferences.AttributeText(preferences, viewport?.ShownLayoutZoomFactor ?? state.Layout.LayoutZoomFactor)),
             evidence,
             nonce)
         {

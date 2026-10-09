@@ -23,6 +23,7 @@
 //   (every byte other than a letter, a digit, "-", ".", "_", and "~" written
 //   as "%" and two hexadecimal digits), so that it holds no space or ";";
 // - "zoom", then the zoom level, as Chromium's zoom levels are written;
+// - "layoutZoom", then the recorded layout zoom factor, a number above 0;
 // - "color", a map name ("light", "dark", or "forcedColors"), a color's
 //   RendererColorId name, such as "kColorCssSystemWindow", and the color as
 //   eight hexadecimal digits, alpha, red, green, and blue, as SkColor holds
@@ -31,8 +32,8 @@
 // Numbers are read by the number parser given, so that this uses the C++
 // standard library alone and can be exercised outside a Chromium build; the
 // bridge gives base::StringToDouble. Text that does not follow this form, a
-// repeated field, zoom, or color, or a number that is not finite gives no
-// values at all.
+// repeated field, zoom, layout zoom, or color, a number that is not finite,
+// or a layout zoom that is not above 0 gives no values at all.
 
 // The 67 RendererColorId values of ui/color/color_id.mojom, by name, in the
 // enumeration's order. X is called once with each name.
@@ -156,11 +157,17 @@ struct RecreationPreferences {
   // By the field's name in the web-preferences-sent record.
   std::map<std::string, RecreationPreferenceValue> fields;
   std::optional<double> zoom_level;
+  // The recorded layout zoom factor (Blink's LocalFrame::LayoutZoomFactor:
+  // the screen's scale factor, with Windows' text size, times the browser
+  // zoom), which a recreation is laid out at, so that its layout units are
+  // the recorded ones.
+  std::optional<double> layout_zoom_factor;
   // By map name, then by color name, each color as SkColor holds it.
   std::map<std::string, std::map<std::string, uint32_t>> color_maps;
 
   bool empty() const {
-    return fields.empty() && !zoom_level && color_maps.empty();
+    return fields.empty() && !zoom_level && !layout_zoom_factor &&
+           color_maps.empty();
   }
 
   const RecreationPreferenceValue* Find(std::string_view name) const {
@@ -398,6 +405,15 @@ RecreationPreferences ParseRecreationPreferences(std::string_view text,
         return {};
       }
       values.zoom_level = *number;
+    } else if (key == "layoutZoom") {
+      if (words.size() != 2 || values.layout_zoom_factor) {
+        return {};
+      }
+      const std::optional<double> number = internal::Number(words[1], parse);
+      if (!number || !(*number > 0)) {
+        return {};
+      }
+      values.layout_zoom_factor = *number;
     } else if (key == "color") {
       if (words.size() != 4 || !internal::IsMapName(words[1]) ||
           !internal::IsName(words[2])) {

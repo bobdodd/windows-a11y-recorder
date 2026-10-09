@@ -655,6 +655,17 @@ public sealed class RecreationControl : IAsyncDisposable
 // and the renderer's zoom at the frame then gives the page the CSS size and
 // devicePixelRatio it had at the frame, also when the zoom changed after the
 // checkpoint (found in the owner's check of 2026-10-09).
+//
+// The renderer is laid out at the recorded layout zoom factor at the frame
+// ("The recorded layout zoom" in
+// docs/architecture/accessibility-preferences.md, agreed 2026-10-09): that
+// of the document's latest layout change set, which follows Windows' text
+// size and the screen's scale factor, which no checkpoint may have recorded
+// since. The screen's scale factor at the frame is that zoom over the
+// browser zoom. Where it differs from the checkpoint's, the window is taken
+// to have kept its size in screen pixels, as a text size change leaves it,
+// so the emulated width and height are scaled by the checkpoint's factor
+// over the frame's; this is inferred, not recorded.
 public sealed record RecreationViewport(double Width, double Height, double DevicePixelRatio, double LayoutZoomFactor)
 {
     /// <summary>The recorded browser zoom factor the page is shown at; 1 when none is applied.</summary>
@@ -663,16 +674,35 @@ public sealed record RecreationViewport(double Width, double Height, double Devi
     /// <summary>The recorded browser zoom factor at the checkpoint; when none is given, that of the frame.</summary>
     public double? CheckpointZoomFactor { get; init; }
 
+    /// <summary>The layout zoom factor of the document's latest layout change set at the frame; when none is given, the checkpoint's at the frame's zoom.</summary>
+    public double? FrameLayoutZoomFactor { get; init; }
+
     private double AtCheckpoint => CheckpointZoomFactor ?? BrowserZoomFactor;
 
+    /// <summary>The screen's scale factor at the checkpoint, with Windows' text size.</summary>
+    public double CheckpointScaleFactor => DevicePixelRatio / AtCheckpoint;
+
+    /// <summary>The screen's scale factor at the frame, with Windows' text size.</summary>
+    public double FrameScaleFactor => FrameLayoutZoomFactor is { } zoom && zoom > 0
+        ? zoom / BrowserZoomFactor
+        : CheckpointScaleFactor;
+
+    // The checkpoint's scale factor over the frame's: how much the window's
+    // size in device-independent pixels grew, at the same size in screen
+    // pixels.
+    private double ScaleChange => CheckpointScaleFactor / FrameScaleFactor;
+
     /// <summary>The emulated width, in device-independent pixels.</summary>
-    public double EmulatedWidth => Width * AtCheckpoint;
+    public double EmulatedWidth => Width * AtCheckpoint * ScaleChange;
 
     /// <summary>The emulated height, in device-independent pixels.</summary>
-    public double EmulatedHeight => Height * AtCheckpoint;
+    public double EmulatedHeight => Height * AtCheckpoint * ScaleChange;
 
     /// <summary>The emulated device scale factor.</summary>
-    public double EmulatedDeviceScaleFactor => DevicePixelRatio / AtCheckpoint;
+    public double EmulatedDeviceScaleFactor => FrameScaleFactor;
+
+    /// <summary>The layout zoom factor the renderer lays the page out at.</summary>
+    public double ShownLayoutZoomFactor => FrameScaleFactor * BrowserZoomFactor;
 
     /// <summary>The page's CSS width once the renderer zooms it.</summary>
     public double ShownWidth => EmulatedWidth / BrowserZoomFactor;

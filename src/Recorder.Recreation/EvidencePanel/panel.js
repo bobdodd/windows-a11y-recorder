@@ -963,6 +963,49 @@ function showTimings(steps, times) {
   }
 }
 
+// The page's own size and device pixel ratio once it has painted, beside
+// those it is meant to be shown at ("The recorded layout zoom" in
+// docs/architecture/accessibility-preferences.md). innerWidth and
+// innerHeight are the size media queries see, as the recorded viewport is.
+function checkViewport() {
+  const top = evidenceByKey.get("");
+  const meant = top && top.shownViewport;
+  if (!meant) {
+    return;
+  }
+  chrome.devtools.inspectedWindow.eval(
+    "JSON.stringify([innerWidth, innerHeight, devicePixelRatio])",
+    (result) => {
+      if (typeof result !== "string") {
+        return;
+      }
+      const [width, height, ratio] = JSON.parse(result);
+      content.appendChild(element("h2", "Viewport as shown"));
+      const list = element("ul");
+      list.appendChild(element("li",
+        `Meant to be shown at: ${meant.width.toFixed(2)} by ${meant.height.toFixed(2)} CSS pixels, device pixel ratio ${meant.devicePixelRatio.toFixed(4)}, laid out at a layout zoom factor of ${meant.layoutZoomFactor.toFixed(4)}`));
+      list.appendChild(element("li",
+        `Shown at: ${width} by ${height} CSS pixels, device pixel ratio ${Number(ratio).toFixed(4)}`));
+      content.appendChild(list);
+      const sizeDiffers = Math.abs(width - meant.width) > 1 || Math.abs(height - meant.height) > 1;
+      const ratioDiffers = Math.abs(ratio - meant.devicePixelRatio) > 0.001;
+      const differences = [];
+      if (sizeDiffers) {
+        differences.push("its size");
+      }
+      if (ratioDiffers) {
+        differences.push("its device pixel ratio");
+      }
+      const summary = differences.length === 0
+        ? "The page's size, to the nearest CSS pixel, and its device pixel ratio are those it is meant to be shown at."
+        : `The page differs in ${differences.join(" and ")} from the viewport it is meant to be shown at, so its media queries and layout may not be the recorded ones.`;
+      content.appendChild(element("p", summary));
+      if (differences.length > 0) {
+        say(summary);
+      }
+    });
+}
+
 function watchTimings(address) {
   chrome.devtools.inspectedWindow.eval(
     "window.__recorderRecreation ? JSON.stringify(window.__recorderRecreation.times) : null",
@@ -981,6 +1024,8 @@ function watchTimings(address) {
       showTimings(steps, times);
       if (!times || typeof times.firstPaint !== "number") {
         setTimeout(() => watchTimings(address), 1000);
+      } else {
+        checkViewport();
       }
     });
 }

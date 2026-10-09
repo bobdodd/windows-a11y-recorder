@@ -9308,6 +9308,45 @@ class RecreationIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(1, patched.count(INTEGRATE.BLINK_RECREATION_ITEMS_HOOK))
 
+    def test_upgrades_the_items_hook_that_gave_an_inline_box_its_recorded_size(self):
+        # Found at 200 percent text size on 2026-10-09: an inline box's item
+        # must have its box fragment's size, which Blink checks.
+        old = INTEGRATE.PRE_BOX_SIZE_BLINK_RECREATION_ITEMS_HOOK
+        new = INTEGRATE.BLINK_RECREATION_ITEMS_HOOK
+        self.assertNotEqual(old, new)
+        self.assertIn("recorder_size = recorder_box->Size();", new)
+        self.assertIn("recorder_item.Type() == FragmentItem::kBox", new)
+        self.assertIn("at another size from the box Blink laid", new)
+        self.assertNotIn("LayoutUnit::FromDoubleRound(recorder_width),\n"
+                         "                           LayoutUnit::FromDoubleRound(recorder_height)));",
+                         new)
+        # The size is taken before the rectangle is set.
+        self.assertLess(
+            new.index("recorder_size = recorder_box->Size();"),
+            new.index("recorder_item.RecorderSetRect(PhysicalRect("),
+        )
+        self.assertIn(
+            '#include "third_party/blink/renderer/core/layout/physical_box_fragment.h"',
+            INTEGRATE.BLINK_RECREATION_ITEMS_INCLUDES,
+        )
+        source = (
+            '#include "third_party/blink/renderer/core/layout/inline/'
+            'fragment_items_builder.h"\n'
+            + INTEGRATE.BLINK_RECREATION_ITEMS_HELPER
+            + INTEGRATE.BLINK_RECREATION_ITEMS_HELPER_ANCHOR
+            + old
+            + INTEGRATE.BLINK_RECREATION_ITEMS_ANCHOR
+            + "LayoutUnit offset, bool b) {}\n"
+        )
+        patched = self.patch_source_twice(
+            "fragment_items_builder.cc",
+            source,
+            INTEGRATE.patch_blink_fragment_items_builder,
+        )
+        self.assertNotIn(old, patched)
+        self.assertEqual(1, patched.count(new))
+        self.assertIn("physical_box_fragment.h", patched)
+
 
 class ScriptSourceIntegrationTests(unittest.TestCase):
     """Slice 4h (protocol 0.54): the page's script source."""
@@ -10099,6 +10138,66 @@ class RecreationPreferencesIntegrationTests(unittest.TestCase):
             INTEGRATE.patch_blink_frame_widget_zoom,
         )
 
+    def test_a_recreated_page_is_laid_out_at_the_recorded_layout_zoom(self):
+        source = (
+            "namespace blink {\n\n"
+            + INTEGRATE.BLINK_FRAME_WIDGET_ZOOM_DECLARATION_ANCHOR
+            + "  SetZoomInternal(zoom_level, css_zoom_factor_);\n}\n\n"
+            "void WebFrameWidgetImpl::SetZoomInternal(double zoom_level,\n"
+            "                                         double css_zoom_factor) {\n"
+            + INTEGRATE.BLINK_FRAME_WIDGET_ZOOM_ANCHOR
+            + "  if (auto* local_frame = LocalRootImpl()->GetFrame()) {\n"
+            "    if (Document* document = local_frame->GetDocument()) {\n"
+            + INTEGRATE.BLINK_FRAME_WIDGET_LAYOUT_ZOOM_ANCHOR
+            + "      local_frame->SetLayoutZoomFactor(layout_zoom_factor);\n"
+            "    }\n  }\n}\n\n"
+            "}  // namespace blink\n"
+        )
+
+        def both(path):
+            INTEGRATE.patch_blink_frame_widget_zoom(path)
+            INTEGRATE.patch_blink_frame_widget_layout_zoom(path)
+
+        first = self.patch_twice("web_frame_widget_impl.cc", source, both)
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_FRAME_WIDGET_LAYOUT_ZOOM_HOOK))
+        self.assertEqual(
+            1, first.count(INTEGRATE.BLINK_FRAME_WIDGET_LAYOUT_ZOOM_DECLARATION)
+        )
+        # The recorded layout zoom replaces the one worked out, before it is
+        # given to the frame.
+        self.assertLess(
+            first.index("static_cast<float>(css_zoom_factor);"),
+            first.index("layout_zoom_factor = static_cast<float>(*recorder_layout_zoom);"),
+        )
+        self.assertLess(
+            first.index("layout_zoom_factor = static_cast<float>(*recorder_layout_zoom);"),
+            first.index("SetLayoutZoomFactor(layout_zoom_factor);"),
+        )
+        self.refuses(
+            "web_frame_widget_impl.cc",
+            source.replace("static_cast<float>(css_zoom_factor);", "css_zoom_factor;"),
+            INTEGRATE.patch_blink_frame_widget_layout_zoom,
+        )
+        view = (
+            "namespace blink {\n\n"
+            + INTEGRATE.BLINK_WEB_VIEW_PREFERENCES_HELPER_ANCHOR
+            + "    const RendererPreferences& preferences) {}\n\n"
+            "}  // namespace blink\n"
+        )
+        patched = self.patch_twice(
+            "web_view_impl.cc", view, INTEGRATE.patch_blink_web_view_layout_zoom
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_WEB_VIEW_LAYOUT_ZOOM_HELPER))
+        self.assertIn(
+            "std::optional<double> RecorderRecordedLayoutZoom(WebLocalFrameImpl* frame);",
+            INTEGRATE.BLINK_FRAME_WIDGET_LAYOUT_ZOOM_DECLARATION,
+        )
+        self.assertIn(
+            "std::optional<double> RecorderRecordedLayoutZoom(WebLocalFrameImpl* frame) {",
+            INTEGRATE.BLINK_WEB_VIEW_LAYOUT_ZOOM_HELPER,
+        )
+        self.assertIn("layout_zoom_factor", INTEGRATE.BLINK_WEB_VIEW_LAYOUT_ZOOM_HELPER)
+
     def test_the_recorded_preferences_are_applied_as_the_root_is_parsed(self):
         source = (
             "namespace blink {\n\n"
@@ -10152,6 +10251,8 @@ class RecreationPreferencesIntegrationTests(unittest.TestCase):
             "patch_blink_web_view_preferences(",
             "patch_blink_page_color_maps(",
             "patch_blink_frame_widget_zoom(",
+            "patch_blink_web_view_layout_zoom(",
+            "patch_blink_frame_widget_layout_zoom(",
             "patch_blink_html_element_preferences(",
         ):
             with self.subTest(patch=patch):
@@ -10160,6 +10261,11 @@ class RecreationPreferencesIntegrationTests(unittest.TestCase):
         self.assertLess(
             main.index("patch_content_render_view_host("),
             main.index("patch_content_render_view_host_color_maps("),
+        )
+        # The layout zoom helper follows the preferences helper it calls.
+        self.assertLess(
+            main.index("patch_blink_web_view_preferences("),
+            main.index("patch_blink_web_view_layout_zoom("),
         )
 
     def test_the_bridge_records_only_the_maps_that_changed_for_a_view(self):

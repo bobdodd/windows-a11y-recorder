@@ -165,6 +165,32 @@ public sealed class RecreationTests : IDisposable
     }
 
     [Fact]
+    public void ThePanelComparesTheShownViewportWithThePagesOwn()
+    {
+        // The evidence names the viewport the page is meant to be shown at
+        // as the panel reads it, and the panel reads the page's own size and
+        // ratio once it has painted.
+        var evidence = FixedRecreation.Create().Evidence with
+        {
+            ShownViewport = new RecreationShownViewport(1864, 818, 1, 1),
+        };
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(evidence, RecreationServer.EvidenceJson));
+        var shown = json.RootElement.GetProperty("shownViewport");
+        Assert.Equal(1864, shown.GetProperty("width").GetDouble());
+        Assert.Equal(818, shown.GetProperty("height").GetDouble());
+        Assert.Equal(1, shown.GetProperty("devicePixelRatio").GetDouble());
+        Assert.Equal(1, shown.GetProperty("layoutZoomFactor").GetDouble());
+        var extension = Path.Combine(_directory, RecreationBrowser.ExtensionFolder);
+        RecreationBrowser.WriteExtension(extension, "http://127.0.0.1:5000/token/evidence.json");
+        var panel = File.ReadAllText(Path.Combine(extension, "panel.js"));
+        var check = panel[panel.IndexOf("function checkViewport", StringComparison.Ordinal)..panel.IndexOf("function watchTimings", StringComparison.Ordinal)];
+        Assert.Contains("top.shownViewport", check, StringComparison.Ordinal);
+        Assert.Contains("JSON.stringify([innerWidth, innerHeight, devicePixelRatio])", check, StringComparison.Ordinal);
+        Assert.Contains("\"Viewport as shown\"", check, StringComparison.Ordinal);
+        Assert.Contains("checkViewport();", panel, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TheBrowserOpensInItsOwnProfileWithDevToolsInItsOwnWindowAndItsProtocolPort()
     {
         var profile = Path.Combine(_directory, RecreationBrowser.ProfileFolder);

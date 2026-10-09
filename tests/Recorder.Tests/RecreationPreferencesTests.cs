@@ -331,6 +331,59 @@ public sealed class RecreationPreferencesTests
     }
 
     [Fact]
+    public void TheViewportFollowsTheLayoutZoomOfTheLatestChangeSet()
+    {
+        // The owner's recording of 2026-10-09: a checkpoint at 200 percent
+        // text size, 932 by 409 CSS pixels at a ratio of 2, then Windows'
+        // text size set back to 100 percent, after which every change set
+        // names a layout zoom of 1 and no checkpoint was recorded.
+        var after = new RecreationViewport(932, 409, 2, 2) { FrameLayoutZoomFactor = 1 };
+        Assert.Equal(2, after.CheckpointScaleFactor, 9);
+        Assert.Equal(1, after.FrameScaleFactor, 9);
+        Assert.Equal(1864, after.EmulatedWidth, 9);
+        Assert.Equal(818, after.EmulatedHeight, 9);
+        Assert.Equal(1, after.EmulatedDeviceScaleFactor, 9);
+        Assert.Equal(1864, after.ShownWidth, 9);
+        Assert.Equal(818, after.ShownHeight, 9);
+        Assert.Equal(1, after.ShownDevicePixelRatio, 9);
+        Assert.Equal(1, after.ShownLayoutZoomFactor, 9);
+
+        // Before the change, the change sets give the checkpoint's zoom.
+        var before = new RecreationViewport(932, 409, 2, 2) { FrameLayoutZoomFactor = 2 };
+        Assert.Equal(932, before.EmulatedWidth, 9);
+        Assert.Equal(2, before.EmulatedDeviceScaleFactor, 9);
+        Assert.Equal(2, before.ShownLayoutZoomFactor, 9);
+
+        // With a browser zoom, the frame's scale factor is its layout zoom
+        // over the zoom: 2.5 at 125 percent is a scale factor of 2.
+        var zoomed = new RecreationViewport(800, 600, 2.5, 2.5) { BrowserZoomFactor = 1.25, CheckpointZoomFactor = 1.25, FrameLayoutZoomFactor = 2.5 };
+        Assert.Equal(2, zoomed.FrameScaleFactor, 9);
+        Assert.Equal(1000, zoomed.EmulatedWidth, 9);
+        Assert.Equal(800, zoomed.ShownWidth, 9);
+        Assert.Equal(2.5, zoomed.ShownLayoutZoomFactor, 9);
+
+        // With no change set, the checkpoint's.
+        var none = new RecreationViewport(800, 600, 1.5, 1.5);
+        Assert.Equal(1.5, none.ShownLayoutZoomFactor, 9);
+        Assert.Equal(800, none.EmulatedWidth, 9);
+    }
+
+    [Fact]
+    public void TheAttributeGivesTheLayoutZoomWithOrWithoutPageValues()
+    {
+        Assert.Null(RecordedPreferences.AttributeText(null, null));
+        Assert.Equal("layoutZoom 2", RecordedPreferences.AttributeText(null, 2.0));
+        Assert.Equal("layoutZoom 1.5", RecordedPreferences.AttributeText(null, 1.5));
+        Assert.Null(RecordedPreferences.AttributeText(null, 0));
+        Assert.Null(RecordedPreferences.AttributeText(null, double.NaN));
+        var values = Recording().PageValuesAt(12, "https://example.org/", 7 * Second);
+        var entries = RecordedPreferences.AttributeText(values, 2)!.Split("; ");
+        Assert.Contains("layoutZoom 2", entries);
+        Assert.Contains("field defaultFontSize i 20", entries);
+        Assert.Equal(RecordedPreferences.AttributeText(values).Split("; ").Length + 1, entries.Length);
+    }
+
+    [Fact]
     public void ADocumentsPageIsThatOfItsPageCommit()
     {
         PlaybackIndexEvent Navigation(long key, string token, string pageId, string frameType = "primary-main-frame") =>

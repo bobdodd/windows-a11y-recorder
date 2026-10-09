@@ -49,7 +49,7 @@ int main() {
         "field caretBlinkIntervalMilliseconds n 530.5; "
         "field standardFontFamily t Times%20New%20Roman; "
         "field preferredColorScheme t dark; field mathFontFamily t ; "
-        "zoom 1.2239010857415449; "
+        "zoom 1.2239010857415449; layoutZoom 2; "
         "color light kColorCssSystemWindow FFFFFFFF; "
         "color forcedColors kColorCssSystemWindow FF000000; "
         "color forcedColors kColorCssSystemWindowText FFFFFF00");
@@ -68,6 +68,7 @@ int main() {
     Check(values.zoom_level && *values.zoom_level > 1.22 &&
               *values.zoom_level < 1.23,
           "the zoom level");
+    Check(values.layout_zoom_factor == 2.0, "the layout zoom factor");
     Check(values.color_maps.size() == 2, "two maps");
     Check(values.color_maps.at("light").at("kColorCssSystemWindow") ==
               0xFFFFFFFFu,
@@ -82,6 +83,14 @@ int main() {
   Check(Parse("field defaultFontSize i 20; field defaultFontSize i 21").empty(),
         "a repeated field gives nothing");
   Check(Parse("zoom 1; zoom 2").empty(), "a repeated zoom gives nothing");
+  Check(!Parse("layoutZoom 1.5").empty() &&
+            Parse("layoutZoom 1.5").layout_zoom_factor == 1.5,
+        "a layout zoom alone gives values");
+  Check(Parse("layoutZoom 1; layoutZoom 2").empty(),
+        "a repeated layout zoom gives nothing");
+  Check(Parse("layoutZoom 0").empty(), "a layout zoom of 0 gives nothing");
+  Check(Parse("layoutZoom -1").empty(),
+        "a negative layout zoom gives nothing");
   Check(Parse("zoom nan").empty(), "a number that is not finite gives nothing");
   Check(Parse("field prefersReducedMotion b yes").empty(),
         "a boolean that is not true or false gives nothing");

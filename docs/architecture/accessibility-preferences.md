@@ -1322,39 +1322,58 @@ Built 2026-10-08 to the design above, with these decisions and limits.
   The recorded geometry is Blink's own layout units
   (`RectInContainerFragment`), which include the layout zoom factor:
   the screen's scale factor, here multiplied by the text size, times the
-  browser zoom (`WebFrameWidgetImpl::SetZoomInternal`). The recreation's
-  device scale factor is set through DevTools' emulation, which Blink
-  applies as an inspector override on top of the layout zoom
-  (`LocalFrame::DevicePixelRatio`), not as the layout zoom itself. So
-  where the participant's layout zoom differs from the viewing machine's,
-  as at 200 percent text size, the recorded rectangles are in other units
-  from the recreation's own layout: the fragment items hook gives an
+  browser zoom (`WebFrameWidgetImpl::SetZoomInternal`). The recording's
+  page was laid out at a layout zoom of 2 at 200 percent text size, so
+  the recreation, whose box was half the recorded size, was laid out at
+  1. Why it was is not settled: in this checkout DevTools' emulated
+  device scale factor is the one `ZoomFactorForViewportLayout` gives the
+  layout zoom (`web_view_impl.h`), except on a page with a `text-scale`
+  meta tag, where the text size is divided out, so the emulated factor of
+  2 should have given 2. Either way, where the recreation's layout zoom
+  differs from the recorded one, the recorded rectangles are in other
+  units from the recreation's own layout: the fragment items hook gives an
   inline box's item its recorded size while its box keeps Blink's, which
-  the check refuses. The same holds for any recording made at a screen
-  scale other than the viewing machine's. A fix is proposed in "Proposed:
-  the recorded layout zoom" below, not agreed.
+  the check refuses. The fix, in "The recorded layout zoom" below, does
+  not depend on how emulation sets the layout zoom, as the renderer is
+  given the recorded one.
 
-### Proposed: the recorded layout zoom
+### The recorded layout zoom
 
-Proposed 2026-10-09, for agreement before it is built.
+Proposed and agreed 2026-10-09; built, not yet checked on the target
+machine.
 
-1. A recreation is laid out at the recorded layout zoom factor. The
-   builder adds the layout checkpoint's `layoutZoomFactor` to the root
-   attribute (`layoutZoom FACTOR`), and in recreation mode
-   `SetZoomInternal` uses it as the layout zoom factor in place of the one
-   it works out, so Blink's layout units, font sizes, and glyph advances
-   are those recorded. The browser zoom entry stays, for what the page
-   and DevTools report of it.
-2. The recorder emulates the viewport so the page has the recorded CSS
-   size and `devicePixelRatio` at that layout zoom. How DevTools'
-   emulated width and device scale factor combine with an imposed layout
-   zoom is measured first, on the target machine, and the recorder then
-   reads `innerWidth`, `innerHeight`, and `devicePixelRatio` from the
-   recreation after it loads and lists any difference from the recorded
-   values in the evidence panel.
+1. A recreation is laid out at the recorded layout zoom factor. The owner's
+   recording of 2026-10-09 showed that the layout checkpoint is not enough:
+   its only checkpoints of the page were before 7.3 s, at a layout zoom of
+   2, while Windows' text size was set back to 100 percent at 19.0 s, after
+   which every layout change set named a layout zoom of 1. So the layout
+   zoom at the frame is that of the document's latest layout change set
+   (`layoutZoomFactor` of `layout-changes-started`), or the checkpoint's at
+   the frame's zoom when there is none. The builder writes it in the root
+   attribute as `layoutZoom FACTOR`, also for a recording with no browser
+   preferences, and in recreation mode `WebFrameWidgetImpl::SetZoomInternal`
+   uses it in place of the layout zoom factor it works out, so Blink's
+   layout units, font sizes, and glyph advances are those recorded. The
+   browser zoom entry stays, for the zoom level the page reports.
+2. The viewport. The screen's scale factor at the frame, with Windows' text
+   size, is the frame's layout zoom over the browser zoom. Where it differs
+   from the checkpoint's, the window is taken to have kept its size in
+   screen pixels, as a text size change leaves it, so the emulated width
+   and height are scaled by the checkpoint's factor over the frame's, and
+   the device scale factor emulated is the frame's (`RecreationViewport`).
+   For the recording above, a frame after 19.0 s is shown at 1864 by 818
+   CSS pixels at a ratio of 1, where the checkpoint gave 932 by 409 at 2.
+   That size is inferred, not recorded, and the evidence panel's notes say
+   so. How DevTools' emulation combines with the imposed layout zoom is not
+   yet measured, so the evidence panel's Viewport as shown section reads
+   `innerWidth`, `innerHeight`, and `devicePixelRatio` from the page once it
+   has painted and lists them beside the values the page is meant to have,
+   saying when they differ by more than a CSS pixel or 0.001 of the ratio.
 3. Whatever the zoom, an inline box's item keeps its box fragment's size,
-   with the recorded offset, and the console says when the recorded size
-   differs, so a mismatch is reported, not a renderer crash.
+   at the recorded offset, and the console says, for the block, that an
+   inline box it lays out was recorded at another size, so a mismatch is
+   reported, not a renderer crash. `integrate.py` upgrades a checkout that
+   holds the earlier fragment items hook.
 - The script's first analysis (2026-10-09) stopped formatting a time:
   Windows PowerShell chose `Math.Max(int, int)` for a literal 0, which a
   recording's nanoseconds overflow. Both arguments are now `long`, and the

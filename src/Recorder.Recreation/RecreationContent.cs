@@ -194,7 +194,16 @@ public sealed record RecreationEvidence(
     public string? ScriptsNotRead { get; init; }
 
     public IReadOnlyList<string> ScriptNotes { get; init; } = [];
+
+    // The size, device pixel ratio, and layout zoom factor the page is meant
+    // to be shown at, which the evidence panel compares with the page's
+    // own once it has painted; null when no layout checkpoint was recorded.
+    public RecreationShownViewport? ShownViewport { get; init; }
 }
+
+// The viewport a recreation is meant to be shown at: its CSS size, its
+// devicePixelRatio, and the layout zoom factor it is laid out at.
+public sealed record RecreationShownViewport(double Width, double Height, double DevicePixelRatio, double LayoutZoomFactor);
 
 // Source is "fixed" for slice 3a and "recording" from slice 3b. The frame,
 // recording time, and basis are null for fixed content.

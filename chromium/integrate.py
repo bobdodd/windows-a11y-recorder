@@ -8718,6 +8718,77 @@ BLINK_RECREATION_ITEMS_HOOK = """\
 """
 
 
+# The fragment items hook as written before 2026-10-09, which gave an inline
+# box's item its recorded size. Blink requires an inline box's item to have
+# its box fragment's size (DCHECK_EQ(box_fragment->Size(), Size()) in
+# FragmentItem::RecalcInkOverflow), and a recreation at a frame recorded at
+# 200 percent Windows text size stopped its renderer there, the item 1440 by
+# 1781.89 and the box 720 by 1781.89 (target machine, 2026-10-09). A
+# checkout that holds it is upgraded to the current hook, in which an inline
+# box's item keeps its box fragment's size, at its recorded offset, and the
+# console says when the recorded size differs.
+PRE_BOX_SIZE_BLINK_RECREATION_ITEMS_HOOK = BLINK_RECREATION_ITEMS_HOOK
+_PRE_BOX_SIZE_ITEM_RECT = """\
+          recorder_item.RecorderSetRect(
+              PhysicalRect(LayoutUnit::FromDoubleRound(recorder_x),
+                           LayoutUnit::FromDoubleRound(recorder_y),
+                           LayoutUnit::FromDoubleRound(recorder_width),
+                           LayoutUnit::FromDoubleRound(recorder_height)));
+"""
+_BOX_SIZE_ITEM_RECT = """\
+          PhysicalSize recorder_size(
+              LayoutUnit::FromDoubleRound(recorder_width),
+              LayoutUnit::FromDoubleRound(recorder_height));
+          // An inline box's item has its box fragment's size, which Blink
+          // checks; a recorded size that differs is reported, not imposed.
+          if (recorder_item.Type() == FragmentItem::kBox) {
+            if (const PhysicalBoxFragment* recorder_box =
+                    recorder_item.BoxFragment()) {
+              if (recorder_box->Size() != recorder_size) {
+                ++recorder_resized;
+              }
+              recorder_size = recorder_box->Size();
+            }
+          }
+          recorder_item.RecorderSetRect(PhysicalRect(
+              PhysicalOffset(LayoutUnit::FromDoubleRound(recorder_x),
+                             LayoutUnit::FromDoubleRound(recorder_y)),
+              recorder_size));
+"""
+_PRE_BOX_SIZE_COUNTER = """\
+        wtf_size_t recorder_reshaped = 0;
+"""
+_BOX_SIZE_COUNTER = """\
+        wtf_size_t recorder_reshaped = 0;
+        wtf_size_t recorder_resized = 0;
+"""
+_PRE_BOX_SIZE_REPORT = """\
+        if (recorder_reshaped) {
+"""
+_BOX_SIZE_REPORT = """\
+        if (recorder_resized) {
+          RecorderReportNotImposed(recorder_node,
+                                   "an inline box it lays out was recorded "
+                                   "at another size from the box Blink laid "
+                                   "out, so the box keeps its own size");
+        }
+        if (recorder_reshaped) {
+"""
+for _old in (_PRE_BOX_SIZE_ITEM_RECT, _PRE_BOX_SIZE_COUNTER, _PRE_BOX_SIZE_REPORT):
+    if PRE_BOX_SIZE_BLINK_RECREATION_ITEMS_HOOK.count(_old) != 1:
+        raise RuntimeError("a fragment items hook step was not found once")
+BLINK_RECREATION_ITEMS_HOOK = (
+    PRE_BOX_SIZE_BLINK_RECREATION_ITEMS_HOOK.replace(
+        _PRE_BOX_SIZE_ITEM_RECT, _BOX_SIZE_ITEM_RECT, 1
+    )
+    .replace(_PRE_BOX_SIZE_COUNTER, _BOX_SIZE_COUNTER, 1)
+    .replace(_PRE_BOX_SIZE_REPORT, _BOX_SIZE_REPORT, 1)
+)
+BLINK_RECREATION_ITEMS_INCLUDES = (
+    *BLINK_RECREATION_ITEMS_INCLUDES,
+    '#include "third_party/blink/renderer/core/layout/physical_box_fragment.h"',
+)
+
 # The stage 3 box hook as written by revision 44736a8, which did not compile:
 # in a BoxFragmentBuilder member, the Node class is hidden by its Node()
 # method. A checkout that holds it is upgraded to the current hook.
@@ -9301,6 +9372,10 @@ def patch_blink_fragment_items_builder(path: Path) -> None:
                 BLINK_RECREATION_ITEMS_HELPER,
             ),
             (LEGACY_FEASIBILITY_ITEMS_HELPER, BLINK_RECREATION_ITEMS_HELPER),
+            (
+                PRE_BOX_SIZE_BLINK_RECREATION_ITEMS_HOOK,
+                BLINK_RECREATION_ITEMS_HOOK,
+            ),
             (INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK, BLINK_RECREATION_ITEMS_HOOK),
             (LEGACY_FEASIBILITY_ITEMS_HOOK, BLINK_RECREATION_ITEMS_HOOK),
         ),
@@ -20634,6 +20709,92 @@ def patch_blink_frame_widget_zoom(path: Path) -> None:
     write_patched(path, text)
 
 
+# The recorded layout zoom ("The recorded layout zoom" in
+# docs/architecture/accessibility-preferences.md, agreed 2026-10-09). The
+# recorded geometry is Blink's layout units, which include the layout zoom
+# factor, so a recreation is laid out at the recorded one, whatever the
+# viewing machine's screen scale, text size, or DevTools' emulation give.
+BLINK_WEB_VIEW_LAYOUT_ZOOM_HELPER_MARKER = (
+    "std::optional<double> RecorderRecordedLayoutZoom(WebLocalFrameImpl* "
+    "frame) {"
+)
+BLINK_WEB_VIEW_LAYOUT_ZOOM_HELPER = """\
+// Windows A11y Recorder recreation mode: the recorded layout zoom factor,
+// which the recreation is laid out at, so that its layout units are the
+// recorded ones.
+std::optional<double> RecorderRecordedLayoutZoom(WebLocalFrameImpl* frame);
+
+std::optional<double> RecorderRecordedLayoutZoom(WebLocalFrameImpl* frame) {
+  if (!frame) {
+    return std::nullopt;
+  }
+  const std::optional<a11y_recorder::RecreationPreferences> recorder_values =
+      RecorderRecordedPreferencesOf(frame->GetFrame());
+  return recorder_values ? recorder_values->layout_zoom_factor : std::nullopt;
+}
+
+"""
+BLINK_FRAME_WIDGET_LAYOUT_ZOOM_DECLARATION_MARKER = (
+    "std::optional<double> RecorderRecordedLayoutZoom(WebLocalFrameImpl* "
+    "frame);"
+)
+BLINK_FRAME_WIDGET_LAYOUT_ZOOM_DECLARATION = """\
+// Windows A11y Recorder recreation mode: defined in web_view_impl.cc.
+std::optional<double> RecorderRecordedLayoutZoom(WebLocalFrameImpl* frame);
+
+"""
+BLINK_FRAME_WIDGET_LAYOUT_ZOOM_ANCHOR = """\
+      float layout_zoom_factor =
+          device_scale_factor *
+          static_cast<float>(View()->ZoomLevelToZoomFactor(zoom_level)) *
+          static_cast<float>(css_zoom_factor);
+"""
+BLINK_FRAME_WIDGET_LAYOUT_ZOOM_HOOK = """\
+      float layout_zoom_factor =
+          device_scale_factor *
+          static_cast<float>(View()->ZoomLevelToZoomFactor(zoom_level)) *
+          static_cast<float>(css_zoom_factor);
+      // Windows A11y Recorder recreation mode: the recorded layout zoom
+      // factor in place of the one worked out, so that the recreation's
+      // layout units are the recorded ones.
+      if (const std::optional<double> recorder_layout_zoom =
+              RecorderRecordedLayoutZoom(LocalRootImpl())) {
+        layout_zoom_factor = static_cast<float>(*recorder_layout_zoom);
+      }
+"""
+
+
+def patch_blink_web_view_layout_zoom(path: Path) -> None:
+    """A recreated page is laid out at the recorded layout zoom factor."""
+    text = read_source(path)
+    text = insert_before_once(
+        text,
+        BLINK_WEB_VIEW_PREFERENCES_HELPER_ANCHOR,
+        BLINK_WEB_VIEW_LAYOUT_ZOOM_HELPER,
+        BLINK_WEB_VIEW_LAYOUT_ZOOM_HELPER_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_frame_widget_layout_zoom(path: Path) -> None:
+    """A recreated page is laid out at the recorded layout zoom factor."""
+    text = read_source(path)
+    text = insert_before_once(
+        text,
+        BLINK_FRAME_WIDGET_ZOOM_DECLARATION_ANCHOR,
+        BLINK_FRAME_WIDGET_LAYOUT_ZOOM_DECLARATION,
+        BLINK_FRAME_WIDGET_LAYOUT_ZOOM_DECLARATION_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_FRAME_WIDGET_LAYOUT_ZOOM_ANCHOR,
+        BLINK_FRAME_WIDGET_LAYOUT_ZOOM_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
 BLINK_HTML_ELEMENT_PREFERENCES_ANCHOR = """\
 void HTMLHtmlElement::InsertedByParser() {
   // When parsing a fragment, its dummy document has a null parser.
@@ -21096,6 +21257,12 @@ def main() -> int:
     )
     patch_blink_page_color_maps(blink_core / "page" / "page.cc")
     patch_blink_frame_widget_zoom(
+        blink_core / "frame" / "web_frame_widget_impl.cc"
+    )
+    patch_blink_web_view_layout_zoom(
+        blink_core / "exported" / "web_view_impl.cc"
+    )
+    patch_blink_frame_widget_layout_zoom(
         blink_core / "frame" / "web_frame_widget_impl.cc"
     )
     patch_blink_html_element_preferences(
