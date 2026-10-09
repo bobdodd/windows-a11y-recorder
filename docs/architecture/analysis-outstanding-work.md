@@ -139,9 +139,9 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   there. Page colors checked by a prepared profile
   (`scripts/Set-PageColors.ps1`) 2026-10-08, as the build has no setting
   that changes them while it runs. The player's Browser rows and
-  change buttons checked by the owner the same day. Open: what the
-  timeline should show of the browser settings (the owner's answer
-  "Other", to settle); naming the stored
+  change buttons checked by the owner the same day. The timeline's
+  Browser settings lane and filter accepted by the owner as they are.
+  Open: naming the stored
   `requestedPageColors` numbers, now known, in the player; the font families of
   scripts other than the common one; and showing the foreground tab in the
   "Sent to the page" group once the foreground tab is recorded.
