@@ -922,8 +922,19 @@ no page colors record could be made; and the browser color mode change,
 as the change was made in the page colors step's time, where it is
 listed under otherChanges ("colorScheme 0 to 2; colorScheme 2 to 1").
 The default zoom at the start reads 100 percent, with no record before
-the first step. Not checked yet: page colors by a prepared profile, and
-the player.
+the first step.
+
+Page colors by a prepared profile, run by the owner 2026-10-08 (results
+`browser-preferences-test-20261008-212241`): `Set-PageColors.ps1` stored
+2, Dusk, in `a11y-test-profile`, and the prepared profile run with
+`-PreparedPageColors 2` passed all eight checks. The `browser-preferences`
+record held `requestedPageColors` 2, not the default, with
+`defaultFontSize` 20 from before; the fixture page's first values had
+`inForcedColors` true. The folder was set back to 0 after. Not checked:
+what the page showed, as the script does not ask, and a page colors
+change during a recording, which the build cannot make.
+
+Not checked yet: the player.
 
 ### Page colors
 

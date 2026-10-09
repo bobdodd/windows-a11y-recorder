@@ -136,9 +136,9 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   (see "The first run on the target machine" in its "Stage 2"): every
   change recorded; the script's step checks corrected after and the
   recording analysed again, 13 of 16 steps passing, the others explained
-  there. Open: page colors
-  by a prepared profile (`scripts/Set-PageColors.ps1`), as the build has
-  no setting that changes them while it runs; the player's Browser rows,
+  there. Page colors checked by a prepared profile
+  (`scripts/Set-PageColors.ps1`) 2026-10-08, as the build has no setting
+  that changes them while it runs. Open: the player's Browser rows,
   change buttons, and lane on the target machine; naming the stored
   `requestedPageColors` numbers, now known, in the player; the font families of
   scripts other than the common one; and showing the foreground tab in the
