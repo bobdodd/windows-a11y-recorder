@@ -1667,8 +1667,12 @@ installed theme. The Properties row is renamed "Browser theme in use", and
 shows "default theme", "theme color", "generated color theme", or the
 installed theme's identity.
 
-Not yet checked on the target machine: that a recreation at a frame after
-a theme color is chosen draws the browser's window with it.
+Checked by the owner on 2026-10-10 with 33ef0e6 and the same recording:
+recreations at frames after 35.0 s and after 46.2 s draw the browser's
+window with the recorded theme, and the two differ as the recorded styles
+do. The theme rows' change buttons find and move between the changes. The
+theme notes, in the recreation DevTools' Evidence panel under "Notes on
+the recreation", were not yet read.
 
 ## Decisions
 
