@@ -263,7 +263,11 @@ not be measured, if it could not.
 
 ## The keyboard hook
 
-Built 2026-10-10 (step 2a), not yet run on the target machine. A
+Built 2026-10-10 (step 2a). First run on the target machine the same day
+([validation](../validation/keyboard-hook-2026-10-10.md)): it recorded
+every key raw input did and the keys NVDA kept, refreshed once a second
+while NVDA ran, and its longest callback was 184 microseconds. Keys to an
+elevated window are untested. A
 collector, `windows.keyboard-hook`
 (`src/Recorder.Collectors.Input/KeyboardHookCollector.cs`), installs a
 `WH_KEYBOARD_LL` hook on its own thread and records every call. It is on
@@ -332,8 +336,9 @@ when keyboard and mouse are recorded, as raw input is.
   the database tests in `EvidenceTableTests`): the loss check from
   generated sequences, including a kept key, a kept physical Tab replaced
   by an injected one, Shift without its side, and injected and fake raw
-  keys; the payload rules; the summaries and key names. The integration
-  and system tests below are still to run.
+  keys; the payload rules; the summaries and key names. The system test
+  below was run on 2026-10-10 except for the elevated window; the
+  integration tests on Windows are still to write.
 
 ## Key disposition
 
