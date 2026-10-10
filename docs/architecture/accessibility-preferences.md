@@ -1427,7 +1427,10 @@ The owner reported on 2026-10-09 that with revision e3f7c8f the pages of
 the recording of that day render correctly. At a frame before the text
 size change, the evidence panel's Viewport as shown section gave 932 by
 409 CSS pixels at a device pixel ratio of 2 and a layout zoom of 2, both
-meant and shown, so the page's size and ratio are the recorded ones.
+meant and shown, so the page's size and ratio are the recorded ones. At
+a frame after it, the section gave 1864 by 818 CSS pixels at a device
+pixel ratio of 1 and a layout zoom of 1, both meant and shown: the same
+frame in screen pixels, laid out at the later text size.
 - The script's first analysis (2026-10-09) stopped formatting a time:
   Windows PowerShell chose `Math.Max(int, int)` for a literal 0, which a
   recording's nanoseconds overflow. Both arguments are now `long`, and the
