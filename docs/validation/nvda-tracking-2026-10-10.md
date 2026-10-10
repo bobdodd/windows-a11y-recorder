@@ -63,3 +63,21 @@ separates NVDA's sound from the microphone, as was assumed.
 
 Both fixes need a short run: NVDA started during a recording, with its
 startup sound's period starting with the system sound.
+
+## The run after the fixes
+
+Recording 20261010-202006-12fce23c0acd40aa90883283017c3602, with package
+wr-e16347c: NVDA started during the recording, spoke, and was quit. The
+recording has no audio files, as audio was not captured, so the check
+against the system sound could not be made.
+
+- Versions: the helper's and the module's `fileVersion` and
+  `productVersion` are null. Fixed.
+- Times: NVDA started at 11.65 s by Windows' clock (record at 11.68 s),
+  its helper at 12.90 s (record at 12.99 s), and exited at 33.80 s (record
+  at 33.96 s). The module was in the browser from 13.47 s to 33.82 s.
+- First sound: its period started at 13.05 s, 0.06 s after the helper's
+  record. In the first run it started 0.61 s after the helper's record,
+  and 0.72 s after the system sound. This points to the fix working, but
+  without the system sound it is not confirmed; a run with audio captured
+  is still needed.
