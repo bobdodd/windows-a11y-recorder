@@ -38,6 +38,13 @@ public sealed class RawInputCollector : ICaptureCollector
     }
 
     public CollectorDescriptor Descriptor { get; }
+
+    /// <summary>
+    /// Each keyboard record as it is written, on the message thread, for the
+    /// keyboard hook collector's check that its hook is still installed.
+    /// </summary>
+    public event Action<RawKeyObservation>? KeyboardObserved;
+
     public CollectorLifecycleState LifecycleState { get; private set; } = CollectorLifecycleState.Created;
     public CollectorHealthState HealthState { get; private set; } = CollectorHealthState.Unknown;
 
@@ -301,12 +308,13 @@ public sealed class RawInputCollector : ICaptureCollector
         var context = _context!;
         var keyboard = input.data.keyboard;
         var sequence = _keyboardSequence++;
+        var at = context.Clock.GetElapsedNanoseconds();
         var record = RecorderEventFactory.Create(
             context.SessionId,
             Descriptor,
             "input.keyboard",
             sequence,
-            context.Clock.GetElapsedNanoseconds(),
+            at,
             "raw-keyboard",
             new
             {
@@ -319,6 +327,12 @@ public sealed class RawInputCollector : ICaptureCollector
             },
             "receipt-time-stamp");
         context.EventSink.TryWrite(record);
+        KeyboardObserved?.Invoke(new RawKeyObservation(
+            at,
+            keyboard.MakeCode,
+            keyboard.VKey,
+            (keyboard.Flags & KeyboardHookRecords.RawBreakFlag) != 0,
+            input.header.hDevice != nint.Zero));
     }
 
     private void EmitMouse(RAWINPUT input)
@@ -603,3 +617,6 @@ public sealed class RawInputCollector : ICaptureCollector
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
 }
+
+/// <summary>A raw input keyboard record, as the keyboard hook collector checks it.</summary>
+public readonly record struct RawKeyObservation(long At, int ScanCode, int VirtualKey, bool Up, bool FromDevice);

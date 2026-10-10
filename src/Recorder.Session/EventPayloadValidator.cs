@@ -13,6 +13,7 @@ internal static class EventPayloadValidator
         "window.foreground",
         "system.preferences",
         "system.assistive-technology",
+        "input.keyboard-hook",
         "accessibility.uia.events",
         "graphics.desktop.frames",
         "graphics.magnifier",
@@ -112,6 +113,12 @@ internal static class EventPayloadValidator
                 break;
             case ("graphics.magnifier", "magnifier-changed"):
                 ValidateMagnifierChange(payload, issues);
+                break;
+            case ("input.keyboard-hook", "hook-keyboard"):
+                ValidateHookKeyboard(payload, issues);
+                break;
+            case ("input.keyboard-hook", "hook-installed"):
+                ValidateHookInstalled(payload, issues);
                 break;
             case ("system.assistive-technology", "assistive-technology-watch"):
                 ValidateAssistiveTechnologyWatch(payload, issues);
@@ -1351,6 +1358,101 @@ internal static class EventPayloadValidator
                     "#/payload/changed",
                     $"The readings before and after differ in {(expected.Count == 0 ? "nothing" : string.Join(", ", expected))}.");
             }
+        }
+    }
+
+    // The keyboard hook collector's records (input.keyboard-hook): each key
+    // its low-level hook was called with, and each installation of the hook.
+    // See docs/architecture/screen-reader-activity.md, "The keyboard hook".
+    private static void ValidateHookKeyboard(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredInteger("installation", positive: true),
+                RequiredInteger("virtualKey", nonnegative: true),
+                RequiredInteger("scanCode", nonnegative: true),
+                RequiredInteger("flags", nonnegative: true),
+                RequiredBoolean("up"),
+                RequiredBoolean("extended"),
+                RequiredBoolean("injected"),
+                RequiredBoolean("lowerIntegrityInjected"),
+                RequiredBoolean("altDown"),
+                RequiredInteger("extraInformation"),
+                RequiredInteger("eventTimeMilliseconds", nonnegative: true)
+            ],
+            issues);
+        if (!payload.TryGetProperty("flags", out var flagsValue) || !flagsValue.TryGetInt32(out var flags))
+        {
+            return;
+        }
+
+        foreach (var (name, bit) in new[]
+                 {
+                     ("up", Recorder.Contracts.KeyboardHookRecords.UpFlag),
+                     ("extended", Recorder.Contracts.KeyboardHookRecords.ExtendedFlag),
+                     ("injected", Recorder.Contracts.KeyboardHookRecords.InjectedFlag),
+                     ("lowerIntegrityInjected", Recorder.Contracts.KeyboardHookRecords.LowerIntegrityInjectedFlag),
+                     ("altDown", Recorder.Contracts.KeyboardHookRecords.AltDownFlag)
+                 })
+        {
+            if (payload.TryGetProperty(name, out var value) &&
+                value.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+                (value.ValueKind == JsonValueKind.True) != ((flags & bit) != 0))
+            {
+                AddError(
+                    issues,
+                    "hook-keyboard-flag-inconsistent",
+                    "#/payload/" + name,
+                    $"{name} must match its bit of flags.");
+            }
+        }
+    }
+
+    private static void ValidateHookInstalled(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredInteger("installation", positive: true),
+                RequiredEnum("reason", [.. Recorder.Contracts.KeyboardHookRecords.Reasons]),
+                RequiredBoolean("installed"),
+                NullableText("problem"),
+                NullableInteger("previousInstallation", positive: true),
+                NullableInteger("previousKeys", nonnegative: true),
+                RequiredNullableNumber("previousMaxCallbackMicroseconds", nonnegative: true),
+                RequiredInteger("keysDropped", nonnegative: true),
+                NullableInteger("lastHookKeyAt", nonnegative: true),
+                NullableInteger("unmatchedRawKeyAt", nonnegative: true),
+                NullableInteger("unmatchedScanCode", nonnegative: true)
+            ],
+            issues);
+        bool IsNull(string name) => !payload.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null;
+        if (payload.TryGetProperty("installed", out var installed) &&
+            installed.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+            (installed.ValueKind == JsonValueKind.True) != IsNull("problem"))
+        {
+            AddError(
+                issues,
+                "hook-installed-problem-inconsistent",
+                "#/payload/problem",
+                "An installation has a problem exactly when the hook was not installed.");
+        }
+
+        var lost = Text(payload, "reason") == Recorder.Contracts.KeyboardHookRecords.HookLostReason;
+        var hasRaw = !IsNull("unmatchedRawKeyAt");
+        var hasScan = !IsNull("unmatchedScanCode");
+        if (lost ? !(hasRaw && hasScan) : hasRaw || hasScan)
+        {
+            AddError(
+                issues,
+                "hook-installed-loss-inconsistent",
+                "#/payload/unmatchedRawKeyAt",
+                "An installation after a loss names the raw key that showed it, and no other does.");
         }
     }
 

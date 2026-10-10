@@ -75,12 +75,14 @@ Designed in [screen reader activity](screen-reader-activity.md), agreed
   reader rows, as in its "Tracking NVDA". First run on the target machine
   2026-10-10 ([validation](../validation/nvda-tracking-2026-10-10.md));
   two defects fixed and checked by a further run the same day.
-- To build, in the order agreed on 2026-10-10: the keyboard hook
-  collector, with reinstalling when a screen reader starts and when the
-  hook is lost; the key dispositions; the screen reader window episodes;
-  the command data for NVDA; the player's screen reader lane; then the
-  test of NVDA's requests to Chromium, and the reading position from the
-  accessibility tree and the commands.
+- Built 2026-10-10, not yet run on the target machine: step 2a, the
+  recorder's keyboard hook, installed again every second while a screen
+  reader runs and when the hook is lost, as in its "The keyboard hook".
+- To build, in the order agreed on 2026-10-10: the key dispositions (2b);
+  NVDA's commands, the mode band, and the screen reader window episodes
+  (2c); a low-level mouse hook, for NVDA's speaking of the content under
+  the pointer; then the test of NVDA's requests to Chromium, and the
+  reading position.
 - To settle: the items in its "Questions to settle".
 - To test: as in its "Required tests".
 

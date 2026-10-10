@@ -72,6 +72,16 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
     }
 
     public CollectorDescriptor Descriptor { get; }
+
+    /// <summary>
+    /// Whether a watched product's main process is running, raised on the
+    /// collector's thread when it changes, with true also for each further
+    /// main process seen to start; for the keyboard hook collector, which
+    /// keeps its hook first in the chain while a screen reader runs. The
+    /// second value says a main process started during the recording.
+    /// </summary>
+    public event Action<bool, bool>? ScreenReaderRunningChanged;
+
     public CollectorLifecycleState LifecycleState { get; private set; } = CollectorLifecycleState.Created;
     public CollectorHealthState HealthState { get; private set; } = CollectorHealthState.Unknown;
     public string? HealthReason { get; private set; }
@@ -353,6 +363,11 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
                 exitCode = GetExitCodeProcess(process.Handle, out var code) ? (long?)code : null
             }, exitedAt);
             process.Handle.Dispose();
+            if (process.Role == AssistiveTechnologyRecords.ScreenReaderRole &&
+                !_processes.Values.Any(other => other.Role == AssistiveTechnologyRecords.ScreenReaderRole))
+            {
+                ScreenReaderRunningChanged?.Invoke(false, false);
+            }
         }
 
         foreach (var entry in entries)
@@ -412,6 +427,7 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
             {
                 // Listed at once, and often until it has a session.
                 _awaitingSession = true;
+                ScreenReaderRunningChanged?.Invoke(true, !atStart);
             }
             var version = path is null ? null : FileVersion(path);
             Emit(AssistiveTechnologyRecords.ProcessStartedEventType, new

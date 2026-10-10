@@ -205,6 +205,21 @@ internal static class EvidenceSamples
             """),
         ("browser.preferences", "color-maps-sent", ColorMapsSample(false, ["kColorMenuBackground", "kColorMenuSeparator"])),
         ("browser.preferences", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
+        // Added with 0027_keyboard_hook.sql: a key NVDA kept, the injected Tab
+        // NVDA put in place of a physical one, an extended key up; the first
+        // installation, a refresh, and one after a loss.
+        ("input.keyboard-hook", "hook-keyboard",
+            J("{'installation':1,'virtualKey':72,'scanCode':35,'flags':0,'up':false,'extended':false,'injected':false,'lowerIntegrityInjected':false,'altDown':false,'extraInformation':0,'eventTimeMilliseconds':123456789}")),
+        ("input.keyboard-hook", "hook-keyboard",
+            J("{'installation':2,'virtualKey':9,'scanCode':15,'flags':16,'up':false,'extended':false,'injected':true,'lowerIntegrityInjected':false,'altDown':false,'extraInformation':-1,'eventTimeMilliseconds':123456800}")),
+        ("input.keyboard-hook", "hook-keyboard",
+            J("{'installation':2,'virtualKey':40,'scanCode':80,'flags':129,'up':true,'extended':true,'injected':false,'lowerIntegrityInjected':false,'altDown':false,'extraInformation':0,'eventTimeMilliseconds':123456900}")),
+        ("input.keyboard-hook", "hook-installed",
+            J("{'installation':1,'reason':'recording-started','installed':true,'problem':null,'previousInstallation':null,'previousKeys':null,'previousMaxCallbackMicroseconds':null,'keysDropped':0,'lastHookKeyAt':null,'unmatchedRawKeyAt':null,'unmatchedScanCode':null}")),
+        ("input.keyboard-hook", "hook-installed",
+            J("{'installation':2,'reason':'refresh','installed':true,'problem':null,'previousInstallation':1,'previousKeys':12,'previousMaxCallbackMicroseconds':38.5,'keysDropped':0,'lastHookKeyAt':null,'unmatchedRawKeyAt':null,'unmatchedScanCode':null}")),
+        ("input.keyboard-hook", "hook-installed",
+            J("{'installation':3,'reason':'hook-lost','installed':false,'problem':'SetWindowsHookEx failed with error 5.','previousInstallation':null,'previousKeys':null,'previousMaxCallbackMicroseconds':null,'keysDropped':2,'lastHookKeyAt':1200,'unmatchedRawKeyAt':1500,'unmatchedScanCode':30}")),
         // Added with 0026_assistive_technology.sql: the watch, with a browser
         // and without one and with the meters unavailable; NVDA's portable
         // copy running at the start and its helper; one started later whose

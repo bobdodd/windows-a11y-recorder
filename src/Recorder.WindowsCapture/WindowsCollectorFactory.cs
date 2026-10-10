@@ -17,9 +17,20 @@ public static class WindowsCollectorFactory
         ArgumentNullException.ThrowIfNull(options);
         var collectors = new List<ICaptureCollector>();
 
+        RawInputCollector? rawInput = null;
+        KeyboardHookCollector? keyboardHook = null;
         if (options.CaptureKeyboardAndMouse)
         {
-            collectors.Add(new RawInputCollector());
+            rawInput = new RawInputCollector();
+            collectors.Add(rawInput);
+
+            // The keys a screen reader keeps never reach raw input; the
+            // low-level hook sees them. It is checked against raw input, and
+            // kept first in the chain while a screen reader runs. See
+            // docs/architecture/screen-reader-activity.md, "The keyboard hook".
+            keyboardHook = new KeyboardHookCollector();
+            rawInput.KeyboardObserved += keyboardHook.ObserveRawKey;
+            collectors.Add(keyboardHook);
         }
 
         if (options.CaptureUiAutomation)
@@ -41,10 +52,16 @@ public static class WindowsCollectorFactory
         // its processes, its modules in the instrumented Chromium, and when
         // its audio makes sound. It reads only, and changes nothing in it.
         // See docs/architecture/screen-reader-activity.md, "Tracking NVDA".
-        collectors.Add(new AssistiveTechnologyCollector(
+        var assistiveTechnology = new AssistiveTechnologyCollector(
             options.CaptureBrowserEvidence
                 ? options.ChromiumExecutablePath ?? Path.Combine(AppContext.BaseDirectory, "browser", "chrome.exe")
-                : null));
+                : null);
+        if (keyboardHook is not null)
+        {
+            assistiveTechnology.ScreenReaderRunningChanged += keyboardHook.SetScreenReaderRunning;
+        }
+
+        collectors.Add(assistiveTechnology);
 
         if (options.CaptureDesktopFrames)
         {

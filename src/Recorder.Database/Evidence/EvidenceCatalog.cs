@@ -182,6 +182,38 @@ internal static class EvidenceCatalog
         new InlineField("previous", R, MagnifierReadings()),
         new InlineField("current", R, MagnifierReadings()));
 
+    // Added by 0027_keyboard_hook.sql. The keyboard hook collector's
+    // records (input.keyboard-hook): each key its low-level hook was called
+    // with, and each installation of the hook. See
+    // docs/architecture/screen-reader-activity.md, "The keyboard hook".
+    public static readonly EvidenceTable KeyboardHookKeys = Evidence(
+        "keyboard_hook_keys",
+        Int("installation"),
+        Int("virtualKey"),
+        Int("scanCode"),
+        Int("flags"),
+        Bool("up"),
+        Bool("extended"),
+        Bool("injected"),
+        Bool("lowerIntegrityInjected"),
+        Bool("altDown"),
+        BigInt("extraInformation"),
+        BigInt("eventTimeMilliseconds"));
+
+    public static readonly EvidenceTable KeyboardHookInstallations = Evidence(
+        "keyboard_hook_installations",
+        Int("installation"),
+        Text("reason"),
+        Bool("installed"),
+        Text("problem", N),
+        Int("previousInstallation", N),
+        BigInt("previousKeys", N),
+        Double("previousMaxCallbackMicroseconds", N),
+        BigInt("keysDropped"),
+        BigInt("lastHookKeyAt", N),
+        BigInt("unmatchedRawKeyAt", N),
+        Int("unmatchedScanCode", N));
+
     // Added by 0026_assistive_technology.sql. The assistive technology
     // collector's records (system.assistive-technology): what it watches,
     // each watched process's start and exit, each of its modules seen in or
@@ -1393,7 +1425,8 @@ internal static class EvidenceCatalog
         [
             AssistiveTechnologyWatches, AssistiveTechnologyProcessStarts, AssistiveTechnologyProcessExits,
             AssistiveTechnologyModuleChanges, AssistiveTechnologySoundStarts, AssistiveTechnologySoundEnds
-        ])
+        ]),
+        (27, "keyboard_hook", [KeyboardHookKeys, KeyboardHookInstallations])
     ];
 
     /// <summary>
@@ -1419,6 +1452,8 @@ internal static class EvidenceCatalog
             [("system.preferences", "windows-preference-changed")] = WindowsPreferenceChanges,
             [("graphics.desktop.frames", "desktop-frame")] = DesktopFrames,
             [("graphics.magnifier", "magnifier-changed")] = MagnifierChangeRecords,
+            [("input.keyboard-hook", "hook-keyboard")] = KeyboardHookKeys,
+            [("input.keyboard-hook", "hook-installed")] = KeyboardHookInstallations,
             [("system.assistive-technology", "assistive-technology-watch")] = AssistiveTechnologyWatches,
             [("system.assistive-technology", "assistive-technology-process-started")] = AssistiveTechnologyProcessStarts,
             [("system.assistive-technology", "assistive-technology-process-exited")] = AssistiveTechnologyProcessExits,

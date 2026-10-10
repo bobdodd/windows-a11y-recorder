@@ -24,7 +24,8 @@ public sealed class SessionPlaybackArchiveBuilder
         "session.annotations",
         "graphics.desktop.frames",
         "graphics.magnifier",
-        "system.assistive-technology"
+        "system.assistive-technology",
+        "input.keyboard-hook"
     ];
 
     /// <summary>
@@ -599,6 +600,11 @@ public sealed class SessionPlaybackArchiveBuilder
             return AssistiveTechnologySummary(eventType, payload);
         }
 
+        if (channel == KeyboardHookRecords.Channel)
+        {
+            return KeyboardHookSummary(eventType, payload);
+        }
+
         if (channel == MagnifierChanges.Channel &&
             payload.TryGetProperty("changed", out var changed) && changed.ValueKind == JsonValueKind.Object &&
             payload.TryGetProperty("current", out var now) && now.ValueKind == JsonValueKind.Object)
@@ -758,6 +764,39 @@ public sealed class SessionPlaybackArchiveBuilder
         items.Count <= 1
             ? string.Concat(items)
             : $"{string.Join(", ", items.Take(items.Count - 1))} and {items[^1]}";
+
+    // A keyboard hook record as the event list shows it: the key, its
+    // direction, and whether it was injected; or the installation's reason.
+    private static string KeyboardHookSummary(string eventType, JsonElement payload)
+    {
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        bool Flag(string name) => payload.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
+        if (eventType == KeyboardHookRecords.KeyEventType)
+        {
+            var key = payload.TryGetProperty("virtualKey", out var virtualKey) && virtualKey.TryGetInt32(out var code)
+                ? KeyboardHookRecords.KeyName(code)
+                : null;
+            return JoinSummary(
+                eventType,
+                key is null ? null : key + (Flag("up") ? " up" : " down"),
+                Flag("lowerIntegrityInjected") ? "injected at lower integrity" : Flag("injected") ? "injected" : null);
+        }
+
+        if (eventType == KeyboardHookRecords.InstalledEventType)
+        {
+            var number = payload.TryGetProperty("installation", out var installation) && installation.TryGetInt32(out var value)
+                ? "installation " + value.ToString(culture)
+                : null;
+            return JoinSummary(
+                eventType,
+                ReadString(payload, "reason"),
+                number,
+                Flag("installed") ? null : "not installed",
+                ReadString(payload, "problem"));
+        }
+
+        return eventType;
+    }
 
     // An assistive technology record as the event list shows it: the
     // product, what happened, and the process.

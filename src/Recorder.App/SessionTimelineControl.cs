@@ -424,7 +424,8 @@ public sealed class SessionTimelineControl : FrameworkElement
 
     private static int GetLane(string channel) => channel switch
     {
-        "input.keyboard" => 0,
+        // The keyboard hook's keys share the keyboard lane with raw input's.
+        "input.keyboard" or "input.keyboard-hook" => 0,
         "input.mouse" => 1,
         "accessibility.uia.events" => 2,
         "window.foreground" => 3,

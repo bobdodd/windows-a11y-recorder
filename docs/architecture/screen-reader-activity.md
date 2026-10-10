@@ -63,8 +63,9 @@ Inferred, each shown as an inference with its basis:
   keyboard layout, and key commands.
 - Whether the screen reader was in browse or focus mode, from the keys it
   kept and passed.
-- What the screen reader said, by local speech recognition of the audio
-  (analysis work, not designed here).
+- What the screen reader had to announce, from the recorded accessibility
+  tree and the commands given (step 4 below), not from the audio: the
+  owner ruled out speech recognition on 2026-10-10.
 - Where the screen reader's reading position was (not designed here; see
   "Not in this design").
 
@@ -106,6 +107,36 @@ The order of work, as agreed:
    this design").
 4. The reading position, inferred from the accessibility tree and the
    commands, with the player's list of steps and a view of the tree.
+
+Step 2 is built in parts, each tested on the target machine before the
+next, as agreed on 2026-10-10:
+
+- 2a, recording the keys: the recorder's own low-level keyboard hook, kept
+  first in the chain, with its installations recorded. Built; see "The
+  keyboard hook". Until then only the test script
+  (`scripts/Test-ScreenReaderKeys.ps1`) had a hook, and the recorder had
+  only raw input, which the keys NVDA keeps never reach.
+- 2b, what happened to each key, at playback; see "Key disposition".
+- 2c, NVDA's commands, the browse or focus mode band, and NVDA's windows;
+  see "Settings and key commands".
+- A low-level mouse hook, later in step 2, on the same terms as the
+  keyboard hook: needed in case the user is using NVDA's speaking of the
+  content under the pointer (the owner, 2026-10-10).
+
+The open questions of step 2, settled by the owner on 2026-10-10:
+
+- Staying first in the chain: while a screen reader runs, the hook is
+  installed again every second, the new hook before the old is removed;
+  see "The keyboard hook".
+- The command data: a data file in the repository for each NVDA version,
+  with the source of each command. A version without its own file uses the
+  nearest earlier version's, and the player says so.
+- NVDA's settings: the keyboard layout, the NVDA modifier keys, and the
+  custom key commands are read from NVDA's own configuration files, and
+  nothing in them is changed.
+- The join window stays 300 ms, to be checked on the target machine.
+- The helpers recorded stay NVDA's children from its folder: in the three
+  runs on the target machine they were NVDA's helper and nothing else.
 
 ## Tracking NVDA
 
@@ -232,8 +263,11 @@ not be measured, if it could not.
 
 ## The keyboard hook
 
-A collector, `windows.keyboard-hook`, installs a `WH_KEYBOARD_LL` hook on
-its own thread and records every call.
+Built 2026-10-10 (step 2a), not yet run on the target machine. A
+collector, `windows.keyboard-hook`
+(`src/Recorder.Collectors.Input/KeyboardHookCollector.cs`), installs a
+`WH_KEYBOARD_LL` hook on its own thread and records every call. It is on
+when keyboard and mouse are recorded, as raw input is.
 
 - It observes only: every call passes the key to the next hook unchanged,
   and the collector never blocks, delays, or alters a key.
@@ -247,29 +281,59 @@ its own thread and records every call.
   `LowLevelHooksTimeout` "is silently removed" on Windows 7 and later, with
   "no way for the application to know", and the timeout is at most 1000 ms
   on Windows 10 version 1709 and later (same source).
-- Record `hook-keyboard` on channel `input.keyboard-hook`: the virtual
-  key, scan code, the flags (up, extended, injected, injected at lower
-  integrity), the extra information, the event's own time, and the receipt
-  time.
+- Record `hook-keyboard` on channel `input.keyboard-hook`
+  (`src/Recorder.Contracts/KeyboardHookRecords.cs`): the virtual key, scan
+  code, the flags and each of them (up, extended, injected, injected at
+  lower integrity, Alt down), the extra information, the event's own time
+  in milliseconds, the receipt time, and the installation that saw it.
 - Order: `SetWindowsHookEx` "always installs a hook procedure at the
   beginning of a hook chain"
   ([Microsoft, about hooks](https://learn.microsoft.com/en-us/windows/win32/winmsg/about-hooks)),
-  and a screen reader's hook that keeps a key does not pass it on. The
-  collector therefore reinstalls its hook when assistive technology
-  detection sees a screen reader start, so that its hook is first again,
-  and records `hook-installed` with the reason (start of recording, screen
-  reader started, hook lost).
-- Loss: the collector compares its records with raw input as it runs. A
-  raw input key from a device with no hook record of the same key within
-  the join window means the hook was removed; the collector reinstalls it
-  and records `hook-installed` with reason "hook lost" and the time of the
-  last key it saw. The gap is shown in the player.
+  and a screen reader's hook that keeps a key does not pass it on. A
+  screen reader may install its hook some time after its process starts,
+  later than tracking sees the process, so one reinstall when it starts is
+  not enough. As agreed on 2026-10-10:
+  - while a screen reader's main process runs, the hook is installed again
+    every second (`refresh`), and at once when one starts during the
+    recording (`screen-reader-started`);
+  - the new hook is installed before the old one is removed, so a key is
+    always seen by one of them, and only the newest records, so no key is
+    recorded twice;
+  - a time when the hook was not first is therefore at most about a
+    second, and the first kept key after a screen reader starts shows when
+    it ended.
+- Each installation is recorded as `hook-installed`: its number and
+  reason (`recording-started`, `screen-reader-started`, `refresh`,
+  `hook-lost`); whether it was installed, and the problem if not; the
+  previous installation's number, its count of keys, and its longest
+  callback in microseconds, as evidence against the timeout; and the
+  keys dropped because the queue was full.
+- Loss: the collector compares its records with raw input as it runs, the
+  raw input collector passing it each key in the process. A raw input key
+  from a device with no hook call of the same scan code and direction
+  within the join window either side means the hook was removed; the
+  collector reinstalls it and records `hook-installed` with reason
+  `hook-lost`, the raw key's time and scan code, and the time of the last
+  key the hook saw before it. Keys are matched by scan code because raw
+  input gives Shift, Ctrl, and Alt without their side; injected keys,
+  which have no device, and raw input's fake keys are not checked.
 - Keys are recorded verbatim, as raw input already records them,
   including typed passwords; the hook adds the keys the screen reader
   keeps. It changes the volume of keyboard evidence, not its kind, under
   the existing privacy and data-handling policy.
 - Raw input stays as built: it is the only record of the device a key came
   from.
+- Storage and the player: the payload rules are in
+  `EventPayloadValidator`; the database tables are made by migration 0027;
+  the hook's keys share the timeline's keyboard lane and filter with raw
+  input's, and the event list names the key, its direction, and whether it
+  was injected.
+- Tests built with 2a (`tests/Recorder.Tests/KeyboardHookTests.cs`, and
+  the database tests in `EvidenceTableTests`): the loss check from
+  generated sequences, including a kept key, a kept physical Tab replaced
+  by an injected one, Shift without its side, and injected and fake raw
+  keys; the payload rules; the summaries and key names. The integration
+  and system tests below are still to run.
 
 ## Key disposition
 
@@ -320,6 +384,10 @@ key.
 
 ## Speech audio
 
+Superseded in part on 2026-10-10: speech recognition is ruled out, and
+the periods of NVDA's sound come from its own audio session's meter (see
+"Making sound"). The rest stands as a record of the constraint.
+
 The system sound already carries the screen reader's speech, mixed with
 the page's sound. Capturing one process's sound needs
 `AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK`, whose minimum supported
@@ -327,8 +395,7 @@ client is Windows 10 build 20348
 ([Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/audioclientactivationparams/ne-audioclientactivationparams-audioclient_activation_type));
 the target machine, build 19045, cannot. On such builds speech stays in
 the system sound; where the build allows, the screen reader's sound is
-recorded as its own channel. Speech recognition is analysis work, run
-locally, and is not designed here.
+recorded as its own channel.
 
 ## The player
 
@@ -351,24 +418,20 @@ A "Screen reader" lane on the timeline shows:
   through `RenderAccessibilityImpl::PerformAction`
   (`content/renderer/accessibility/render_accessibility_impl.cc`, line 328
   in the Windows checkout); whether NVDA makes any during browse mode
-  navigation is untested. With speech recognition matched to the
-  recorded accessibility tree, they are the basis for a later design.
+  navigation is untested; step 3 tests it. With the recorded
+  accessibility tree and the commands, they are the basis of step 4.
 - Braille output.
 - Screen readers other than NVDA, until each is tested.
 
 ## Questions to settle
 
-- Whether the helpers recorded should be other than NVDA's children from
-  its folder (see "Tracking NVDA").
-
-- Whether a low-level mouse hook is added on the same terms, for injected
-  mouse input and the screen reader's mouse commands.
 - Whether to record `PerformAction` requests in the instrumented Chromium,
-  after a test of what NVDA requests during browse mode navigation.
-- The format and home of the command data, and how a version without its
-  own data is handled.
+  after a test of what NVDA requests during browse mode navigation (step
+  3).
 - The join window, if the target machine shows longer delays than the
   validation.
+
+The others were settled on 2026-10-10; see "Decisions of 2026-10-10".
 
 ## Required tests
 

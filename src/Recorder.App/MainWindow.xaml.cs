@@ -43,6 +43,7 @@ public partial class MainWindow : Window
     private static readonly HashSet<string> FilteredChannels =
     [
         "input.keyboard",
+        "input.keyboard-hook",
         "input.mouse",
         "accessibility.uia.events",
         "window.foreground",
@@ -1226,6 +1227,7 @@ public partial class MainWindow : Window
 
         var visibleChannels = new HashSet<string>(StringComparer.Ordinal);
         AddVisibleChannel(FilterKeyboardCheckBox, "input.keyboard", visibleChannels);
+        AddVisibleChannel(FilterKeyboardCheckBox, "input.keyboard-hook", visibleChannels);
         AddVisibleChannel(FilterMouseCheckBox, "input.mouse", visibleChannels);
         AddVisibleChannel(
             FilterAutomationCheckBox,

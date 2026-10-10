@@ -881,7 +881,9 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         // 0023 added the tables of the browser preferences.
         record.Channel != "browser.preferences" &&
         // 0026 added the tables of the assistive technology records.
-        record.Channel != "system.assistive-technology";
+        record.Channel != "system.assistive-technology" &&
+        // 0027 added the tables of the keyboard hook records.
+        record.Channel != "input.keyboard-hook";
 
     private static List<string> Sorted(List<string> rows)
     {
