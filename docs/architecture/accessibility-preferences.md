@@ -1509,8 +1509,16 @@ maximized after the page loaded: a frame before the maximize was shown at
 pixel ratio of 1, meant and shown alike, so the recreation follows the
 resize. The frame after it did not use the fallback: no line said the
 screen could not hold it, so the window was given its whole page area of
-1920 by 953. Whether all of that page area was on the screen is not yet
-known.
+1920 by 953. The owner reported that the whole page showed, with its
+scroll bars, so the fallback was rightly not used: Windows let the window
+be that large, its invisible borders off the screen. Resizing the
+recreation window kept the page's recorded layout, and its scroll bars
+reached the whole page.
+
+Still not checked on the target machine: the fallback itself, drawn at a
+scale below 1, and whether a click lands where it is drawn then. It is
+reached only when Windows cannot give the window the frame's page area,
+as when the recording's screen was larger than the viewing machine's.
 - The script's first analysis (2026-10-09) stopped formatting a time:
   Windows PowerShell chose `Math.Max(int, int)` for a literal 0, which a
   recording's nanoseconds overflow. Both arguments are now `long`, and the
