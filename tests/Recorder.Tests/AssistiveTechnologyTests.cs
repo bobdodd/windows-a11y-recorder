@@ -81,6 +81,17 @@ public sealed class AssistiveTechnologyTests
     }
 
     [Fact]
+    public void AFileWithoutAVersionHasANullVersion()
+    {
+        // Windows gives an empty string for a file without a version
+        // resource, as for NVDA's nvdaHelperRemote.dll on the target machine.
+        Assert.Null(AssistiveTechnologyRecords.VersionOrNull(""));
+        Assert.Null(AssistiveTechnologyRecords.VersionOrNull("  "));
+        Assert.Null(AssistiveTechnologyRecords.VersionOrNull(null));
+        Assert.Equal("2026.2.0.57664", AssistiveTechnologyRecords.VersionOrNull("2026.2.0.57664"));
+    }
+
+    [Fact]
     public void TheCopyIsInstalledOnlyWhenTheUninstallKeyNamesItsFolder()
     {
         const string installed = @"C:\Program Files\NVDA";

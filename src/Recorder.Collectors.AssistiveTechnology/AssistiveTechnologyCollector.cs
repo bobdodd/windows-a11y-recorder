@@ -49,6 +49,13 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
     private MMDeviceEnumerator? _devices;
     private string? _soundProblem;
 
+    // Whether a running main process has no audio session listed yet. Its
+    // first sound opens one, so the sessions are listed every 100 ms until
+    // it has one, and the start of that sound is not missed; then every
+    // second. Found in the first target-machine recording of 2026-10-10,
+    // where NVDA's startup sound began 0.7 s before its session was listed.
+    private bool _awaitingSession;
+
     /// <param name="browserExecutablePath">
     /// The instrumented Chromium's executable, whose processes' modules are
     /// read, or null when the recording has no browser.
@@ -221,9 +228,10 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
 
         var processDue = Now();
         var moduleDue = processDue;
-        var sessionDue = processDue;
+        var sessionsListedAt = processDue;
         var processInterval = Milliseconds(AssistiveTechnologyRecords.ProcessPollMilliseconds);
         var moduleInterval = Milliseconds(AssistiveTechnologyRecords.ModulePollMilliseconds);
+        var newSessionInterval = Milliseconds(AssistiveTechnologyRecords.NewSessionListMilliseconds);
         while (!_stop.Wait(AssistiveTechnologyRecords.SoundSampleMilliseconds))
         {
             try
@@ -242,10 +250,10 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
                     ScanModules();
                 }
 
-                if (now >= sessionDue)
+                if (now - sessionsListedAt >= (_awaitingSession ? newSessionInterval : moduleInterval))
                 {
-                    sessionDue = now + moduleInterval;
                     RefreshSessions();
+                    sessionsListedAt = now;
                 }
             }
             catch (Exception ex) when (ex is COMException or Win32Exception or InvalidOperationException)
@@ -400,6 +408,11 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
                     AssistiveTechnologyRecords.SoundThreshold,
                     Milliseconds(AssistiveTechnologyRecords.SoundGapMilliseconds)));
             _processes[key] = process;
+            if (main is not null)
+            {
+                // Listed at once, and often until it has a session.
+                _awaitingSession = true;
+            }
             var version = path is null ? null : FileVersion(path);
             Emit(AssistiveTechnologyRecords.ProcessStartedEventType, new
             {
@@ -409,8 +422,8 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
                     ? AssistiveTechnologyRecords.KnownExecutableBasis
                     : AssistiveTechnologyRecords.ChildInFolderBasis,
                 executablePath = path,
-                fileVersion = version?.FileVersion,
-                productVersion = version?.ProductVersion,
+                fileVersion = AssistiveTechnologyRecords.VersionOrNull(version?.FileVersion),
+                productVersion = AssistiveTechnologyRecords.VersionOrNull(version?.ProductVersion),
                 processId = entry.ProcessId,
                 // As the process list gives it: the parent may have exited.
                 parentProcessId = entry.ParentProcessId == 0 ? null : (long?)entry.ParentProcessId,
@@ -503,7 +516,7 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
                 {
                     seen[name] = (product, path, host.Modules.TryGetValue(name, out var known) && known.Path == path
                         ? known.FileVersion
-                        : FileVersion(path)?.FileVersion);
+                        : AssistiveTechnologyRecords.VersionOrNull(FileVersion(path)?.FileVersion));
                 }
             }
 
@@ -557,6 +570,7 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
         }
 
         _sessions.Clear();
+        _awaitingSession = false;
         if (_devices is null || _processes.Count == 0)
         {
             return;
@@ -593,6 +607,10 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
             HealthState = CollectorHealthState.Degraded;
             HealthReason = $"The audio sessions could not be read: {ex.Message}";
         }
+
+        var listed = _sessions.Select(session => session.ProcessId).ToHashSet();
+        _awaitingSession = _processes.Values.Any(process =>
+            process.Role == AssistiveTechnologyRecords.ScreenReaderRole && !listed.Contains(process.ProcessId));
     }
 
     private void SampleSound(long now)

@@ -86,9 +86,22 @@ public static class AssistiveTechnologyRecords
     // so the pauses between words do not split one utterance.
     public const int ProcessPollMilliseconds = 250;
     public const int ModulePollMilliseconds = 1000;
+
+    // The audio sessions are listed again every ModulePollMilliseconds, and
+    // every NewSessionListMilliseconds while a running main process has
+    // none yet, so its first sound is not missed.
+    public const int NewSessionListMilliseconds = 100;
     public const int SoundSampleMilliseconds = 20;
     public const double SoundThreshold = 0.001;
     public const int SoundGapMilliseconds = 250;
+
+    /// <summary>
+    /// A version from a file's version resource, or null when it has none:
+    /// Windows gives an empty string for a file without one, such as NVDA's
+    /// <c>nvdaHelperRemote.dll</c>.
+    /// </summary>
+    public static string? VersionOrNull(string? version) =>
+        string.IsNullOrWhiteSpace(version) ? null : version.Trim();
 
     /// <summary>The known product whose main executable has this file name, or null.</summary>
     public static KnownAssistiveTechnology? ByExecutable(string fileName) =>

@@ -12,8 +12,9 @@ which measured what reaches the recorder while NVDA runs.
 
 On 2026-10-10 the owner set the goals for NVDA and the terms of the work,
 recorded in "Decisions of 2026-10-10", and the first step, tracking NVDA,
-was built; see "Tracking NVDA". It has not yet been run on the target
-machine. The keyboard hook and the rest of this design are not built.
+was built; see "Tracking NVDA". Its first run on the target machine is in
+[the NVDA tracking validation](../validation/nvda-tracking-2026-10-10.md).
+The keyboard hook and the rest of this design are not built.
 
 ## The problem
 
@@ -108,7 +109,10 @@ The order of work, as agreed:
 
 ## Tracking NVDA
 
-Built 2026-10-10, not yet run on the target machine. The assistive
+Built 2026-10-10. First run on the target machine the same day
+([validation](../validation/nvda-tracking-2026-10-10.md)): the processes,
+the module, and the periods of sound matched, and two defects were fixed.
+The assistive
 technology collector (`src/Recorder.Collectors.AssistiveTechnology`) is
 always on, as the Windows settings collector is, and records on the
 `system.assistive-technology` channel
@@ -132,7 +136,8 @@ From the process list (Toolhelp), every 250 ms:
   copy already running when the recording starts is recorded with its
   real start time and `runningAtStart`. A process is known by its ID and
   start time, so an ID Windows reuses is a new process.
-- The record holds the executable's path, file and product versions, and
+- The record holds the executable's path, file and product versions (null
+  for a file without a version resource), and
   the copy: installed when the `UninstallDirectory` value of
   `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NVDA` names
   its folder, as NVDA's own `config.isInstalledCopy` decides it
@@ -162,7 +167,9 @@ browser process ended with the module loaded.
 From the peak meter of each of NVDA's processes' audio sessions on every
 active output device (`IAudioSessionManager2`, the session's process ID
 from `IAudioSessionControl2`, and `IAudioMeterInformation`), sampled every
-20 ms; the sessions are listed again every second. The method follows
+20 ms. The sessions are listed again every second, and every 100 ms while
+a running NVDA has none yet, as its first sound opens its session. The
+method follows
 [Matthew van Eerde's per-session peak meters](https://matthewvaneerde.wordpress.com/2012/06/08/getting-audio-peak-meter-values-for-all-active-audio-sessions/).
 The meter is NVDA's own stream before the system mixes it, so the
 microphone and other programs' sound do not reach it.
@@ -180,10 +187,10 @@ microphone and other programs' sound do not reach it.
 - Sound is not speech. A period may be speech, a beep, or one of NVDA's
   sounds; the player says "playing sound".
 - On the owner's instruction of 2026-10-10 ("Let's assume it works for now
-  and proceed"), the meter is assumed to work. It is untested: the
-  threshold, the gap, and whether NVDA's sound reaches a session of its own
-  process under each of its audio outputs are to be checked on the target
-  machine.
+  and proceed"), the meter was assumed to work. The first run on the
+  target machine supports it there: the owner's speech, alone or over
+  NVDA, started no period, and NVDA's periods held 96% of the system
+  sound. NVDA's other audio outputs and other machines are untested.
 
 Records: `assistive-technology-sound-started` and
 `assistive-technology-sound-ended`. The first record,
@@ -213,11 +220,14 @@ not be measured, if it could not.
   event summaries.
 - Database tests: every record type is written and read back
   (`EvidenceTableTests`).
-- A system test on the target machine, to do: start NVDA after the
-  recording begins, speak with it, talk over it, and quit it; then check
-  that the start and exit times match Windows', that the module is seen
-  in the browser, and that the periods of sound match NVDA's speech and
-  not the microphone.
+- A system test on the target machine: start NVDA after the recording
+  begins, speak with it, talk over it, and quit it; then check that the
+  start and exit times match Windows', that the module is seen in the
+  browser, that the periods of sound match NVDA's sound and not the
+  microphone, and that the startup sound's period starts with the system
+  sound. First run 2026-10-10
+  ([validation](../validation/nvda-tracking-2026-10-10.md)); the last
+  check is to repeat after its fix.
 
 ## The keyboard hook
 

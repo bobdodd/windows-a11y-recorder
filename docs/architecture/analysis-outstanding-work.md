@@ -72,7 +72,9 @@ Designed in [screen reader activity](screen-reader-activity.md), agreed
 
 - Built 2026-10-10: tracking NVDA, its processes, its module in the
   browser, and its periods of sound, with the properties panel's Screen
-  reader rows, as in its "Tracking NVDA". To test on the target machine.
+  reader rows, as in its "Tracking NVDA". First run on the target machine
+  2026-10-10 ([validation](../validation/nvda-tracking-2026-10-10.md));
+  two defects fixed, to check with a short run.
 - To build, in the order agreed on 2026-10-10: the keyboard hook
   collector, with reinstalling when a screen reader starts and when the
   hook is lost; the key dispositions; the screen reader window episodes;
