@@ -182,6 +182,37 @@ internal static class EvidenceCatalog
         new InlineField("previous", R, MagnifierReadings()),
         new InlineField("current", R, MagnifierReadings()));
 
+    // Added by 0028_input_recordability.sql. The records of when input could
+    // not be recorded (window.foreground): the recorder's integrity level,
+    // the foreground process's, and the input desktop. See
+    // docs/architecture/screen-reader-activity.md, "Input the recorder
+    // cannot receive".
+    public static readonly EvidenceTable RecorderIntegrities = Evidence(
+        "recorder_integrities",
+        BigInt("processId"),
+        Text("integrityLevel", N),
+        Int("integrityRid", N),
+        Bool("uiAccess", N),
+        Text("problem", N));
+
+    public static readonly EvidenceTable ForegroundIntegrities = Evidence(
+        "foreground_integrities",
+        BigInt("windowHandle"),
+        BigInt("processId"),
+        Text("processName", N),
+        Text("integrityLevel", N),
+        Int("integrityRid", N),
+        Bool("uiAccess", N),
+        Text("problem", N),
+        Bool("inputRecordable", N));
+
+    public static readonly EvidenceTable InputDesktops = Evidence(
+        "input_desktops",
+        Text("reason"),
+        Text("desktopName", N),
+        Text("problem", N),
+        Bool("inputRecordable"));
+
     // Added by 0027_keyboard_hook.sql. The keyboard hook collector's
     // records (input.keyboard-hook): each key its low-level hook was called
     // with, and each installation of the hook. See
@@ -1426,7 +1457,8 @@ internal static class EvidenceCatalog
             AssistiveTechnologyWatches, AssistiveTechnologyProcessStarts, AssistiveTechnologyProcessExits,
             AssistiveTechnologyModuleChanges, AssistiveTechnologySoundStarts, AssistiveTechnologySoundEnds
         ]),
-        (27, "keyboard_hook", [KeyboardHookKeys, KeyboardHookInstallations])
+        (27, "keyboard_hook", [KeyboardHookKeys, KeyboardHookInstallations]),
+        (28, "input_recordability", [RecorderIntegrities, ForegroundIntegrities, InputDesktops])
     ];
 
     /// <summary>
@@ -1452,6 +1484,9 @@ internal static class EvidenceCatalog
             [("system.preferences", "windows-preference-changed")] = WindowsPreferenceChanges,
             [("graphics.desktop.frames", "desktop-frame")] = DesktopFrames,
             [("graphics.magnifier", "magnifier-changed")] = MagnifierChangeRecords,
+            [("window.foreground", "recorder-integrity")] = RecorderIntegrities,
+            [("window.foreground", "foreground-integrity")] = ForegroundIntegrities,
+            [("window.foreground", "input-desktop")] = InputDesktops,
             [("input.keyboard-hook", "hook-keyboard")] = KeyboardHookKeys,
             [("input.keyboard-hook", "hook-installed")] = KeyboardHookInstallations,
             [("system.assistive-technology", "assistive-technology-watch")] = AssistiveTechnologyWatches,

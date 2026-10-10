@@ -41,6 +41,10 @@ public sealed class SessionTimelineControl : FrameworkElement
     private static readonly int[] SeriesDrawOrder = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, OtherSeries, AnnotationSeries];
 
     private static readonly Brush BackgroundBrush = Freeze("#201F1D");
+
+    // The band over the keyboard and mouse lanes where input could not be
+    // recorded: diagonal stripes, so it does not rely on colour alone.
+    private static readonly Brush UnrecordableBrush = CreateUnrecordableBrush();
     private static readonly Brush OtherChannelBrush = Freeze("#BAB9B4");
     private static readonly Pen HighlightPen = FreezePen(Brushes.White, 2);
 
@@ -66,6 +70,7 @@ public sealed class SessionTimelineControl : FrameworkElement
     private long _viewportStartNanoseconds;
     private long _viewportDurationNanoseconds;
     private SessionTimelineEvent? _selectedEvent;
+    private IReadOnlyList<Recorder.Session.UnrecordablePeriod> _unrecordable = [];
 
     // The lane keyboard stepping moves in: the selected event's lane, or the
     // lane last clicked.
@@ -114,8 +119,21 @@ public sealed class SessionTimelineControl : FrameworkElement
         _viewportStartNanoseconds = 0;
         _viewportDurationNanoseconds = _durationNanoseconds;
         _positionNanoseconds = 0;
+        _unrecordable = [];
         RebuildShownChannels();
         SelectEvent(null);
+        RedrawAll();
+    }
+
+    /// <summary>
+    /// The periods when keyboard and mouse input could not be recorded,
+    /// drawn as a band over the keyboard and mouse lanes. The properties
+    /// panel's Keyboard and mouse row gives the reason in text.
+    /// </summary>
+    public void SetUnrecordablePeriods(IReadOnlyList<Recorder.Session.UnrecordablePeriod> periods)
+    {
+        ArgumentNullException.ThrowIfNull(periods);
+        _unrecordable = periods;
         RedrawAll();
     }
 
@@ -314,6 +332,22 @@ public sealed class SessionTimelineControl : FrameworkElement
 
         var laneHeight = Math.Max(3, height / LaneCount);
         var columns = (int)Math.Ceiling(width);
+        var viewportEnd = _viewportStartNanoseconds + _viewportDurationNanoseconds;
+        foreach (var period in _unrecordable)
+        {
+            if (period.End < _viewportStartNanoseconds || period.Start > viewportEnd)
+            {
+                continue;
+            }
+
+            var left = Math.Max(0, ToX(Math.Max(period.Start, _viewportStartNanoseconds)));
+            var right = Math.Min(width, ToX(Math.Min(period.End, viewportEnd)));
+            drawingContext.DrawRectangle(
+                UnrecordableBrush,
+                null,
+                new Rect(left, GetLane("input.keyboard") * laneHeight, Math.Max(1, right - left), 2 * laneHeight - 1));
+        }
+
         foreach (var series in SeriesDrawOrder)
         {
             var lane = LaneOfSeries(series);
@@ -473,6 +507,24 @@ public sealed class SessionTimelineControl : FrameworkElement
     private static SolidColorBrush Freeze(string color)
     {
         var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
+        brush.Freeze();
+        return brush;
+    }
+
+    private static Brush CreateUnrecordableBrush()
+    {
+        var stripe = new GeometryDrawing(
+            null,
+            FreezePen(Freeze("#9A9894"), 1.5),
+            new LineGeometry(new Point(0, 8), new Point(8, 0)));
+        var brush = new DrawingBrush(stripe)
+        {
+            TileMode = TileMode.Tile,
+            Viewport = new Rect(0, 0, 8, 8),
+            ViewportUnits = BrushMappingMode.Absolute,
+            Viewbox = new Rect(0, 0, 8, 8),
+            ViewboxUnits = BrushMappingMode.Absolute
+        };
         brush.Freeze();
         return brush;
     }

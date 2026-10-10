@@ -735,6 +735,7 @@ public partial class MainWindow : Window
             TimelineControl.SetSession(
                 _playbackArchive.Timeline,
                 _playbackArchive.DurationNanoseconds);
+            TimelineControl.SetUnrecordablePeriods(_playbackArchive.InputRecordability.Unrecordable);
             ApplyBrowserNavigationFilter();
             BrowserCorrelationTextBox.Text =
                 _playbackArchive.BrowserNavigations.Count == 0

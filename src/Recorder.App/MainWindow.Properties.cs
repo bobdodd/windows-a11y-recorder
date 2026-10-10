@@ -71,12 +71,13 @@ public partial class MainWindow
 
     // Every row of the panel at a time: the Magnifier and Windows groups,
     // then the Browser and Sent to the page groups, then the Screen reader
-    // group.
+    // group, then the Keyboard and mouse group.
     private static IReadOnlyList<PropertyRow> RowsAt(SessionPlaybackArchive archive, long time, SessionVideoFrame? frame) =>
     [
         .. archive.WindowsPreferences.RowsAt(time, frame, archive.MagnifierChanges),
         .. archive.BrowserPreferences.RowsAt(time),
-        .. archive.AssistiveTechnology.RowsAt(time)
+        .. archive.AssistiveTechnology.RowsAt(time),
+        .. archive.InputRecordability.RowsAt(time)
     ];
 
     // The row's place among its setting's changes, or null when it has no
@@ -99,7 +100,7 @@ public partial class MainWindow
         {
             times = PropertyChangeSteps.TimesOf(
                 row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences,
-                archive.AssistiveTechnology);
+                archive.AssistiveTechnology, archive.InputRecordability);
             _propertyChangeTimes[row.Key] = times;
         }
 
@@ -164,7 +165,7 @@ public partial class MainWindow
         var name = char.ToLower(row.Setting[0], System.Globalization.CultureInfo.CurrentCulture) + row.Setting[1..];
         if (PropertyChangeSteps.TimesOf(
                 row.Row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences,
-                archive.AssistiveTechnology) is not { } times)
+                archive.AssistiveTechnology, archive.InputRecordability) is not { } times)
         {
             _busy.AnnounceLayout(row.Group switch
             {
@@ -172,6 +173,7 @@ public partial class MainWindow
                 BrowserPreferenceTimeline.BrowserGroup => "This recording has no browser preference records.",
                 BrowserPreferenceTimeline.PageGroup => "The values sent to the page have no change steps.",
                 AssistiveTechnologyTimeline.Group => "This recording has no assistive technology records.",
+                InputRecordabilityTimeline.Group => "This recording has no records of when input could be recorded.",
                 _ => "This recording has no Windows settings records."
             });
             return;

@@ -35,6 +35,13 @@ public sealed record SessionPlaybackArchive(
     public AssistiveTechnologyTimeline AssistiveTechnology { get; init; } = AssistiveTechnologyTimeline.Empty;
 
     /// <summary>
+    /// When keyboard and mouse input could not be recorded, for the
+    /// timeline's band and the properties panel's Keyboard and mouse row;
+    /// empty for a recording made before it was recorded.
+    /// </summary>
+    public InputRecordabilityTimeline InputRecordability { get; init; } = InputRecordabilityTimeline.Empty;
+
+    /// <summary>
     /// The browser preferences of the recording and those sent to its pages,
     /// for the properties panel; empty for a recording made before they were
     /// recorded or without a browser.

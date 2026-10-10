@@ -27,7 +27,10 @@ public sealed record PlaybackIndex
     // 0.56) whole, for the panel's Browser and Sent to the page rows.
     // Version 9 keeps the assistive technology records
     // (system.assistive-technology) whole, for the panel's Screen reader rows.
-    public const int CurrentVersion = 9;
+    // Version 10 keeps the input recordability records (window.foreground:
+    // recorder-integrity, foreground-integrity, input-desktop) whole, for the
+    // panel's Keyboard and mouse row and the timeline's band.
+    public const int CurrentVersion = 10;
 
     public required int Version { get; init; }
 
@@ -227,7 +230,8 @@ public sealed class PlaybackIndexBuilder
         if (channel == Recorder.Contracts.WindowsPreferenceSettings.Channel ||
             channel == Recorder.Contracts.MagnifierChanges.Channel ||
             channel == Recorder.Contracts.BrowserPreferenceSettings.Channel ||
-            channel == Recorder.Contracts.AssistiveTechnologyRecords.Channel)
+            channel == Recorder.Contracts.AssistiveTechnologyRecords.Channel ||
+            IsInputRecordabilityRecord(channel, record.EventType))
         {
             Keep(eventKey, record);
             return;
@@ -340,6 +344,10 @@ public sealed class PlaybackIndexBuilder
             ReadInt32(context, "processId"));
     }
 
+    private static bool IsInputRecordabilityRecord(string channel, string eventType) =>
+        channel == Recorder.Contracts.InputRecordabilityRecords.Channel &&
+        Recorder.Contracts.InputRecordabilityRecords.EventTypes.Contains(eventType);
+
     private void Keep(long eventKey, RecorderEvent record) =>
         _events.Add(new PlaybackIndexEvent(
             eventKey,
@@ -352,7 +360,8 @@ public sealed class PlaybackIndexBuilder
              record.Channel == Recorder.Contracts.WindowsPreferenceSettings.Channel ||
              record.Channel == Recorder.Contracts.MagnifierChanges.Channel ||
              record.Channel == Recorder.Contracts.BrowserPreferenceSettings.Channel ||
-             record.Channel == Recorder.Contracts.AssistiveTechnologyRecords.Channel) &&
+             record.Channel == Recorder.Contracts.AssistiveTechnologyRecords.Channel ||
+             IsInputRecordabilityRecord(record.Channel, record.EventType)) &&
             record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()
                 : PlaybackPayload(record.Payload)));

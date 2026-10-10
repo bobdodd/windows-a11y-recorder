@@ -107,6 +107,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<(long Time, JsonElement Payload)> _magnifierChanges = [];
     private readonly List<BrowserPreferenceRecord> _browserPreferences = [];
     private readonly List<AssistiveTechnologyRecord> _assistiveTechnology = [];
+    private readonly List<InputRecordabilityRecord> _inputRecordability = [];
     private readonly List<BrowserPageCommit> _pageCommits = [];
     private readonly bool _retainEvents;
     private long _maximumTimestamp;
@@ -136,6 +137,7 @@ public sealed class SessionPlaybackArchiveBuilder
         channel == WindowsPreferenceSettings.Channel ||
         channel == MagnifierChanges.Channel ||
         channel == AssistiveTechnologyRecords.Channel ||
+        channel == InputRecordabilityRecords.Channel ||
         channel.StartsWith("audio.", StringComparison.Ordinal) ||
         channel.StartsWith("browser.", StringComparison.Ordinal);
 
@@ -279,6 +281,13 @@ public sealed class SessionPlaybackArchiveBuilder
             _assistiveTechnology.Add(new AssistiveTechnologyRecord(timestamp, timelineEvent.EventType, payload.Clone()));
         }
 
+        if (timelineEvent.Channel == InputRecordabilityRecords.Channel &&
+            InputRecordabilityRecords.EventTypes.Contains(timelineEvent.EventType) &&
+            payload.ValueKind == JsonValueKind.Object)
+        {
+            _inputRecordability.Add(new InputRecordabilityRecord(timestamp, timelineEvent.EventType, payload.Clone()));
+        }
+
         if (timelineEvent.Channel == BrowserPreferenceSettings.Channel &&
             payload.ValueKind == JsonValueKind.Object)
         {
@@ -361,7 +370,10 @@ public sealed class SessionPlaybackArchiveBuilder
                 : new BrowserPreferenceTimeline(_browserPreferences, _pageCommits),
             AssistiveTechnology = _assistiveTechnology.Count == 0
                 ? AssistiveTechnologyTimeline.Empty
-                : new AssistiveTechnologyTimeline(_assistiveTechnology)
+                : new AssistiveTechnologyTimeline(_assistiveTechnology),
+            InputRecordability = _inputRecordability.Count == 0
+                ? InputRecordabilityTimeline.Empty
+                : new InputRecordabilityTimeline(_inputRecordability)
         };
     }
 
@@ -566,6 +578,28 @@ public sealed class SessionPlaybackArchiveBuilder
         if (payload.ValueKind != JsonValueKind.Object)
         {
             return eventType;
+        }
+
+        if (channel == InputRecordabilityRecords.Channel &&
+            InputRecordabilityRecords.EventTypes.Contains(eventType))
+        {
+            bool? Recordable() => payload.TryGetProperty("inputRecordable", out var value) &&
+                value.ValueKind is JsonValueKind.True or JsonValueKind.False
+                    ? value.ValueKind == JsonValueKind.True
+                    : null;
+            return eventType switch
+            {
+                InputRecordabilityRecords.InputDesktopEventType => JoinSummary(
+                    eventType,
+                    ReadString(payload, "desktopName") is { } desktop ? "desktop " + desktop : "desktop not readable",
+                    Recordable() == true ? "input recordable" : "input not recordable"),
+                InputRecordabilityRecords.ForegroundIntegrityEventType => JoinSummary(
+                    eventType,
+                    ReadString(payload, "processName"),
+                    ReadString(payload, "integrityLevel") ?? "level not readable",
+                    Recordable() switch { true => "input recordable", false => "input not recordable", null => null }),
+                _ => JoinSummary(eventType, ReadString(payload, "integrityLevel") ?? "level not readable")
+            };
         }
 
         if (channel == "window.foreground")
@@ -773,7 +807,8 @@ public sealed class SessionPlaybackArchiveBuilder
         bool Flag(string name) => payload.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
         if (eventType == KeyboardHookRecords.KeyEventType)
         {
-            var key = payload.TryGetProperty("virtualKey", out var virtualKey) && virtualKey.TryGetInt32(out var code)
+            var key = payload.TryGetProperty("virtualKey", out var virtualKey) && virtualKey.ValueKind == JsonValueKind.Number &&
+                virtualKey.TryGetInt32(out var code)
                 ? KeyboardHookRecords.KeyName(code)
                 : null;
             return JoinSummary(
@@ -784,7 +819,8 @@ public sealed class SessionPlaybackArchiveBuilder
 
         if (eventType == KeyboardHookRecords.InstalledEventType)
         {
-            var number = payload.TryGetProperty("installation", out var installation) && installation.TryGetInt32(out var value)
+            var number = payload.TryGetProperty("installation", out var installation) && installation.ValueKind == JsonValueKind.Number &&
+                installation.TryGetInt32(out var value)
                 ? "installation " + value.ToString(culture)
                 : null;
             return JoinSummary(

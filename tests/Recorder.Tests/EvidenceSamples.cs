@@ -205,6 +205,19 @@ internal static class EvidenceSamples
             """),
         ("browser.preferences", "color-maps-sent", ColorMapsSample(false, ["kColorMenuBackground", "kColorMenuSeparator"])),
         ("browser.preferences", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
+        // Added with 0028_input_recordability.sql: the recorder at medium; an
+        // elevated window, and one whose level could not be read; the user's
+        // desktop, and the secure desktop that could not be opened.
+        ("window.foreground", "recorder-integrity",
+            J("{'processId':4321,'integrityLevel':'medium','integrityRid':8192,'uiAccess':false,'problem':null}")),
+        ("window.foreground", "foreground-integrity",
+            J("{'windowHandle':7800334,'processId':22444,'processName':'powershell','integrityLevel':'high','integrityRid':12288,'uiAccess':false,'problem':null,'inputRecordable':false}")),
+        ("window.foreground", "foreground-integrity",
+            J("{'windowHandle':65748,'processId':8,'processName':null,'integrityLevel':null,'integrityRid':null,'uiAccess':null,'problem':'OpenProcessToken failed with error 5.','inputRecordable':null}")),
+        ("window.foreground", "input-desktop",
+            J("{'reason':'start','desktopName':'Default','problem':null,'inputRecordable':true}")),
+        ("window.foreground", "input-desktop",
+            J("{'reason':'switch','desktopName':null,'problem':'OpenInputDesktop failed with error 5.','inputRecordable':false}")),
         // Added with 0027_keyboard_hook.sql: a key NVDA kept, the injected Tab
         // NVDA put in place of a physical one, an extended key up; the first
         // installation, a refresh, and one after a loss.

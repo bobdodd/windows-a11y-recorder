@@ -10,6 +10,13 @@ namespace Recorder.Collectors.Windowing;
 public sealed class ForegroundWindowCollector : ICaptureCollector
 {
     private const uint EventSystemForeground = 0x0003;
+    private const uint EventSystemDesktopSwitch = 0x0020;
+    private const uint WmTimer = 0x0113;
+    private const uint TokenQuery = 0x0008;
+    private const int TokenIntegrityLevel = 25;
+    private const int TokenUiAccess = 26;
+    private const uint DesktopReadObjects = 0x0001;
+    private const int UoiName = 2;
     private const uint WineventOutOfContext = 0x0000;
     private const uint WineventSkipOwnProcess = 0x0002;
     private const uint WmQuit = 0x0012;
@@ -29,6 +36,9 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
     private long _lifecycleSequence = -1;
     private long _dropped;
     private bool _disposed;
+    private WinEventProc? _desktopCallback;
+    private int _recorderIntegrityRid = 0x2000;
+    private (string? Name, string? Problem)? _lastDesktop;
 
     public ForegroundWindowCollector()
     {
@@ -135,6 +145,8 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
 
         LifecycleState = CollectorLifecycleState.Running;
         EmitLifecycle("started", boundary);
+        EmitRecorderIntegrity();
+        PostThreadMessageW(_hookThreadId, WmCheckDesktop, nuint.Zero, nint.Zero);
         Enqueue(GetForegroundWindow(), "initial", null, null);
         return CollectorTransitionResult.Success(LifecycleState);
     }
@@ -216,6 +228,8 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
     private void HookLoop()
     {
         nint hook = nint.Zero;
+        nint desktopHook = nint.Zero;
+        nuint timer = 0;
 
         try
         {
@@ -237,10 +251,36 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
                     "SetWinEventHook failed.");
             }
 
+            // The desktop that receives input: Windows' switch event, and a
+            // check every 250 ms in case the event is not delivered across
+            // desktops. See InputRecordabilityRecords.
+            _desktopCallback = OnDesktopSwitch;
+            desktopHook = SetWinEventHook(
+                EventSystemDesktopSwitch,
+                EventSystemDesktopSwitch,
+                nint.Zero,
+                _desktopCallback,
+                0,
+                0,
+                WineventOutOfContext);
+            timer = SetTimer(nint.Zero, 0, InputRecordabilityRecords.DesktopPollMilliseconds, nint.Zero);
+
             _ready!.TrySetResult(true);
 
             while (GetMessageW(out var message, nint.Zero, 0, 0) > 0)
             {
+                if (message.hwnd == nint.Zero && message.message == WmTimer)
+                {
+                    CheckDesktop(InputRecordabilityRecords.PollReason);
+                    continue;
+                }
+
+                if (message.hwnd == nint.Zero && message.message == WmCheckDesktop)
+                {
+                    CheckDesktop(InputRecordabilityRecords.StartReason);
+                    continue;
+                }
+
                 TranslateMessage(ref message);
                 DispatchMessageW(ref message);
             }
@@ -257,6 +297,173 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
             {
                 UnhookWinEvent(hook);
             }
+
+            if (desktopHook != nint.Zero)
+            {
+                UnhookWinEvent(desktopHook);
+            }
+
+            if (timer != 0)
+            {
+                KillTimer(nint.Zero, timer);
+            }
+        }
+    }
+
+    private void OnDesktopSwitch(
+        nint hook,
+        uint eventType,
+        nint window,
+        int objectId,
+        int childId,
+        uint eventThreadId,
+        uint eventTimeMilliseconds) =>
+        CheckDesktop(InputRecordabilityRecords.SwitchReason);
+
+    // Records the input desktop at the start, and when it differs from the
+    // last one recorded. On a desktop the recorder cannot open, such as the
+    // secure desktop, input is not recordable.
+    private void CheckDesktop(string reason)
+    {
+        var (name, problem) = ReadInputDesktop();
+        var start = reason == InputRecordabilityRecords.StartReason;
+        if (!start && _lastDesktop == (name, problem))
+        {
+            return;
+        }
+
+        if (start && _lastDesktop is not null)
+        {
+            return;
+        }
+
+        _lastDesktop = (name, problem);
+        EmitEvent(
+            InputRecordabilityRecords.InputDesktopEventType,
+            new
+            {
+                reason,
+                desktopName = name,
+                problem,
+                inputRecordable = name == InputRecordabilityRecords.DefaultDesktop
+            },
+            _context?.Clock.GetElapsedNanoseconds() ?? 0);
+    }
+
+    private static (string? Name, string? Problem) ReadInputDesktop()
+    {
+        var desktop = OpenInputDesktop(0, false, DesktopReadObjects);
+        if (desktop == nint.Zero)
+        {
+            return (null, $"OpenInputDesktop failed with error {Marshal.GetLastWin32Error()}.");
+        }
+
+        try
+        {
+            var buffer = new char[256];
+            return GetUserObjectInformationW(desktop, UoiName, buffer, buffer.Length * 2, out var needed)
+                ? (new string(buffer, 0, Math.Max(0, Math.Min(buffer.Length, needed / 2) - 1)).TrimEnd('\0'), null)
+                : (null, $"GetUserObjectInformation failed with error {Marshal.GetLastWin32Error()}.");
+        }
+        finally
+        {
+            CloseDesktop(desktop);
+        }
+    }
+
+    private void EmitRecorderIntegrity()
+    {
+        var own = ReadIntegrity(GetCurrentProcessId());
+        if (own.Rid is { } rid)
+        {
+            _recorderIntegrityRid = rid;
+        }
+
+        EmitEvent(
+            InputRecordabilityRecords.RecorderIntegrityEventType,
+            new
+            {
+                processId = (long)GetCurrentProcessId(),
+                integrityLevel = own.Rid is { } level ? InputRecordabilityRecords.IntegrityLevel(level) : null,
+                integrityRid = own.Rid,
+                uiAccess = own.UiAccess,
+                problem = own.Problem
+            },
+            _context?.Clock.GetElapsedNanoseconds() ?? 0);
+    }
+
+    private object ForegroundIntegrity(WindowSnapshot snapshot)
+    {
+        var integrity = ReadIntegrity(snapshot.ProcessId);
+        return new
+        {
+            windowHandle = snapshot.WindowHandle,
+            processId = (long)snapshot.ProcessId,
+            processName = snapshot.ProcessName,
+            integrityLevel = integrity.Rid is { } level ? InputRecordabilityRecords.IntegrityLevel(level) : null,
+            integrityRid = integrity.Rid,
+            uiAccess = integrity.UiAccess,
+            problem = integrity.Problem,
+            inputRecordable = InputRecordabilityRecords.InputRecordable(integrity.Rid, _recorderIntegrityRid)
+        };
+    }
+
+    // The integrity level and UIAccess flag of a process, from its token,
+    // or why they could not be read. Reading the token reads only.
+    private static (int? Rid, bool? UiAccess, string? Problem) ReadIntegrity(uint processId)
+    {
+        var process = OpenProcess(ProcessQueryLimitedInformation, false, processId);
+        if (process == nint.Zero)
+        {
+            return (null, null, $"OpenProcess failed with error {Marshal.GetLastWin32Error()}.");
+        }
+
+        try
+        {
+            if (!OpenProcessToken(process, TokenQuery, out var token))
+            {
+                return (null, null, $"OpenProcessToken failed with error {Marshal.GetLastWin32Error()}.");
+            }
+
+            try
+            {
+                GetTokenInformation(token, TokenIntegrityLevel, nint.Zero, 0, out var size);
+                if (size == 0)
+                {
+                    return (null, null, $"GetTokenInformation failed with error {Marshal.GetLastWin32Error()}.");
+                }
+
+                var buffer = Marshal.AllocHGlobal(size);
+                try
+                {
+                    if (!GetTokenInformation(token, TokenIntegrityLevel, buffer, size, out _))
+                    {
+                        return (null, null, $"GetTokenInformation failed with error {Marshal.GetLastWin32Error()}.");
+                    }
+
+                    // TOKEN_MANDATORY_LABEL: the label's SID comes first; the
+                    // level is its last subauthority.
+                    var sid = Marshal.ReadIntPtr(buffer);
+                    var count = Marshal.ReadByte(GetSidSubAuthorityCount(sid));
+                    var rid = Marshal.ReadInt32(GetSidSubAuthority(sid, (uint)(count - 1)));
+                    bool? uiAccess = GetTokenInformation(token, TokenUiAccess, out int access, sizeof(int), out _)
+                        ? access != 0
+                        : null;
+                    return (rid, uiAccess, null);
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buffer);
+                }
+            }
+            finally
+            {
+                CloseHandle(token);
+            }
+        }
+        finally
+        {
+            CloseHandle(process);
         }
     }
 
@@ -299,9 +506,14 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
     {
         await foreach (var observation in _observations.Reader.ReadAllAsync().ConfigureAwait(false))
         {
+            var snapshot = ReadWindowSnapshot(observation);
             EmitEvent(
                 "foreground-window",
-                ReadWindowSnapshot(observation),
+                snapshot,
+                observation.MonotonicNanoseconds);
+            EmitEvent(
+                InputRecordabilityRecords.ForegroundIntegrityEventType,
+                ForegroundIntegrity(snapshot),
                 observation.MonotonicNanoseconds);
         }
     }
@@ -628,6 +840,47 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
 
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentProcessId();
+
+    private const uint WmCheckDesktop = 0x8000 + 1;
+
+    [DllImport("user32.dll")]
+    private static extern nuint SetTimer(nint window, nuint id, uint milliseconds, nint procedure);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool KillTimer(nint window, nuint id);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern nint OpenInputDesktop(uint flags, [MarshalAs(UnmanagedType.Bool)] bool inherit, uint access);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetUserObjectInformationW(nint handle, int index, [Out] char[] information, int length, out int needed);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseDesktop(nint desktop);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool OpenProcessToken(nint process, uint access, out nint token);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetTokenInformation(nint token, int informationClass, nint information, int length, out int returned);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetTokenInformation(nint token, int informationClass, out int information, int length, out int returned);
+
+    [DllImport("advapi32.dll")]
+    private static extern nint GetSidSubAuthorityCount(nint sid);
+
+    [DllImport("advapi32.dll")]
+    private static extern nint GetSidSubAuthority(nint sid, uint index);
 
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();

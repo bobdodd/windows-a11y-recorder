@@ -67,13 +67,15 @@ public static class PropertyChangeSteps
     /// change records, or a settings row of one without settings records.
     /// A browser row's times are those of <see cref="BrowserPreferenceTimeline.ChangeTimesOf"/>.
     /// A Screen reader row's are those of <see cref="AssistiveTechnologyTimeline.ChangeTimesOf"/>.
+    /// The Keyboard and mouse row's are those of <see cref="InputRecordabilityTimeline.ChangeTimesOf"/>.
     /// </summary>
     public static IReadOnlyList<long>? TimesOf(
         PropertyRow row,
         WindowsPreferenceTimeline settings,
         MagnifierChangeTimeline magnifier,
         BrowserPreferenceTimeline? browser = null,
-        AssistiveTechnologyTimeline? assistiveTechnology = null)
+        AssistiveTechnologyTimeline? assistiveTechnology = null,
+        InputRecordabilityTimeline? inputRecordability = null)
     {
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(settings);
@@ -82,6 +84,11 @@ public static class PropertyChangeSteps
             row.Key.StartsWith(BrowserPreferenceTimeline.PageKeyPrefix, StringComparison.Ordinal))
         {
             return (browser ?? BrowserPreferenceTimeline.Empty).ChangeTimesOf(row.Key);
+        }
+
+        if (row.Key == InputRecordabilityTimeline.Key)
+        {
+            return (inputRecordability ?? InputRecordabilityTimeline.Empty).ChangeTimesOf(row.Key);
         }
 
         if (row.Key.StartsWith(AssistiveTechnologyTimeline.KeyPrefix, StringComparison.Ordinal))

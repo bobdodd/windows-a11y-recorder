@@ -342,7 +342,90 @@ when keyboard and mouse are recorded, as raw input is.
   below was run on 2026-10-10, with the elevated window; the integration
   tests on Windows are still to write.
 
+## Input the recorder cannot receive
+
+Agreed with the owner on 2026-10-10, after the run with an elevated
+window ([validation](../validation/keyboard-hook-2026-10-10.md), "The
+elevated window") found that while a window of an elevated process is in
+the foreground, neither the keyboard hook nor raw input receives any key,
+nor raw input any mouse input, and that nothing in the recording marked
+the gap. Built the same day, not yet run on the target machine.
+
+The owner's decisions:
+
+- Elevated programs are not recorded: "For the testing I envisage, we
+  wouldn't want to track anything running at elevated privilege". Giving
+  the recorder UIAccess, which would let it "read input for all integrity
+  levels by using low-level hooks, raw input"
+  ([Microsoft, UIAccess policy](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/security-policy-settings/user-account-control-only-elevate-uiaccess-applications-that-are-installed-in-secure-locations)),
+  and running it as administrator are ruled out.
+- What is on screen stays recorded, the elevated window's title and the
+  screen frames included: "if it's on screen it's part of the test".
+- The recording marks when input could not be recorded, and the player
+  shows it.
+
+Records, on `window.foreground`, by the foreground window collector
+(`src/Recorder.Contracts/InputRecordabilityRecords.cs`). They record
+privilege facts only; no input or content is taken from an elevated
+window.
+
+- `recorder-integrity`, once at the start: the recorder's own integrity
+  level and UIAccess flag, from its process token.
+- `foreground-integrity`, with each `foreground-window` record and at the
+  same time: the window's process's integrity level, its relative
+  identifier
+  ([Microsoft, well-known SIDs](https://learn.microsoft.com/en-us/windows/win32/secauthz/well-known-sids)),
+  and UIAccess flag, read from its token; and `inputRecordable`, false when
+  the level is higher than the recorder's. Where the token cannot be read
+  the level and `inputRecordable` are null and the problem is recorded; it
+  is not guessed. A separate record leaves the `foreground-window` record
+  and its table as they were.
+- `input-desktop`, at the start and whenever the desktop that receives
+  input changes: its name, or the problem when the recorder cannot open
+  it, as with the secure desktop of a permission prompt; input is
+  recordable only on the user's desktop, `Default`. The change is found by
+  Windows' event that "the active desktop has been switched"
+  ([Microsoft, event constants](https://learn.microsoft.com/en-us/windows/win32/winauto/event-constants))
+  and by a check every 250 ms, in case the event is not delivered across
+  desktops; the record's reason says which.
+
+In the player:
+
+- Input is not recordable on another desktop, or while the foreground
+  window's level is higher than the recorder's; a window whose level could
+  not be read is shown as unknown, not as a gap
+  (`src/Recorder.Session/InputRecordabilityTimeline.cs`).
+- The timeline draws each such period as a striped band over the keyboard
+  and mouse lanes.
+- The properties panel's "Keyboard and mouse" group has an "Input
+  recordable" row: "recordable", "not recordable" with the reason, such as
+  "high integrity window, powershell" or "a desktop the recorder cannot
+  open, such as the secure desktop", or "unknown" with the problem; with
+  the change buttons and count. The timeline is drawn, so the row is where
+  the reason is read.
+- The event list summarises each record.
+- Storage: the payload rules are in `EventPayloadValidator`; migration
+  0028 makes the tables; the playback index keeps the records whole
+  (version 10).
+- Key disposition (step 2b) treats these periods as gaps, so a key missing
+  from both records there is not reported as lost.
+
+Tests:
+
+- Unit tests (`tests/Recorder.Tests/InputRecordabilityTests.cs`, and the
+  database tests in `EvidenceTableTests`): the level names and the rule;
+  the payload rules; the periods from the records of the elevated window
+  run, the desktop before the window, an unreadable level; the panel row
+  and its change times; the summaries.
+- A system test on the target machine: the elevated window run again,
+  showing a period for each elevated episode and for the permission
+  prompt, with input recorded either side, and whether an elevated
+  process's token can be read.
+
 ## Key disposition
+
+A key is not judged lost in a period when input was not recordable (see
+"Input the recorder cannot receive").
 
 Derived at playback from the records, with the rule versioned so that a
 recording can be read again under a later rule.

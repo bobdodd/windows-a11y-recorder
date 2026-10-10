@@ -114,6 +114,15 @@ internal static class EventPayloadValidator
             case ("graphics.magnifier", "magnifier-changed"):
                 ValidateMagnifierChange(payload, issues);
                 break;
+            case ("window.foreground", "recorder-integrity"):
+                ValidateIntegrity(payload, issues, foreground: false);
+                break;
+            case ("window.foreground", "foreground-integrity"):
+                ValidateIntegrity(payload, issues, foreground: true);
+                break;
+            case ("window.foreground", "input-desktop"):
+                ValidateInputDesktop(payload, issues);
+                break;
             case ("input.keyboard-hook", "hook-keyboard"):
                 ValidateHookKeyboard(payload, issues);
                 break;
@@ -1361,6 +1370,100 @@ internal static class EventPayloadValidator
         }
     }
 
+    // The records of when input could not be recorded (window.foreground):
+    // the recorder's integrity level, the foreground process's, and the
+    // input desktop. See docs/architecture/screen-reader-activity.md, "Input
+    // the recorder cannot receive".
+    private static void ValidateIntegrity(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues,
+        bool foreground)
+    {
+        List<PropertyRule> rules =
+        [
+            RequiredInteger("processId", nonnegative: true),
+            NullableEnum("integrityLevel", [.. Recorder.Contracts.InputRecordabilityRecords.IntegrityLevels]),
+            NullableInteger("integrityRid", nonnegative: true),
+            NullableBoolean("uiAccess"),
+            NullableText("problem")
+        ];
+        if (foreground)
+        {
+            rules.Add(RequiredInteger("windowHandle"));
+            rules.Add(NullableText("processName"));
+            rules.Add(NullableBoolean("inputRecordable"));
+        }
+
+        ValidateShape(payload, [.. rules], issues);
+        bool IsNull(string name) => !payload.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null;
+        if (IsNull("integrityRid") == IsNull("problem"))
+        {
+            AddError(
+                issues,
+                "integrity-problem-inconsistent",
+                "#/payload/problem",
+                "An integrity record has a level or a problem, not both.");
+        }
+
+        if (IsNull("integrityRid") != IsNull("integrityLevel") ||
+            payload.TryGetProperty("integrityRid", out var rid) && rid.ValueKind == JsonValueKind.Number &&
+            rid.TryGetInt32(out var number) &&
+            Text(payload, "integrityLevel") is { } level &&
+            level != Recorder.Contracts.InputRecordabilityRecords.IntegrityLevel(number))
+        {
+            AddError(
+                issues,
+                "integrity-level-inconsistent",
+                "#/payload/integrityLevel",
+                "The integrity level must be the name of its identifier.");
+        }
+
+        if (foreground && IsNull("integrityRid") != IsNull("inputRecordable"))
+        {
+            AddError(
+                issues,
+                "integrity-recordable-inconsistent",
+                "#/payload/inputRecordable",
+                "Whether input is recordable is known exactly when the level is.");
+        }
+    }
+
+    private static void ValidateInputDesktop(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredEnum("reason", [.. Recorder.Contracts.InputRecordabilityRecords.DesktopReasons]),
+                NullableText("desktopName"),
+                NullableText("problem"),
+                RequiredBoolean("inputRecordable")
+            ],
+            issues);
+        bool IsNull(string name) => !payload.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null;
+        if (IsNull("desktopName") == IsNull("problem"))
+        {
+            AddError(
+                issues,
+                "input-desktop-problem-inconsistent",
+                "#/payload/problem",
+                "An input desktop record has a name or a problem, not both.");
+        }
+
+        if (payload.TryGetProperty("inputRecordable", out var recordable) &&
+            recordable.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+            (recordable.ValueKind == JsonValueKind.True) !=
+                (Text(payload, "desktopName") == Recorder.Contracts.InputRecordabilityRecords.DefaultDesktop))
+        {
+            AddError(
+                issues,
+                "input-desktop-recordable-inconsistent",
+                "#/payload/inputRecordable",
+                "Input is recordable exactly on the user's desktop.");
+        }
+    }
+
     // The keyboard hook collector's records (input.keyboard-hook): each key
     // its low-level hook was called with, and each installation of the hook.
     // See docs/architecture/screen-reader-activity.md, "The keyboard hook".
@@ -1384,7 +1487,8 @@ internal static class EventPayloadValidator
                 RequiredInteger("eventTimeMilliseconds", nonnegative: true)
             ],
             issues);
-        if (!payload.TryGetProperty("flags", out var flagsValue) || !flagsValue.TryGetInt32(out var flags))
+        if (!payload.TryGetProperty("flags", out var flagsValue) || flagsValue.ValueKind != JsonValueKind.Number ||
+            !flagsValue.TryGetInt32(out var flags))
         {
             return;
         }

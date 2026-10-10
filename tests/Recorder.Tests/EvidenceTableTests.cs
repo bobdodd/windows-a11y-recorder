@@ -883,7 +883,9 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         // 0026 added the tables of the assistive technology records.
         record.Channel != "system.assistive-technology" &&
         // 0027 added the tables of the keyboard hook records.
-        record.Channel != "input.keyboard-hook";
+        record.Channel != "input.keyboard-hook" &&
+        // 0028 added the tables of the input recordability records.
+        !Recorder.Contracts.InputRecordabilityRecords.EventTypes.Contains(record.EventType);
 
     private static List<string> Sorted(List<string> rows)
     {
