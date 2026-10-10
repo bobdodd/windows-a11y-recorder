@@ -77,7 +77,8 @@ public sealed class RecreationSession : IAsyncDisposable
                 server.AddBlocked,
                 cancellationToken,
                 server.ServedAtRecordedAddress ? server : null,
-                server.BaseAddress);
+                server.BaseAddress,
+                fit => server.WindowFit = fit);
             server.AddTiming("Attaching to the tab and asking it to load the page", clock.Elapsed);
             return new RecreationSession(server, browser, control) { DevToolsAddress = address };
         }

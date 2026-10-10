@@ -619,6 +619,16 @@ public sealed class RecreationServer : IAsyncDisposable, IRecreationAnswers
         }
     }
 
+    // How the recreation's window holds the recorded frame, set once the
+    // window is sized, before the page is loaded; null without a viewport.
+    private RecreationWindowFit? _windowFit;
+
+    public RecreationWindowFit? WindowFit
+    {
+        get => Volatile.Read(ref _windowFit);
+        set => Volatile.Write(ref _windowFit, value);
+    }
+
     public IReadOnlyList<RecreationTiming> Timings
     {
         get
@@ -701,6 +711,10 @@ public sealed class RecreationServer : IAsyncDisposable, IRecreationAnswers
             case "blocked.json":
                 response.ContentType = "application/json; charset=utf-8";
                 body = JsonSerializer.SerializeToUtf8Bytes(Blocked, EvidenceJson);
+                break;
+            case "window.json":
+                response.ContentType = "application/json; charset=utf-8";
+                body = JsonSerializer.SerializeToUtf8Bytes(WindowFit, EvidenceJson);
                 break;
             case "timings.json":
                 response.ContentType = "application/json; charset=utf-8";

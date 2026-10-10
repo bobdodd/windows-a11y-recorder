@@ -110,6 +110,19 @@ public sealed class RecreationTests : IDisposable
             """[{"step":"Writing the page","milliseconds":12.3}]""",
             await client.GetStringAsync(server.BaseAddress + "timings.json", token));
 
+        // How the window holds the recorded frame, once it is sized.
+        Assert.Equal("null", await client.GetStringAsync(server.BaseAddress + "window.json", token));
+        server.WindowFit = new RecreationWindowFit(1864, 818, 1850, 800, true, 0.9779);
+        using (var fit = JsonDocument.Parse(await client.GetStringAsync(server.BaseAddress + "window.json", token)))
+        {
+            Assert.True(fit.RootElement.GetProperty("emulated").GetBoolean());
+            Assert.Equal(0.9779, fit.RootElement.GetProperty("scale").GetDouble());
+            Assert.Equal(1864, fit.RootElement.GetProperty("emulatedWidth").GetInt32());
+            Assert.Equal(818, fit.RootElement.GetProperty("emulatedHeight").GetInt32());
+            Assert.Equal(1850, fit.RootElement.GetProperty("areaWidth").GetDouble());
+            Assert.Equal(800, fit.RootElement.GetProperty("areaHeight").GetDouble());
+        }
+
         var other = RecreationServer.NewToken();
         foreach (var address in new[]
         {
@@ -188,6 +201,49 @@ public sealed class RecreationTests : IDisposable
         Assert.Contains("JSON.stringify([innerWidth, innerHeight, devicePixelRatio])", check, StringComparison.Ordinal);
         Assert.Contains("\"Viewport as shown\"", check, StringComparison.Ordinal);
         Assert.Contains("checkViewport();", panel, StringComparison.Ordinal);
+        // The window's fit, and the scale the page is drawn at when its size
+        // is emulated, are listed and announced.
+        Assert.Contains("${recorderBase}window.json", check, StringComparison.Ordinal);
+        Assert.Contains("fit.emulated", check, StringComparison.Ordinal);
+        Assert.Contains("fit.emulationError", check, StringComparison.Ordinal);
+        Assert.Contains("say(fitNote ?", check, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheWindowFitEmulatesThePageSizeOnlyWhenTheScreenCannotHoldTheFrame()
+    {
+        // The owner's frame of 2026-10-09, 1864 by 818 screen pixels, on a
+        // screen at a scale factor of 1.
+        var viewport = new RecreationViewport(932, 409, 2, 2) { FrameLayoutZoomFactor = 1 };
+
+        // The window holds it, or holds it but for less than a pixel.
+        foreach (var (width, height) in new[] { (1864.0, 818.0), (1900.0, 900.0), (1863.5, 817.2) })
+        {
+            var fits = RecreationControl.Fit(viewport, 1, width, height);
+            Assert.False(fits.Emulated);
+            Assert.Equal(1, fits.Scale);
+        }
+
+        // The screen cannot hold it: the size is emulated at the frame's and
+        // drawn at the largest scale the page area holds, rounded down.
+        var shortOfHeight = RecreationControl.Fit(viewport, 1, 1864, 700);
+        Assert.True(shortOfHeight.Emulated);
+        Assert.Equal((1864, 818), (shortOfHeight.EmulatedWidth, shortOfHeight.EmulatedHeight));
+        Assert.Equal(0.8557, shortOfHeight.Scale, 9);
+        Assert.True(1864 * shortOfHeight.Scale <= 1864 && 818 * shortOfHeight.Scale <= 700);
+        var shortOfBoth = RecreationControl.Fit(viewport, 1, 1850, 800);
+        Assert.Equal(0.9779, shortOfBoth.Scale, 9);
+        Assert.Equal(0.9924, RecreationControl.Fit(viewport, 1, 1850, 818).Scale, 9);
+
+        // On a screen at 1.5, the frame needs fewer device-independent
+        // pixels, and the emulated size is in them.
+        var atOneAndAHalf = RecreationControl.Fit(viewport, 1.5, 1000, 545);
+        Assert.True(atOneAndAHalf.Emulated);
+        Assert.Equal((1243, 545), (atOneAndAHalf.EmulatedWidth, atOneAndAHalf.EmulatedHeight));
+        Assert.Equal(0.8047, atOneAndAHalf.Scale, 9);
+
+        // A page area of nothing still gives a scale DevTools takes.
+        Assert.Equal(0.01, RecreationControl.Fit(viewport, 1, 0, 0).Scale, 9);
     }
 
     [Fact]

@@ -13,11 +13,11 @@ public sealed record BlockedNavigation(string Url, DateTimeOffset Time, bool InR
 // is paused: a request for the recreation's own address continues, and any
 // other, such as a followed link, is refused, recorded, and shown in the
 // evidence panel; a tab opened by a refused request is closed. Nothing is
-// added to the page. The recreation's tab is also given the recorded
-// viewport, and focus emulation, so the recorded focus holds while DevTools
-// has the keyboard, and its window is sized so that its page area is that
-// viewport. See docs/architecture/page-recreation.md, "Leaving the
-// recreation".
+// added to the page. The recreation's tab is also given focus emulation,
+// so the recorded focus holds while DevTools has the keyboard, and its
+// window is sized so that its page area is the recorded frame, with the
+// page's size emulated only when the screen cannot hold the window. See
+// docs/architecture/page-recreation.md, "Leaving the recreation".
 //
 // Slice 5b: every frame target of a tab, and of a frame, is attached before
 // it runs too, and its requests are paused in its own session, since an out
@@ -97,7 +97,8 @@ public sealed class RecreationControl : IAsyncDisposable
         Action<BlockedNavigation> blocked,
         CancellationToken cancellationToken,
         IRecreationAnswers? answers = null,
-        string? loopbackAddress = null)
+        string? loopbackAddress = null,
+        Action<RecreationWindowFit>? fitted = null)
     {
         var connection = await DevToolsConnection.ConnectAsync(browserAddress, cancellationToken);
         var control = new RecreationControl(connection, pageAddress, loopbackAddress, viewport, blocked, answers);
@@ -126,9 +127,11 @@ public sealed class RecreationControl : IAsyncDisposable
             var session = await control._firstTab.Task.WaitAsync(timeout.Token);
             if (viewport is { Width: > 0, Height: > 0 })
             {
-                // Nothing is emulated: the window's page area is the recorded
-                // frame's size in screen pixels.
-                await control.FitWindowAsync(session, viewport, cancellationToken);
+                // The window's page area is the recorded frame's size in
+                // screen pixels; only when the screen cannot hold it is the
+                // page's size emulated, drawn smaller to fit.
+                var fit = await control.FitWindowAsync(session, viewport, cancellationToken);
+                fitted?.Invoke(fit);
             }
             await connection.SendAsync("Page.navigate", new { url = pageAddress }, session, cancellationToken);
             return control;
@@ -141,14 +144,19 @@ public sealed class RecreationControl : IAsyncDisposable
     }
 
     // Sizes the recreation's window so that its page area is the recorded
-    // viewport, so the whole recorded page and its scroll bars show. The
+    // frame, so the whole recorded page and its scroll bars show. The
     // window's frame, its size less the page area, is read from the blank
-    // tab, in CSS pixels, which are the
-    // window's own units at the default zoom, with the blank tab's
-    // devicePixelRatio, which is this machine's scale factor. A window the
-    // screen cannot hold gives a smaller page, which the evidence panel's
-    // Viewport as shown section reports.
-    private async Task FitWindowAsync(string session, RecreationViewport viewport, CancellationToken cancellationToken)
+    // tab, in CSS pixels, which are the window's own units at the default
+    // zoom, with the blank tab's devicePixelRatio, which is this machine's
+    // scale factor. The page area the window was given is then read back.
+    // When the screen cannot hold the window, so the page area is a pixel
+    // or more short of the frame, the page's size alone is emulated at the
+    // frame's, with no device scale factor, and it is drawn at the largest
+    // scale the page area holds; the window's page view is not resized
+    // (dontSetVisibleSize), as in DevTools' device mode. Agreed with the
+    // owner on 2026-10-10 ("The recorded layout zoom" in
+    // docs/architecture/accessibility-preferences.md).
+    private async Task<RecreationWindowFit> FitWindowAsync(string session, RecreationViewport viewport, CancellationToken cancellationToken)
     {
         var measured = await _connection.SendAsync("Runtime.evaluate", new
         {
@@ -173,6 +181,78 @@ public sealed class RecreationControl : IAsyncDisposable
             windowId = window.GetProperty("windowId").GetInt32(),
             bounds = new { width = size.Width, height = size.Height }
         }, null, cancellationToken);
+        var area = await PageAreaAsync(session, viewport.WindowWidthAt(hostScale), viewport.WindowHeightAt(hostScale), cancellationToken);
+        var fit = Fit(viewport, hostScale, area.Width, area.Height);
+        if (!fit.Emulated)
+        {
+            return fit;
+        }
+        try
+        {
+            await _connection.SendAsync("Emulation.setDeviceMetricsOverride", new
+            {
+                width = fit.EmulatedWidth,
+                height = fit.EmulatedHeight,
+                deviceScaleFactor = 0,
+                mobile = false,
+                scale = fit.Scale,
+                dontSetVisibleSize = true
+            }, session, cancellationToken);
+            return fit;
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            return fit with { Emulated = false, EmulationError = error.Message };
+        }
+    }
+
+    // The blank tab's page area once the window has taken its new size: the
+    // first reading that holds the frame, or one that holds for five
+    // readings 100 ms apart, or the last of 30.
+    private async Task<(double Width, double Height)> PageAreaAsync(string session, double width, double height, CancellationToken cancellationToken)
+    {
+        (double Width, double Height) last = (0, 0);
+        var same = 0;
+        for (var reading = 0; reading < 30; reading++)
+        {
+            await Task.Delay(100, cancellationToken);
+            var measured = await _connection.SendAsync("Runtime.evaluate", new
+            {
+                expression = "JSON.stringify([innerWidth, innerHeight])",
+                returnByValue = true
+            }, session, cancellationToken);
+            using var area = JsonDocument.Parse(measured.GetProperty("result").GetProperty("value").GetString()!);
+            var now = (area.RootElement[0].GetDouble(), area.RootElement[1].GetDouble());
+            if (width - now.Item1 < 1 && height - now.Item2 < 1)
+            {
+                return now;
+            }
+            same = now == last ? same + 1 : 0;
+            last = now;
+            if (same >= 4)
+            {
+                break;
+            }
+        }
+        return last;
+    }
+
+    // Whether the page area the window was given holds the recorded frame,
+    // in this machine's device-independent pixels, and when it does not, the
+    // size to emulate and the scale to draw it at: the largest that the page
+    // area holds, rounded down to 0.0001, and no less than 0.01, as DevTools
+    // takes no scale that is not above 0.
+    public static RecreationWindowFit Fit(RecreationViewport viewport, double hostScale, double areaWidth, double areaHeight)
+    {
+        var width = viewport.WindowWidthAt(hostScale);
+        var height = viewport.WindowHeightAt(hostScale);
+        if (width - areaWidth < 1 && height - areaHeight < 1)
+        {
+            return new RecreationWindowFit(width, height, areaWidth, areaHeight, false, 1);
+        }
+        var scale = Math.Min(1, Math.Min(Math.Max(0, areaWidth) / width, Math.Max(0, areaHeight) / height));
+        scale = Math.Max(0.01, Math.Floor(scale * 10000) / 10000);
+        return new RecreationWindowFit(width, height, areaWidth, areaHeight, true, scale);
     }
 
     // The window size whose page area is the recorded viewport, given the
@@ -692,4 +772,21 @@ public sealed record RecreationViewport(double Width, double Height, double Devi
 
     private static double HostScale(double hostScale) =>
         double.IsFinite(hostScale) && hostScale > 0 ? hostScale : 1.0;
+}
+
+// How the recreation's window holds the recorded frame, in the viewing
+// machine's device-independent pixels: the page area the frame needs, the
+// one the window was given, and whether the page's size is emulated at the
+// frame's, drawn at a scale, because the screen cannot hold the window. The
+// evidence panel's Viewport as shown section reports it.
+public sealed record RecreationWindowFit(double NeededWidth, double NeededHeight, double AreaWidth, double AreaHeight, bool Emulated, double Scale)
+{
+    /// <summary>The emulated page width, the frame's, in whole device-independent pixels.</summary>
+    public int EmulatedWidth => (int)Math.Round(NeededWidth);
+
+    /// <summary>The emulated page height, as <see cref="EmulatedWidth"/>.</summary>
+    public int EmulatedHeight => (int)Math.Round(NeededHeight);
+
+    /// <summary>DevTools' answer when the emulation was refused; the page is then the window's size.</summary>
+    public string? EmulationError { get; init; }
 }

@@ -1417,6 +1417,7 @@ aside: the frame is exactly its recorded size, and the page is the page.
    smaller page, which the Viewport as shown section reports as a
    difference. Keeping the recorded size there would need the size alone
    to be emulated; that is not built, and is for the owner to decide.
+   Decided 2026-10-10: built as below, drawn smaller to fit.
 
 The target machine script (`scripts/Test-RecreationPreferences.ps1`) now
 expects, at each step, the latest layout change set's layout zoom as the
@@ -1431,6 +1432,39 @@ meant and shown, so the page's size and ratio are the recorded ones. At
 a frame after it, the section gave 1864 by 818 CSS pixels at a device
 pixel ratio of 1 and a layout zoom of 1, both meant and shown: the same
 frame in screen pixels, laid out at the later text size.
+
+Agreed with the owner on 2026-10-10, option A of the fallback proposed for
+item 3 above: a frame the screen cannot hold is drawn smaller, whole.
+
+1. When. The window is sized as before, then the blank tab's page area is
+   read back until it holds the frame or has settled (five readings 100 ms
+   apart that agree, or the last of 30). When it is a pixel or more short
+   of the frame in either direction, the fallback is used; otherwise
+   nothing is emulated (`RecreationControl.Fit`).
+2. What. `Emulation.setDeviceMetricsOverride` with the frame's size in the
+   viewing machine's device-independent pixels, no device scale factor
+   (`deviceScaleFactor` 0, so the earlier problem of an emulated factor
+   that did not reach the renderer does not arise), and
+   `dontSetVisibleSize`, so the window's page view keeps its size. In the
+   checkout, the renderer's widget then takes the emulated size as its own
+   (`ScreenMetricsEmulator::Apply`), and without `dontSetVisibleSize` the
+   page view would be resized to it and cut off by the window
+   (`WebContentsImpl::SetDeviceEmulationSize`).
+3. The scale. The page is drawn at the largest scale the page area holds,
+   rounded down to 0.0001 and no less than 0.01, through the command's
+   `scale`, which DevTools' device mode uses to fit a large device in its
+   window. The layout is the recorded one; only the drawing is smaller.
+   The scale is set for the window as the recreation opened it.
+4. The panel. The recorder serves the fit as `window.json`
+   (`RecreationWindowFit`), and the Viewport as shown section lists the
+   page area, the frame's size, and the scale, and announces them, or says
+   that the emulation was refused, with DevTools' answer, and that the page
+   is then the window's size.
+
+Not yet measured on the target machine: whether a mouse click lands where
+it is drawn at a scale below 1, and whether resizing the window keeps the
+emulated size. The check is a recording made with Chromium maximized,
+whose window and its frame the screen cannot hold.
 - The script's first analysis (2026-10-09) stopped formatting a time:
   Windows PowerShell chose `Math.Max(int, int)` for a literal 0, which a
   recording's nanoseconds overflow. Both arguments are now `long`, and the

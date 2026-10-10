@@ -967,11 +967,22 @@ function showTimings(steps, times) {
 // those it is meant to be shown at ("The recorded layout zoom" in
 // docs/architecture/accessibility-preferences.md). innerWidth and
 // innerHeight are the size media queries see, as the recorded viewport is.
-function checkViewport() {
+// When the screen could not hold the recorded frame, the recorder emulated
+// the page's size and drew it smaller to fit, and says so in window.json.
+async function checkViewport() {
   const top = evidenceByKey.get("");
   const meant = top && top.shownViewport;
   if (!meant) {
     return;
+  }
+  let fit = null;
+  try {
+    const response = await fetch(`${recorderBase}window.json`, { cache: "no-store" });
+    if (response.ok) {
+      fit = await response.json();
+    }
+  } catch (error) {
+    fit = null;
   }
   chrome.devtools.inspectedWindow.eval(
     "JSON.stringify([innerWidth, innerHeight, devicePixelRatio])",
@@ -986,6 +997,15 @@ function checkViewport() {
         `Meant to be shown at: ${meant.width.toFixed(2)} by ${meant.height.toFixed(2)} CSS pixels, device pixel ratio ${meant.devicePixelRatio.toFixed(4)}, laid out at a layout zoom factor of ${meant.layoutZoomFactor.toFixed(4)}`));
       list.appendChild(element("li",
         `Shown at: ${width} by ${height} CSS pixels, device pixel ratio ${Number(ratio).toFixed(4)}`));
+      let fitNote = null;
+      if (fit && fit.emulated) {
+        fitNote = `The screen could not hold the recorded frame: the window's page area is ${Math.round(fit.areaWidth)} by ${Math.round(fit.areaHeight)} device-independent pixels, where the frame needs ${fit.emulatedWidth} by ${fit.emulatedHeight}. The page's size is emulated at the frame's, and it is drawn at ${(fit.scale * 100).toFixed(2)} percent to fit the window. The scale is set for the window as the recreation opened it.`;
+      } else if (fit && fit.emulationError) {
+        fitNote = `The screen could not hold the recorded frame, and the page's size could not be emulated (${fit.emulationError}), so the page is the window's size: ${Math.round(fit.areaWidth)} by ${Math.round(fit.areaHeight)} device-independent pixels, where the frame needs ${fit.emulatedWidth} by ${fit.emulatedHeight}.`;
+      }
+      if (fitNote) {
+        list.appendChild(element("li", fitNote));
+      }
       content.appendChild(list);
       const sizeDiffers = Math.abs(width - meant.width) > 1 || Math.abs(height - meant.height) > 1;
       const ratioDiffers = Math.abs(ratio - meant.devicePixelRatio) > 0.001;
@@ -1000,8 +1020,8 @@ function checkViewport() {
         ? "The page's size, to the nearest CSS pixel, and its device pixel ratio are those it is meant to be shown at."
         : `The page differs in ${differences.join(" and ")} from the viewport it is meant to be shown at, so its media queries and layout may not be the recorded ones.`;
       content.appendChild(element("p", summary));
-      if (differences.length > 0) {
-        say(summary);
+      if (differences.length > 0 || fitNote) {
+        say(fitNote ? `${summary} ${fitNote}` : summary);
       }
     });
 }

@@ -2547,6 +2547,11 @@ Built on 2026-10-01, not yet run on the target machine.
   machine's scale factor, so a window the screen cannot hold gives a
   smaller page, which the evidence panel's Viewport as shown section
   reports.
+  Revised 2026-10-10: when the page area the window was given is a pixel
+  or more short of the frame, the page's size alone is emulated at the
+  frame's and drawn smaller to fit, and the Viewport as shown section
+  says so ("The recorded layout zoom" in
+  [accessibility preferences](accessibility-preferences.md)).
 
 Tests at this stage:
 
