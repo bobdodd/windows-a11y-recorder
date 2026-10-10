@@ -349,7 +349,10 @@ window ([validation](../validation/keyboard-hook-2026-10-10.md), "The
 elevated window") found that while a window of an elevated process is in
 the foreground, neither the keyboard hook nor raw input receives any key,
 nor raw input any mouse input, and that nothing in the recording marked
-the gap. Built the same day, not yet run on the target machine.
+the gap. Built the same day, and run on the target machine the same day
+([validation](../validation/keyboard-hook-2026-10-10.md), "Marking when
+input could not be recorded"): the elevated window's level was read as
+high and its periods marked; the secure desktop is still to check.
 
 The owner's decisions:
 

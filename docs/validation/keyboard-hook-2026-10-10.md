@@ -79,3 +79,33 @@ The recorder runs without administrator rights, so input to a window of
 an elevated process does not reach it. Nothing in the recording marks
 these periods as times when input could not be recorded; only the
 foreground window's title shows it.
+
+## Marking when input could not be recorded
+
+Recording 20261010-224236-a9813e7e610b40fca8513f4d4b9cd042, package
+wr-51372a3, about 155 s: the elevated window steps again, with the
+records of "Input the recorder cannot receive"
+([screen reader activity](../architecture/screen-reader-activity.md)).
+
+- The recorder recorded itself at medium integrity (8192), without
+  UIAccess, and the user's desktop, `Default`, at the start.
+- The elevated PowerShell (process 22444) was read as high integrity
+  (12288), with no problem, and recorded as not recordable each time it
+  came to the foreground: from 32.15 s to 48.90 s and from 102.14 s to
+  119.17 s. Every other window was medium or low, and recordable,
+  including NVDA's (medium, without UIAccess, as a portable copy) and the
+  search pane and the shell's flyouts (low).
+- In those periods the hook and raw input recorded no key and raw input
+  no mouse input, as in the first run; the mouse release just before each
+  period, on the taskbar, was recorded. Keys either side were recorded:
+  three Tabs at about 50 s and five H keys from 126.9 s.
+- The owner saw the band in the player: "the channels are greyed out when
+  focus is in the elevated powershell window".
+- The keyboard hook was installed again every second while NVDA ran (79
+  refreshes, the longest spacing 1.015 s), with no loss, no failure, and
+  no key dropped; the longest callback was 350 microseconds.
+
+Not shown by this run: the secure desktop. The elevated PowerShell was the
+one left open from the previous run, so no permission prompt appeared,
+and the input desktop stayed `Default` throughout (one `input-desktop`
+record, at the start).

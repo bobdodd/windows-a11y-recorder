@@ -80,10 +80,11 @@ Designed in [screen reader activity](screen-reader-activity.md), agreed
   its "The keyboard hook". First run on the target machine the same day
   ([validation](../validation/keyboard-hook-2026-10-10.md)). Input to an
   elevated window, and on the secure desktop, reaches neither the hook nor
-  raw input. Built 2026-10-10, not yet run on the target machine: the
-  records and the player's band and row for when input could not be
-  recorded, as in its "Input the recorder cannot receive"; recording
-  elevated programs is ruled out by the owner.
+  raw input. Built 2026-10-10 and run on the target machine the same day:
+  the records and the player's band and row for when input could not be
+  recorded, as in its "Input the recorder cannot receive"; the secure
+  desktop of a permission prompt is still to check. Recording elevated
+  programs is ruled out by the owner.
 - To build, in the order agreed on 2026-10-10: the key dispositions (2b);
   NVDA's commands, the mode band, and the screen reader window episodes
   (2c); a low-level mouse hook, for NVDA's speaking of the content under
