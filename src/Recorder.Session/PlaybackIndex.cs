@@ -25,7 +25,9 @@ public sealed record PlaybackIndex
     // (graphics.magnifier) whole, for the panel's Magnifier rows. Version 8
     // keeps the browser preference records (browser.preferences, protocol
     // 0.56) whole, for the panel's Browser and Sent to the page rows.
-    public const int CurrentVersion = 8;
+    // Version 9 keeps the assistive technology records
+    // (system.assistive-technology) whole, for the panel's Screen reader rows.
+    public const int CurrentVersion = 9;
 
     public required int Version { get; init; }
 
@@ -224,7 +226,8 @@ public sealed class PlaybackIndexBuilder
 
         if (channel == Recorder.Contracts.WindowsPreferenceSettings.Channel ||
             channel == Recorder.Contracts.MagnifierChanges.Channel ||
-            channel == Recorder.Contracts.BrowserPreferenceSettings.Channel)
+            channel == Recorder.Contracts.BrowserPreferenceSettings.Channel ||
+            channel == Recorder.Contracts.AssistiveTechnologyRecords.Channel)
         {
             Keep(eventKey, record);
             return;
@@ -348,7 +351,8 @@ public sealed class PlaybackIndexBuilder
             (IsPopupRecord(record.Channel, record.EventType) ||
              record.Channel == Recorder.Contracts.WindowsPreferenceSettings.Channel ||
              record.Channel == Recorder.Contracts.MagnifierChanges.Channel ||
-             record.Channel == Recorder.Contracts.BrowserPreferenceSettings.Channel) &&
+             record.Channel == Recorder.Contracts.BrowserPreferenceSettings.Channel ||
+             record.Channel == Recorder.Contracts.AssistiveTechnologyRecords.Channel) &&
             record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()
                 : PlaybackPayload(record.Payload)));

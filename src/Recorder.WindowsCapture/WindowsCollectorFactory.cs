@@ -1,3 +1,4 @@
+using Recorder.Collectors.AssistiveTechnology;
 using Recorder.Collectors.Audio;
 using Recorder.Collectors.Automation;
 using Recorder.Collectors.Browser;
@@ -35,6 +36,15 @@ public static class WindowsCollectorFactory
         // them changes nothing and costs little. See
         // docs/architecture/accessibility-preferences.md.
         collectors.Add(new WindowsPreferencesCollector());
+
+        // The assistive technology running, NVDA first, is always recorded:
+        // its processes, its modules in the instrumented Chromium, and when
+        // its audio makes sound. It reads only, and changes nothing in it.
+        // See docs/architecture/screen-reader-activity.md, "Tracking NVDA".
+        collectors.Add(new AssistiveTechnologyCollector(
+            options.CaptureBrowserEvidence
+                ? options.ChromiumExecutablePath ?? Path.Combine(AppContext.BaseDirectory, "browser", "chrome.exe")
+                : null));
 
         if (options.CaptureDesktopFrames)
         {

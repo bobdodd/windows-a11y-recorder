@@ -182,6 +182,74 @@ internal static class EvidenceCatalog
         new InlineField("previous", R, MagnifierReadings()),
         new InlineField("current", R, MagnifierReadings()));
 
+    // Added by 0026_assistive_technology.sql. The assistive technology
+    // collector's records (system.assistive-technology): what it watches,
+    // each watched process's start and exit, each of its modules seen in or
+    // gone from the instrumented Chromium, and each period of sound. See
+    // docs/architecture/screen-reader-activity.md, "Tracking NVDA".
+    public static readonly EvidenceTable AssistiveTechnologyWatches = Evidence(
+        "assistive_technology_watches",
+        TextList("products", R, "assistive_technology_watch_products"),
+        TextList("executables", R, "assistive_technology_watch_executables"),
+        TextList("modules", R, "assistive_technology_watch_modules"),
+        Int("processPollMilliseconds"),
+        Int("modulePollMilliseconds"),
+        Int("soundSampleMilliseconds"),
+        Double("soundThreshold"),
+        Int("soundGapMilliseconds"),
+        Text("browserExecutablePath", N),
+        Text("soundProblem", N));
+
+    public static readonly EvidenceTable AssistiveTechnologyProcessStarts = Evidence(
+        "assistive_technology_process_starts",
+        Text("product"),
+        Text("role"),
+        Text("basis"),
+        Text("executablePath", N),
+        Text("fileVersion", N),
+        Text("productVersion", N),
+        BigInt("processId"),
+        BigInt("parentProcessId", N),
+        Scalar("startedUtc", ScalarType.Utc, N),
+        Bool("runningAtStart"),
+        Text("copy"),
+        Text("problem", N));
+
+    public static readonly EvidenceTable AssistiveTechnologyProcessExits = Evidence(
+        "assistive_technology_process_exits",
+        Text("product"),
+        Text("role"),
+        BigInt("processId"),
+        Scalar("startedUtc", ScalarType.Utc, N),
+        Scalar("exitedUtc", ScalarType.Utc, N),
+        BigInt("exitCode", N));
+
+    // Both a module seen loaded and one seen gone; the event type says which.
+    public static readonly EvidenceTable AssistiveTechnologyModuleChanges = Evidence(
+        "assistive_technology_module_changes",
+        Text("product"),
+        Text("moduleName"),
+        Text("modulePath"),
+        Text("fileVersion", N),
+        BigInt("hostProcessId"),
+        Text("hostExecutablePath"),
+        Bool("hostExited"));
+
+    public static readonly EvidenceTable AssistiveTechnologySoundStarts = Evidence(
+        "assistive_technology_sound_starts",
+        Text("product"),
+        BigInt("processId"),
+        Double("peak"));
+
+    public static readonly EvidenceTable AssistiveTechnologySoundEnds = Evidence(
+        "assistive_technology_sound_ends",
+        Text("product"),
+        BigInt("processId"),
+        BigInt("startedAt"),
+        BigInt("lastSoundAt"),
+        Double("maxPeak"),
+        Text("endedBy"));
+
     // Added by 0023_browser_preferences.sql (protocol 0.56). The listed
     // browser preferences of a profile and their changes, the preferences
     // each page's view is sent, and each zoom level change. See
@@ -1320,7 +1388,12 @@ internal static class EvidenceCatalog
             BrowserPreferenceSnapshots, BrowserPreferenceChanges, BrowserWebPreferencesSent,
             BrowserZoomLevelChanges
         ]),
-        (24, "browser_color_maps", [BrowserColorMapsSent])
+        (24, "browser_color_maps", [BrowserColorMapsSent]),
+        (26, "assistive_technology",
+        [
+            AssistiveTechnologyWatches, AssistiveTechnologyProcessStarts, AssistiveTechnologyProcessExits,
+            AssistiveTechnologyModuleChanges, AssistiveTechnologySoundStarts, AssistiveTechnologySoundEnds
+        ])
     ];
 
     /// <summary>
@@ -1346,6 +1419,13 @@ internal static class EvidenceCatalog
             [("system.preferences", "windows-preference-changed")] = WindowsPreferenceChanges,
             [("graphics.desktop.frames", "desktop-frame")] = DesktopFrames,
             [("graphics.magnifier", "magnifier-changed")] = MagnifierChangeRecords,
+            [("system.assistive-technology", "assistive-technology-watch")] = AssistiveTechnologyWatches,
+            [("system.assistive-technology", "assistive-technology-process-started")] = AssistiveTechnologyProcessStarts,
+            [("system.assistive-technology", "assistive-technology-process-exited")] = AssistiveTechnologyProcessExits,
+            [("system.assistive-technology", "assistive-technology-module-loaded")] = AssistiveTechnologyModuleChanges,
+            [("system.assistive-technology", "assistive-technology-module-unloaded")] = AssistiveTechnologyModuleChanges,
+            [("system.assistive-technology", "assistive-technology-sound-started")] = AssistiveTechnologySoundStarts,
+            [("system.assistive-technology", "assistive-technology-sound-ended")] = AssistiveTechnologySoundEnds,
             [("browser.preferences", "browser-preferences")] = BrowserPreferenceSnapshots,
             [("browser.preferences", "browser-preference-changed")] = BrowserPreferenceChanges,
             [("browser.preferences", "web-preferences-sent")] = BrowserWebPreferencesSent,

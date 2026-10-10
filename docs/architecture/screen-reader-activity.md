@@ -10,6 +10,11 @@ records which screen reader is running, and the
 [screen reader keys validation](../validation/screen-reader-keys-2026-10-07.md),
 which measured what reaches the recorder while NVDA runs.
 
+On 2026-10-10 the owner set the goals for NVDA and the terms of the work,
+recorded in "Decisions of 2026-10-10", and the first step, tracking NVDA,
+was built; see "Tracking NVDA". It has not yet been run on the target
+machine. The keyboard hook and the rest of this design are not built.
+
 ## The problem
 
 A screen reader user moves through a page in several ways: Tab and the
@@ -61,6 +66,158 @@ Inferred, each shown as an inference with its basis:
   (analysis work, not designed here).
 - Where the screen reader's reading position was (not designed here; see
   "Not in this design").
+
+## Decisions of 2026-10-10
+
+The owner's two goals for NVDA: "One, I want to know what it says. Two, I
+want to know how the user is interacting with it (how they are using the
+shortcut keys etc, heading navigation, landmark navigation, pulling out
+lists of links etc). It is important for testing and for remediation so
+that the developer understands how the issue was caused and can repeat
+the process to test the remediation."
+
+The terms, in the owner's words where quoted:
+
+- No NVDA log: "I don't want to use the log. Work it out from the
+  recording."
+- No speech recognition. The microphone and the system sound are often in
+  one channel, so what NVDA said is worked out from the recorded
+  accessibility tree and the commands given: "I prefer to inspect the
+  accessibility tree knowing the commands given."
+- No add-ons or settings in NVDA: "Ideally, I don't really wand plugins or
+  special settings within NVDA". This is also the prototype plan's rule
+  that the recorder "must not inject code into the screen reader or modify
+  its behavior" ([prototype plan](../prototype-plan.md)). The recorder
+  reads; it changes nothing in NVDA.
+- Track NVDA's processes, "to know when it is operating (potentially at
+  least) operating".
+- What the player shows from the tree and the commands is labelled what
+  NVDA had to announce, not what NVDA said. The chain of inference breaks
+  at a command the model does not handle, and the player shows where.
+
+The order of work, as agreed:
+
+1. Tracking NVDA: running, reached the browser, and making sound. Built;
+   see "Tracking NVDA".
+2. The keyboard hook and the commands, as designed below.
+3. A test in the instrumented Chromium of the `PerformAction` and scroll
+   requests NVDA makes during heading and landmark navigation (see "Not in
+   this design").
+4. The reading position, inferred from the accessibility tree and the
+   commands, with the player's list of steps and a view of the tree.
+
+## Tracking NVDA
+
+Built 2026-10-10, not yet run on the target machine. The assistive
+technology collector (`src/Recorder.Collectors.AssistiveTechnology`) is
+always on, as the Windows settings collector is, and records on the
+`system.assistive-technology` channel
+(`src/Recorder.Contracts/AssistiveTechnologyRecords.cs`). It needs no
+administrator rights, loads nothing into NVDA or the browser, and changes
+no setting. Each fact is recorded at one of three levels, each with its
+basis.
+
+### Running
+
+From the process list (Toolhelp), every 250 ms:
+
+- NVDA's main process is a process whose executable is `nvda.exe`.
+- A helper is a child of a main process whose executable is in the main
+  process's folder or below it, such as `nvda_slave.exe`. A child from
+  elsewhere, such as a program NVDA was asked to start, is not recorded.
+  This was the planned default for the open question of which helpers to
+  record; it can be changed.
+- Each process's start and exit times are Windows' own
+  (`GetProcessTimes`), so the polling interval does not blur them, and a
+  copy already running when the recording starts is recorded with its
+  real start time and `runningAtStart`. A process is known by its ID and
+  start time, so an ID Windows reuses is a new process.
+- The record holds the executable's path, file and product versions, and
+  the copy: installed when the `UninstallDirectory` value of
+  `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NVDA` names
+  its folder, as NVDA's own `config.isInstalledCopy` decides it
+  ([NVDA source, config](https://github.com/nvaccess/nvda/blob/master/source/config/__init__.py);
+  [the key](https://github.com/nvaccess/nvda/blob/master/source/config/registry.py)),
+  and otherwise portable. Both registry views are read.
+
+Records: `assistive-technology-process-started` and
+`assistive-technology-process-exited`.
+
+### Reached the browser
+
+From the module lists of the instrumented Chromium's processes (the
+processes whose executable is the recording's `chrome.exe`), every second
+while NVDA runs or its module is seen: `nvdahelperremote.dll`, the module
+Chromium itself matches to NVDA in `DiscoverAssistiveTech`, seen in or gone
+from each process. Reading a module list reads; it does not inject. A
+process whose list cannot be read is passed over, so the absence of the
+module there is not evidence.
+
+Records: `assistive-technology-module-loaded` and
+`assistive-technology-module-unloaded`, with `hostExited` when the
+browser process ended with the module loaded.
+
+### Making sound
+
+From the peak meter of each of NVDA's processes' audio sessions on every
+active output device (`IAudioSessionManager2`, the session's process ID
+from `IAudioSessionControl2`, and `IAudioMeterInformation`), sampled every
+20 ms; the sessions are listed again every second. The method follows
+[Matthew van Eerde's per-session peak meters](https://matthewvaneerde.wordpress.com/2012/06/08/getting-audio-peak-meter-values-for-all-active-audio-sessions/).
+The meter is NVDA's own stream before the system mixes it, so the
+microphone and other programs' sound do not reach it.
+
+- A period of sound starts with the first sample at or above 0.001 and
+  ends when no sample has reached it for 250 ms, so the pauses between
+  words do not split an utterance. The end record comes after the gap;
+  its `lastSoundAt` is when the sound stopped, and the player uses that.
+- A period also ends when the process exits or the recording stops.
+- The session's active state is not used: NVDA keeps its audio device
+  awake after speech for a set time
+  ([NVDA 2026.2 user guide](https://download.nvaccess.org/releases/2026.2/documentation/userGuide.html)),
+  so a session stays active through silence
+  ([Microsoft, OnStateChanged](https://learn.microsoft.com/en-us/windows/win32/api/audiopolicy/nf-audiopolicy-iaudiosessionevents-onstatechanged)).
+- Sound is not speech. A period may be speech, a beep, or one of NVDA's
+  sounds; the player says "playing sound".
+- On the owner's instruction of 2026-10-10 ("Let's assume it works for now
+  and proceed"), the meter is assumed to work. It is untested: the
+  threshold, the gap, and whether NVDA's sound reaches a session of its own
+  process under each of its audio outputs are to be checked on the target
+  machine.
+
+Records: `assistive-technology-sound-started` and
+`assistive-technology-sound-ended`. The first record,
+`assistive-technology-watch`, gives the products watched, the intervals,
+the threshold and gap, the browser's executable, and why the sound could
+not be measured, if it could not.
+
+### Storage and the player
+
+- The payload rules are in `EventPayloadValidator`; the database tables
+  are made by migration 0026; the playback index keeps the records whole
+  (version 9).
+- The properties panel has a "Screen reader" group with three rows for
+  NVDA: running (with version, copy, and process), in the browser, and
+  audio. Each row has the change buttons and count, the audio row's count
+  being of periods of sound.
+- The timeline has a lane and a filter for the records.
+- A recording made before the records shows "not recorded".
+
+### Tests of tracking NVDA
+
+- Unit tests (`tests/Recorder.Tests/AssistiveTechnologyTests.cs`): the
+  periods of sound from samples, including pauses shorter than the gap
+  and the ends by exit and stop; matching NVDA's executable, module, and
+  helpers by folder; the copy; the payload rules, including inconsistent
+  records; the panel rows and their change times; the archive and the
+  event summaries.
+- Database tests: every record type is written and read back
+  (`EvidenceTableTests`).
+- A system test on the target machine, to do: start NVDA after the
+  recording begins, speak with it, talk over it, and quit it; then check
+  that the start and exit times match Windows', that the module is seen
+  in the browser, and that the periods of sound match NVDA's speech and
+  not the microphone.
 
 ## The keyboard hook
 
@@ -189,6 +346,9 @@ A "Screen reader" lane on the timeline shows:
 - Screen readers other than NVDA, until each is tested.
 
 ## Questions to settle
+
+- Whether the helpers recorded should be other than NVDA's children from
+  its folder (see "Tracking NVDA").
 
 - Whether a low-level mouse hook is added on the same terms, for injected
   mouse input and the screen reader's mouse commands.

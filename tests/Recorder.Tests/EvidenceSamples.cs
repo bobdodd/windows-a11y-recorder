@@ -205,6 +205,36 @@ internal static class EvidenceSamples
             """),
         ("browser.preferences", "color-maps-sent", ColorMapsSample(false, ["kColorMenuBackground", "kColorMenuSeparator"])),
         ("browser.preferences", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
+        // Added with 0026_assistive_technology.sql: the watch, with a browser
+        // and without one and with the meters unavailable; NVDA's portable
+        // copy running at the start and its helper; one started later whose
+        // path could not be read; their exits; its module seen in the
+        // browser, then gone, once with the browser; and a period of sound
+        // ending each way.
+        ("system.assistive-technology", "assistive-technology-watch",
+            J("{'products':['NVDA'],'executables':['nvda.exe'],'modules':['nvdahelperremote.dll'],'processPollMilliseconds':250,'modulePollMilliseconds':1000,'soundSampleMilliseconds':20,'soundThreshold':0.001,'soundGapMilliseconds':250,'browserExecutablePath':'C:\\\\Recorder\\\\browser\\\\chrome.exe','soundProblem':null}")),
+        ("system.assistive-technology", "assistive-technology-watch",
+            J("{'products':['NVDA'],'executables':['nvda.exe'],'modules':['nvdahelperremote.dll'],'processPollMilliseconds':250,'modulePollMilliseconds':1000,'soundSampleMilliseconds':20,'soundThreshold':0.001,'soundGapMilliseconds':250,'browserExecutablePath':null,'soundProblem':'The audio devices could not be listed: Class not registered'}")),
+        ("system.assistive-technology", "assistive-technology-process-started",
+            J("{'product':'NVDA','role':'screen-reader','basis':'known-executable','executablePath':'C:\\\\Users\\\\User\\\\Desktop\\\\NVDA\\\\nvda.exe','fileVersion':'2026.2.0.12345','productVersion':'2026.2','processId':5120,'parentProcessId':4100,'startedUtc':'2026-10-10T17:59:12.1234567+00:00','runningAtStart':true,'copy':'portable','problem':null}")),
+        ("system.assistive-technology", "assistive-technology-process-started",
+            J("{'product':'NVDA','role':'helper','basis':'child-in-folder','executablePath':'C:\\\\Users\\\\User\\\\Desktop\\\\NVDA\\\\nvda_slave.exe','fileVersion':null,'productVersion':null,'processId':5200,'parentProcessId':5120,'startedUtc':'2026-10-10T17:59:13+00:00','runningAtStart':false,'copy':'portable','problem':null}")),
+        ("system.assistive-technology", "assistive-technology-process-started",
+            J("{'product':'NVDA','role':'screen-reader','basis':'known-executable','executablePath':null,'fileVersion':null,'productVersion':null,'processId':6100,'parentProcessId':null,'startedUtc':null,'runningAtStart':false,'copy':'unknown','problem':'The process\\u0027s executable path could not be read.'}")),
+        ("system.assistive-technology", "assistive-technology-process-exited",
+            J("{'product':'NVDA','role':'screen-reader','processId':5120,'startedUtc':'2026-10-10T17:59:12.1234567+00:00','exitedUtc':'2026-10-10T18:05:00.5+00:00','exitCode':0}")),
+        ("system.assistive-technology", "assistive-technology-process-exited",
+            J("{'product':'NVDA','role':'helper','processId':5200,'startedUtc':null,'exitedUtc':null,'exitCode':null}")),
+        ("system.assistive-technology", "assistive-technology-module-loaded",
+            J("{'product':'NVDA','moduleName':'nvdahelperremote.dll','modulePath':'C:\\\\Users\\\\User\\\\Desktop\\\\NVDA\\\\lib64\\\\2026.2\\\\nvdaHelperRemote.dll','fileVersion':'2026.2.0.12345','hostProcessId':4000,'hostExecutablePath':'C:\\\\Recorder\\\\browser\\\\chrome.exe','hostExited':false}")),
+        ("system.assistive-technology", "assistive-technology-module-unloaded",
+            J("{'product':'NVDA','moduleName':'nvdahelperremote.dll','modulePath':'C:\\\\Users\\\\User\\\\Desktop\\\\NVDA\\\\lib64\\\\2026.2\\\\nvdaHelperRemote.dll','fileVersion':null,'hostProcessId':4000,'hostExecutablePath':'C:\\\\Recorder\\\\browser\\\\chrome.exe','hostExited':true}")),
+        ("system.assistive-technology", "assistive-technology-sound-started",
+            J("{'product':'NVDA','processId':5120,'peak':0.0421}")),
+        ("system.assistive-technology", "assistive-technology-sound-ended",
+            J("{'product':'NVDA','processId':5120,'startedAt':1000,'lastSoundAt':1500,'maxPeak':0.31,'endedBy':'silence'}")),
+        ("system.assistive-technology", "assistive-technology-sound-ended",
+            J("{'product':'NVDA','processId':5120,'startedAt':1200,'lastSoundAt':1200,'maxPeak':0.002,'endedBy':'stop'}")),
         // Added with 0022_magnifier_changes.sql: a level and position change,
         // a pan, a color effect turned on, and readings that failed.
         ("graphics.magnifier", "magnifier-changed",

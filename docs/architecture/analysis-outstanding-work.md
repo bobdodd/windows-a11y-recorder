@@ -70,10 +70,15 @@ Designed in [screen reader activity](screen-reader-activity.md), agreed
 2026-10-07. The owner accepted a low-level keyboard hook on
 2026-10-07.
 
-- To build: the keyboard hook collector, with reinstalling when a screen
-  reader starts and when the hook is lost; the key dispositions; the
-  screen reader window episodes; the command data for NVDA; the player's
-  screen reader lane.
+- Built 2026-10-10: tracking NVDA, its processes, its module in the
+  browser, and its periods of sound, with the properties panel's Screen
+  reader rows, as in its "Tracking NVDA". To test on the target machine.
+- To build, in the order agreed on 2026-10-10: the keyboard hook
+  collector, with reinstalling when a screen reader starts and when the
+  hook is lost; the key dispositions; the screen reader window episodes;
+  the command data for NVDA; the player's screen reader lane; then the
+  test of NVDA's requests to Chromium, and the reading position from the
+  accessibility tree and the commands.
 - To settle: the items in its "Questions to settle".
 - To test: as in its "Required tests".
 

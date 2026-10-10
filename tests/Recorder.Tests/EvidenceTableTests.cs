@@ -879,7 +879,9 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         // 0022 added the table of the Magnifier changes.
         record.Channel != "graphics.magnifier" &&
         // 0023 added the tables of the browser preferences.
-        record.Channel != "browser.preferences";
+        record.Channel != "browser.preferences" &&
+        // 0026 added the tables of the assistive technology records.
+        record.Channel != "system.assistive-technology";
 
     private static List<string> Sorted(List<string> rows)
     {

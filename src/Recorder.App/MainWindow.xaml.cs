@@ -50,6 +50,7 @@ public partial class MainWindow : Window
         "graphics.desktop.frames",
         "graphics.magnifier",
         "browser.preferences",
+        "system.assistive-technology",
         "audio.microphone",
         "audio.system",
         "session.annotations",
@@ -1234,6 +1235,7 @@ public partial class MainWindow : Window
         AddVisibleChannel(FilterPreferencesCheckBox, "system.preferences", visibleChannels);
         AddVisibleChannel(FilterMagnifierCheckBox, "graphics.magnifier", visibleChannels);
         AddVisibleChannel(FilterBrowserSettingsCheckBox, "browser.preferences", visibleChannels);
+        AddVisibleChannel(FilterAssistiveTechnologyCheckBox, "system.assistive-technology", visibleChannels);
         AddVisibleChannel(
             FilterFramesCheckBox,
             "graphics.desktop.frames",
@@ -1289,6 +1291,7 @@ public partial class MainWindow : Window
         FilterPreferencesCheckBox.IsChecked = selected;
         FilterMagnifierCheckBox.IsChecked = selected;
         FilterBrowserSettingsCheckBox.IsChecked = selected;
+        FilterAssistiveTechnologyCheckBox.IsChecked = selected;
         FilterFramesCheckBox.IsChecked = selected;
         FilterMicrophoneCheckBox.IsChecked = selected;
         FilterSystemAudioCheckBox.IsChecked = selected;

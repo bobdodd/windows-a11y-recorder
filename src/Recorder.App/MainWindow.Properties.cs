@@ -70,11 +70,13 @@ public partial class MainWindow
     }
 
     // Every row of the panel at a time: the Magnifier and Windows groups,
-    // then the Browser and Sent to the page groups.
+    // then the Browser and Sent to the page groups, then the Screen reader
+    // group.
     private static IReadOnlyList<PropertyRow> RowsAt(SessionPlaybackArchive archive, long time, SessionVideoFrame? frame) =>
     [
         .. archive.WindowsPreferences.RowsAt(time, frame, archive.MagnifierChanges),
-        .. archive.BrowserPreferences.RowsAt(time)
+        .. archive.BrowserPreferences.RowsAt(time),
+        .. archive.AssistiveTechnology.RowsAt(time)
     ];
 
     // The row's place among its setting's changes, or null when it has no
@@ -96,7 +98,8 @@ public partial class MainWindow
         if (!_propertyChangeTimes.TryGetValue(row.Key, out var times))
         {
             times = PropertyChangeSteps.TimesOf(
-                row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences);
+                row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences,
+                archive.AssistiveTechnology);
             _propertyChangeTimes[row.Key] = times;
         }
 
@@ -160,13 +163,15 @@ public partial class MainWindow
 
         var name = char.ToLower(row.Setting[0], System.Globalization.CultureInfo.CurrentCulture) + row.Setting[1..];
         if (PropertyChangeSteps.TimesOf(
-                row.Row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences) is not { } times)
+                row.Row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences,
+                archive.AssistiveTechnology) is not { } times)
         {
             _busy.AnnounceLayout(row.Group switch
             {
                 WindowsPreferenceTimeline.MagnifierGroup => "This recording has no Magnifier change records.",
                 BrowserPreferenceTimeline.BrowserGroup => "This recording has no browser preference records.",
                 BrowserPreferenceTimeline.PageGroup => "The values sent to the page have no change steps.",
+                AssistiveTechnologyTimeline.Group => "This recording has no assistive technology records.",
                 _ => "This recording has no Windows settings records."
             });
             return;

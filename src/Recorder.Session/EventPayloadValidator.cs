@@ -12,6 +12,7 @@ internal static class EventPayloadValidator
         "input.mouse",
         "window.foreground",
         "system.preferences",
+        "system.assistive-technology",
         "accessibility.uia.events",
         "graphics.desktop.frames",
         "graphics.magnifier",
@@ -111,6 +112,25 @@ internal static class EventPayloadValidator
                 break;
             case ("graphics.magnifier", "magnifier-changed"):
                 ValidateMagnifierChange(payload, issues);
+                break;
+            case ("system.assistive-technology", "assistive-technology-watch"):
+                ValidateAssistiveTechnologyWatch(payload, issues);
+                break;
+            case ("system.assistive-technology", "assistive-technology-process-started"):
+                ValidateAssistiveTechnologyProcessStarted(payload, issues);
+                break;
+            case ("system.assistive-technology", "assistive-technology-process-exited"):
+                ValidateAssistiveTechnologyProcessExited(payload, issues);
+                break;
+            case ("system.assistive-technology", "assistive-technology-module-loaded"):
+            case ("system.assistive-technology", "assistive-technology-module-unloaded"):
+                ValidateAssistiveTechnologyModule(payload, eventType.EndsWith("-loaded", StringComparison.Ordinal), issues);
+                break;
+            case ("system.assistive-technology", "assistive-technology-sound-started"):
+                ValidateAssistiveTechnologySoundStarted(payload, issues);
+                break;
+            case ("system.assistive-technology", "assistive-technology-sound-ended"):
+                ValidateAssistiveTechnologySoundEnded(payload, monotonicNanoseconds, issues);
                 break;
             case ("graphics.desktop.frames", "desktop-frame"):
                 ValidateDesktopFrame(payload, issues);
@@ -1333,6 +1353,158 @@ internal static class EventPayloadValidator
             }
         }
     }
+
+    // The assistive technology collector's records (system.assistive-technology):
+    // what it watches, each watched process's start and exit, each of its
+    // modules seen in or gone from the instrumented Chromium, and each period
+    // of sound. See docs/architecture/screen-reader-activity.md, "Tracking
+    // NVDA".
+    private static void ValidateAssistiveTechnologyWatch(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues) =>
+        ValidateShape(
+            payload,
+            [
+                RequiredStringArray("products"),
+                RequiredStringArray("executables"),
+                RequiredStringArray("modules"),
+                RequiredInteger("processPollMilliseconds", positive: true),
+                RequiredInteger("modulePollMilliseconds", positive: true),
+                RequiredInteger("soundSampleMilliseconds", positive: true),
+                RequiredNumber("soundThreshold", positive: true),
+                RequiredInteger("soundGapMilliseconds", positive: true),
+                NullableText("browserExecutablePath"),
+                NullableText("soundProblem")
+            ],
+            issues);
+
+    private static void ValidateAssistiveTechnologyProcessStarted(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredText("product"),
+                RequiredEnum("role", [.. Recorder.Contracts.AssistiveTechnologyRecords.Roles]),
+                RequiredEnum("basis", [.. Recorder.Contracts.AssistiveTechnologyRecords.Bases]),
+                NullableText("executablePath"),
+                NullableText("fileVersion"),
+                NullableText("productVersion"),
+                RequiredInteger("processId", nonnegative: true),
+                NullableInteger("parentProcessId", nonnegative: true),
+                NullableDateTime("startedUtc"),
+                RequiredBoolean("runningAtStart"),
+                RequiredEnum("copy", [.. Recorder.Contracts.AssistiveTechnologyRecords.Copies]),
+                NullableText("problem")
+            ],
+            issues);
+        if (Text(payload, "role") is { } role && Text(payload, "basis") is { } basis &&
+            (role == Recorder.Contracts.AssistiveTechnologyRecords.ScreenReaderRole) !=
+            (basis == Recorder.Contracts.AssistiveTechnologyRecords.KnownExecutableBasis))
+        {
+            AddError(
+                issues,
+                "assistive-technology-process-basis-inconsistent",
+                "#/payload/basis",
+                "A main process is matched by its executable, and a helper as a child in its folder.");
+        }
+
+        if (payload.TryGetProperty("executablePath", out var path) && payload.TryGetProperty("problem", out var problem) &&
+            (path.ValueKind == JsonValueKind.Null) != (problem.ValueKind == JsonValueKind.String))
+        {
+            AddError(
+                issues,
+                "assistive-technology-process-problem-inconsistent",
+                "#/payload/problem",
+                "A process has a problem exactly when its executable path could not be read.");
+        }
+    }
+
+    private static void ValidateAssistiveTechnologyProcessExited(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues) =>
+        ValidateShape(
+            payload,
+            [
+                RequiredText("product"),
+                RequiredEnum("role", [.. Recorder.Contracts.AssistiveTechnologyRecords.Roles]),
+                RequiredInteger("processId", nonnegative: true),
+                NullableDateTime("startedUtc"),
+                NullableDateTime("exitedUtc"),
+                NullableInteger("exitCode", nonnegative: true)
+            ],
+            issues);
+
+    private static void ValidateAssistiveTechnologyModule(
+        JsonElement payload,
+        bool loaded,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredText("product"),
+                RequiredText("moduleName"),
+                RequiredText("modulePath"),
+                NullableText("fileVersion"),
+                RequiredInteger("hostProcessId", nonnegative: true),
+                RequiredText("hostExecutablePath"),
+                RequiredBoolean("hostExited")
+            ],
+            issues);
+        if (loaded && payload.TryGetProperty("hostExited", out var exited) && exited.ValueKind == JsonValueKind.True)
+        {
+            AddError(
+                issues,
+                "assistive-technology-module-host-exited",
+                "#/payload/hostExited",
+                "A module is seen loaded only in a running process.");
+        }
+    }
+
+    private static void ValidateAssistiveTechnologySoundStarted(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues) =>
+        ValidateShape(
+            payload,
+            [
+                RequiredText("product"),
+                RequiredInteger("processId", nonnegative: true),
+                RequiredNumber("peak", nonnegative: true)
+            ],
+            issues);
+
+    private static void ValidateAssistiveTechnologySoundEnded(
+        JsonElement payload,
+        long monotonicNanoseconds,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredText("product"),
+                RequiredInteger("processId", nonnegative: true),
+                RequiredInteger("startedAt", nonnegative: true),
+                RequiredInteger("lastSoundAt", nonnegative: true),
+                RequiredNumber("maxPeak", nonnegative: true),
+                RequiredEnum("endedBy", [.. Recorder.Contracts.AssistiveTechnologyRecords.SoundEndings])
+            ],
+            issues);
+        if (payload.TryGetProperty("startedAt", out var started) && started.TryGetInt64(out var startedAt) &&
+            payload.TryGetProperty("lastSoundAt", out var last) && last.TryGetInt64(out var lastSoundAt) &&
+            (startedAt > lastSoundAt || lastSoundAt > monotonicNanoseconds))
+        {
+            AddError(
+                issues,
+                "assistive-technology-sound-times-inconsistent",
+                "#/payload/lastSoundAt",
+                "A period of sound starts at or before its last sound, which is at or before the record.");
+        }
+    }
+
+    private static string? Text(JsonElement payload, string name) =>
+        payload.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     // The two readings of one side of a Magnifier change, or null when either
     // is not of the shape a desktop frame holds.

@@ -28,6 +28,13 @@ public sealed record SessionPlaybackArchive(
     public MagnifierChangeTimeline MagnifierChanges { get; init; } = MagnifierChangeTimeline.Empty;
 
     /// <summary>
+    /// The assistive technology records of the recording, for the
+    /// properties panel's Screen reader rows; empty for a recording made
+    /// before they were recorded.
+    /// </summary>
+    public AssistiveTechnologyTimeline AssistiveTechnology { get; init; } = AssistiveTechnologyTimeline.Empty;
+
+    /// <summary>
     /// The browser preferences of the recording and those sent to its pages,
     /// for the properties panel; empty for a recording made before they were
     /// recorded or without a browser.

@@ -10,6 +10,15 @@ during a recording, what each signal establishes, what cannot be observed,
 and a proposal for recording it. Nothing here has been run on the target
 machine yet except the inventory in "The target machine".
 
+On 2026-10-10 the parts for NVDA were built: its processes, its module in
+the instrumented Chromium, and its audio by process, on the
+`system.assistive-technology` channel, as described in
+[screen reader activity](screen-reader-activity.md), "Tracking NVDA". The
+records differ from the proposal below: module records are kept to the
+instrumented Chromium's processes, and audio is recorded as periods of
+sound from the session's peak meter, not the session's state. The other
+signals are not built.
+
 ## Purpose
 
 The prototype plan, under "Screen-reader independence", allows the

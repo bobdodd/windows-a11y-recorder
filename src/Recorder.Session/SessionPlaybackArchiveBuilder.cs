@@ -23,7 +23,8 @@ public sealed class SessionPlaybackArchiveBuilder
         "accessibility.uia.events",
         "session.annotations",
         "graphics.desktop.frames",
-        "graphics.magnifier"
+        "graphics.magnifier",
+        "system.assistive-technology"
     ];
 
     /// <summary>
@@ -104,6 +105,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<WindowsPreferenceRecord> _preferences = [];
     private readonly List<(long Time, JsonElement Payload)> _magnifierChanges = [];
     private readonly List<BrowserPreferenceRecord> _browserPreferences = [];
+    private readonly List<AssistiveTechnologyRecord> _assistiveTechnology = [];
     private readonly List<BrowserPageCommit> _pageCommits = [];
     private readonly bool _retainEvents;
     private long _maximumTimestamp;
@@ -132,6 +134,7 @@ public sealed class SessionPlaybackArchiveBuilder
         channel == "graphics.desktop.frames" ||
         channel == WindowsPreferenceSettings.Channel ||
         channel == MagnifierChanges.Channel ||
+        channel == AssistiveTechnologyRecords.Channel ||
         channel.StartsWith("audio.", StringComparison.Ordinal) ||
         channel.StartsWith("browser.", StringComparison.Ordinal);
 
@@ -269,6 +272,12 @@ public sealed class SessionPlaybackArchiveBuilder
             _magnifierChanges.Add((timestamp, payload.Clone()));
         }
 
+        if (timelineEvent.Channel == AssistiveTechnologyRecords.Channel &&
+            payload.ValueKind == JsonValueKind.Object)
+        {
+            _assistiveTechnology.Add(new AssistiveTechnologyRecord(timestamp, timelineEvent.EventType, payload.Clone()));
+        }
+
         if (timelineEvent.Channel == BrowserPreferenceSettings.Channel &&
             payload.ValueKind == JsonValueKind.Object)
         {
@@ -348,7 +357,10 @@ public sealed class SessionPlaybackArchiveBuilder
                 : new MagnifierChangeTimeline(_magnifierChanges),
             BrowserPreferences = _browserPreferences.Count == 0
                 ? BrowserPreferenceTimeline.Empty
-                : new BrowserPreferenceTimeline(_browserPreferences, _pageCommits)
+                : new BrowserPreferenceTimeline(_browserPreferences, _pageCommits),
+            AssistiveTechnology = _assistiveTechnology.Count == 0
+                ? AssistiveTechnologyTimeline.Empty
+                : new AssistiveTechnologyTimeline(_assistiveTechnology)
         };
     }
 
@@ -582,6 +594,11 @@ public sealed class SessionPlaybackArchiveBuilder
             return BrowserPreferenceSummary(eventType, payload);
         }
 
+        if (channel == AssistiveTechnologyRecords.Channel)
+        {
+            return AssistiveTechnologySummary(eventType, payload);
+        }
+
         if (channel == MagnifierChanges.Channel &&
             payload.TryGetProperty("changed", out var changed) && changed.ValueKind == JsonValueKind.Object &&
             payload.TryGetProperty("current", out var now) && now.ValueKind == JsonValueKind.Object)
@@ -741,6 +758,62 @@ public sealed class SessionPlaybackArchiveBuilder
         items.Count <= 1
             ? string.Concat(items)
             : $"{string.Join(", ", items.Take(items.Count - 1))} and {items[^1]}";
+
+    // An assistive technology record as the event list shows it: the
+    // product, what happened, and the process.
+    private static string AssistiveTechnologySummary(string eventType, JsonElement payload)
+    {
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        var product = ReadString(payload, "product");
+        string? Process(string name) =>
+            payload.TryGetProperty(name, out var id) && id.TryGetInt64(out var number)
+                ? "process " + number.ToString(culture)
+                : null;
+        switch (eventType)
+        {
+            case AssistiveTechnologyRecords.WatchEventType:
+                return JoinSummary(
+                    eventType,
+                    "watching " + string.Join(", ", payload.TryGetProperty("products", out var products) && products.ValueKind == JsonValueKind.Array
+                        ? products.EnumerateArray().Select(item => item.GetString())
+                        : []),
+                    ReadString(payload, "soundProblem"));
+            case AssistiveTechnologyRecords.ProcessStartedEventType:
+                var atStart = payload.TryGetProperty("runningAtStart", out var running) && running.ValueKind == JsonValueKind.True;
+                return JoinSummary(
+                    eventType,
+                    product,
+                    (ReadString(payload, "role") == AssistiveTechnologyRecords.HelperRole ? "helper " : string.Empty) +
+                        (atStart ? "running at the start" : "started"),
+                    ReadString(payload, "productVersion"),
+                    ReadString(payload, "copy") is { } copy && copy != "unknown" ? copy + " copy" : null,
+                    Process("processId"));
+            case AssistiveTechnologyRecords.ProcessExitedEventType:
+                return JoinSummary(
+                    eventType,
+                    product,
+                    ReadString(payload, "role") == AssistiveTechnologyRecords.HelperRole ? "helper exited" : "exited",
+                    Process("processId"));
+            case AssistiveTechnologyRecords.ModuleLoadedEventType:
+            case AssistiveTechnologyRecords.ModuleUnloadedEventType:
+                return JoinSummary(
+                    eventType,
+                    product,
+                    ReadString(payload, "moduleName") +
+                        (eventType == AssistiveTechnologyRecords.ModuleLoadedEventType ? " seen in" : " gone from") +
+                        " browser " + Process("hostProcessId"));
+            case AssistiveTechnologyRecords.SoundStartedEventType:
+                return JoinSummary(eventType, product, "sound started", Process("processId"));
+            case AssistiveTechnologyRecords.SoundEndedEventType:
+                var length = payload.TryGetProperty("startedAt", out var started) && started.TryGetInt64(out var startedAt) &&
+                    payload.TryGetProperty("lastSoundAt", out var last) && last.TryGetInt64(out var lastSoundAt)
+                        ? ((lastSoundAt - startedAt) / 1_000_000.0).ToString("0", culture) + " ms of sound"
+                        : null;
+                return JoinSummary(eventType, product, "sound ended", length, ReadString(payload, "endedBy"));
+            default:
+                return JoinSummary(eventType, product);
+        }
+    }
 
     private static string JoinSummary(string fallback, params string?[] values)
     {

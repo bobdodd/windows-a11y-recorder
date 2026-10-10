@@ -253,6 +253,11 @@
                             Content="Browser settings"
                             Checked="TimelineFilter_Changed"
                             Unchecked="TimelineFilter_Changed" />
+                  <CheckBox x:Name="FilterAssistiveTechnologyCheckBox"
+                            IsChecked="True"
+                            Content="Screen reader"
+                            Checked="TimelineFilter_Changed"
+                            Unchecked="TimelineFilter_Changed" />
                   <CheckBox x:Name="FilterFramesCheckBox"
                             IsChecked="True"
                             Content="_Frames"
