@@ -78,8 +78,9 @@ Designed in [screen reader activity](screen-reader-activity.md), agreed
 - Built 2026-10-10: step 2a, the recorder's keyboard hook, installed again
   every second while a screen reader runs and when the hook is lost, as in
   its "The keyboard hook". First run on the target machine the same day
-  ([validation](../validation/keyboard-hook-2026-10-10.md)); keys to an
-  elevated window are untested.
+  ([validation](../validation/keyboard-hook-2026-10-10.md)). Input to an
+  elevated window, and on the secure desktop, reaches neither the hook nor
+  raw input, and the recording does not mark the gap: to decide.
 - To build, in the order agreed on 2026-10-10: the key dispositions (2b);
   NVDA's commands, the mode band, and the screen reader window episodes
   (2c); a low-level mouse hook, for NVDA's speaking of the content under

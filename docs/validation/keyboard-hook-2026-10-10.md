@@ -10,7 +10,8 @@ The owner started the recording with NVDA not running, started NVDA, used
 heading, landmark, and link navigation, Tab, and the elements list on a
 page, filled in fields of a form, quit NVDA, started it again, used H and
 Tab, and quit it. The optional step of typing into an elevated window was
-not done: no elevated window is in the foreground records.
+not done: no elevated window is in the foreground records. It was run
+next; see "The elevated window".
 
 ## Results
 
@@ -44,7 +45,37 @@ not done: no elevated window is in the foreground records.
   record, so such a key leaves no trace. No key was pressed in the first
   seconds after either start, so the run neither shows nor rules out a
   missed key there; the refreshes bound the time to about a second.
-- Keys to an elevated window.
 - Whether a key NVDA passed was passed because NVDA was in focus mode:
   after the second start, H reached the page four times on the form
   before NVDA kept it again. That is for the mode band of step 2c.
+
+## The elevated window
+
+Recording 20261010-213058-530aff5c98704c93997622eececa42ff, package
+wr-876ab63, about 142 s. The owner opened Windows PowerShell as
+administrator from the search pane with the mouse (a right click and
+Run as administrator), typed `hello` into it and cleared it with Escape,
+pressed Tab three times in the browser, started NVDA, typed `hello` into
+the same window again, pressed H three times in the browser, and quit
+NVDA. The foreground records show the window as process 22444, titled
+"Administrator: Windows PowerShell".
+
+- While the elevated window was in the foreground, from 14.0 s to 28.4 s
+  and from 98.7 s to 116.3 s, neither the hook nor raw input recorded a
+  key, and raw input recorded no mouse input either: no movement, and not
+  the button press that moved the foreground back to the browser (its
+  release, at 116.5 s, was recorded). From 12.2 s to 14.0 s, the
+  permission prompt's secure desktop, raw input recorded no mouse input.
+- As both records lost the same keys, the loss check found no loss, which
+  is right: the hook was not removed. Keys after each episode were
+  recorded at once: the four Tabs passed, and the three H keys were kept
+  by NVDA, at 117.9 s, 119.2 s, and 120.6 s.
+- The hook was installed again every second while NVDA ran (67
+  refreshes, the longest spacing 1.029 s); no installation failed; no key
+  was dropped or recorded twice; the longest callback was 380
+  microseconds.
+
+The recorder runs without administrator rights, so input to a window of
+an elevated process does not reach it. Nothing in the recording marks
+these periods as times when input could not be recorded; only the
+foreground window's title shows it.

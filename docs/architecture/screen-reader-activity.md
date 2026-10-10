@@ -266,8 +266,10 @@ not be measured, if it could not.
 Built 2026-10-10 (step 2a). First run on the target machine the same day
 ([validation](../validation/keyboard-hook-2026-10-10.md)): it recorded
 every key raw input did and the keys NVDA kept, refreshed once a second
-while NVDA ran, and its longest callback was 184 microseconds. Keys to an
-elevated window are untested. A
+while NVDA ran, and its longest callback was 184 microseconds. A second
+run found that while an elevated window is in the foreground neither the
+hook nor raw input receives any key, nor raw input any mouse input, and
+nothing marks the gap; see the validation. A
 collector, `windows.keyboard-hook`
 (`src/Recorder.Collectors.Input/KeyboardHookCollector.cs`), installs a
 `WH_KEYBOARD_LL` hook on its own thread and records every call. It is on
@@ -337,8 +339,8 @@ when keyboard and mouse are recorded, as raw input is.
   generated sequences, including a kept key, a kept physical Tab replaced
   by an injected one, Shift without its side, and injected and fake raw
   keys; the payload rules; the summaries and key names. The system test
-  below was run on 2026-10-10 except for the elevated window; the
-  integration tests on Windows are still to write.
+  below was run on 2026-10-10, with the elevated window; the integration
+  tests on Windows are still to write.
 
 ## Key disposition
 
