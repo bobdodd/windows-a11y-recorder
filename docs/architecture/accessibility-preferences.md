@@ -1502,6 +1502,15 @@ Agreed with the owner on 2026-10-10:
 
 The target machine script expects the latest of the walk's and the change
 sets' viewports at each step.
+
+The owner's check of 444df8b (2026-10-10), a recording with the window
+maximized after the page loaded: a frame before the maximize was shown at
+929 by 925 CSS pixels, and one after at 1920 by 953, each at a device
+pixel ratio of 1, meant and shown alike, so the recreation follows the
+resize. The frame after it did not use the fallback: no line said the
+screen could not hold it, so the window was given its whole page area of
+1920 by 953. Whether all of that page area was on the screen is not yet
+known.
 - The script's first analysis (2026-10-09) stopped formatting a time:
   Windows PowerShell chose `Math.Max(int, int)` for a literal 0, which a
   recording's nanoseconds overflow. Both arguments are now `long`, and the
