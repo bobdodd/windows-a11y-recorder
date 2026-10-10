@@ -2605,7 +2605,9 @@ void RecordBrowserZoomLevelChanged(std::string mode,
 // last maps sent to each view and records only the maps that differ from
 // them, each whole; a send that changes none is not recorded. The view
 // identity is as for RecordBrowserWebPreferencesSent, and "view-created"
-// starts a new set for it.
+// starts a new set for it. From protocol 0.59 a later record also holds
+// "changedColors": for each map in it, the names of its colors that differ
+// from the map last sent to the view.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBrowserColorMapsSent(int page_frame_tree_node_id,
                                 bool primary_page,

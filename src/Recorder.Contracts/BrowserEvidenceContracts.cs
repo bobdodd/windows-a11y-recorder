@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.58";
+    public const string CurrentVersion = "0.59";
 }
 
 public static class BrowserEvidenceChannels
@@ -2287,4 +2287,8 @@ public sealed record BrowserColorMapsSentPayload(
     string ViewId,
     string Point,
     bool First,
-    IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> Maps);
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> Maps,
+    // Protocol 0.59: in a later send, the names of the colors of each map
+    // in it that differ from the map last sent to the view; absent in a
+    // first send and before 0.59.
+    IReadOnlyDictionary<string, IReadOnlyList<string>>? ChangedColors = null);

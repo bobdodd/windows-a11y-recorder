@@ -442,6 +442,14 @@ scroll bars, and system colors follow the participant's. The evidence
 panel lists each value with the time of its record. See "Stage 3" in
 [accessibility preferences](docs/architecture/accessibility-preferences.md).
 
+Protocol 0.59 records the browser's theme, its color, color style,
+grayscale setting, and any installed theme, with the light, dark, or
+device mode already recorded, in the Properties panel and on the
+timeline, and a color map record names the colors that changed. A
+recreation's browser window is given the participant's theme at the
+frame. See "The browser theme" in
+[accessibility preferences](docs/architecture/accessibility-preferences.md).
+
 Protocol 0.58 records the page's viewport and device pixel ratio with each
 layout change set, not only at its layout checkpoint, so a recreation
 follows a browser window resized during the recording. A recreation is

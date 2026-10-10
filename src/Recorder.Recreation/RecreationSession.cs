@@ -66,7 +66,7 @@ public sealed class RecreationSession : IAsyncDisposable
         try
         {
             var clock = System.Diagnostics.Stopwatch.StartNew();
-            browser = RecreationBrowser.Open(executablePath, directory, server, extraArguments);
+            browser = RecreationBrowser.Open(executablePath, directory, server, extraArguments, content.BrowserTheme);
             var address = await browser.DevToolsAddressAsync(cancellationToken);
             server.AddTiming("Starting the recreation browser, to its DevTools port", clock.Elapsed);
             clock.Restart();

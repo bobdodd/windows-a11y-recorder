@@ -40,7 +40,8 @@ internal static class EvidenceSamples
 
     // A color-maps-sent record: all three maps in a first one, the forced
     // colors map alone in a later one.
-    internal static string ColorMapsSample(bool first)
+    // From protocol 0.59 a later one names the colors that changed.
+    internal static string ColorMapsSample(bool first, IReadOnlyList<string>? changedColors = null)
     {
         static string Map(string color) =>
             "{" + string.Join(",", Recorder.Contracts.BrowserPreferenceSettings.RendererColorNames
@@ -49,7 +50,11 @@ internal static class EvidenceSamples
             ? $"{{\"light\":{Map("#FFFFFFFF")},\"dark\":{Map("#FF202124")},\"forcedColors\":{Map("#FF000000")}}}"
             : $"{{\"forcedColors\":{Map("#FFFFFF00")}}}";
         return "{\"context\":{\"browserInstanceId\":\"browser-1\",\"processId\":4000,\"processType\":\"browser\",\"profileId\":null,\"browserContextId\":null,\"pageId\":null,\"frameId\":null,\"documentId\":null,\"executionWorldId\":null,\"documentToken\":null}," +
-            $"\"pageFrameTreeNodeId\":12,\"primaryPage\":true,\"rendererProcessId\":7,\"viewId\":\"2199023255552\",\"point\":\"{(first ? "view-created" : "color-providers")}\",\"first\":{(first ? "true" : "false")},\"maps\":{maps}}}";
+            $"\"pageFrameTreeNodeId\":12,\"primaryPage\":true,\"rendererProcessId\":7,\"viewId\":\"2199023255552\",\"point\":\"{(first ? "view-created" : "color-providers")}\",\"first\":{(first ? "true" : "false")},\"maps\":{maps}" +
+            (changedColors is null
+                ? string.Empty
+                : $",\"changedColors\":{{\"forcedColors\":[{string.Join(",", changedColors.Select(name => $"\"{name}\""))}]}}") +
+            "}";
     }
 
     private static readonly string WorldContext =
@@ -187,6 +192,18 @@ internal static class EvidenceSamples
         // first color maps and a later send of its forced colors map.
         ("browser.preferences", "color-maps-sent", ColorMapsSample(true)),
         ("browser.preferences", "color-maps-sent", ColorMapsSample(false)),
+        // Added with 0025_browser_theme.sql (protocol 0.59): a profile's
+        // preferences with the browser theme, a change of its color, and a
+        // later color maps send naming the colors that changed.
+        ("browser.preferences", "browser-preferences",
+            """
+            {"context":{"browserInstanceId":"browser-1","processId":4000,"processType":"browser","profileId":null,"browserContextId":null,"pageId":null,"frameId":null,"documentId":null,"executionWorldId":null,"documentToken":null},"profileDirectory":"C:\\Users\\User\\AppData\\Local\\A11yRecorder\\Profile 1","newProfile":false,"preferences":{"standardFontFamily":{"value":"Times New Roman","isDefault":true,"problem":null},"fixedFontFamily":{"value":"Consolas","isDefault":true,"problem":null},"serifFontFamily":{"value":"Times New Roman","isDefault":true,"problem":null},"sansSerifFontFamily":{"value":"Arial","isDefault":true,"problem":null},"cursiveFontFamily":{"value":"Comic Sans MS","isDefault":true,"problem":null},"fantasyFontFamily":{"value":"Impact","isDefault":true,"problem":null},"mathFontFamily":{"value":"Cambria Math","isDefault":true,"problem":null},"defaultFontSize":{"value":20,"isDefault":false,"problem":null},"defaultFixedFontSize":{"value":13,"isDefault":true,"problem":null},"minimumFontSize":{"value":0,"isDefault":true,"problem":null},"minimumLogicalFontSize":{"value":6,"isDefault":true,"problem":null},"colorScheme":{"value":0,"isDefault":true,"problem":null},"focusHighlight":{"value":false,"isDefault":true,"problem":null},"requestedPageColors":{"value":0,"isDefault":true,"problem":null},"pageColorsOnlyOnIncreasedContrast":{"value":true,"isDefault":true,"problem":null},"pageColorsBlockList":{"value":["example.org"],"isDefault":false,"problem":null},"caretBrowsing":{"value":null,"isDefault":null,"problem":"not registered"},"userColor":{"value":-1543926,"isDefault":false,"problem":null},"colorVariant":{"value":1,"isDefault":false,"problem":null},"grayscaleTheme":{"value":false,"isDefault":true,"problem":null},"themeId":{"value":"","isDefault":true,"problem":null}}}
+            """),
+        ("browser.preferences", "browser-preference-changed",
+            """
+            {"context":{"browserInstanceId":"browser-1","processId":4000,"processType":"browser","profileId":null,"browserContextId":null,"pageId":null,"frameId":null,"documentId":null,"executionWorldId":null,"documentToken":null},"profileDirectory":"C:\\Users\\User\\AppData\\Local\\A11yRecorder\\Profile 1","preference":"userColor","previous":{"userColor":{"value":0,"isDefault":true,"problem":null}},"current":{"userColor":{"value":-1543926,"isDefault":false,"problem":null}}}
+            """),
+        ("browser.preferences", "color-maps-sent", ColorMapsSample(false, ["kColorMenuBackground", "kColorMenuSeparator"])),
         ("browser.preferences", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
         // Added with 0022_magnifier_changes.sql: a level and position change,
         // a pan, a color effect turned on, and readings that failed.

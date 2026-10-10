@@ -484,6 +484,11 @@ public sealed class SessionPlaybackArchiveBuilder
                 var isFirst = payload.TryGetProperty("first", out var first) && first.ValueKind == JsonValueKind.True;
                 return JoinSummary(eventType, ReadString(payload, "point"), isFirst ? "all fields" : fields);
             case BrowserPreferenceSettings.ColorMapsEventType:
+                if (ColorMapChangeSummary(payload) is { } colorChange)
+                {
+                    return JoinSummary(eventType, ReadString(payload, "point"), colorChange);
+                }
+
                 var maps = payload.TryGetProperty("maps", out var sentMaps) && sentMaps.ValueKind == JsonValueKind.Object
                     ? string.Join(" ", sentMaps.EnumerateObject().Select(map => map.Name))
                     : null;
@@ -668,6 +673,74 @@ public sealed class SessionPlaybackArchiveBuilder
 
         return eventType;
     }
+
+    // Protocol 0.59: a later color maps send names the colors that changed in
+    // each map, so the summary says how many, in which maps, and which, as
+    // "3 colors changed in light and dark: menu background, ...". Maps whose
+    // changes differ are each described. Null for a record without them.
+    private static string? ColorMapChangeSummary(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("changedColors", out var changed) || changed.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var byMap = changed.EnumerateObject()
+            .Where(map => map.Value.ValueKind == JsonValueKind.Array)
+            .Select(map => (
+                Map: map.Name == "forcedColors" ? "forced colors" : map.Name,
+                Colors: map.Value.EnumerateArray()
+                    .Where(color => color.ValueKind == JsonValueKind.String)
+                    .Select(color => color.GetString()!)
+                    .ToList()))
+            .Where(map => map.Colors.Count > 0)
+            .ToList();
+        if (byMap.Count == 0)
+        {
+            return null;
+        }
+
+        var parts = byMap
+            .GroupBy(map => string.Join("\n", map.Colors))
+            .Select(group =>
+            {
+                var colors = group.First().Colors;
+                var count = colors.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                var shown = colors.Take(5).Select(ColorLabel).ToList();
+                if (colors.Count > 5)
+                {
+                    shown.Add($"and {(colors.Count - 5).ToString(System.Globalization.CultureInfo.InvariantCulture)} more");
+                }
+
+                var noun = colors.Count == 1 ? "color" : "colors";
+                return $"{count} {noun} changed in {JoinAnd([.. group.Select(map => map.Map)])}: {string.Join(", ", shown)}";
+            });
+        return string.Join("; ", parts);
+    }
+
+    // A RendererColorId name as words: kColorMenuItemBackgroundSelected is
+    // "menu item background selected".
+    private static string ColorLabel(string name)
+    {
+        var bare = name.StartsWith("kColor", StringComparison.Ordinal) ? name["kColor".Length..] : name;
+        var words = new System.Text.StringBuilder();
+        for (var index = 0; index < bare.Length; index++)
+        {
+            if (index > 0 && char.IsUpper(bare[index]) && !char.IsUpper(bare[index - 1]))
+            {
+                words.Append(' ');
+            }
+
+            words.Append(char.ToLowerInvariant(bare[index]));
+        }
+
+        return words.ToString();
+    }
+
+    private static string JoinAnd(IReadOnlyList<string> items) =>
+        items.Count <= 1
+            ? string.Concat(items)
+            : $"{string.Join(", ", items.Take(items.Count - 1))} and {items[^1]}";
 
     private static string JoinSummary(string fallback, params string?[] values)
     {

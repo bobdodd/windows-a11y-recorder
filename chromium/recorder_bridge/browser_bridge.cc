@@ -8197,6 +8197,9 @@ void RecordBrowserColorMapsSent(int page_frame_tree_node_id,
   }
   const bool created = point == "view-created";
   base::DictValue changed;
+  // Protocol 0.59: the names of each changed map's colors that differ from
+  // the map last sent to the view, so that a record says what changed.
+  base::DictValue changed_colors;
   bool first = false;
   {
     BrowserPreferenceStorage& storage = GetBrowserPreferenceStorage();
@@ -8211,6 +8214,19 @@ void RecordBrowserColorMapsSent(int page_frame_tree_node_id,
       for (auto [name, map] : maps) {
         const base::Value* previous = last.Find(name);
         if (!previous || *previous != map) {
+          const base::DictValue* previous_map =
+              previous ? previous->GetIfDict() : nullptr;
+          base::ListValue colors;
+          if (const base::DictValue* current_map = map.GetIfDict()) {
+            for (auto [color, value] : *current_map) {
+              const base::Value* before =
+                  previous_map ? previous_map->Find(color) : nullptr;
+              if (!before || *before != value) {
+                colors.Append(color);
+              }
+            }
+          }
+          changed_colors.Set(name, std::move(colors));
           changed.Set(name, map.Clone());
           last.Set(name, map.Clone());
         }
@@ -8229,6 +8245,9 @@ void RecordBrowserColorMapsSent(int page_frame_tree_node_id,
   payload.Set("point", std::move(point));
   payload.Set("first", first);
   payload.Set("maps", std::move(changed));
+  if (!first) {
+    payload.Set("changedColors", std::move(changed_colors));
+  }
   SendBlinkEvidence("browser.preferences", "color-maps-sent",
                     std::move(payload));
 }

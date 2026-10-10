@@ -158,6 +158,11 @@ in the checkout:
   `settings.a11y.page_colors_block_list` (lines 830 to 843).
 - Caret browsing: `settings.a11y.caretbrowsing.enabled` (lines 2887 to
   2889).
+- Added 2026-10-10, at protocol 0.59: the browser's theme,
+  `browser.theme.user_color2` (line 711), `browser.theme.color_variant2`
+  (line 717), `browser.theme.is_grayscale2` (line 727), and
+  `extensions.theme.id` (line 682), in the owner's checkout of Chromium
+  156.0.8065.0. See "The browser theme".
 - Zoom: the default zoom level, and each change of a host's or a tab's
   zoom level through `HostZoomMap::AddZoomLevelChangedCallback`
   (`content/public/browser/host_zoom_map.h`, line 190).
@@ -1547,7 +1552,104 @@ reduced motion, the default font size, the `Canvas` system color, and
 `devicePixelRatio`, and to say whether the Styles pane shows the matching
 `@media` rules and whether the scroll bars have the recorded colors.
 
+## The browser theme
+
+### The owner's finding
+
+The owner's recording of 2026-10-10 (session
+20261010-152204-f290f94ccb7e47bfaba601c5583d213a) changed the browser's
+theme several times. The theme colors the browser's own window, its tabs
+and toolbar, as well as what it gives the page, and the recreation
+browser's window did not show the changes. The recording held only their
+effect on the page: a `color-maps-sent` record for each open page at
+27.4 s, 38.7 s, and 47.6 s, in each of which the light and dark maps'
+`kColorMenuBackground`, `kColorMenuItemBackgroundSelected`, and
+`kColorMenuSeparator` changed, to warm tints and back. Of the theme's
+settings only the light, dark, or device mode, `colorScheme`, was listed,
+and it stayed at the device's. The theme's color, its style, grayscale,
+and an installed theme were not recorded, so they were not in the
+Properties panel, and the timeline's color map records said only
+"color-providers, light dark". A recreation's browser starts with a new
+profile, so its window had the default theme.
+
+### The design
+
+Agreed with the owner on 2026-10-10, with the timeline addition:
+
+1. Four browser preferences join the list at protocol 0.59, read and
+   watched as the others are: `userColor` (`browser.theme.user_color2`),
+   `colorVariant` (`browser.theme.color_variant2`), `grayscaleTheme`
+   (`browser.theme.is_grayscale2`), and `themeId` (`extensions.theme.id`).
+   They are named in `chrome/common/pref_names.h` and registered by
+   `ThemeService::RegisterProfilePrefs`
+   (`chrome/browser/themes/theme_service.cc`), in the owner's checkout,
+   Chromium 156.0.8065.0. With `colorScheme`, already listed, they are the
+   browser's theme. A snapshot before 0.59 does not hold them, so the
+   validator and the database take them as optional there; their rows say
+   "not recorded" for an older recording.
+2. They are in the Properties panel's Browser group, with the change
+   buttons and counts of the other rows, and their changes are on the
+   timeline. The theme color is an SkColor kept in an integer preference,
+   shown as `#RRGGBB`, and transparent, its default, as no color chosen.
+   The color style is named from `ui::mojom::BrowserColorVariant`
+   (`ui/base/mojom/themes.mojom`): system, tonal spot, neutral, vibrant,
+   expressive.
+3. The timeline addition: a later `color-maps-sent` record names, for
+   each map it holds, the colors that differ from the map last sent to the
+   view (`changedColors`, protocol 0.59), so its summary says how many
+   changed, in which maps, and which, such as "3 colors changed in light
+   and dark: menu background, menu item background selected, menu
+   separator". The timeline reads records out of order, so the record
+   itself names the changes, which the bridge already compares to choose
+   the maps it records. A record before 0.59 is summarized as before.
+4. A recreation writes the theme at the frame into the recreation
+   browser's new profile before it starts, as `browser.theme.color_scheme2`,
+   `user_color2`, `color_variant2`, and `is_grayscale2`, so its window is
+   drawn as the participant's was. Chromium's one-time copy of the older
+   synced theme preferences (`MigrateSyncingThemePrefsToNonSyncingIfNeeded`,
+   `chrome/browser/themes/theme_syncable_service.cc`) copies only values a
+   profile has set, so it leaves the written values in place.
+5. An installed theme, from the Chrome Web Store, cannot be installed in
+   the recreation, which has no network access. Its identity is recorded,
+   and the recreation leaves the theme color, its style, and grayscale at
+   their defaults, as the participant's window did not show them, so it
+   draws the browser's default theme with the recorded color mode, and the
+   evidence panel says so.
+6. The evidence panel lists the theme values given, with the time of each
+   record, names the theme settings a recording did not hold, and notes
+   that with the color mode "system" the recreation's window follows the
+   viewing machine's Windows light or dark mode, which may not be the
+   participant's.
+
+The theme is set as the recreation opens, so it is the frame's, as every
+recreation is of one frame.
+
+### As built
+
+Protocol 0.59: `kRecorderBrowserPreferences` in `profile_impl.cc` gains the
+four preferences, and `integrate.py` extends a list patched before 0.59 in
+place. `RecordBrowserColorMapsSent` (`browser_bridge.cc`) adds
+`changedColors` to a later record. The recorder's list,
+`BrowserPreferenceSettings.Browser`, marks the four as added in 0.59
+(`AddedIn`), and `0025_browser_theme.sql` adds their columns and the
+changed colors' tables. `BrowserPreferenceTimeline.ThemeAt` gives a
+recreation the theme at the frame, `RecreationBrowser.ThemePreferences`
+writes it into the profile, and `RecordedPreferences.ThemeNotes` writes the
+evidence panel's notes.
+
+Not yet checked on the target machine: a recording in which the theme's
+color, its style, grayscale, and the color mode are changed, whose
+Properties rows and timeline follow each change, and whose recreations at
+frames after each change draw the browser's window with that theme.
+
 ## Decisions
+
+Agreed 2026-10-10, the browser theme (see "The browser theme"): the four
+theme preferences are recorded at protocol 0.59 and shown in the
+Properties panel and the timeline; a later color map record names its
+changed colors; a recreation gives the recreation browser's window the
+recorded theme, and with an installed theme, the default theme with the
+recorded color mode, saying so.
 
 Agreed 2026-10-08, stage 3 (see "Stage 3: the recreation"):
 

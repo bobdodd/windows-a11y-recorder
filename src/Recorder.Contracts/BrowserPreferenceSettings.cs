@@ -22,7 +22,10 @@ public sealed record BrowserPreferenceSetting(
     string Name,
     BrowserPreferenceKind Kind,
     string Source,
-    string Label);
+    string Label,
+    // The protocol version that added the setting to the list, for one added
+    // after 0.56, whose snapshot an older recording does not hold.
+    string? AddedIn = null);
 
 /// <summary>
 /// The records of protocol 0.56 (accessibility preferences, stage 2): the
@@ -126,8 +129,24 @@ public static class BrowserPreferenceSettings
         new("requestedPageColors", BrowserPreferenceKind.Integer, "settings.a11y.requested_page_colors", "Page colors"),
         new("pageColorsOnlyOnIncreasedContrast", BrowserPreferenceKind.Boolean, "settings.a11y.apply_page_colors_only_on_increased_contrast", "Page colors only with increased contrast"),
         new("pageColorsBlockList", BrowserPreferenceKind.TextList, "settings.a11y.page_colors_block_list", "Sites without page colors"),
-        new("caretBrowsing", BrowserPreferenceKind.Boolean, "settings.a11y.caretbrowsing.enabled", "Caret browsing")
+        new("caretBrowsing", BrowserPreferenceKind.Boolean, "settings.a11y.caretbrowsing.enabled", "Caret browsing"),
+        // Protocol 0.59: the browser's theme, which colors its own window,
+        // registered by ThemeService::RegisterProfilePrefs
+        // (chrome/browser/themes/theme_service.cc). Agreed with the owner on
+        // 2026-10-10; see docs/architecture/accessibility-preferences.md,
+        // "The browser theme".
+        new("userColor", BrowserPreferenceKind.Integer, "browser.theme.user_color2", "Browser theme color", "0.59"),
+        new("colorVariant", BrowserPreferenceKind.Integer, "browser.theme.color_variant2", "Browser theme color style", "0.59"),
+        new("grayscaleTheme", BrowserPreferenceKind.Boolean, "browser.theme.is_grayscale2", "Browser grayscale theme", "0.59"),
+        new("themeId", BrowserPreferenceKind.Text, "extensions.theme.id", "Installed browser theme", "0.59")
     ];
+
+    /// <summary>
+    /// The browser preferences of its theme, which a recreation gives the
+    /// recreation browser's own window, from the light, dark, or device mode.
+    /// </summary>
+    public static IReadOnlyList<string> ThemeNames { get; } =
+        ["colorScheme", "userColor", "colorVariant", "grayscaleTheme", "themeId"];
 
     /// <summary>
     /// The fields of the preferences a page's view is sent. The source is the

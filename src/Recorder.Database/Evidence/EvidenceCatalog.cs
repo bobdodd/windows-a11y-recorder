@@ -245,6 +245,16 @@ internal static class EvidenceCatalog
                 ColorMap("light", "browser_color_maps_sent_light"),
                 ColorMap("dark", "browser_color_maps_sent_dark"),
                 ColorMap("forcedColors", "browser_color_maps_sent_forced_colors")
+            ]),
+        // Added by 0025_browser_theme.sql (protocol 0.59): a later send's
+        // changed colors of each map, by name.
+        new InlineField(
+            "changedColors",
+            O,
+            [
+                TextList("light", O, "browser_color_maps_changed_light"),
+                TextList("dark", O, "browser_color_maps_changed_dark"),
+                TextList("forcedColors", O, "browser_color_maps_changed_forced_colors")
             ]));
 
     public static readonly EvidenceTable UiaEvents = Evidence(
@@ -1594,7 +1604,9 @@ internal static class EvidenceCatalog
     [
         .. Recorder.Contracts.BrowserPreferenceSettings.Browser.Select(setting => (Field)new InlineField(
             setting.Name,
-            presence,
+            // A setting added after 0.56 (0025_browser_theme.sql) is absent
+            // from an older recording's snapshot.
+            setting.AddedIn is null ? presence : O,
             [BrowserPreferenceValue(setting, "value", N, listTable), Bool("isDefault", N), Text("problem", N)]))
     ];
 

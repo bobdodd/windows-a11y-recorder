@@ -401,4 +401,81 @@ public sealed class RecreationPreferencesTests
                 BrowserPreferenceSettings.ColorMapsEventType,
                 JsonDocument.Parse(EvidenceSamples.ColorMapsSample(false)).RootElement));
     }
+
+    // Protocol 0.59: a theme value as a recreation reads it.
+    private static BrowserThemeValue Theme(string name, string value, long time = Second) =>
+        new(BrowserPreferenceSettings.FindBrowser(name)!,
+            JsonDocument.Parse($$"""{"value":{{value}},"isDefault":false,"problem":null}""").RootElement.Clone(),
+            time);
+
+    [Fact]
+    public void TheRecreationBrowsersProfileIsGivenTheRecordedTheme()
+    {
+        IReadOnlyList<BrowserThemeValue> theme =
+        [
+            Theme("colorScheme", "2"), Theme("userColor", "-1543926", 3 * Second), Theme("colorVariant", "3"),
+            Theme("grayscaleTheme", "true"), Theme("themeId", "\"\"")
+        ];
+        var written = RecreationBrowser.ThemePreferences(theme);
+        Assert.Equal(
+            """{"color_scheme2":2,"user_color2":-1543926,"color_variant2":3,"is_grayscale2":true}""",
+            written.ToJsonString());
+
+        var directory = Path.Combine(Path.GetTempPath(), "theme-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            RecreationBrowser.WriteProfile(directory, theme);
+            using var preferences = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "Default", "Preferences")));
+            var browserTheme = preferences.RootElement.GetProperty("browser").GetProperty("theme");
+            Assert.Equal(-1543926, browserTheme.GetProperty("user_color2").GetInt64());
+            Assert.Equal(2, preferences.RootElement.GetProperty("net").GetProperty("network_prediction_options").GetInt32());
+            // Without a recorded theme the profile has no theme preferences.
+            RecreationBrowser.WriteProfile(directory);
+            using var plain = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "Default", "Preferences")));
+            Assert.False(plain.RootElement.TryGetProperty("browser", out _));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AnInstalledThemeLeavesTheDefaultThemeWithTheRecordedMode()
+    {
+        IReadOnlyList<BrowserThemeValue> theme =
+        [
+            Theme("colorScheme", "1"), Theme("userColor", "-1543926"), Theme("colorVariant", "3"),
+            Theme("grayscaleTheme", "true"), Theme("themeId", "\"abcdefghijklmnopabcdefghijklmnop\"")
+        ];
+        Assert.Equal("""{"color_scheme2":1}""", RecreationBrowser.ThemePreferences(theme).ToJsonString());
+        var notes = RecordedPreferences.ThemeNotes(theme);
+        Assert.Contains(notes, note => note.Contains("installed theme, abcdefghijklmnopabcdefghijklmnop", StringComparison.Ordinal));
+        Assert.DoesNotContain(notes, note => note.Contains("viewing machine's Windows light or dark mode", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TheThemeNotesListTheValuesAndWhatWasNotRecorded()
+    {
+        var notes = RecordedPreferences.ThemeNotes([Theme("colorScheme", "0")]);
+        Assert.Contains("Browser color mode: system, from the record at 1.000 s", notes[0], StringComparison.Ordinal);
+        Assert.Contains(notes, note => note.StartsWith("These theme settings were not recorded, as in a recording made before protocol 0.59", StringComparison.Ordinal) &&
+            note.Contains("Browser theme color, Browser theme color style, Browser grayscale theme, Installed browser theme", StringComparison.Ordinal));
+        Assert.Contains(notes, note => note.Contains("viewing machine's Windows light or dark mode", StringComparison.Ordinal));
+        Assert.StartsWith("The participant's browser theme was not recorded", Assert.Single(RecordedPreferences.ThemeNotes([])), StringComparison.Ordinal);
+        Assert.StartsWith("The participant's browser theme was not recorded", Assert.Single(RecordedPreferences.ThemeNotes(null)), StringComparison.Ordinal);
+    }
+
+
+    [Fact]
+    public void TheContentCarriesTheThemeAndItsNotes()
+    {
+        IReadOnlyList<BrowserThemeValue> theme = [Theme("colorScheme", "2"), Theme("userColor", "-1543926")];
+        var content = RecordedPage.Content(RecordedPageTests.State(), "about:blank", 50, 50, "basis", browserTheme: theme);
+        Assert.Same(theme, content.BrowserTheme);
+        Assert.Contains(content.Evidence.Notes, note => note.Contains("Browser theme color: #E8710A", StringComparison.Ordinal));
+        var none = RecordedPage.Content(RecordedPageTests.State(), "about:blank", 50, 50, "basis");
+        Assert.Contains(none.Evidence.Notes, note => note.StartsWith("The participant's browser theme was not recorded", StringComparison.Ordinal));
+    }
+
 }

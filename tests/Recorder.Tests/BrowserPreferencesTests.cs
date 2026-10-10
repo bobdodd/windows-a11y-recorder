@@ -296,6 +296,132 @@ public sealed class BrowserPreferencesTests
             Summary(BrowserPreferenceSettings.SentEventType, Sample(BrowserPreferenceSettings.SentEventType, 1)));
     }
 
+    // Protocol 0.59: a recording with the browser theme at 1 s, its color
+    // chosen at 3 s and its style at 5 s.
+    private static BrowserPreferenceTimeline ThemeRecording()
+    {
+        var style = Change("colorVariant", 3);
+        return new BrowserPreferenceTimeline(
+            [
+                Record(Second, BrowserPreferenceSettings.SnapshotEventType, Sample(BrowserPreferenceSettings.SnapshotEventType, 1)),
+                Record(3 * Second, BrowserPreferenceSettings.ChangeEventType, Change("userColor", -16776961)),
+                Record(5 * Second, BrowserPreferenceSettings.ChangeEventType, style)
+            ]);
+    }
+
+    [Fact]
+    public void TheBrowserThemeHasRowsWithItsChanges()
+    {
+        var timeline = ThemeRecording();
+        var start = timeline.RowsAt(2 * Second);
+        Assert.Equal("#E8710A", Row(start, BrowserPreferenceTimeline.BrowserGroup, "Browser theme color").Value);
+        Assert.Equal("tonal spot", Row(start, BrowserPreferenceTimeline.BrowserGroup, "Browser theme color style").Value);
+        Assert.Equal("off (default)", Row(start, BrowserPreferenceTimeline.BrowserGroup, "Browser grayscale theme").Value);
+        Assert.Equal("none (no installed theme) (default)", Row(start, BrowserPreferenceTimeline.BrowserGroup, "Installed browser theme").Value);
+        var later = timeline.RowsAt(6 * Second);
+        Assert.Equal("#0000FF", Row(later, BrowserPreferenceTimeline.BrowserGroup, "Browser theme color").Value);
+        Assert.Equal("vibrant", Row(later, BrowserPreferenceTimeline.BrowserGroup, "Browser theme color style").Value);
+        Assert.Equal([3 * Second], timeline.ChangeTimesOf(BrowserPreferenceTimeline.BrowserKeyPrefix + "userColor"));
+        Assert.Equal([5 * Second], timeline.ChangeTimesOf(BrowserPreferenceTimeline.BrowserKeyPrefix + "colorVariant"));
+
+        // A recording before 0.59 holds no theme beyond the color mode.
+        var older = Recording().RowsAt(2 * Second);
+        Assert.Equal("not recorded", Row(older, BrowserPreferenceTimeline.BrowserGroup, "Browser theme color").Value);
+        Assert.Equal(Recording().RowsAt(2 * Second).Count, older.Count);
+    }
+
+    [Fact]
+    public void TheThemeColorIsItsRgbOrNoneWhenTransparent()
+    {
+        Assert.Equal("none (no color chosen)", BrowserPreferenceTimeline.DescribeUserColor(0));
+        Assert.Equal("#E8710A", BrowserPreferenceTimeline.DescribeUserColor(-1543926));
+        Assert.Equal("#E8710A", BrowserPreferenceTimeline.DescribeUserColor(0xFFE8710AL));
+    }
+
+    [Fact]
+    public void TheThemeAtATimeIsTheLastReadingOfEachSetting()
+    {
+        var timeline = ThemeRecording();
+        var before = timeline.ThemeAt(2 * Second);
+        Assert.Equal(BrowserPreferenceSettings.ThemeNames, before.Select(value => value.Setting.Name));
+        Assert.Equal(-1543926, before.Single(value => value.Setting.Name == "userColor").Value!.Value.GetInt64());
+        Assert.Equal(Second, before.Single(value => value.Setting.Name == "userColor").Time);
+        var after = timeline.ThemeAt(3 * Second);
+        Assert.Equal(-16776961, after.Single(value => value.Setting.Name == "userColor").Value!.Value.GetInt64());
+        Assert.Equal(3 * Second, after.Single(value => value.Setting.Name == "userColor").Time);
+
+        // Before 0.59 only the color mode is recorded.
+        Assert.Equal(["colorScheme"], Recording().ThemeAt(2 * Second).Select(value => value.Setting.Name));
+        Assert.Empty(new BrowserPreferenceTimeline([]).ThemeAt(Second));
+    }
+
+    [Fact]
+    public void AColorMapsSendsChangedColorsAreChecked()
+    {
+        var later = JsonNode.Parse(EvidenceSamples.ColorMapsSample(false, ["kColorMenuBackground"]))!;
+        Assert.Empty(Validate(BrowserPreferenceSettings.ColorMapsEventType, later));
+
+        var first = JsonNode.Parse(EvidenceSamples.ColorMapsSample(true))!;
+        first["changedColors"] = JsonNode.Parse("""{"light":["kColorMenuBackground"]}""");
+        Assert.Contains(Validate(BrowserPreferenceSettings.ColorMapsEventType, first), issue => issue.Code == "browser-color-maps-changed-colors-inconsistent");
+
+        var otherMap = JsonNode.Parse(EvidenceSamples.ColorMapsSample(false))!;
+        otherMap["changedColors"] = JsonNode.Parse("""{"light":["kColorMenuBackground"]}""");
+        Assert.Contains(Validate(BrowserPreferenceSettings.ColorMapsEventType, otherMap), issue => issue.Code == "browser-color-maps-changed-colors-inconsistent");
+
+        foreach (var colors in new[] { "[]", """["kColorNotAColor"]""", """["kColorMenuBackground","kColorMenuBackground"]""", "[1]" })
+        {
+            var invalid = JsonNode.Parse(EvidenceSamples.ColorMapsSample(false))!;
+            invalid["changedColors"] = JsonNode.Parse($$"""{"forcedColors":{{colors}}}""");
+            Assert.Contains(Validate(BrowserPreferenceSettings.ColorMapsEventType, invalid), issue => issue.Code == "browser-color-maps-changed-colors-invalid");
+        }
+    }
+
+    [Fact]
+    public void ASnapshotNeedsEveryPreferenceListedBefore059()
+    {
+        var snapshot = Sample(BrowserPreferenceSettings.SnapshotEventType);
+        ((JsonObject)snapshot["preferences"]!).Remove("caretBrowsing");
+        Assert.NotEmpty(Validate(BrowserPreferenceSettings.SnapshotEventType, snapshot));
+        var themed = Sample(BrowserPreferenceSettings.SnapshotEventType, 1);
+        ((JsonObject)themed["preferences"]!).Remove("themeId");
+        Assert.Empty(Validate(BrowserPreferenceSettings.SnapshotEventType, themed));
+    }
+
+    [Fact]
+    public void TheThemeAndColorChangeSummariesSayWhatChanged()
+    {
+        string Summary(string eventType, JsonNode payload) =>
+            SessionPlaybackArchiveBuilder.CreateSummary(
+                BrowserPreferenceSettings.Channel,
+                eventType,
+                JsonDocument.Parse(payload.ToJsonString()).RootElement);
+
+        Assert.Equal(
+            "browser-preference-changed: userColor, #E8710A",
+            Summary(BrowserPreferenceSettings.ChangeEventType, Change("userColor", -1543926)));
+        var both = JsonNode.Parse(EvidenceSamples.ColorMapsSample(true))!;
+        both["first"] = false;
+        both["point"] = "color-providers";
+        ((JsonObject)both["maps"]!).Remove("forcedColors");
+        both["changedColors"] = JsonNode.Parse("""{"light":["kColorMenuBackground","kColorMenuItemBackgroundSelected","kColorMenuSeparator"],"dark":["kColorMenuBackground","kColorMenuItemBackgroundSelected","kColorMenuSeparator"]}""");
+        Assert.Equal(
+            "color-maps-sent: color-providers, 3 colors changed in light and dark: menu background, menu item background selected, menu separator",
+            Summary(BrowserPreferenceSettings.ColorMapsEventType, both));
+        both["changedColors"]!["dark"] = JsonNode.Parse("""["kColorCssSystemField"]""");
+        Assert.Equal(
+            "color-maps-sent: color-providers, 3 colors changed in light: menu background, menu item background selected, menu separator; 1 color changed in dark: css system field",
+            Summary(BrowserPreferenceSettings.ColorMapsEventType, both));
+        var many = JsonNode.Parse(EvidenceSamples.ColorMapsSample(false, [.. BrowserPreferenceSettings.RendererColorNames.Take(7)]))!;
+        Assert.EndsWith(
+            "7 colors changed in forced colors: css system active text, css system btn face, css system btn text, css system field, css system field text, and 2 more",
+            Summary(BrowserPreferenceSettings.ColorMapsEventType, many));
+        // A send before 0.59 names its maps only.
+        Assert.Equal(
+            "color-maps-sent: color-providers, forcedColors",
+            Summary(BrowserPreferenceSettings.ColorMapsEventType, JsonNode.Parse(EvidenceSamples.ColorMapsSample(false))!));
+    }
+
     [Fact]
     public void TheIndexKeepsTheRecordsWholeAndPlaybackReadsThem()
     {

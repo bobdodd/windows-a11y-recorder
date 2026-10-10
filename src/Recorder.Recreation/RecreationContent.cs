@@ -31,6 +31,12 @@ public sealed record RecreationContent(string Html, RecreationEvidence Evidence,
 
     public string? FontAddress { get; init; }
 
+    // Protocol 0.59: the participant's browser theme at the frame, which
+    // the recreation writes into the recreation browser's new profile, so
+    // that its own window, its tabs and toolbar, is drawn as the
+    // participant's was. Empty or null when the recording holds none.
+    public IReadOnlyList<Recorder.Session.BrowserThemeValue>? BrowserTheme { get; init; }
+
     // Slice 5b: the frames of the page, each with how it is built. Served
     // frames are answered by the recorder at their recorded addresses.
     public IReadOnlyList<RecreationFrame> Frames { get; init; } = [];

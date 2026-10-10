@@ -20038,6 +20038,12 @@ constexpr std::pair<const char*, const char*> kRecorderBrowserPreferences[] = {
      "settings.a11y.apply_page_colors_only_on_increased_contrast"},
     {"pageColorsBlockList", "settings.a11y.page_colors_block_list"},
     {"caretBrowsing", "settings.a11y.caretbrowsing.enabled"},
+    // Protocol 0.59: the browser's theme, registered by
+    // ThemeService::RegisterProfilePrefs.
+    {"userColor", "browser.theme.user_color2"},
+    {"colorVariant", "browser.theme.color_variant2"},
+    {"grayscaleTheme", "browser.theme.is_grayscale2"},
+    {"themeId", "extensions.theme.id"},
 };
 
 base::DictValue RecorderBrowserPreferenceReading(PrefService* prefs,
@@ -20108,9 +20114,42 @@ CHROME_PROFILE_IMPL_WATCH_HOOK = """\
 """
 
 
+# Before protocol 0.59 the list ended at caret browsing, without the theme.
+CHROME_PROFILE_IMPL_LEGACY_PREFERENCES_TAIL = """\
+    {"pageColorsBlockList", "settings.a11y.page_colors_block_list"},
+    {"caretBrowsing", "settings.a11y.caretbrowsing.enabled"},
+};
+"""
+CHROME_PROFILE_IMPL_PREFERENCES_TAIL = """\
+    {"pageColorsBlockList", "settings.a11y.page_colors_block_list"},
+    {"caretBrowsing", "settings.a11y.caretbrowsing.enabled"},
+    // Protocol 0.59: the browser's theme, registered by
+    // ThemeService::RegisterProfilePrefs.
+    {"userColor", "browser.theme.user_color2"},
+    {"colorVariant", "browser.theme.color_variant2"},
+    {"grayscaleTheme", "browser.theme.is_grayscale2"},
+    {"themeId", "extensions.theme.id"},
+};
+"""
+
+
 def patch_chrome_profile_impl(path: Path) -> None:
-    """Protocol 0.56: a profile's listed browser preferences and changes."""
+    """Protocol 0.56: a profile's listed browser preferences and changes.
+
+    From protocol 0.59 the list holds the browser's theme too; a checkout
+    patched before it has its list extended in place.
+    """
     text = read_source(path)
+    if (
+        CHROME_PROFILE_IMPL_HELPER_MARKER in text
+        and CHROME_PROFILE_IMPL_PREFERENCES_TAIL not in text
+    ):
+        text = replace_once(
+            text,
+            CHROME_PROFILE_IMPL_LEGACY_PREFERENCES_TAIL,
+            CHROME_PROFILE_IMPL_PREFERENCES_TAIL,
+            path,
+        )
     text = add_includes_after(
         text, CHROME_PROFILE_IMPL_OWN_INCLUDE, CHROME_PROFILE_IMPL_INCLUDES, path
     )

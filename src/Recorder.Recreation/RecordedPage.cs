@@ -119,7 +119,8 @@ public static class RecordedPage
         RecordedPageResources? resources = null,
         IReadOnlyList<RecordedPopup>? popups = null,
         IReadOnlyList<RecordedFrame>? frames = null,
-        BrowserPageValues? preferences = null)
+        BrowserPageValues? preferences = null,
+        IReadOnlyList<BrowserThemeValue>? browserTheme = null)
     {
         var tree = state.Dom ?? throw new InvalidOperationException("The document has no DOM state.");
         var nonce = RecreationServer.NewToken();
@@ -186,6 +187,7 @@ public static class RecordedPage
             notes.Add("No layout checkpoint of the page was recorded at or before the frame, so the viewport is the browser window's.");
         }
         notes.AddRange(RecordedPreferences.Notes(preferences));
+        notes.AddRange(RecordedPreferences.ThemeNotes(browserTheme));
         var elements = tree.Nodes.Values.Where(node => node.NodeType == "element").ToList();
         var withLayout = elements.Count(node => state.Layout.Nodes.ContainsKey(node.Id));
         notes.Add($"{withLayout.ToString(CultureInfo.InvariantCulture)} of the {elements.Count.ToString(CultureInfo.InvariantCulture)} recorded elements have a layout record, whose recorded style and box fragments the recreation imposes. They are written on each element in its data-a11y-recorded-style and data-a11y-recorded-layout attributes, which are shown in the Elements pane but were not attributes of the recorded page. Pseudo-elements, such as ::before, take no recorded style: they appear only as far as the page's recorded style sheets make them.");
@@ -279,6 +281,7 @@ public static class RecordedPage
         {
             Frames = written,
             Viewport = viewport,
+            BrowserTheme = browserTheme,
             DocumentUrl = servedAtRecordedAddress ? url : null,
             Resources = used,
             FontAddress = servedAtRecordedAddress ? fontAddress : null,

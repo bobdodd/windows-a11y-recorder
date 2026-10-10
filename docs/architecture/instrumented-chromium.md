@@ -1209,7 +1209,17 @@ checkpoint's and the change sets' viewports. Agreed with the owner on
 2026-10-10 ("The recorded layout zoom" in
 [accessibility preferences](accessibility-preferences.md)).
 
-Live 0.58 connections require an exact protocol-version match.
+Protocol version 0.59 adds four browser preferences to `browser.preferences`,
+the browser's theme: `userColor` (`browser.theme.user_color2`),
+`colorVariant` (`browser.theme.color_variant2`), `grayscaleTheme`
+(`browser.theme.is_grayscale2`), and `themeId` (`extensions.theme.id`), in
+the snapshot and as changes, with the hook in `profile_impl.cc`. A later
+`color-maps-sent` record also holds `changedColors`, the names of each
+map's colors that differ from the map last sent to the view. Agreed with
+the owner on 2026-10-10 ("The browser theme" in
+[accessibility preferences](accessibility-preferences.md)).
+
+Live 0.59 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

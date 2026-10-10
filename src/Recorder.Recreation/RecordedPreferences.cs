@@ -186,6 +186,50 @@ public static class RecordedPreferences
         return notes;
     }
 
+    /// <summary>
+    /// The evidence panel's notes on the browser theme the recreation
+    /// browser's own window is given (protocol 0.59).
+    /// </summary>
+    public static IReadOnlyList<string> ThemeNotes(IReadOnlyList<BrowserThemeValue>? theme)
+    {
+        if (theme is null || theme.Count == 0)
+        {
+            return
+            [
+                "The participant's browser theme was not recorded, as in a recording made before protocol 0.56 or without the browser, so the recreation browser's window, its tabs and toolbar, shows its own default theme."
+            ];
+        }
+
+        var notes = new List<string>();
+        var listed = string.Join(
+            "; ",
+            theme.Select(value =>
+                $"{value.Setting.Label}: {BrowserPreferenceTimeline.DescribeReading(value.Setting, value.Reading)}, from the record at {Seconds(value.Time)} s"));
+        notes.Add($"The recreation browser's own window, its tabs and toolbar, is given the participant's browser theme at the frame, written into its new profile before it starts: {listed}. The theme is set as the recreation opens, so it is the frame's; the page's own colors are given separately, from its recorded color maps.");
+        var missing = BrowserPreferenceSettings.ThemeNames
+            .Where(name => theme.All(value => value.Setting.Name != name))
+            .Select(name => BrowserPreferenceSettings.FindBrowser(name)!.Label)
+            .ToList();
+        if (missing.Count > 0)
+        {
+            notes.Add($"These theme settings were not recorded, as in a recording made before protocol 0.59, so the recreation browser's defaults are used: {string.Join(", ", missing)}.");
+        }
+
+        if (theme.FirstOrDefault(value => value.Setting.Name == "colorScheme")?.Value is { } scheme &&
+            scheme.TryGetInt64(out var mode) && mode == 0)
+        {
+            notes.Add("The browser color mode was system, so the recreation browser's window follows the viewing machine's Windows light or dark mode, which may not be the participant's.");
+        }
+
+        if (theme.FirstOrDefault(value => value.Setting.Name == "themeId")?.Value is { ValueKind: JsonValueKind.String } id &&
+            id.GetString() is { Length: > 0 } installed)
+        {
+            notes.Add($"The participant's browser had an installed theme, {installed}, which the recreation cannot install, as it has no network access, so its window shows the browser's default theme in place of it, with the recorded color mode.");
+        }
+
+        return notes;
+    }
+
     private static string MapLabel(string name) => name switch
     {
         "forcedColors" => "forced colors",

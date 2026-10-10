@@ -57,7 +57,7 @@ public sealed class RecreationBrowser : IAsyncDisposable
     // Opens DevTools in a window of its own, so that it and the page can each
     // be moved to any display and maximized there. DevTools keeps its dock
     // state in the profile's preferences.
-    public static void WriteProfile(string directory)
+    public static void WriteProfile(string directory, IReadOnlyList<Recorder.Session.BrowserThemeValue>? theme = null)
     {
         var defaultProfile = Path.Combine(directory, "Default");
         Directory.CreateDirectory(defaultProfile);
@@ -83,7 +83,53 @@ public sealed class RecreationBrowser : IAsyncDisposable
                 ["network_prediction_options"] = 2
             }
         };
+        if (ThemePreferences(theme) is { Count: > 0 } themed)
+        {
+            preferences["browser"] = new JsonObject { ["theme"] = themed };
+        }
         File.WriteAllText(Path.Combine(defaultProfile, "Preferences"), preferences.ToJsonString());
+    }
+
+    // Protocol 0.59: the participant's browser theme at the frame, as the
+    // values of the browser.theme preferences ThemeService reads as the
+    // profile loads (chrome/browser/themes/theme_service.cc). The recreation
+    // has no installed theme, which needs the network, so with one recorded
+    // the theme color, its style, and grayscale are left at their defaults,
+    // as the participant's window did not show them, and the browser's
+    // default theme is drawn with the recorded color mode. A setting not
+    // read is left out. Agreed with the owner on 2026-10-10.
+    public static JsonObject ThemePreferences(IReadOnlyList<Recorder.Session.BrowserThemeValue>? theme)
+    {
+        var themed = new JsonObject();
+        if (theme is null)
+        {
+            return themed;
+        }
+        var installed = theme.FirstOrDefault(value => value.Setting.Name == "themeId")?.Value is { ValueKind: JsonValueKind.String } id &&
+            !string.IsNullOrEmpty(id.GetString());
+        foreach (var value in theme)
+        {
+            if (value.Value is not { } recorded)
+            {
+                continue;
+            }
+            switch (value.Setting.Name)
+            {
+                case "colorScheme" when recorded.TryGetInt64(out var mode):
+                    themed["color_scheme2"] = mode;
+                    break;
+                case "userColor" when !installed && recorded.TryGetInt64(out var color):
+                    themed["user_color2"] = color;
+                    break;
+                case "colorVariant" when !installed && recorded.TryGetInt64(out var variant):
+                    themed["color_variant2"] = variant;
+                    break;
+                case "grayscaleTheme" when !installed && recorded.ValueKind is JsonValueKind.True or JsonValueKind.False:
+                    themed["is_grayscale2"] = recorded.GetBoolean();
+                    break;
+            }
+        }
+        return themed;
     }
 
     public const string DevToolsPortFile = "DevToolsActivePort";
@@ -171,7 +217,8 @@ public sealed class RecreationBrowser : IAsyncDisposable
         string executablePath,
         string directory,
         RecreationServer server,
-        IEnumerable<string>? extraArguments = null)
+        IEnumerable<string>? extraArguments = null,
+        IReadOnlyList<Recorder.Session.BrowserThemeValue>? theme = null)
     {
         if (!File.Exists(executablePath))
         {
@@ -188,7 +235,7 @@ public sealed class RecreationBrowser : IAsyncDisposable
         }
         var profile = Path.Combine(directory, ProfileFolder);
         var extension = Path.Combine(directory, ExtensionFolder);
-        WriteProfile(profile);
+        WriteProfile(profile, theme);
         WriteExtension(extension, server.EvidenceAddress);
         var log = LogPathFor(directory);
         var process = Process.Start(CreateStartInfo(executablePath, profile, extension, extraArguments, log))

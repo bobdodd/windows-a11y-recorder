@@ -34,6 +34,10 @@ public sealed class BrowserPreferenceTimeline
     // chrome/browser/themes/theme_service.h: kSystem 0, kLight 1, kDark 2.
     private static readonly string[] ColorSchemes = ["system", "light", "dark"];
 
+    // ui::mojom::BrowserColorVariant, ui/base/mojom/themes.mojom: kSystem,
+    // kTonalSpot, kNeutral, kVibrant, kExpressive, numbered from 0.
+    private static readonly string[] ColorVariants = ["system", "tonal spot", "neutral", "vibrant", "expressive"];
+
     private readonly Dictionary<string, JsonElement> _start = new(StringComparer.Ordinal);
     private readonly List<(long Time, string Preference, JsonElement Reading)> _changes = [];
     private readonly List<(long Time, double Percent)> _defaultZoom = [];
@@ -417,6 +421,48 @@ public sealed class BrowserPreferenceTimeline
         setAt is { } at && time - at < ChangedWindowNanoseconds;
 
     /// <summary>
+    /// The browser theme's settings at a time, each the reading at the
+    /// profile's load or of its last change at or before it, for a
+    /// recreation to give the recreation browser's window (protocol 0.59).
+    /// A setting the recording does not hold, as before 0.59, is left out.
+    /// </summary>
+    public IReadOnlyList<BrowserThemeValue> ThemeAt(long time)
+    {
+        var values = new List<BrowserThemeValue>();
+        if (!Recorded)
+        {
+            return values;
+        }
+
+        foreach (var name in BrowserPreferenceSettings.ThemeNames)
+        {
+            var setting = BrowserPreferenceSettings.FindBrowser(name)!;
+            JsonElement? reading = _start.TryGetValue(name, out var startReading) ? startReading : null;
+            var at = StartTime ?? 0;
+            foreach (var change in _changes)
+            {
+                if (change.Time > time)
+                {
+                    break;
+                }
+
+                if (change.Preference == name)
+                {
+                    reading = change.Reading;
+                    at = change.Time;
+                }
+            }
+
+            if (reading is { } value)
+            {
+                values.Add(new BrowserThemeValue(setting, value, at));
+            }
+        }
+
+        return values;
+    }
+
+    /// <summary>
     /// A browser preference's reading as the panel shows it: its value, with
     /// "(default)" when it is the default, or that it could not be read.
     /// </summary>
@@ -460,6 +506,18 @@ public sealed class BrowserPreferenceTimeline
                         : $"value {number.ToString(CultureInfo.InvariantCulture)}";
                 }
 
+                if (setting.Name == "colorVariant")
+                {
+                    return number >= 0 && number < ColorVariants.Length
+                        ? ColorVariants[number]
+                        : $"value {number.ToString(CultureInfo.InvariantCulture)}";
+                }
+
+                if (setting.Name == "userColor")
+                {
+                    return DescribeUserColor(number);
+                }
+
                 if (setting.Name == "requestedPageColors")
                 {
                     return $"value {number.ToString(CultureInfo.InvariantCulture)}";
@@ -473,7 +531,9 @@ public sealed class BrowserPreferenceTimeline
                     ? $"{real.ToString("0.###", CultureInfo.InvariantCulture)} ms"
                     : real.ToString("0.###", CultureInfo.InvariantCulture);
             case BrowserPreferenceKind.Text when value.ValueKind == JsonValueKind.String:
-                return value.GetString() is { Length: > 0 } text ? text : "none";
+                return value.GetString() is { Length: > 0 } text
+                    ? text
+                    : setting.Name == "themeId" ? "none (no installed theme)" : "none";
             case BrowserPreferenceKind.TextList when value.ValueKind == JsonValueKind.Array:
                 var items = value.EnumerateArray()
                     .Where(item => item.ValueKind == JsonValueKind.String)
@@ -485,10 +545,38 @@ public sealed class BrowserPreferenceTimeline
         }
     }
 
+    /// <summary>
+    /// The browser's theme color: an SkColor, ARGB, kept in an integer
+    /// preference, so above 0x7FFFFFFF it reads as negative. Transparent,
+    /// the registered default, is no color chosen.
+    /// </summary>
+    public static string DescribeUserColor(long number)
+    {
+        var argb = unchecked((uint)number);
+        return (argb >> 24) == 0
+            ? "none (no color chosen)"
+            : $"#{(argb & 0xFFFFFF).ToString("X6", CultureInfo.InvariantCulture)}";
+    }
+
     private static string Percent(double percent) =>
         $"{percent.ToString("0.#", CultureInfo.InvariantCulture)}%";
 
     private static string Clock(long nanoseconds) => WindowsPreferenceTimeline.Clock(nanoseconds);
+}
+
+/// <summary>
+/// A browser theme setting's reading, {value, isDefault, problem}, at a
+/// time, and the time of its record.
+/// </summary>
+public sealed record BrowserThemeValue(BrowserPreferenceSetting Setting, JsonElement Reading, long Time)
+{
+    /// <summary>The value, or null when it was not read.</summary>
+    public JsonElement? Value =>
+        Reading.ValueKind == JsonValueKind.Object &&
+        Reading.TryGetProperty("value", out var value) &&
+        value.ValueKind != JsonValueKind.Null
+            ? value
+            : null;
 }
 
 /// <summary>A field last sent to a page's view, and the time of its record.</summary>

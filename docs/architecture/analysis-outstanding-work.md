@@ -158,6 +158,14 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   [accessibility preferences](accessibility-preferences.md)). To build in
   the owner's checkout and check on the target machine with a recording
   whose Chromium window is maximized after the page loads.
+- The browser theme at protocol 0.59: its color, color style, grayscale,
+  and installed theme recorded, shown in the Properties panel and the
+  timeline, a color map record naming its changed colors, and the
+  recreation browser's window given the recorded theme: agreed and built
+  2026-10-10 ("The browser theme" in
+  [accessibility preferences](accessibility-preferences.md)). To build in
+  the owner's checkout and check on the target machine with a recording
+  in which the theme is changed.
 - Left open by the owner's decision 2026-10-08, to start stage 2 first:
   the Magnifier change records on a real Magnifier recording
   (`scripts/Test-MagnifierChanges.ps1`); applying a Windows color filter

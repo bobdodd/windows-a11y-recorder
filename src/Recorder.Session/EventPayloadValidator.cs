@@ -754,7 +754,15 @@ internal static class EventPayloadValidator
         var expected = only is null
             ? Recorder.Contracts.BrowserPreferenceSettings.Browser
             : [Recorder.Contracts.BrowserPreferenceSettings.FindBrowser(only)!];
-        ValidateShape(readings, [.. expected.Select(setting => RequiredObject(setting.Name))], issues, path);
+        // A snapshot holds every setting listed by its protocol: one added
+        // later (AddedIn) is absent from an older recording's.
+        ValidateShape(
+            readings,
+            [.. expected.Select(setting => only is null && setting.AddedIn is not null
+                ? OptionalObject(setting.Name)
+                : RequiredObject(setting.Name))],
+            issues,
+            path);
         foreach (var setting in expected)
         {
             if (!readings.TryGetProperty(setting.Name, out var reading) || reading.ValueKind != JsonValueKind.Object)
@@ -887,7 +895,8 @@ internal static class EventPayloadValidator
                 RequiredDecimalText("viewId"),
                 RequiredEnum("point", [.. Recorder.Contracts.BrowserPreferenceSettings.ColorMapSendPoints]),
                 RequiredBoolean("first"),
-                RequiredObject("maps")
+                RequiredObject("maps"),
+                OptionalObject("changedColors")
             ],
             issues);
         ValidateBrowserContextProperty(payload, issues);
@@ -950,6 +959,52 @@ internal static class EventPayloadValidator
                 ],
                 issues,
                 $"#/payload/maps/{name}");
+        }
+
+        ValidateChangedColors(payload, first, present, issues);
+    }
+
+    // Protocol 0.59: a later send names, for each map it holds, the colors
+    // that differ from the map last sent to the view, at least one, each
+    // once. A first send names none.
+    private static void ValidateChangedColors(
+        JsonElement payload,
+        bool first,
+        IReadOnlyList<string> present,
+        ICollection<EventValidationIssue> issues)
+    {
+        if (!payload.TryGetProperty("changedColors", out var changed) || changed.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        var named = changed.EnumerateObject().Select(map => map.Name).ToList();
+        if (first || !named.Order(StringComparer.Ordinal).SequenceEqual(present.Order(StringComparer.Ordinal), StringComparer.Ordinal))
+        {
+            AddError(
+                issues,
+                "browser-color-maps-changed-colors-inconsistent",
+                "#/payload/changedColors",
+                "A record after the first names the changed colors of each map it holds, and only those maps; a first record names none.");
+            return;
+        }
+
+        foreach (var map in changed.EnumerateObject())
+        {
+            var colors = map.Value.ValueKind == JsonValueKind.Array
+                ? map.Value.EnumerateArray().ToList()
+                : null;
+            if (colors is null || colors.Count == 0 ||
+                colors.Any(color => color.ValueKind != JsonValueKind.String ||
+                    !Recorder.Contracts.BrowserPreferenceSettings.RendererColorNames.Contains(color.GetString()!)) ||
+                colors.Select(color => color.GetString()).Distinct(StringComparer.Ordinal).Count() != colors.Count)
+            {
+                AddError(
+                    issues,
+                    "browser-color-maps-changed-colors-invalid",
+                    $"#/payload/changedColors/{map.Name}",
+                    "A map's changed colors are a list of at least one RendererColorId name, each once.");
+            }
         }
     }
 

@@ -1805,7 +1805,10 @@ public partial class MainWindow : Window
                             documents.PageFrameTreeNodeIdOf(chosen.Key),
                             chosen.Url,
                             found.Basis.CutTime);
-                        var written = RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis, resources, popups, frames: frames, preferences: pageValues);
+                        // Protocol 0.59: the participant's browser theme at
+                        // the same time, for the recreation browser's window.
+                        var browserTheme = browserPreferences.ThemeAt(found.Basis.CutTime);
+                        var written = RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis, resources, popups, frames: frames, preferences: pageValues, browserTheme: browserTheme);
                         timings.Add(new RecreationTiming("Writing the page", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
                         return written;
                     }

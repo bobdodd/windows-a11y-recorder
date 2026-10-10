@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.58"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.58"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.59"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.59"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -9850,6 +9850,10 @@ class BrowserPreferencesIntegrationTests(unittest.TestCase):
             "settings.a11y.apply_page_colors_only_on_increased_contrast",
             "settings.a11y.page_colors_block_list",
             "settings.a11y.caretbrowsing.enabled",
+            "browser.theme.user_color2",
+            "browser.theme.color_variant2",
+            "browser.theme.is_grayscale2",
+            "extensions.theme.id",
         ):
             with self.subTest(preference=preference):
                 self.assertIn(f'"{preference}"', first)
@@ -9859,6 +9863,27 @@ class BrowserPreferencesIntegrationTests(unittest.TestCase):
                 "patched", first, self.signatures()
             ),
         )
+
+    def test_a_profile_patched_before_0_59_gains_the_theme(self):
+        # Protocol 0.59: a checkout patched at 0.56 to 0.58 holds the list
+        # without the browser's theme, which is added in place.
+        self.assertIn(
+            INTEGRATE.CHROME_PROFILE_IMPL_PREFERENCES_TAIL,
+            INTEGRATE.CHROME_PROFILE_IMPL_HELPER,
+        )
+        current = self.patch_twice(
+            "profile_impl.cc", self.profile_source(),
+            INTEGRATE.patch_chrome_profile_impl,
+        )
+        legacy = current.replace(
+            INTEGRATE.CHROME_PROFILE_IMPL_PREFERENCES_TAIL,
+            INTEGRATE.CHROME_PROFILE_IMPL_LEGACY_PREFERENCES_TAIL,
+        )
+        self.assertNotIn('"browser.theme.user_color2"', legacy)
+        upgraded = self.patch_twice(
+            "profile_impl.cc", legacy, INTEGRATE.patch_chrome_profile_impl
+        )
+        self.assertEqual(current, upgraded)
 
     def test_refuses_a_profile_it_does_not_recognise(self):
         source = self.profile_source().replace(
