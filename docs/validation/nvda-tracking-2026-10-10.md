@@ -79,5 +79,23 @@ against the system sound could not be made.
 - First sound: its period started at 13.05 s, 0.06 s after the helper's
   record. In the first run it started 0.61 s after the helper's record,
   and 0.72 s after the system sound. This points to the fix working, but
-  without the system sound it is not confirmed; a run with audio captured
-  is still needed.
+  without the system sound it is not confirmed. The next run confirms it.
+
+## The run with audio, after the fixes
+
+Recording 20261010-202211-725404eb32ee45e0917f509b8e24673c, with package
+wr-e16347c and audio captured: NVDA started during the recording, spoke,
+and was quit.
+
+- NVDA started at 8.46 s by Windows' clock (record at 8.69 s), its helper
+  at 9.84 s, and both exited at 39.21 s (records at 39.40 s). Versions of
+  files without one are null.
+- The system sound, on the same 20 ms grid and threshold as above, had 8
+  periods, and NVDA had 8, one for each.
+- The startup sound began at 9.86 s in the system sound, and its period at
+  9.96 s: 0.10 s late, against 0.72 s in the first run, and within the
+  100 ms listing interval and one 20 ms sample. Every later period started
+  within 15 to 40 ms of the system sound.
+
+The fix for the first sound is confirmed. Up to about 0.1 s of a new
+session's first sound can still be missed.

@@ -226,8 +226,9 @@ not be measured, if it could not.
   browser, that the periods of sound match NVDA's sound and not the
   microphone, and that the startup sound's period starts with the system
   sound. First run 2026-10-10
-  ([validation](../validation/nvda-tracking-2026-10-10.md)); the last
-  check is to repeat after its fix.
+  ([validation](../validation/nvda-tracking-2026-10-10.md)), with the
+  first sound checked again after its fix; up to about 0.1 s of a new
+  session's first sound can be missed.
 
 ## The keyboard hook
 
