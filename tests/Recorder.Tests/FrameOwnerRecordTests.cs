@@ -154,7 +154,7 @@ public sealed class FrameOwnerRecordTests : IDisposable
     [Fact]
     public void TheValidatorAcceptsTheRecordsAndRefusesMalformedOnes()
     {
-        Assert.Equal("0.57", BrowserEvidenceProtocol.CurrentVersion);
+        Assert.Equal("0.58", BrowserEvidenceProtocol.CurrentVersion);
         Assert.Empty(Validate("dom-checkpoint-started", Started(Parent, "dom-checkpoint-1", MainFrame, true)));
         Assert.Empty(Validate("dom-checkpoint-started", Started(Child, "dom-checkpoint-1", RemoteFrame, false)));
         // A document with no frame, and a walk recorded before protocol 0.55.

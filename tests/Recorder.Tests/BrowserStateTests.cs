@@ -139,12 +139,36 @@ public sealed class BrowserStateTests : IDisposable
             return this;
         }
 
-        public Records Layout(params (long Id, double Y)[] nodes)
+        public Records Layout(params (long Id, double Y)[] nodes) => LayoutWith("", nodes);
+
+        // Protocol 0.58: a change set that records the viewport at it.
+        public Records LayoutAt(double width, double height, double ratio, params (long Id, double Y)[] nodes) =>
+            LayoutWith($$""","viewport":{"width":{{width}},"height":{{height}}},"devicePixelRatio":{{ratio}}""", nodes);
+
+        // A change set that lays a node out at a width, in its box fragment.
+        public Records LayoutWidth(long node, double width, double zoom)
+        {
+            var id = $"layout-changes-{token}-{++_changeSet}";
+            Add("browser.layout", "layout-changes-started", $$"""
+                "changeSetId":"{{id}}","layoutCheckpointId":null,"layoutZoomFactor":{{zoom}},"viewPaintOffset":{"x":0,"y":0},
+                "viewTransformNodeId":"1"
+                """);
+            Add("browser.layout", "layout-node-changed", $$"""
+                "changeSetId":"{{id}}","nodeId":{{node}},"transformNodeId":"1",
+                "boxFragments":{"effectiveZoom":{{zoom}},"fragments":[{"width":{{width * zoom}},"height":100}]}
+                """);
+            Add("browser.layout", "layout-changes-completed", $$"""
+                "changeSetId":"{{id}}"
+                """);
+            return this;
+        }
+
+        private Records LayoutWith(string frame, (long Id, double Y)[] nodes)
         {
             var id = $"layout-changes-{token}-{++_changeSet}";
             Add("browser.layout", "layout-changes-started", $$"""
                 "changeSetId":"{{id}}","layoutCheckpointId":null,"layoutZoomFactor":1,"viewPaintOffset":{"x":0,"y":0},
-                "viewTransformNodeId":"1"
+                "viewTransformNodeId":"1"{{frame}}
                 """);
             Add("browser.layout", "layout-transform-node", """
                 "transformNodeId":"1","parentTransformNodeId":null,"matrix":[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],
@@ -388,6 +412,49 @@ public sealed class BrowserStateTests : IDisposable
         Assert.Equal(["token-a doc-1", "token-a doc-2"], builder.Documents.Keys.Order());
         Assert.Equal(4, builder.Documents["token-a doc-1"].Dom!.Nodes.Count);
         Assert.Equal(2, builder.Documents["token-a doc-2"].Dom!.Nodes.Count);
+    }
+
+    [Fact]
+    public void AChangeSetFromProtocol058GivesTheViewportAtIt()
+    {
+        // The owner's recording of 2026-10-10: the page's checkpoint at 929
+        // by 925, then the window maximized, laid out by a change set.
+        var document = Build(new Records("token-a")
+            .Walk("finished-parsing", "first", false, Page)
+            .LayoutWalk("first")
+            .Layout((3, 1))
+            .LayoutAt(1920, 969, 1, (3, 2))
+            .Layout((3, 3))
+            .Items).Documents.Values.Single();
+        var viewport = document.Viewport!;
+        Assert.Equal((1920.0, 969.0, 1.0, 1.0), (viewport.Width, viewport.Height, viewport.DevicePixelRatio, viewport.LayoutZoomFactor));
+        Assert.True(viewport.FromChangeSet);
+        var read = BrowserStateSnapshot.Read(BrowserStateSnapshot.Serialize(document)).Viewport!;
+        Assert.Equal(viewport, read);
+
+        // Before protocol 0.58 a change set holds no viewport, and the
+        // checkpoint's stays.
+        var older = Build(new Records("token-a").LayoutWalk("first").Layout((3, 1)).Items).Documents.Values.Single();
+        Assert.False(older.Viewport!.FromChangeSet);
+        Assert.Equal(1001, older.Viewport.Width);
+
+        // A later checkpoint's viewport replaces a change set's.
+        var walked = Build(new Records("token-a").LayoutAt(1920, 969, 1).LayoutWalk("check").Items).Documents.Values.Single();
+        Assert.False(walked.Viewport!.FromChangeSet);
+    }
+
+    [Fact]
+    public void TheRootsLaidOutWidthIsItsFirstFragmentsWidthInCssPixels()
+    {
+        var document = Build(new Records("token-a")
+            .Walk("finished-parsing", "first", false, Page)
+            .LayoutWalk("first")
+            .LayoutWidth(2, 1905, 1.25)
+            .Items).Documents.Values.Single();
+        Assert.Equal(1905, Recorder.Recreation.RecordedPage.RootLaidOutWidth(document.Dom!, document)!.Value, 9);
+        // With no layout record of the root, there is none.
+        var unlaid = Build(new Records("token-a").Walk("finished-parsing", "first", false, Page).Items).Documents.Values.Single();
+        Assert.Null(Recorder.Recreation.RecordedPage.RootLaidOutWidth(unlaid.Dom!, unlaid));
     }
 
     [Fact]

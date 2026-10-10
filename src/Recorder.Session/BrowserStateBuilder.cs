@@ -405,6 +405,18 @@ public sealed class BrowserStateBuilder
             ? value.GetString()
             : null;
 
+    // The viewport a layout checkpoint, or from protocol 0.58 a change set,
+    // records, with its device pixel ratio and layout zoom factor; null when
+    // the record holds none.
+    private static RecordedViewport? ReadViewport(JsonElement payload, long time, bool fromChangeSet) =>
+        payload.TryGetProperty("viewport", out var viewport) && viewport.ValueKind == JsonValueKind.Object &&
+        viewport.TryGetProperty("width", out var width) && width.ValueKind == JsonValueKind.Number &&
+        viewport.TryGetProperty("height", out var height) && height.ValueKind == JsonValueKind.Number &&
+        payload.TryGetProperty("devicePixelRatio", out var ratio) && ratio.ValueKind == JsonValueKind.Number &&
+        payload.TryGetProperty("layoutZoomFactor", out var zoom) && zoom.ValueKind == JsonValueKind.Number
+            ? new RecordedViewport(width.GetDouble(), height.GetDouble(), ratio.GetDouble(), zoom.GetDouble(), time) { FromChangeSet = fromChangeSet }
+            : null;
+
     private void ApplyLayout(BrowserDocumentState document, long eventKey, long time, string eventType, JsonElement payload)
     {
         switch (eventType)
@@ -422,15 +434,17 @@ public sealed class BrowserStateBuilder
                 {
                     document.LayoutCompleteness = BrowserStateCompleteness.Complete;
                 }
+                // Protocol 0.58: a change set records the viewport at it, so
+                // a window resized after the checkpoint is followed.
+                if (eventType == "layout-changes-started" && ReadViewport(payload, time, fromChangeSet: true) is { } changed)
+                {
+                    document.Viewport = changed;
+                }
                 break;
             case "layout-checkpoint-started":
-                if (payload.TryGetProperty("viewport", out var viewport) && viewport.ValueKind == JsonValueKind.Object &&
-                    viewport.TryGetProperty("width", out var width) && width.ValueKind == JsonValueKind.Number &&
-                    viewport.TryGetProperty("height", out var height) && height.ValueKind == JsonValueKind.Number &&
-                    payload.TryGetProperty("devicePixelRatio", out var ratio) && ratio.ValueKind == JsonValueKind.Number &&
-                    payload.TryGetProperty("layoutZoomFactor", out var zoom) && zoom.ValueKind == JsonValueKind.Number)
+                if (ReadViewport(payload, time, fromChangeSet: false) is { } walked)
                 {
-                    document.Viewport = new RecordedViewport(width.GetDouble(), height.GetDouble(), ratio.GetDouble(), zoom.GetDouble(), time);
+                    document.Viewport = walked;
                 }
                 // A layout walk after a lost record states the loss; the
                 // change records that follow it lack the lost change.

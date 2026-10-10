@@ -203,7 +203,13 @@ public sealed record RecreationEvidence(
 
 // The viewport a recreation is meant to be shown at: its CSS size, its
 // devicePixelRatio, and the layout zoom factor it is laid out at.
-public sealed record RecreationShownViewport(double Width, double Height, double DevicePixelRatio, double LayoutZoomFactor);
+public sealed record RecreationShownViewport(double Width, double Height, double DevicePixelRatio, double LayoutZoomFactor)
+{
+    // Set when the recorded viewport may be out of date at the frame: in a
+    // recording before protocol 0.58, the root element was laid out wider
+    // than the checkpoint's viewport. The panel shows and announces it.
+    public string? Warning { get; init; }
+}
 
 // Source is "fixed" for slice 3a and "recording" from slice 3b. The frame,
 // recording time, and basis are null for fixed content.

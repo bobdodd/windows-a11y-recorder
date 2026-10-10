@@ -98,6 +98,7 @@ public static class BrowserStateSnapshot
             writer.WriteNumber("devicePixelRatio", viewport.DevicePixelRatio);
             writer.WriteNumber("layoutZoomFactor", viewport.LayoutZoomFactor);
             writer.WriteNumber("time", viewport.Time);
+            writer.WriteBoolean("fromChangeSet", viewport.FromChangeSet);
             writer.WriteEndObject();
         }
         else
@@ -267,6 +268,11 @@ public static class BrowserStateSnapshot
                 viewport.GetProperty("devicePixelRatio").GetDouble(),
                 viewport.GetProperty("layoutZoomFactor").GetDouble(),
                 viewport.GetProperty("time").GetInt64())
+            {
+                // Absent from a snapshot written before protocol 0.58.
+                FromChangeSet = viewport.TryGetProperty("fromChangeSet", out var fromChangeSet) &&
+                    fromChangeSet.ValueKind == JsonValueKind.True
+            }
             : null;
         var started = layout.GetProperty("started");
         document.Layout.Load(

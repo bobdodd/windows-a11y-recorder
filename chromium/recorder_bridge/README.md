@@ -546,9 +546,19 @@ tests it outside a Chromium build. In recreation mode,
 root element and replaces the listed fields of `WebPreferences` and
 `RendererPreferences` with the recorded values after each send;
 `Page::UpdateColorProviders` takes the recorded maps;
-`WebFrameWidgetImpl::SetZoomInternal` sets the recorded zoom level; and
-`HTMLHtmlElement::InsertedByParser` applies all of them again once the
-served root, with its attribute, is inserted.
+`WebFrameWidgetImpl::SetZoomInternal` uses the recorded layout zoom factor
+in place of the one it works out (the recorded zoom level itself is not
+applied, from 2026-10-09); and `HTMLHtmlElement::InsertedByParser` applies
+all of them again once the served root, with its attribute, is inserted.
+
+Protocol 0.58 adds `viewport` and `devicePixelRatio` to
+`layout-changes-started`. The change set helper in `local_frame_view.cc`
+reads them as the layout checkpoint helper does, from
+`LocalFrameView::ViewportSizeForMediaQueries` and
+`LocalFrame::DevicePixelRatio`, into `LayoutChangesFrame`, so that a window
+resized after the document's checkpoint is recorded with the change set
+that lays the page out at the new size. `integrate.py` upgrades a helper
+patched at 0.57.
 
 Protocol 0.55 (slice 5a) records frames on `browser.dom`. The DOM walk
 helper in `document.cc` passes `BeginBlinkDomCheckpoint` the walked

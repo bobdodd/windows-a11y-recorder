@@ -458,7 +458,9 @@ differs:
 - `layout-changes-started`: `changeSetId` (`layout-changes-N`),
   `layoutCheckpointId` (the checkpoint recorded for the document since its
   previous change set, or null), `viewTransformNodeId`, `viewPaintOffset`,
-  and `layoutZoomFactor`.
+  and `layoutZoomFactor`; from protocol 0.58 also `viewport` (`width` and
+  `height`, in CSS pixels) and `devicePixelRatio`, as a checkpoint records
+  them.
 - `layout-transform-node`: `transformNodeId` (`layout-transform-N`),
   `parentTransformNodeId` (null at the view's node and at the tree's root),
   `matrix` (16 values, column-major, with the transform origin applied),

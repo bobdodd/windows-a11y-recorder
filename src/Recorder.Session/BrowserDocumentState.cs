@@ -45,9 +45,15 @@ public sealed record TextControlState(
 
 /// <summary>
 /// The viewport size in CSS pixels, device pixel ratio, and layout zoom
-/// factor of a layout checkpoint's start record, and when it was recorded.
+/// factor of the document's latest layout record that holds them, and when
+/// it was recorded: a layout checkpoint's start record, or from protocol
+/// 0.58 a change set's (<see cref="FromChangeSet"/>).
 /// </summary>
-public sealed record RecordedViewport(double Width, double Height, double DevicePixelRatio, double LayoutZoomFactor, long Time);
+public sealed record RecordedViewport(double Width, double Height, double DevicePixelRatio, double LayoutZoomFactor, long Time)
+{
+    /// <summary>True when a layout change set recorded it (protocol 0.58), false for a checkpoint.</summary>
+    public bool FromChangeSet { get; init; }
+}
 
 /// <summary>The focused node, selection, and text controls the interaction records give.</summary>
 public sealed record InteractionCurrent(

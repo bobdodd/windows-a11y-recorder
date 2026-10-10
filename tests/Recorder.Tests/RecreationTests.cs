@@ -206,7 +206,17 @@ public sealed class RecreationTests : IDisposable
         Assert.Contains("${recorderBase}window.json", check, StringComparison.Ordinal);
         Assert.Contains("fit.emulated", check, StringComparison.Ordinal);
         Assert.Contains("fit.emulationError", check, StringComparison.Ordinal);
-        Assert.Contains("say(fitNote ?", check, StringComparison.Ordinal);
+        Assert.Contains("say([summary, fitNote, staleNote]", check, StringComparison.Ordinal);
+        // A recorded viewport that may be out of date is listed and
+        // announced too; the evidence carries the warning only when set.
+        Assert.Contains("meant.warning", check, StringComparison.Ordinal);
+        Assert.Equal(JsonValueKind.Null, shown.GetProperty("warning").ValueKind);
+        var warned = FixedRecreation.Create().Evidence with
+        {
+            ShownViewport = new RecreationShownViewport(929, 925, 1, 1) { Warning = "The page's root element was laid out 1905 CSS pixels wide" },
+        };
+        using var warnedJson = JsonDocument.Parse(JsonSerializer.Serialize(warned, RecreationServer.EvidenceJson));
+        Assert.StartsWith("The page's root element", warnedJson.RootElement.GetProperty("shownViewport").GetProperty("warning").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]

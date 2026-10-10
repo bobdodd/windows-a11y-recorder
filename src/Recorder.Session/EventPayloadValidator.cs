@@ -4607,9 +4607,32 @@ internal static class EventPayloadValidator
                 RequiredBoolean("checkpointUpdate"),
                 RequiredString("viewTransformNodeId"),
                 RequiredObject("viewPaintOffset"),
-                RequiredNumber("layoutZoomFactor", positive: true)
+                RequiredNumber("layoutZoomFactor", positive: true),
+                // Protocol 0.58.
+                OptionalObject("viewport"),
+                OptionalNumber("devicePixelRatio", positive: true)
             ],
             issues);
+        if (payload.TryGetProperty("viewport", out var changesViewport) &&
+            changesViewport.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                changesViewport,
+                [
+                    RequiredNumber("width", nonnegative: true),
+                    RequiredNumber("height", nonnegative: true)
+                ],
+                issues,
+                "#/payload/viewport");
+        }
+        if (payload.TryGetProperty("viewport", out _) != payload.TryGetProperty("devicePixelRatio", out _))
+        {
+            AddError(
+                issues,
+                "browser-layout-change-viewport-inconsistent",
+                "#/payload/viewport",
+                "A change set records its viewport and device pixel ratio together.");
+        }
         ValidateLayoutChangeSetIdentity(payload, issues);
         ValidateLayoutIdentity(
             payload,
@@ -7941,6 +7964,21 @@ internal static class EventPayloadValidator
                 : nonnegative
                     ? "must be a finite nonnegative number"
                     : "must be a finite number");
+
+    private static PropertyRule OptionalNumber(
+        string name,
+        bool positive = false) =>
+        new(
+            name,
+            false,
+            false,
+            value => value.ValueKind == JsonValueKind.Number &&
+                value.TryGetDouble(out var number) &&
+                double.IsFinite(number) &&
+                (!positive || number > 0),
+            positive
+                ? "must be a finite positive number"
+                : "must be a finite number");
 
     private static PropertyRule OptionalNullableNumber(
         string name,

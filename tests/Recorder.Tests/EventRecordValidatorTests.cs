@@ -3277,6 +3277,29 @@ public sealed class EventRecordValidatorTests
     }
 
     [Fact]
+    public void AcceptsAChangeSetsViewportFromProtocol058()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangesStarted)!;
+        payload["viewport"] = JsonNode.Parse("""{"width":1920,"height":969.5}""");
+        payload["devicePixelRatio"] = 1.25;
+        Assert.Empty(ValidateLayoutRecord("layout-changes-started", payload));
+
+        // Each without the other, a negative size, and a ratio of 0.
+        var alone = JsonNode.Parse(BrowserLayoutPayloads.ChangesStarted)!;
+        alone["viewport"] = JsonNode.Parse("""{"width":1920,"height":969}""");
+        Assert.Contains(ValidateLayoutRecord("layout-changes-started", alone), issue => issue.Code == "browser-layout-change-viewport-inconsistent");
+        var ratioAlone = JsonNode.Parse(BrowserLayoutPayloads.ChangesStarted)!;
+        ratioAlone["devicePixelRatio"] = 1;
+        Assert.Contains(ValidateLayoutRecord("layout-changes-started", ratioAlone), issue => issue.Code == "browser-layout-change-viewport-inconsistent");
+        var negative = JsonNode.Parse(payload.ToJsonString())!;
+        negative["viewport"]!["width"] = -1;
+        Assert.NotEmpty(ValidateLayoutRecord("layout-changes-started", negative));
+        var zero = JsonNode.Parse(payload.ToJsonString())!;
+        zero["devicePixelRatio"] = 0;
+        Assert.NotEmpty(ValidateLayoutRecord("layout-changes-started", zero));
+    }
+
+    [Fact]
     public void RejectsAChangeSetOfACheckpointsUpdateWithoutTheCheckpoint()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangesStarted)!;

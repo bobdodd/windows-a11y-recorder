@@ -213,7 +213,8 @@ function Invoke-Analysis([string]$results, [string]$events) {
         # The page as the recreation shows it ("The recorded layout zoom" in
         # docs/architecture/accessibility-preferences.md, as revised on
         # 2026-10-09): the frame is the latest layout walk's size in screen
-        # pixels, its CSS size times its devicePixelRatio, and the page is
+        # pixels, or from protocol 0.58 the latest change set's, its CSS size
+        # times its devicePixelRatio, and the page is
         # laid out at the layout zoom of the latest layout change set, which
         # follows the zoom and text size, or the walk's when there is none.
         # Nothing is emulated, so the page's devicePixelRatio is that layout
@@ -228,11 +229,15 @@ function Invoke-Analysis([string]$results, [string]$events) {
         $expectedHeight = ''
         if ($changeSet.Count -and $null -ne $changeSet[0].Payload.layoutZoomFactor) { $layoutZoom = [double]$changeSet[0].Payload.layoutZoomFactor }
         elseif ($layout.Count) { $layoutZoom = [double]$layout[0].Payload.layoutZoomFactor }
-        if ($layout.Count -and $layoutZoom) {
-            $walkDpr = [double]$layout[0].Payload.devicePixelRatio
+        # From protocol 0.58 a change set records the viewport too, so the
+        # frame is the latest of the walk and the change sets that hold one.
+        $sized = @(@($layout) + @($changeSets | Where-Object { $_.Time -le $time -and $null -ne $_.Payload.viewport }) |
+            Where-Object { $_ } | Sort-Object Time | Select-Object -Last 1)
+        if ($sized.Count -and $layoutZoom) {
+            $sizedDpr = [double]$sized[0].Payload.devicePixelRatio
             $expectedDpr = [Math]::Round($layoutZoom, 4)
-            $expectedWidth = [Math]::Round([double]$layout[0].Payload.viewport.width * $walkDpr / $layoutZoom, 2)
-            $expectedHeight = [Math]::Round([double]$layout[0].Payload.viewport.height * $walkDpr / $layoutZoom, 2)
+            $expectedWidth = [Math]::Round([double]$sized[0].Payload.viewport.width * $sizedDpr / $layoutZoom, 2)
+            $expectedHeight = [Math]::Round([double]$sized[0].Payload.viewport.height * $sizedDpr / $layoutZoom, 2)
         }
         $dark = [string]$fields['preferredColorScheme'] -eq 'dark'
         $forced = [bool]$fields['inForcedColors']

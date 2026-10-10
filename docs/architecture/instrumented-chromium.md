@@ -1190,14 +1190,26 @@ providers, all three in a view's first record and only those that changed
 in later ones. In recreation mode the renderer gives the recreated page
 the recorded values carried in its root element's
 `data-a11y-recorded-preferences` attribute: its listed preferences, color
-maps, and zoom level, in place of those the recreation browser sends. The
+maps, and zoom level, in place of those the recreation browser sends
+(revised 2026-10-09: the recorded layout zoom factor, not the zoom level). The
 hooks are in `content/browser` (`render_view_host_impl.cc`,
 `web_contents_impl.cc`) and `third_party/blink/renderer`
 (`web_view_impl.cc`, `page.cc`, `web_frame_widget_impl.cc`,
 `html_html_element.cc`). The design is in
 [accessibility preferences](accessibility-preferences.md), "Stage 3".
 
-Live 0.57 connections require an exact protocol-version match.
+Protocol version 0.58 adds `viewport` (`width` and `height`, in CSS
+pixels) and `devicePixelRatio` to `layout-changes-started`, read as a
+layout checkpoint reads them (`LocalFrameView::ViewportSizeForMediaQueries`
+and `LocalFrame::DevicePixelRatio`), so that a window resized after the
+document's checkpoint is recorded with the change set that lays the page
+out at its new size. Both are absent before 0.58, and the validator takes
+them together or not at all. The recreation is shown at the latest of the
+checkpoint's and the change sets' viewports. Agreed with the owner on
+2026-10-10 ("The recorded layout zoom" in
+[accessibility preferences](accessibility-preferences.md)).
+
+Live 0.58 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

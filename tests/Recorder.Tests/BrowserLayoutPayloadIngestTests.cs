@@ -57,6 +57,20 @@ public sealed class BrowserLayoutPayloadIngestTests
         Assert.Null(startedPayload.LayoutCheckpointId);
         Assert.Equal("layout-transform-1", startedPayload.ViewTransformNodeId);
         Assert.Equal(2, startedPayload.ViewPaintOffset.Y);
+        Assert.Null(startedPayload.Viewport);
+        Assert.Null(startedPayload.DevicePixelRatio);
+
+        // Protocol 0.58: a change set's viewport and device pixel ratio.
+        var sized = JsonNode.Parse(BrowserLayoutPayloads.ChangesStartedWithoutCheckpoint)!.AsObject();
+        sized["viewport"] = JsonNode.Parse("""{"width":1920,"height":969}""");
+        sized["devicePixelRatio"] = 1.25;
+        using (var sizedDocument = JsonDocument.Parse(sized.ToJsonString()))
+        {
+            BrowserProtocol.ValidateEvidencePayload(BrowserEvidenceChannels.Layout, "layout-changes-started", sizedDocument.RootElement);
+            var sizedPayload = BrowserProtocol.Deserialize<BrowserLayoutChangesStartedPayload>(sizedDocument.RootElement);
+            Assert.Equal(new BrowserLayoutSize(1920, 969), sizedPayload.Viewport);
+            Assert.Equal(1.25, sizedPayload.DevicePixelRatio);
+        }
 
         using var transform = JsonDocument.Parse(BrowserLayoutPayloads.ScrollTransformNode);
         var transformPayload = BrowserProtocol.Deserialize<BrowserLayoutTransformNodePayload>(

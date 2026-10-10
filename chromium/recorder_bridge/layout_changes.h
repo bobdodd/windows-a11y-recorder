@@ -305,12 +305,17 @@ struct LayoutTransformNode {
 
 // What a change set states about its document's view: the transform node of
 // the layout view's local border box, the view's paint offset in it, and the
-// layout zoom factor.
+// layout zoom factor. From protocol 0.58, also the viewport, in CSS pixels,
+// and the device pixel ratio, as a layout checkpoint reads them, so that a
+// window resized after the checkpoint is recorded.
 struct LayoutChangesFrame {
   uint64_t view_transform_node_id = 0;
   double view_paint_offset_x = 0;
   double view_paint_offset_y = 0;
   double layout_zoom_factor = 0;
+  double viewport_width = 0;
+  double viewport_height = 0;
+  double device_pixel_ratio = 0;
 };
 
 // One scroller whose scroll offset Blink stored during a rendering update,

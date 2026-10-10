@@ -442,6 +442,14 @@ scroll bars, and system colors follow the participant's. The evidence
 panel lists each value with the time of its record. See "Stage 3" in
 [accessibility preferences](docs/architecture/accessibility-preferences.md).
 
+Protocol 0.58 records the page's viewport and device pixel ratio with each
+layout change set, not only at its layout checkpoint, so a recreation
+follows a browser window resized during the recording. A recreation is
+shown at the recorded window's size in screen pixels; when the viewing
+screen cannot hold it, the page keeps its recorded size and is drawn
+smaller to fit. See "The recorded layout zoom" in
+[accessibility preferences](docs/architecture/accessibility-preferences.md).
+
 Protocol 0.55 records the frames of each document: a DOM walk names the
 DevTools frame token of its document's frame and whether it is a main frame,
 and the frame each frame owner element (`iframe`, `frame`, `object`,

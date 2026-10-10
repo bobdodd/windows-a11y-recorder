@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.57";
+    public const string CurrentVersion = "0.58";
 }
 
 public static class BrowserEvidenceChannels
@@ -1346,6 +1346,9 @@ public sealed record BrowserLayoutCheckpointCompletedPayload(
 // CheckpointUpdate (protocol 0.46) is true when the change set was read for
 // the rendering update its named checkpoint recorded, and so is part of the
 // walked update presented through that checkpoint.
+// Viewport and DevicePixelRatio (protocol 0.58) are the document's viewport,
+// in CSS pixels, and devicePixelRatio at the change set, as a layout
+// checkpoint records them; both are absent before 0.58.
 public sealed record BrowserLayoutChangesStartedPayload(
     BrowserContext Context,
     string ChangeSetId,
@@ -1353,7 +1356,9 @@ public sealed record BrowserLayoutChangesStartedPayload(
     bool CheckpointUpdate,
     string ViewTransformNodeId,
     BrowserLayoutPoint ViewPaintOffset,
-    double LayoutZoomFactor);
+    double LayoutZoomFactor,
+    BrowserLayoutSize? Viewport = null,
+    double? DevicePixelRatio = null);
 
 // One transform node of the paint property tree. Matrix is the node's matrix
 // with its transform origin applied, 16 values in column-major order.

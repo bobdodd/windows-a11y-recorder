@@ -1006,6 +1006,10 @@ async function checkViewport() {
       if (fitNote) {
         list.appendChild(element("li", fitNote));
       }
+      const staleNote = typeof meant.warning === "string" && meant.warning.length > 0 ? meant.warning : null;
+      if (staleNote) {
+        list.appendChild(element("li", staleNote));
+      }
       content.appendChild(list);
       const sizeDiffers = Math.abs(width - meant.width) > 1 || Math.abs(height - meant.height) > 1;
       const ratioDiffers = Math.abs(ratio - meant.devicePixelRatio) > 0.001;
@@ -1020,8 +1024,8 @@ async function checkViewport() {
         ? "The page's size, to the nearest CSS pixel, and its device pixel ratio are those it is meant to be shown at."
         : `The page differs in ${differences.join(" and ")} from the viewport it is meant to be shown at, so its media queries and layout may not be the recorded ones.`;
       content.appendChild(element("p", summary));
-      if (differences.length > 0 || fitNote) {
-        say(fitNote ? `${summary} ${fitNote}` : summary);
+      if (differences.length > 0 || fitNote || staleNote) {
+        say([summary, fitNote, staleNote].filter((text) => text).join(" "));
       }
     });
 }

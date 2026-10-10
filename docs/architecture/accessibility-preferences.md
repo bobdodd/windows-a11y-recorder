@@ -1465,6 +1465,43 @@ Not yet measured on the target machine: whether a mouse click lands where
 it is drawn at a scale below 1, and whether resizing the window keeps the
 emulated size. The check is a recording made with Chromium maximized,
 whose window and its frame the screen cannot hold.
+
+The owner's check of 92e3911 (2026-10-10) found that the fallback was not
+reached, for a reason before it: the recorded viewport was out of date.
+The recording (session 20261010-134925-48ca99c3ea4c4f609be438bda1525365)
+holds one layout checkpoint of the page, at 2.09 s, with a viewport of 929
+by 925 CSS pixels at a device pixel ratio of 1; the owner then maximized
+the window, and the change set at 8.04 s laid the root element out 1905
+CSS pixels wide, the 1920 pixel screen less the page's scroll bar. Change
+sets recorded the layout zoom but not the viewport, so a frame after 8 s
+was shown at 929 by 925, which the window held, with the recorded layout
+1905 wide in it, so with scroll bars the recording did not have. The
+Viewport as shown section reported no difference, as it compares the page
+with the recorded viewport.
+
+Agreed with the owner on 2026-10-10:
+
+1. Each layout change set records the viewport and the device pixel ratio
+   (`viewport` and `devicePixelRatio` in `layout-changes-started`, protocol
+   0.58), read as the layout checkpoint reads them. A Chromium rebuild is
+   needed; `integrate.py` upgrades a change set helper patched at 0.57.
+2. The recreation is shown at the latest viewport at the frame, the
+   checkpoint's or a change set's (`RecordedViewport.FromChangeSet`), and
+   the evidence panel's notes say which.
+3. A recording before 0.58 holds only the checkpoint's. When the page's
+   root element was last laid out more than a CSS pixel wider than that
+   viewport (`RecordedPage.RootLaidOutWidth`), the Viewport as shown
+   section and the notes warn that the viewport may be out of date. The
+   size is not inferred from the root: its width leaves out the scroll bar,
+   and its height is the content's, not the window's. A root set wider
+   than its window gives the same warning.
+4. A change set is recorded only when something on the page lays out
+   differently, so a resize that changes nothing in the layout, such as a
+   taller window for a page whose layout does not depend on its height, is
+   not followed until the next change set.
+
+The target machine script expects the latest of the walk's and the change
+sets' viewports at each step.
 - The script's first analysis (2026-10-09) stopped formatting a time:
   Windows PowerShell chose `Math.Max(int, int)` for a literal 0, which a
   recording's nanoseconds overflow. Both arguments are now `long`, and the

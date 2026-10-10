@@ -13370,7 +13370,33 @@ LEGACY_UNIDENTIFIED_SCROLL_BLINK_LAYOUT_CHANGES_DEFINITION = (
 BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
     BLINK_LAYOUT_CHANGES_SCROLL_PUSH, BLINK_LAYOUT_CHANGES_SCROLL_ELEMENT_ID, 1
 )
+# Protocol 0.58: a change set records the viewport and the device pixel
+# ratio, read as a layout checkpoint reads them, so that a window resized
+# after the document's checkpoint is recorded with the change set that lays
+# it out ("The recorded layout zoom" in
+# docs/architecture/accessibility-preferences.md).
+BLINK_LAYOUT_CHANGES_FRAME_ZOOM = (
+    "  recorder_changes_frame.layout_zoom_factor = recorder_zoom;\n"
+)
+BLINK_LAYOUT_CHANGES_FRAME_VIEWPORT = """\
+  recorder_changes_frame.layout_zoom_factor = recorder_zoom;
+  // Protocol 0.58: the viewport and device pixel ratio, as a layout
+  // checkpoint records them.
+  const gfx::SizeF recorder_changes_viewport =
+      recorder_frame_view.ViewportSizeForMediaQueries();
+  recorder_changes_frame.viewport_width = recorder_changes_viewport.width();
+  recorder_changes_frame.viewport_height = recorder_changes_viewport.height();
+  recorder_changes_frame.device_pixel_ratio = recorder_frame.DevicePixelRatio();
+"""
+if BLINK_LAYOUT_CHANGES_DEFINITION.count(BLINK_LAYOUT_CHANGES_FRAME_ZOOM) != 1:
+    raise RuntimeError("the layout change set's layout zoom was not found once")
+LEGACY_UNSIZED_BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION
+BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
+    BLINK_LAYOUT_CHANGES_FRAME_ZOOM, BLINK_LAYOUT_CHANGES_FRAME_VIEWPORT, 1
+)
 BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS = (
+    # Before protocol 0.58 recorded the viewport with each change set.
+    LEGACY_UNSIZED_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before protocol 0.49 recorded a scroller's compositor element ID.
     LEGACY_UNIDENTIFIED_SCROLL_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before protocol 0.41 recorded a text node without a layout object.

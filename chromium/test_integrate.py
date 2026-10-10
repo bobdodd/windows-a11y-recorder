@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.57"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.57"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.58"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.58"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -6183,7 +6183,7 @@ class LayoutIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(
             INTEGRATE.LEGACY_UNFRAGMENTED_BLINK_LAYOUT_CHANGES_DEFINITION,
-            INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[2],
+            INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[3],
         )
         for include in (
             "layout/block_break_token.h",
@@ -6289,7 +6289,7 @@ class LayoutIntegrationTests(unittest.TestCase):
         legacy = INTEGRATE.LEGACY_TEXT_SKIPPING_BLINK_LAYOUT_CHANGES_DEFINITION
         current = INTEGRATE.LEGACY_UNIDENTIFIED_SCROLL_BLINK_LAYOUT_CHANGES_DEFINITION
         self.assertEqual(
-            legacy, INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[1]
+            legacy, INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[2]
         )
         self.assertIn(INTEGRATE.BLINK_LAYOUT_CHANGES_TEXT_SKIP, legacy)
         self.assertNotIn(INTEGRATE.BLINK_LAYOUT_CHANGES_TEXT_SKIP, current)
@@ -6302,13 +6302,42 @@ class LayoutIntegrationTests(unittest.TestCase):
         )
         self.assertNotIn("IsTextNode() && !recorder_node.GetLayoutObject()", current)
 
+    def test_a_change_set_records_the_viewport_and_device_pixel_ratio(self):
+        # Protocol 0.58: a checkout at 0.57 holds the definition without
+        # them, and is upgraded; only the frame's reading differs.
+        legacy = INTEGRATE.LEGACY_UNSIZED_BLINK_LAYOUT_CHANGES_DEFINITION
+        current = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
+        self.assertEqual(
+            legacy, INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[0]
+        )
+        self.assertEqual(
+            current,
+            legacy.replace(
+                INTEGRATE.BLINK_LAYOUT_CHANGES_FRAME_ZOOM,
+                INTEGRATE.BLINK_LAYOUT_CHANGES_FRAME_VIEWPORT,
+            ),
+        )
+        self.assertEqual(1, current.count("recorder_frame_view.ViewportSizeForMediaQueries()"))
+        self.assertEqual(
+            1,
+            current.count(
+                "recorder_changes_frame.device_pixel_ratio = recorder_frame.DevicePixelRatio();"
+            ),
+        )
+        # The viewport is read where the checkpoint reads it.
+        self.assertIn(
+            "frame_view.ViewportSizeForMediaQueries();",
+            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER,
+        )
+        self.assertNotIn("ViewportSizeForMediaQueries", legacy)
+
     def test_a_scroll_offset_records_its_scroll_element_id(self):
         # Protocol 0.49: a checkout at 0.48 holds the definition without the
         # scroller's compositor element ID, and is upgraded; only that differs.
         legacy = INTEGRATE.LEGACY_UNIDENTIFIED_SCROLL_BLINK_LAYOUT_CHANGES_DEFINITION
-        current = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
+        current = INTEGRATE.LEGACY_UNSIZED_BLINK_LAYOUT_CHANGES_DEFINITION
         self.assertEqual(
-            legacy, INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[0]
+            legacy, INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[1]
         )
         self.assertEqual(
             current,

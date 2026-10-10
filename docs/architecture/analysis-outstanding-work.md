@@ -151,6 +151,13 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   [accessibility preferences](accessibility-preferences.md)). To build in
   the owner's checkout and check on the target machine with
   `scripts/Test-RecreationPreferences.ps1`.
+- The recreation's viewport after a window resize, with `viewport` and
+  `devicePixelRatio` in `layout-changes-started` at protocol 0.58, and the
+  fallback that draws a frame the screen cannot hold smaller: agreed and
+  built 2026-10-10 ("The recorded layout zoom" in
+  [accessibility preferences](accessibility-preferences.md)). To build in
+  the owner's checkout and check on the target machine with a recording
+  whose Chromium window is maximized after the page loads.
 - Left open by the owner's decision 2026-10-08, to start stage 2 first:
   the Magnifier change records on a real Magnifier recording
   (`scripts/Test-MagnifierChanges.ps1`); applying a Windows color filter

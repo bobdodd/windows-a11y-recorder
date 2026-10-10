@@ -152,6 +152,7 @@ public static class RecordedPage
         var fontAddress = RecreationServer.FontAddress(RecreationServer.NewToken());
         var notes = StateNotes(state);
         RecreationViewport? viewport = null;
+        string? viewportWarning = null;
         if (state.Viewport is { } recorded)
         {
             viewport = new RecreationViewport(recorded.Width, recorded.Height, recorded.DevicePixelRatio, recorded.LayoutZoomFactor)
@@ -159,7 +160,18 @@ public static class RecordedPage
                 FrameLayoutZoomFactor = state.Layout.LayoutZoomFactor,
             };
             var screen = $"{viewport.ScreenWidth.ToString("0.##", CultureInfo.InvariantCulture)} by {viewport.ScreenHeight.ToString("0.##", CultureInfo.InvariantCulture)} screen pixels";
-            notes.Add($"The frame is shown at its recorded size, {screen}: the CSS size, {recorded.Width.ToString(CultureInfo.InvariantCulture)} by {recorded.Height.ToString(CultureInfo.InvariantCulture)}, times the device pixel ratio, {recorded.DevicePixelRatio.ToString(CultureInfo.InvariantCulture)}, of the page's latest layout checkpoint, recorded at {(recorded.Time / 1e9).ToString("0.000", CultureInfo.InvariantCulture)} s. The window may have been resized after it. Windows' text size and the browser zoom change how the page is laid out in the window, not the window's size, and nothing is emulated.");
+            var viewportSource = recorded.FromChangeSet
+                ? "the page's latest layout change set that records it (protocol 0.58)"
+                : "the page's latest layout checkpoint";
+            var resized = recorded.FromChangeSet
+                ? "A change set is recorded only when something on the page lays out differently, so a resize that changes nothing in the layout is not followed until the next one."
+                : "The window may have been resized after it: a change set records the viewport only from protocol 0.58.";
+            notes.Add($"The frame is shown at its recorded size, {screen}: the CSS size, {recorded.Width.ToString(CultureInfo.InvariantCulture)} by {recorded.Height.ToString(CultureInfo.InvariantCulture)}, times the device pixel ratio, {recorded.DevicePixelRatio.ToString(CultureInfo.InvariantCulture)}, of {viewportSource}, recorded at {(recorded.Time / 1e9).ToString("0.000", CultureInfo.InvariantCulture)} s. {resized} Windows' text size and the browser zoom change how the page is laid out in the window, not the window's size. Nothing is emulated unless the screen cannot hold the window, which the evidence panel's Viewport as shown section reports.");
+            if (!recorded.FromChangeSet && RootLaidOutWidth(tree, state) is { } rootWidth && rootWidth > recorded.Width + 1)
+            {
+                viewportWarning = $"The page's root element was laid out {Css(rootWidth)} CSS pixels wide at the frame, wider than the recorded viewport, {Css(recorded.Width)}, which is that of the layout checkpoint at {(recorded.Time / 1e9).ToString("0.000", CultureInfo.InvariantCulture)} s. The window was probably widened after the checkpoint, and this recording, made before protocol 0.58, does not record the viewport again, so the recreation is shown at the checkpoint's size and the recorded layout may not fit it. A root element set wider than its window gives the same warning.";
+                notes.Add(viewportWarning);
+            }
             var source = state.Layout.LayoutZoomFactor is null
                 ? "that checkpoint's, as no layout change set was recorded after it"
                 : "that of the document's latest layout change set";
@@ -254,7 +266,7 @@ public static class RecordedPage
         {
             ShownViewport = viewport is null
                 ? null
-                : new RecreationShownViewport(viewport.ShownWidth, viewport.ShownHeight, viewport.ShownDevicePixelRatio, viewport.ShownLayoutZoomFactor),
+                : new RecreationShownViewport(viewport.ShownWidth, viewport.ShownHeight, viewport.ShownDevicePixelRatio, viewport.ShownLayoutZoomFactor) { Warning = viewportWarning },
         };
         return new RecreationContent(
             Markup(
@@ -749,6 +761,40 @@ public static class RecordedPage
             {
                 return node.NodeName;
             }
+        }
+        return null;
+    }
+
+    // The CSS width the document's root element was last laid out at: its
+    // first box fragment's width over its effective zoom, from its latest
+    // layout record; null without one.
+    public static double? RootLaidOutWidth(DomDocumentTree tree, BrowserDocumentState state)
+    {
+        var document = tree.Nodes.Values.Where(node => node.NodeType == "document" && node.ParentId is null)
+            .OrderBy(node => node.Id)
+            .FirstOrDefault();
+        if (document is null)
+        {
+            return null;
+        }
+        foreach (var child in document.Children)
+        {
+            if (!tree.Nodes.TryGetValue(child, out var node) || node.NodeType != "element")
+            {
+                continue;
+            }
+            if (!state.Layout.Nodes.TryGetValue(child, out var record) ||
+                !record.TryGetProperty("boxFragments", out var box) || box.ValueKind != JsonValueKind.Object ||
+                !box.TryGetProperty("fragments", out var fragments) || fragments.ValueKind != JsonValueKind.Array ||
+                fragments.GetArrayLength() == 0 ||
+                !fragments[0].TryGetProperty("width", out var width) || width.ValueKind != JsonValueKind.Number)
+            {
+                return null;
+            }
+            var zoom = box.TryGetProperty("effectiveZoom", out var effective) && effective.ValueKind == JsonValueKind.Number && effective.GetDouble() > 0
+                ? effective.GetDouble()
+                : 1.0;
+            return width.GetDouble() / zoom;
         }
         return null;
     }

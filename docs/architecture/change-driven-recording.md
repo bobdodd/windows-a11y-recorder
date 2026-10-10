@@ -515,7 +515,8 @@ lifecycle reached paint clean, after its checkpoint. For each document:
 - `layout-changes-started`: the change set's identity (`layout-changes-N`),
   the identity of the checkpoint recorded in the same update, or null, the
   viewport's transform node, the view's paint offset, and the frame's layout
-  zoom factor. Each node record maps property names to values, so the
+  zoom factor; from protocol 0.58 also the viewport's size and the device
+  pixel ratio. Each node record maps property names to values, so the
   property list is not repeated.
 - A `layout-transform-node` record for each new or changed transform node.
 - A `layout-node-changed` record for each noted node still connected to the

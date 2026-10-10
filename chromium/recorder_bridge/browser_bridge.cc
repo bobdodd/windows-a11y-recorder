@@ -5462,7 +5462,12 @@ uint64_t RecordBlinkLayoutChanges(
       !IsFiniteNumber(frame.view_paint_offset_x) ||
       !IsFiniteNumber(frame.view_paint_offset_y) ||
       !IsFiniteNumber(frame.layout_zoom_factor) ||
-      frame.layout_zoom_factor <= 0) {
+      frame.layout_zoom_factor <= 0 ||
+      !IsFiniteNumber(frame.viewport_width) ||
+      !IsFiniteNumber(frame.viewport_height) ||
+      !IsFiniteNumber(frame.device_pixel_ratio) ||
+      frame.viewport_width < 0 || frame.viewport_height < 0 ||
+      frame.device_pixel_ratio <= 0) {
     return 0;
   }
   uint64_t checkpoint_sequence = 0;
@@ -5563,6 +5568,12 @@ uint64_t RecordBlinkLayoutChanges(
   offset.Set("y", frame.view_paint_offset_y);
   started.Set("viewPaintOffset", std::move(offset));
   started.Set("layoutZoomFactor", frame.layout_zoom_factor);
+  // Protocol 0.58: the viewport and device pixel ratio at the change set.
+  base::DictValue changes_viewport;
+  changes_viewport.Set("width", frame.viewport_width);
+  changes_viewport.Set("height", frame.viewport_height);
+  started.Set("viewport", std::move(changes_viewport));
+  started.Set("devicePixelRatio", frame.device_pixel_ratio);
   SendBlinkEvidence("browser.layout", "layout-changes-started",
                     std::move(started));
   for (size_t index : changed_transforms) {
