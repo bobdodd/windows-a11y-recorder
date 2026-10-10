@@ -1672,7 +1672,9 @@ recreations at frames after 35.0 s and after 46.2 s draw the browser's
 window with the recorded theme, and the two differ as the recorded styles
 do. The theme rows' change buttons find and move between the changes. The
 theme notes, in the recreation DevTools' Evidence panel under "Notes on
-the recreation", were not yet read.
+the recreation", include "The participant's browser drew its theme color,
+so the recreation's window is given the recorded theme color and its
+style", as the recorded `user_color_theme_id` gives.
 
 ## Decisions
 
