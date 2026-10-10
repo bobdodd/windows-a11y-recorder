@@ -1422,6 +1422,12 @@ The target machine script (`scripts/Test-RecreationPreferences.ps1`) now
 expects, at each step, the latest layout change set's layout zoom as the
 page's `devicePixelRatio` and the frame's screen size over it as its
 `innerWidth` and `innerHeight`, which its Console line reads.
+
+The owner reported on 2026-10-09 that with revision e3f7c8f the pages of
+the recording of that day render correctly. At a frame before the text
+size change, the evidence panel's Viewport as shown section gave 932 by
+409 CSS pixels at a device pixel ratio of 2 and a layout zoom of 2, both
+meant and shown, so the page's size and ratio are the recorded ones.
 - The script's first analysis (2026-10-09) stopped formatting a time:
   Windows PowerShell chose `Math.Max(int, int)` for a literal 0, which a
   recording's nanoseconds overflow. Both arguments are now `long`, and the
