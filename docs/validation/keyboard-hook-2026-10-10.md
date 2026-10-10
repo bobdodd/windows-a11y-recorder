@@ -101,6 +101,8 @@ records of "Input the recorder cannot receive"
   three Tabs at about 50 s and five H keys from 126.9 s.
 - The owner saw the band in the player: "the channels are greyed out when
   focus is in the elevated powershell window".
+- The owner confirmed the properties panel's "Input recordable" row read
+  "not recordable" only in those periods.
 - The keyboard hook was installed again every second while NVDA ran (79
   refreshes, the longest spacing 1.015 s), with no loss, no failure, and
   no key dropped; the longest callback was 350 microseconds.
