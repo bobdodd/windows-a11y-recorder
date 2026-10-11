@@ -64,6 +64,7 @@ public sealed class ScreenReaderWindowTests
         var focus = new[]
         {
             new FocusedElement(93_009 * Millisecond, NvdaProcess, "ControlType.TreeItem", "Contact Us"),
+            new FocusedElement(93_016 * Millisecond, NvdaProcess, "ControlType.TreeItem", "Contact Us"),
             new FocusedElement(99_960 * Millisecond, NvdaProcess, "ControlType.TreeItem", "Phone us by number: 1-800-563-2642"),
             new FocusedElement(104_886 * Millisecond, 17100, "ControlType.Edit", "Search mail"),
             new FocusedElement(222_552 * Millisecond, NvdaProcess, "ControlType.MenuItem", "Exit"),
@@ -108,8 +109,13 @@ public sealed class ScreenReaderWindowTests
         Assert.Equal("NVDA menu, in front from 00:03:41.969; focus: menu item \"Exit\" at 00:03:42.552", windows.ValueAt(223 * Second));
         Assert.Equal("none in front", windows.ValueAt(50 * Second));
         Assert.StartsWith("none in front; Elements List left the front at 00:01:45.010", windows.ValueAt(110 * Second), StringComparison.Ordinal);
+        // Each element focused in a window is a step, the repeat of the same
+        // element at once given once.
         Assert.Equal(
-            [92_768 * Millisecond, 105_010 * Millisecond, 221_969 * Millisecond, 223_483 * Millisecond, 228 * Second],
+            [
+                92_768 * Millisecond, 93_009 * Millisecond, 99_960 * Millisecond, 105_010 * Millisecond,
+                221_969 * Millisecond, 222_552 * Millisecond, 223_483 * Millisecond, 223_684 * Millisecond, 228 * Second
+            ],
             windows.ChangeTimes());
         var row = Assert.Single(windows.RowsAt(95 * Second));
         Assert.Equal((AssistiveTechnologyTimeline.Group, ScreenReaderWindowTimeline.Setting, ScreenReaderWindowTimeline.Key), (row.Group, row.Setting, row.Key));

@@ -720,7 +720,8 @@ in front from 00:01:32.768, opened by NVDA+f7 (elements list) at
 00:01:32.766, inferred; focus: tree item "Contact Us" at 00:01:33.009", or
 "none in front; Elements List left the front at 00:01:45.010, when
 "Perplexity" (Perplexity) came to the front", with the change buttons and
-count, at each span's start and end.
+count, at each span's start and end and at each element focused in the
+window, UI Automation's repeat of the same element at once given once.
 
 Storage: playback index version 13 keeps the foreground window records
 whole, for their process ID and title, and the UI Automation focus
@@ -740,6 +741,13 @@ First target run, 2026-10-11, package 74c5c3f: the owner confirmed the
 green strips line up with NVDA's dialogs, and the NVDA window row reads
 correctly in the properties panel ("Yes the green strips line up with
 NVDA dialogs, and they appear correctly in the properties panel").
+
+Second target run, 2026-10-11: "I can't step through the actions when an
+NVDA window is open, only between openings". The row's steps were only
+each window's coming to the front and leaving it. Each element focused in
+the window is now a step too: in recording 20261010-211432, the Elements
+List from 92.768 s has ten, from "Contact Us" at 93.009 s to "CNIB Come
+to Work" at 102.055 s.
 
 ## The screen reader's windows
 

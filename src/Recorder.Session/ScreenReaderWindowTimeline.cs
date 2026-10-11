@@ -12,7 +12,15 @@ public sealed record ScreenReaderWindowSpan(
     long End,
     string EndBasis,
     string? Opener,
-    int ProcessId);
+    int ProcessId)
+{
+    /// <summary>
+    /// The elements focused in the window while it was in front, in order,
+    /// the same element focused again at once given once; each is a step of
+    /// the NVDA window row.
+    /// </summary>
+    public IReadOnlyList<FocusedElement> Focus { get; init; } = [];
+}
 
 /// <summary>An element given the focus, as UI Automation recorded it.</summary>
 public sealed record FocusedElement(long Time, int? ProcessId, string? ControlType, string? Name);
@@ -126,7 +134,10 @@ public sealed class ScreenReaderWindowTimeline
                 opener is null
                     ? null
                     : $"opened by {opener.Gesture} ({string.Join(" or ", opener.Names)}) at {WindowsPreferenceTimeline.Clock(opener.Time)}, inferred",
-                window.ProcessId!.Value));
+                window.ProcessId!.Value)
+            {
+                Focus = FocusIn(window.ProcessId!.Value, start, end)
+            });
         }
     }
 
@@ -138,6 +149,25 @@ public sealed class ScreenReaderWindowTimeline
 
     /// <summary>The spans, in order.</summary>
     public IReadOnlyList<ScreenReaderWindowSpan> Spans => _spans;
+
+    // The elements focused in a window, UI Automation's repeat of the same
+    // element at once (as at 93.009 s and 93.016 s in recording
+    // 20261010-211432) given once.
+    private List<FocusedElement> FocusIn(int processId, long start, long end)
+    {
+        var focus = new List<FocusedElement>();
+        foreach (var item in _focus.Where(item => item.ProcessId == processId && item.Time >= start && item.Time < end))
+        {
+            if (focus.Count > 0 && focus[^1].ControlType == item.ControlType && focus[^1].Name == item.Name)
+            {
+                continue;
+            }
+
+            focus.Add(item);
+        }
+
+        return focus;
+    }
 
     // A window by its title; an untitled one by what was focused in it.
     private string NameOf(ForegroundWindow window, long end)
@@ -191,8 +221,7 @@ public sealed class ScreenReaderWindowTimeline
             text += $", {opener}";
         }
 
-        var focused = _focus.LastOrDefault(item => item.ProcessId == span.ProcessId &&
-            item.Time >= span.Start && item.Time <= time && item.Time < span.End);
+        var focused = span.Focus.LastOrDefault(item => item.Time <= time);
         if (focused is not null)
         {
             text += $"; focus: {ControlName(focused.ControlType)}" +
@@ -203,7 +232,12 @@ public sealed class ScreenReaderWindowTimeline
         return text;
     }
 
-    /// <summary>The times the row's value changes: each span's start and end.</summary>
+    /// <summary>
+    /// The times the row's value changes: each span's start and end, and
+    /// each element focused in the window between, so the row's buttons step
+    /// through what was done in the window (the owner, 2026-10-11: "I can't
+    /// step through the actions when an NVDA window is open").
+    /// </summary>
     public IReadOnlyList<long> ChangeTimes()
     {
         var times = new SortedSet<long>();
@@ -211,6 +245,10 @@ public sealed class ScreenReaderWindowTimeline
         {
             times.Add(span.Start);
             times.Add(span.End);
+            foreach (var item in span.Focus)
+            {
+                times.Add(item.Time);
+            }
         }
 
         return [.. times];
