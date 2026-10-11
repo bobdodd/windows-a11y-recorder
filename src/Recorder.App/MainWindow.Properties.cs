@@ -77,6 +77,7 @@ public partial class MainWindow
         .. archive.WindowsPreferences.RowsAt(time, frame, archive.MagnifierChanges),
         .. archive.BrowserPreferences.RowsAt(time),
         .. archive.AssistiveTechnology.RowsAt(time),
+        .. archive.ScreenReaderMode.RowsAt(time),
         .. archive.InputRecordability.RowsAt(time)
     ];
 
@@ -100,7 +101,7 @@ public partial class MainWindow
         {
             times = PropertyChangeSteps.TimesOf(
                 row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences,
-                archive.AssistiveTechnology, archive.InputRecordability);
+                archive.AssistiveTechnology, archive.InputRecordability, archive.ScreenReaderMode);
             _propertyChangeTimes[row.Key] = times;
         }
 
@@ -162,10 +163,10 @@ public partial class MainWindow
             return;
         }
 
-        var name = char.ToLower(row.Setting[0], System.Globalization.CultureInfo.CurrentCulture) + row.Setting[1..];
+        var name = PropertyRowView.InSentence(row.Setting);
         if (PropertyChangeSteps.TimesOf(
                 row.Row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences,
-                archive.AssistiveTechnology, archive.InputRecordability) is not { } times)
+                archive.AssistiveTechnology, archive.InputRecordability, archive.ScreenReaderMode) is not { } times)
         {
             _busy.AnnounceLayout(row.Group switch
             {
@@ -251,7 +252,14 @@ public partial class MainWindow
 
         // The setting's name as it reads within a sentence.
         private string SettingInSentence =>
-            char.ToLower(Setting[0], System.Globalization.CultureInfo.CurrentCulture) + Setting[1..];
+            InSentence(Setting);
+
+        // A setting's name within a sentence: its first letter in lower case,
+        // unless it begins an acronym, such as NVDA.
+        public static string InSentence(string setting) =>
+            setting.Length > 1 && char.IsUpper(setting[1])
+                ? setting
+                : char.ToLower(setting[0], System.Globalization.CultureInfo.CurrentCulture) + setting[1..];
 
         public string PreviousName => $"Previous {SettingInSentence} change";
         public string NextName => $"Next {SettingInSentence} change";

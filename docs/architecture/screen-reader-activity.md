@@ -557,6 +557,63 @@ Shift+D previous landmark, K next link, and Insert+F7 at 92.8 s and
 122.4 s the elements list. The system test on the target machine, with
 the settings recorded, is outstanding.
 
+### 2c-2, browse or focus mode
+
+Agreed with the owner on 2026-10-11: the rules below ("yes"); where the
+recording does not show the mode, it is unknown ("We should be honest and
+say unknown"); the band is on the Screen reader lane ("yes").
+
+The evidence, while NVDA's main process runs, the instrumented browser is
+the front window, and no Ctrl, Alt, Windows, or NVDA key is held (Shift
+may be):
+
+- browse mode: a kept letter, digit, arrow, or Tab, or a kept browse mode
+  command such as NVDA+F7; NVDA keeps keys in browse mode, and with its
+  default of trapping keys that are not commands
+  ([NVDA configSpec.py](https://raw.githubusercontent.com/nvaccess/nvda/master/source/config/configSpec.py),
+  `trapNonCommandGestures`), even a letter that is not a command;
+- focus mode: a letter, digit, arrow, or Tab that passed and that the page
+  received;
+- a switch: NVDA+Space kept switches to the other mode, and Escape kept
+  returns to browse mode
+  ([NVDA 2026.2 commands quick reference](https://download.nvaccess.org/releases/2026.2/documentation/keyCommands.html#browse-mode)).
+
+A key that passed but that no page received, such as one in the browser's
+toolbar, shows neither mode. Keys in NVDA's own windows, such as the
+Elements List, do not count, as the browser is not in front.
+
+The spans (`src/Recorder.Session/ScreenReaderModeTimeline.cs`): a mode
+from its first evidence to its last; where two evidences differ with no
+switch between, the span between them is "changed between", because NVDA
+switches by itself (on focusing a form field, for example) without a key.
+A page load (a committed cross-document navigation of a tab's page), and
+NVDA starting or exiting, end the inference, as NVDA starts a new page in
+browse mode by default. Before a mode's first evidence and after its last,
+the mode is unknown. Between two evidences of one mode, the mode is drawn
+as unbroken, an inference: it could have switched and switched back
+without a key the recording shows.
+
+In the player: the band on the Screen reader lane, browse mode solid,
+focus mode in upright stripes, and the span in which it changed in
+leaning stripes, so the band does not rely on colour alone; no band where
+the mode is unknown. The Screen reader group has an "NVDA mode" row: for
+example "browse mode, inferred from H kept (next heading) at 00:00:51.782
+to NVDA+f7 kept (elements list) at 00:02:02.382", "changed between
+00:04:12.221 and 00:04:13.613, from focus mode to browse mode, inferred",
+or "unknown; last seen focus mode, ...", "unknown; a page loaded at ...",
+or "unknown; NVDA exited at ...", with the change buttons and count.
+
+Against recording 20261010-211432: browse mode from 33.5 s to 122.4 s;
+unknown after the page loads from 145.4 s; focus mode from 181.4 s to
+195.6 s; NVDA exited at 228.0 s and started at 236.5 s, so the keys
+between show nothing; focus mode from 244.1 s to 246.3 s; page loads at
+248.8 s and 250.1 s; focus mode at 252.2 s, then changed between 252.2 s
+and 253.6 s; browse mode from 253.6 s to 265.8 s. Against 20261011-035348:
+browse mode from 40.7 s to 120.6 s. Tested at the unit level
+(`ScreenReaderModeTests`); the system test on the target machine is
+outstanding.
+
+## The screen reader's windows
 
 UI Automation already records them. At playback, the records whose
 process is a detected screen reader are grouped into episodes, such as

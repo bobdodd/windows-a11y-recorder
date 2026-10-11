@@ -61,6 +61,9 @@ public sealed class AssistiveTechnologyTimeline
                 Recorded = true;
                 HasBrowser = payload.TryGetProperty("browserExecutablePath", out var browser) &&
                     browser.ValueKind == JsonValueKind.String;
+                BrowserProcessName = HasBrowser && browser.GetString() is { } browserPath
+                    ? Path.GetFileNameWithoutExtension(browserPath.Replace('\\', '/'))
+                    : null;
                 SoundProblem = Text(payload, "soundProblem");
                 if (payload.TryGetProperty("products", out var products) && products.ValueKind == JsonValueKind.Array)
                 {
@@ -190,6 +193,31 @@ public sealed class AssistiveTechnologyTimeline
 
     /// <summary>Whether the recording holds the assistive technology records.</summary>
     public bool Recorded { get; }
+
+    /// <summary>
+    /// The process name of the instrumented Chromium watched, as the front
+    /// window records name processes (its executable's name without
+    /// extension), or null.
+    /// </summary>
+    public string? BrowserProcessName { get; }
+
+    /// <summary>
+    /// The times a product's main process started during the recording or
+    /// exited, with what happened, as the breaks of the inferred mode.
+    /// </summary>
+    public IReadOnlyList<(long Time, string Reason)> ScreenReaderRuns(string product)
+    {
+        if (!_byProduct.TryGetValue(product, out var state))
+        {
+            return [];
+        }
+
+        return
+        [
+            .. state.Starts.Where(start => !start.AtStart).Select(start => (start.Time, $"{product} started")),
+            .. state.Exits.Select(exit => (exit.Time, $"{product} exited"))
+        ];
+    }
 
     /// <summary>Whether the recording watched an instrumented Chromium's processes.</summary>
     public bool HasBrowser { get; }

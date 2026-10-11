@@ -25,6 +25,21 @@ public enum KeyOutcomeKind
 /// What happened to a key record: its outcome, as the status line shows it,
 /// and the records it was joined with, for the selected event's details.
 /// </summary>
+public enum ModeEvidenceKind
+{
+    Browse,
+    Focus,
+    Toggle,
+    ExitFocus
+}
+
+/// <summary>
+/// A key that shows the screen reader's mode, or switches it: its time,
+/// record, kind, and basis, such as "H kept". See
+/// docs/architecture/screen-reader-activity.md, "2c-2, browse or focus mode".
+/// </summary>
+public sealed record ModeEvidence(long Time, string EventId, ModeEvidenceKind Kind, string Basis);
+
 public sealed record KeyOutcome(KeyOutcomeKind Kind, string Text, IReadOnlyList<string> Details)
 {
     /// <summary>The key and direction, such as "Tab down"; null for a page keydown.</summary>
@@ -57,6 +72,7 @@ public sealed class KeyDispositions
     public const string DispatchStartedEventType = "dispatch-started";
 
     private readonly Dictionary<string, KeyOutcome> _outcomes = new(StringComparer.Ordinal);
+    private readonly List<ModeEvidence> _modeEvidence = [];
 
     private sealed class Key
     {
@@ -173,6 +189,15 @@ public sealed class KeyDispositions
 
     /// <summary>The rule the outcomes were derived with.</summary>
     public string Rule { get; }
+
+    /// <summary>
+    /// The keys that show NVDA's mode or switch it, in order, wherever the
+    /// front window was: a letter, digit, arrow, or Tab pressed with no
+    /// modifier but Shift, kept (browse mode) or passed and received by the
+    /// page (focus mode); a kept browse mode command; NVDA+Space kept (a
+    /// switch); and Escape kept (back to browse mode).
+    /// </summary>
+    public IReadOnlyList<ModeEvidence> ModeEvidence => _modeEvidence;
 
     /// <summary>The number of records with an outcome.</summary>
     public int Count => _outcomes.Count;
@@ -532,6 +557,60 @@ public sealed class KeyDispositions
                 : 1;
             last = (canonical, key.Time, count);
             Label(key, gesture, count, settings);
+            AddModeEvidence(key, gesture, held.Any(down => down != key && !IsShift(down.VirtualKey) &&
+                (ScreenReaderGestures.Modifier(down.VirtualKey) is not null ||
+                 ScreenReaderGestures.IsNvdaKey(down.VirtualKey, down.Extended, settings.ModifierKeys))), settings);
+        }
+    }
+
+    private static bool IsShift(int virtualKey) => virtualKey is 0x10 or 0xA0 or 0xA1;
+
+    private static bool ShowsMode(Key key) =>
+        key.VirtualKey is (>= 0x30 and <= 0x39) or (>= 0x41 and <= 0x5A) or 0x09 ||
+        (key.VirtualKey is >= 0x25 and <= 0x28 && key.Extended);
+
+    private void AddModeEvidence(Key key, string gesture, bool otherModifiers, CommandSettings settings)
+    {
+        if (!_outcomes.TryGetValue(key.EventId, out var outcome))
+        {
+            return;
+        }
+
+        var kept = outcome.Kind == KeyOutcomeKind.Kept;
+        var canonical = ScreenReaderGestures.Canonical(gesture);
+        var name = KeyboardHookRecords.KeyName(key.VirtualKey);
+        if (kept && canonical == "nvda+space")
+        {
+            _modeEvidence.Add(new ModeEvidence(key.Time, key.EventId, ModeEvidenceKind.Toggle, "NVDA+Space kept"));
+            return;
+        }
+
+        if (kept && canonical == "escape")
+        {
+            _modeEvidence.Add(new ModeEvidence(key.Time, key.EventId, ModeEvidenceKind.ExitFocus, "Escape kept"));
+            return;
+        }
+
+        var shown = gesture.StartsWith("shift+", StringComparison.Ordinal) ? "Shift+" + name : name;
+        if (kept && settings.Data?.Of(gesture, settings.Layout).FirstOrDefault(command => command.Context == "browse mode") is { } command)
+        {
+            _modeEvidence.Add(new ModeEvidence(key.Time, key.EventId, ModeEvidenceKind.Browse,
+                $"{(otherModifiers ? gesture : shown)} kept ({command.Name})"));
+            return;
+        }
+
+        if (otherModifiers || !ShowsMode(key))
+        {
+            return;
+        }
+
+        if (kept)
+        {
+            _modeEvidence.Add(new ModeEvidence(key.Time, key.EventId, ModeEvidenceKind.Browse, $"{shown} kept"));
+        }
+        else if (outcome.Kind == KeyOutcomeKind.Passed && key.Page is not null)
+        {
+            _modeEvidence.Add(new ModeEvidence(key.Time, key.EventId, ModeEvidenceKind.Focus, $"{shown} passed, received by the page"));
         }
     }
 

@@ -48,6 +48,13 @@ public sealed record SessionPlaybackArchive(
     /// </summary>
     public KeyDispositions KeyDispositions { get; init; } = KeyDispositions.Empty;
 
+    /// <summary>
+    /// NVDA's browse or focus mode, inferred from the key outcomes
+    /// (docs/architecture/screen-reader-activity.md, "2c-2, browse or focus
+    /// mode"), for the timeline's band and the panel row.
+    /// </summary>
+    public ScreenReaderModeTimeline ScreenReaderMode { get; init; } = ScreenReaderModeTimeline.Empty;
+
     /// <summary>An event's description, ending with its key outcome where it has one.</summary>
     public string Describe(SessionTimelineEvent item)
     {

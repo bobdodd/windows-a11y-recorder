@@ -775,6 +775,7 @@ public partial class MainWindow : Window
                 _playbackArchive.Timeline,
                 _playbackArchive.DurationNanoseconds);
             TimelineControl.SetUnrecordablePeriods(_playbackArchive.InputRecordability.Unrecordable);
+            TimelineControl.SetScreenReaderModeSpans(_playbackArchive.ScreenReaderMode.Spans);
             ApplyBrowserNavigationFilter();
             BrowserCorrelationTextBox.Text =
                 _playbackArchive.BrowserNavigations.Count == 0

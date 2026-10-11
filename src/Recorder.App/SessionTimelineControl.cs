@@ -46,6 +46,15 @@ public sealed class SessionTimelineControl : FrameworkElement
     // recorded: diagonal stripes, so it does not rely on colour alone.
     private static readonly Brush UnrecordableBrush = CreateUnrecordableBrush();
     private static readonly Brush OtherChannelBrush = Freeze("#BAB9B4");
+
+    // The band of NVDA's inferred mode over the Screen reader lane, each
+    // kind with its own pattern, so it does not rely on colour alone:
+    // browse mode solid, focus mode upright stripes, and the span in which
+    // the mode changed stripes leaning the other way from the unrecordable
+    // band's. Where the mode is unknown, there is no band.
+    private static readonly Brush BrowseModeBrush = Freeze("#4F6F96");
+    private static readonly Brush FocusModeBrush = CreateStripeBrush("#C9A05A", new Point(4, 0), new Point(4, 8), 3);
+    private static readonly Brush ModeChangedBrush = CreateStripeBrush("#9A9894", new Point(0, 0), new Point(8, 8), 1.5);
     private static readonly Pen HighlightPen = FreezePen(Brushes.White, 2);
 
     private readonly DrawingVisual _eventLayer = new();
@@ -71,6 +80,7 @@ public sealed class SessionTimelineControl : FrameworkElement
     private long _viewportDurationNanoseconds;
     private SessionTimelineEvent? _selectedEvent;
     private IReadOnlyList<Recorder.Session.UnrecordablePeriod> _unrecordable = [];
+    private IReadOnlyList<Recorder.Session.ScreenReaderModeSpan> _modeSpans = [];
 
     // The lane keyboard stepping moves in: the selected event's lane, or the
     // lane last clicked.
@@ -120,6 +130,7 @@ public sealed class SessionTimelineControl : FrameworkElement
         _viewportDurationNanoseconds = _durationNanoseconds;
         _positionNanoseconds = 0;
         _unrecordable = [];
+        _modeSpans = [];
         RebuildShownChannels();
         SelectEvent(null);
         RedrawAll();
@@ -134,6 +145,18 @@ public sealed class SessionTimelineControl : FrameworkElement
     {
         ArgumentNullException.ThrowIfNull(periods);
         _unrecordable = periods;
+        RedrawAll();
+    }
+
+    /// <summary>
+    /// The spans of NVDA's inferred mode, drawn as a band over the Screen
+    /// reader lane. The properties panel's NVDA mode row gives the mode and
+    /// its basis in text.
+    /// </summary>
+    public void SetScreenReaderModeSpans(IReadOnlyList<Recorder.Session.ScreenReaderModeSpan> spans)
+    {
+        ArgumentNullException.ThrowIfNull(spans);
+        _modeSpans = spans;
         RedrawAll();
     }
 
@@ -415,6 +438,27 @@ public sealed class SessionTimelineControl : FrameworkElement
                 new Rect(left, GetLane("input.keyboard") * laneHeight, Math.Max(1, right - left), 2 * laneHeight - 1));
         }
 
+        var modeLane = GetLane(Recorder.Contracts.AssistiveTechnologyRecords.Channel);
+        foreach (var span in _modeSpans)
+        {
+            if (span.End < _viewportStartNanoseconds || span.Start > viewportEnd)
+            {
+                continue;
+            }
+
+            var left = Math.Max(0, ToX(Math.Max(span.Start, _viewportStartNanoseconds)));
+            var right = Math.Min(width, ToX(Math.Min(span.End, viewportEnd)));
+            drawingContext.DrawRectangle(
+                span.Kind switch
+                {
+                    Recorder.Session.ScreenReaderModeKind.Browse => BrowseModeBrush,
+                    Recorder.Session.ScreenReaderModeKind.Focus => FocusModeBrush,
+                    _ => ModeChangedBrush
+                },
+                null,
+                new Rect(left, modeLane * laneHeight, Math.Max(2, right - left), laneHeight - 1));
+        }
+
         foreach (var series in SeriesDrawOrder)
         {
             var lane = LaneOfSeries(series);
@@ -581,6 +625,21 @@ public sealed class SessionTimelineControl : FrameworkElement
     private static SolidColorBrush Freeze(string color)
     {
         var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
+        brush.Freeze();
+        return brush;
+    }
+
+    private static Brush CreateStripeBrush(string color, Point from, Point to, double thickness)
+    {
+        var stripe = new GeometryDrawing(null, FreezePen(Freeze(color), thickness), new LineGeometry(from, to));
+        var brush = new DrawingBrush(stripe)
+        {
+            TileMode = TileMode.Tile,
+            Viewport = new Rect(0, 0, 8, 8),
+            ViewportUnits = BrushMappingMode.Absolute,
+            Viewbox = new Rect(0, 0, 8, 8),
+            ViewboxUnits = BrushMappingMode.Absolute
+        };
         brush.Freeze();
         return brush;
     }

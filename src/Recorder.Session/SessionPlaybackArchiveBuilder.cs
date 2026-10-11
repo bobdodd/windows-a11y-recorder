@@ -110,6 +110,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<InputRecordabilityRecord> _inputRecordability = [];
     private readonly List<KeyEvidenceRecord> _keyEvidence = [];
     private readonly List<BrowserPageCommit> _pageCommits = [];
+    private readonly List<ForegroundWindow> _foreground = [];
     private readonly bool _retainEvents;
     private long _maximumTimestamp;
     private bool _built;
@@ -296,6 +297,13 @@ public sealed class SessionPlaybackArchiveBuilder
                 timelineEvent.EventId, timestamp, timelineEvent.Channel, timelineEvent.EventType, payload.Clone()));
         }
 
+        if (timelineEvent.Channel == "window.foreground" &&
+            timelineEvent.EventType == "foreground-window" &&
+            payload.ValueKind == JsonValueKind.Object)
+        {
+            _foreground.Add(new ForegroundWindow(timestamp, ReadString(payload, "processName")));
+        }
+
         if (timelineEvent.Channel == BrowserPreferenceSettings.Channel &&
             payload.ValueKind == JsonValueKind.Object)
         {
@@ -362,6 +370,17 @@ public sealed class SessionPlaybackArchiveBuilder
         var inputRecordability = _inputRecordability.Count == 0
             ? InputRecordabilityTimeline.Empty
             : new InputRecordabilityTimeline(_inputRecordability);
+        var keyDispositions = _keyEvidence.Count == 0
+            ? KeyDispositions.Empty
+            : new KeyDispositions(_keyEvidence, assistiveTechnology, inputRecordability.Unrecordable);
+        var screenReaderMode = assistiveTechnology.BrowserProcessName is null
+            ? ScreenReaderModeTimeline.Empty
+            : new ScreenReaderModeTimeline(
+                keyDispositions.ModeEvidence,
+                _foreground,
+                assistiveTechnology.BrowserProcessName,
+                _pageCommits.Select(commit => commit.MonotonicNanoseconds),
+                assistiveTechnology.ScreenReaderRuns(AssistiveTechnologyRecords.Nvda.Product));
         return new SessionPlaybackArchive(
             _root,
             manifest,
@@ -384,9 +403,8 @@ public sealed class SessionPlaybackArchiveBuilder
                 : new BrowserPreferenceTimeline(_browserPreferences, _pageCommits),
             AssistiveTechnology = assistiveTechnology,
             InputRecordability = inputRecordability,
-            KeyDispositions = _keyEvidence.Count == 0
-                ? KeyDispositions.Empty
-                : new KeyDispositions(_keyEvidence, assistiveTechnology, inputRecordability.Unrecordable)
+            KeyDispositions = keyDispositions,
+            ScreenReaderMode = screenReaderMode
         };
     }
 
