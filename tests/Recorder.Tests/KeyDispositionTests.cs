@@ -95,7 +95,14 @@ public sealed class KeyDispositionTests
         var keys = new KeyDispositions([kept, injectedDown, rawInjectedDown, injectedUp, page, keptUp], NvdaFrom(Second));
 
         Assert.Equal(KeyOutcomeKind.Kept, keys.Of(kept.EventId)!.Kind);
-        Assert.Equal(KeyOutcomeKind.Kept, keys.Of(keptUp.EventId)!.Kind);
+        Assert.Equal(
+            "kept, screen reader running: NVDA; followed by an injected Tab, received by the page",
+            keys.Of(kept.EventId)!.Text);
+        Assert.Contains(
+            keys.Of(kept.EventId)!.Details,
+            line => line.StartsWith("followed by: hook record: Tab down at 00:00:33.496, injected, 2.0 ms later, received by the page", StringComparison.Ordinal));
+        Assert.Contains(keys.Of(kept.EventId)!.Details, line => line.StartsWith("followed by: hook record: Tab up", StringComparison.Ordinal));
+        Assert.Equal("kept, screen reader running: NVDA", keys.Of(keptUp.EventId)!.Text);
         var injected = keys.Of(injectedDown.EventId)!;
         Assert.Equal(KeyOutcomeKind.Injected, injected.Kind);
         Assert.StartsWith("injected after the kept Tab down at", injected.Text, StringComparison.Ordinal);

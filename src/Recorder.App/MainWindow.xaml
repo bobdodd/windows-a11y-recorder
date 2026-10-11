@@ -755,9 +755,9 @@
                  Content="Timeline _zoom:" />
           <Slider x:Name="TimelineZoomSlider"
                   Grid.Column="1"
-                  Minimum="1"
-                  Maximum="32"
-                  Value="1"
+                  Minimum="0"
+                  Maximum="12"
+                  Value="0"
                   TickFrequency="1"
                   IsSnapToTickEnabled="True"
                   IsEnabled="False"

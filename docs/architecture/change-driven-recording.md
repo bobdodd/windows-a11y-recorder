@@ -1241,9 +1241,11 @@ does not know the duration until it stops, so it keeps each channel's
 bitmap at the smallest power-of-two width that covers the latest time seen,
 and merges pairs of buckets when time passes the end. A grid kept this way
 equals the grid built at the end. A recording uses more than 131,072
-buckets, so at the player's greatest zoom, 32 times on a timeline up to
-4,096 pixels wide, a bucket is still no wider than one pixel column. The
-same width is used for recordings read from the database.
+buckets, so at 32 times zoom on a timeline up to 4,096 pixels wide, a
+bucket is still no wider than one pixel column. The player zooms to 4,096
+times (see session-database.md), where a bucket is drawn wider than a
+pixel column. The same width is used for recordings read from the
+database.
 
 ### Navigation counts
 

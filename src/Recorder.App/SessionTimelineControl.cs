@@ -199,9 +199,72 @@ public sealed class SessionTimelineControl : FrameworkElement
         var shown = _shownChannels;
         _currentLane = lane;
         e.Handled = true;
-        SelectFromLookup(async timeline =>
-            await timeline.NearestAsync(timestamp, start, end, laneChannels).ConfigureAwait(true) ??
-            await timeline.NearestAsync(timestamp, start, end, shown).ConfigureAwait(true));
+        // The events drawn at the clicked event's point: within a pixel
+        // column of it, or a bucket where buckets are wider, as they are
+        // drawn by bucket.
+        var reach = Math.Max(
+            (long)Math.Ceiling(_viewportDurationNanoseconds / ActualWidth),
+            _timeline?.Occupancy.BucketWidth ?? 0);
+        SelectFromLookup(
+            async timeline =>
+                await timeline.NearestAsync(timestamp, start, end, laneChannels).ConfigureAwait(true) ??
+                await timeline.NearestAsync(timestamp, start, end, shown).ConfigureAwait(true),
+            (timeline, item) => AtPointAsync(timeline, item, reach));
+    }
+
+    /// <summary>The most events listed for one point; more are noted, not listed.</summary>
+    public const int MostAtPoint = 50;
+
+    // The shown events of the item's lane within reach of its time, in
+    // timeline order, the item among them; at most MostAtPoint, and
+    // whether there were more.
+    private async Task<(IReadOnlyList<SessionTimelineEvent> Events, bool More)> AtPointAsync(
+        ISessionTimeline timeline,
+        SessionTimelineEvent item,
+        long reach)
+    {
+        var channels = _shownByLane[GetLane(item.Channel)];
+        var before = new List<SessionTimelineEvent>();
+        var after = new List<SessionTimelineEvent>();
+        var more = false;
+        for (var from = item; ;)
+        {
+            var previous = await timeline.AdjacentAsync(from, forward: false, channels).ConfigureAwait(true);
+            if (previous is null || item.MonotonicNanoseconds - previous.MonotonicNanoseconds > reach)
+            {
+                break;
+            }
+
+            if (before.Count + after.Count + 1 >= MostAtPoint)
+            {
+                more = true;
+                break;
+            }
+
+            before.Add(previous);
+            from = previous;
+        }
+
+        for (var from = item; ;)
+        {
+            var next = await timeline.AdjacentAsync(from, forward: true, channels).ConfigureAwait(true);
+            if (next is null || next.MonotonicNanoseconds - item.MonotonicNanoseconds > reach)
+            {
+                break;
+            }
+
+            if (before.Count + after.Count + 1 >= MostAtPoint)
+            {
+                more = true;
+                break;
+            }
+
+            after.Add(next);
+            from = next;
+        }
+
+        before.Reverse();
+        return ([.. before, item, .. after], more);
     }
 
     // Left, Right, Home, and End move within the current lane; Up and Down
@@ -280,7 +343,8 @@ public sealed class SessionTimelineControl : FrameworkElement
     }
 
     private async void SelectFromLookup(
-        Func<ISessionTimeline, Task<SessionTimelineEvent?>> lookup)
+        Func<ISessionTimeline, Task<SessionTimelineEvent?>> lookup,
+        Func<ISessionTimeline, SessionTimelineEvent, Task<(IReadOnlyList<SessionTimelineEvent> Events, bool More)>>? atPoint = null)
     {
         if (_timeline is not { } timeline)
         {
@@ -291,9 +355,12 @@ public sealed class SessionTimelineControl : FrameworkElement
         try
         {
             var item = await lookup(timeline).ConfigureAwait(true);
+            var together = item is not null && atPoint is not null
+                ? await atPoint(timeline, item).ConfigureAwait(true)
+                : default;
             if (request == _request)
             {
-                SelectEvent(item);
+                SelectEvent(item, together.Events, together.More);
             }
         }
         catch (Exception exception) when (
@@ -438,9 +505,12 @@ public sealed class SessionTimelineControl : FrameworkElement
     private bool IsChannelVisible(string channel) =>
         _visibleChannels is null || _visibleChannels.Contains(channel);
 
-    private void SelectEvent(SessionTimelineEvent? item)
+    private void SelectEvent(
+        SessionTimelineEvent? item,
+        IReadOnlyList<SessionTimelineEvent>? atPoint = null,
+        bool moreAtPoint = false)
     {
-        if (Equals(_selectedEvent, item))
+        if (Equals(_selectedEvent, item) && (atPoint is null || atPoint.Count <= 1))
         {
             return;
         }
@@ -453,7 +523,11 @@ public sealed class SessionTimelineControl : FrameworkElement
         RedrawOverlay();
         SelectedEventChanged?.Invoke(
             this,
-            new TimelineEventSelectedEventArgs(item));
+            new TimelineEventSelectedEventArgs(item)
+            {
+                AtPoint = atPoint is { Count: > 1 } ? atPoint : item is null ? [] : [item],
+                MoreAtPoint = moreAtPoint
+            });
     }
 
     private static int GetLane(string channel) => channel switch
@@ -545,4 +619,14 @@ public sealed class TimelineEventSelectedEventArgs : EventArgs
     }
 
     public SessionTimelineEvent? TimelineEvent { get; }
+
+    /// <summary>
+    /// The events drawn at the selected event's point, for a click: more
+    /// than one where the zoom draws several at one point, in timeline order.
+    /// Otherwise the selected event alone.
+    /// </summary>
+    public IReadOnlyList<SessionTimelineEvent> AtPoint { get; init; } = [];
+
+    /// <summary>Whether more events were at the point than <see cref="AtPoint"/> lists.</summary>
+    public bool MoreAtPoint { get; init; }
 }

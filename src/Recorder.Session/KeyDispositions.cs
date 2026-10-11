@@ -68,6 +68,7 @@ public sealed class KeyDispositions
         public required bool Injected { get; init; }
         public Key? Partner { get; set; }
         public Key? KeptKey { get; set; }
+        public List<Key> Followers { get; } = [];
         public (string EventId, long Time)? Page { get; set; }
         public string Name => KeyboardHookRecords.KeyName(VirtualKey) + (Up ? " up" : " down");
     }
@@ -222,6 +223,7 @@ public sealed class KeyDispositions
                 !kept.Injected && !kept.Up && kept.Partner is null &&
                 kept.VirtualKey == key.VirtualKey &&
                 kept.Time <= key.Time && key.Time - kept.Time <= InjectedAfterKeptWindowNanoseconds);
+            key.KeptKey?.Followers.Add(key);
         }
     }
 
@@ -346,12 +348,25 @@ public sealed class KeyDispositions
 
         var running = assistiveTechnology.ScreenReadersRunningAt(key.Time);
         details.Add("inferred: Windows does not say which program kept the key");
-        return new KeyOutcome(
-            KeyOutcomeKind.Kept,
-            running.Count == 0
-                ? "kept, no screen reader running"
-                : "kept, screen reader running: " + string.Join(", ", running),
-            details);
+        var keptText = running.Count == 0
+            ? "kept, no screen reader running"
+            : "kept, screen reader running: " + string.Join(", ", running);
+
+        // The injected key that followed it, as NVDA's own Tab, so that it is
+        // seen from the kept key: the two are too close to select apart.
+        if (key.Followers.Count > 0)
+        {
+            keptText += $"; followed by an injected {KeyboardHookRecords.KeyName(key.VirtualKey)}" +
+                (key.Followers.Any(follower => follower.Page is not null) ? ", received by the page" : string.Empty);
+            foreach (var follower in key.Followers)
+            {
+                details.Add(
+                    $"followed by: {Line("hook record", follower)}, {Milliseconds(follower.Time - key.Time)} later" +
+                    (follower.Page is null ? string.Empty : ", received by the page"));
+            }
+        }
+
+        return new KeyOutcome(KeyOutcomeKind.Kept, keptText, details);
     }
 
     private static KeyOutcome RawOnlyOutcome(Key key, List<(long Time, bool Installed, string? Reason)> installs)

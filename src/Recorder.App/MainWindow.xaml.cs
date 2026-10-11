@@ -435,7 +435,7 @@ public partial class MainWindow : Window
 
     private void FitTimelineButton_Click(object sender, RoutedEventArgs e)
     {
-        TimelineZoomSlider.Value = 1;
+        TimelineZoomSlider.Value = 0;
         ApplyTimelineZoom();
         TimelineZoomSlider.Focus();
     }
@@ -481,26 +481,42 @@ public partial class MainWindow : Window
             PlaybackStatusTextBlock.Text =
                 $"Selected {FormatTime(e.TimelineEvent.MonotonicNanoseconds)} | " +
                 $"{e.TimelineEvent.Channel} | {e.TimelineEvent.EventType} | " +
-                (_playbackArchive?.Describe(e.TimelineEvent) ?? e.TimelineEvent.Summary);
+                (_playbackArchive?.Describe(e.TimelineEvent) ?? e.TimelineEvent.Summary) +
+                (e.AtPoint.Count > 1 ? $" | {e.AtPoint.Count - 1} more at this point" : string.Empty);
         }
 
         try
         {
-            var rawJson = _playbackArchive?.ReadEventJson(e.TimelineEvent) ??
+            var archive = _playbackArchive ??
                 throw new InvalidOperationException("No recording is open.");
-            using var document = JsonDocument.Parse(rawJson);
-            var json = JsonSerializer.Serialize(
-                document.RootElement,
-                InspectorJsonOptions);
-            // A key record's outcome, and the records it was joined with,
-            // come before the record (screen-reader-activity.md, "Key
-            // disposition").
-            EventDetailsTextBox.Text =
-                _playbackArchive.KeyDispositions.Of(e.TimelineEvent.EventId) is { } outcome
-                    ? $"Key outcome ({_playbackArchive.KeyDispositions.Rule}): {outcome.Text}{Environment.NewLine}" +
-                      string.Join(Environment.NewLine, outcome.Details) +
-                      Environment.NewLine + Environment.NewLine + json
-                    : json;
+            // Where the zoom draws several events at the clicked point, the
+            // values of every one of them, in timeline order.
+            if (e.AtPoint.Count > 1)
+            {
+                var text = new System.Text.StringBuilder();
+                text.Append(System.Globalization.CultureInfo.InvariantCulture,
+                    $"{e.AtPoint.Count} events at this point of the timeline, from " +
+                    $"{FormatTime(e.AtPoint[0].MonotonicNanoseconds)} to {FormatTime(e.AtPoint[^1].MonotonicNanoseconds)}");
+                text.Append(e.MoreAtPoint
+                    ? $"; more are at this point than the {SessionTimelineControl.MostAtPoint} listed, zoom in to see them."
+                    : ".");
+                for (var i = 0; i < e.AtPoint.Count; i++)
+                {
+                    var item = e.AtPoint[i];
+                    text.AppendLine().AppendLine();
+                    text.Append(System.Globalization.CultureInfo.InvariantCulture,
+                        $"Event {i + 1} of {e.AtPoint.Count}{(Equals(item, e.TimelineEvent) ? ", selected" : string.Empty)}: " +
+                        $"{FormatTime(item.MonotonicNanoseconds)} | {item.Channel} | {archive.Describe(item)}");
+                    text.AppendLine();
+                    text.Append(EventValues(archive, item));
+                }
+
+                EventDetailsTextBox.Text = text.ToString();
+            }
+            else
+            {
+                EventDetailsTextBox.Text = EventValues(archive, e.TimelineEvent);
+            }
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or
@@ -517,6 +533,20 @@ public partial class MainWindow : Window
             $"Selected {e.TimelineEvent.Channel}, " +
             $"{e.TimelineEvent.EventType}, " +
             $"{FormatTime(e.TimelineEvent.MonotonicNanoseconds)}");
+    }
+
+    // An event's complete recorded values. A key record's outcome, and the
+    // records it was joined with, come before the record
+    // (screen-reader-activity.md, "Key disposition").
+    private static string EventValues(SessionPlaybackArchive archive, SessionTimelineEvent item)
+    {
+        using var document = JsonDocument.Parse(archive.ReadEventJson(item));
+        var json = JsonSerializer.Serialize(document.RootElement, InspectorJsonOptions);
+        return archive.KeyDispositions.Of(item.EventId) is { } outcome
+            ? $"Key outcome ({archive.KeyDispositions.Rule}): {outcome.Text}{Environment.NewLine}" +
+              string.Join(Environment.NewLine, outcome.Details) +
+              Environment.NewLine + Environment.NewLine + json
+            : json;
     }
 
     private void BrowserNavigationFilter_Click(object sender, RoutedEventArgs e) =>
@@ -618,7 +648,7 @@ public partial class MainWindow : Window
 
             if (e.Key is Key.D0 or Key.NumPad0)
             {
-                TimelineZoomSlider.Value = 1;
+                TimelineZoomSlider.Value = 0;
                 e.Handled = true;
                 return;
             }
@@ -751,7 +781,7 @@ public partial class MainWindow : Window
                     ? "This recording contains no browser navigation evidence."
                     : "Select a browser navigation, or move through playback, " +
                       "to inspect its correlated DOM and interaction evidence.";
-            TimelineZoomSlider.Value = 1;
+            TimelineZoomSlider.Value = 0;
             ApplyTimelineFilters();
             ApplyTimelineZoom();
             PlaybackSlider.Maximum =
@@ -1222,7 +1252,7 @@ public partial class MainWindow : Window
         TimelineZoomSlider.IsEnabled = timelineEnabled;
         FitTimelineButton.IsEnabled = timelineEnabled;
         TimelinePanScrollBar.IsEnabled = timelineEnabled &&
-            TimelineZoomSlider.Value > 1;
+            TimelineZoomSlider.Value > 0;
     }
 
     private void ApplyTimelineFilters()
@@ -1321,7 +1351,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        var zoom = Math.Max(1, TimelineZoomSlider.Value);
+        // The slider gives the zoom as a power of two, from 1 to 4,096
+        // times: at the greatest, about 32 to 64 of the occupancy buckets
+        // are visible, however long the recording (session-database.md).
+        var zoom = Math.Pow(2, Math.Max(0, TimelineZoomSlider.Value));
         var duration = Math.Max(
             1,
             (long)(_playbackArchive.DurationNanoseconds / zoom));
@@ -1360,9 +1393,9 @@ public partial class MainWindow : Window
         TimelinePanScrollBar.ViewportSize =
             _timelineViewportDurationNanoseconds / 1_000_000_000d;
         TimelinePanScrollBar.LargeChange =
-            Math.Max(0.1, TimelinePanScrollBar.ViewportSize * 0.9);
+            Math.Max(0.001, TimelinePanScrollBar.ViewportSize * 0.9);
         TimelinePanScrollBar.SmallChange =
-            Math.Max(0.01, TimelinePanScrollBar.ViewportSize * 0.1);
+            Math.Max(0.0001, TimelinePanScrollBar.ViewportSize * 0.1);
         TimelinePanScrollBar.Value =
             _timelineViewportStartNanoseconds / 1_000_000_000d;
         _updatingTimelineControls = false;

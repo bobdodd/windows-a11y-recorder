@@ -723,8 +723,22 @@ only once the database version is tested in full. It adds the
   number of events on each channel and which of 262,144 equal time buckets
   hold events of each channel. The player draws the timeline from those
   buckets, so an event can be drawn up to one bucket earlier than its time;
-  at the greatest zoom, 32 times, a bucket is no wider than one pixel column
-  on a timeline up to 4,096 pixels wide. The timeline's events are not held
+  at 32 times zoom a bucket is no wider than one pixel column on a timeline
+  up to 4,096 pixels wide. The zoom doubles at each step, to 4,096 times,
+  where about 32 to 64 buckets are visible however long the recording, so
+  that events a few milliseconds apart, such as a key a screen reader
+  kept and the key it sent in its place, can be selected apart; a bucket
+  is then drawn wider than a pixel column. Raised from 32 times on
+  2026-10-10, when the owner found that the two could not be selected
+  apart.
+- Where the zoom draws several events at the clicked point, within a pixel
+  column of the selected event, or a bucket where buckets are wider, the
+  "Selected event values" panel lists every one of them, in timeline
+  order, each with its description and complete recorded values, up to
+  50, saying where there were more. The owner's requirement of
+  2026-10-10: "generally if the resolution means multiple events at that
+  time, I expect to see them all in 'selected event values'". The status
+  line gives the selected event and how many more are at the point. The timeline's events are not held
   in memory: the event shown at the playhead, the event selected by a click,
   and stepping with the arrow keys, Home, and End are each a query that reads,
   for each shown channel, one entry of the index on recording, channel,

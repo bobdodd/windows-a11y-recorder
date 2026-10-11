@@ -472,6 +472,11 @@ The joins, from the first keyboard hook run
 The page's `keydown` record does not say which key it was, so it is
 joined by order and time only.
 
+A kept key also names the injected key that followed it, as "followed by
+an injected Tab, received by the page", with the injected records in its
+details: NVDA's Tab is 2 ms after the Tab it kept, too close to select
+apart at the zoom of the time (owner, 2026-10-10).
+
 In the player, the status line's description of a key record, and of a
 joined `keydown`, ends with its outcome, and the selected event's details
 start with the outcome and the records it was joined with, and their
