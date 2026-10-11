@@ -613,6 +613,16 @@ browse mode from 40.7 s to 120.6 s. Tested at the unit level
 (`ScreenReaderModeTests`); the system test on the target machine is
 outstanding.
 
+First target run, 2026-10-11: no band, and the row always unknown. The
+player opens a recording from its playback index, which keeps only the
+records playback reads, and version 11 did not keep the foreground window
+records, so no key was seen with the browser in front. The checks before
+it had read the exported records, not the index. Version 12 keeps them,
+and an older index is derived again when the recording is opened; a test
+now builds the mode through the index and the archive, as the player does
+(`ThePlayerFindsTheModeThroughThePlaybackIndex`), and fails without the
+fix.
+
 ## The screen reader's windows
 
 UI Automation already records them. At playback, the records whose

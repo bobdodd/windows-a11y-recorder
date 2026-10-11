@@ -33,7 +33,11 @@ public sealed record PlaybackIndex
     // Version 11 keeps the key records (input.keyboard, input.keyboard-hook)
     // and the page's trusted keydown dispatches (browser.dispatch) whole, for
     // the key outcomes (KeyDispositions).
-    public const int CurrentVersion = 11;
+    // Version 12 keeps the foreground window records (window.foreground,
+    // foreground-window) with their process name, for NVDA's inferred mode,
+    // which counts keys only while the browser is in front
+    // (ScreenReaderModeTimeline).
+    public const int CurrentVersion = 12;
 
     public required int Version { get; init; }
 
@@ -243,7 +247,8 @@ public sealed class PlaybackIndexBuilder
             channel == Recorder.Contracts.MagnifierChanges.Channel ||
             channel == Recorder.Contracts.BrowserPreferenceSettings.Channel ||
             channel == Recorder.Contracts.AssistiveTechnologyRecords.Channel ||
-            IsInputRecordabilityRecord(channel, record.EventType))
+            IsInputRecordabilityRecord(channel, record.EventType) ||
+            (channel == "window.foreground" && record.EventType == "foreground-window"))
         {
             Keep(eventKey, record);
             return;

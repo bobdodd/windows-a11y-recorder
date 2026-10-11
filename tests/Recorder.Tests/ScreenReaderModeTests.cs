@@ -137,4 +137,50 @@ public sealed class ScreenReaderModeTests
             row, WindowsPreferenceTimeline.Empty, MagnifierChangeTimeline.Empty, screenReaderMode: mode));
         Assert.Empty(ScreenReaderModeTimeline.Empty.RowsAt(0));
     }
+
+    private static readonly CollectorDescriptor Collector = CollectorDescriptor.Create(
+        "test", "Test", "1",
+        ["input.keyboard", KeyboardHookRecords.Channel, AssistiveTechnologyRecords.Channel, "window.foreground"], "test");
+
+    [Fact]
+    public void ThePlayerFindsTheModeThroughThePlaybackIndex()
+    {
+        // As the player opens a recording: from its playback index, which
+        // keeps only the records playback reads. The foreground window
+        // records were missing from version 11, so no key counted.
+        var records = new List<(string Channel, long Time, string EventType, JsonElement Payload)>
+        {
+            (AssistiveTechnologyRecords.Channel, 0, AssistiveTechnologyRecords.WatchEventType,
+                J("{'products':['NVDA'],'executables':['nvda.exe'],'modules':['nvdahelperremote.dll'],'browserExecutablePath':'C:\\\\A11yRecorder\\\\chrome.exe','soundProblem':null}")),
+            (AssistiveTechnologyRecords.Channel, Millisecond, AssistiveTechnologyRecords.ProcessStartedEventType,
+                J("{'product':'NVDA','role':'screen-reader','processId':6688,'runningAtStart':true,'productVersion':'2026.2'}")),
+            ("window.foreground", 2 * Millisecond, "foreground-window",
+                J("{'windowHandle':1,'processId':4000,'processName':'chrome','title':'Home | CNIB','className':'Chrome_WidgetWin_1'}"))
+        };
+        foreach (var record in Kept(10 * Second, 0x48).Concat(Kept(12 * Second, 0x44)))
+        {
+            records.Add((record.Channel, record.MonotonicNanoseconds, record.EventType, record.Payload));
+        }
+
+        var builder = new PlaybackIndexBuilder(10_000_000, TimeSpan.Zero);
+        var key = 0L;
+        foreach (var (channel, time, eventType, payload) in records)
+        {
+            key++;
+            builder.Add(key, RecorderEventFactory.Create("s", Collector, channel, (ulong)key, time, eventType, payload) with { EventId = $"e{key}" });
+        }
+
+        var archiveBuilder = new SessionPlaybackArchiveBuilder(Path.GetTempPath(), retainEvents: false);
+        archiveBuilder.AddIndex(builder.Build());
+        var started = DateTimeOffset.UtcNow;
+        var archive = archiveBuilder.Build(new SessionManifest(
+            "1.1", "s", "completed", started, started.AddSeconds(20), 20 * Second, 10_000_000, 1,
+            "Windows", ".NET", "X64",
+            new SessionRecordingConfiguration(true, true, true, true, 5, true, true),
+            [], [], 1, 0, null));
+
+        var span = Assert.Single(archive.ScreenReaderMode.Spans);
+        Assert.Equal((ScreenReaderModeKind.Browse, 10 * Second, 12 * Second), (span.Kind, span.Start, span.End));
+        Assert.StartsWith("browse mode, inferred from H kept", archive.ScreenReaderMode.ValueAt(11 * Second), StringComparison.Ordinal);
+    }
 }
