@@ -1,0 +1,742 @@
+{
+  "product": "NVDA",
+  "version": "2026.2",
+  "source": "https://download.nvaccess.org/releases/2026.2/documentation/keyCommands.html",
+  "note": "From the NVDA 2026.2 Commands Quick Reference, the sections agreed on 2026-10-10: Basic NVDA commands, Navigating with the System Focus, and Browse Mode (its commands, Single Letter Navigation, the Elements List, Searching for text, Embedded Objects, and Native Selection Mode). Keys as the reference writes them; where it gives one key column, the key is for both layouts. Searching for text repeats Find, Find next and Find previous, listed once. passes: NVDA acts on the key and passes it on, so it is labelled on a passed key.",
+  "sections": [
+    {
+      "id": "basic-nvda-commands",
+      "title": "Basic NVDA commands"
+    },
+    {
+      "id": "navigating-with-the-system-focus",
+      "title": "Navigating with the System Focus"
+    },
+    {
+      "id": "browse-mode",
+      "title": "Browse Mode"
+    }
+  ],
+  "commands": [
+    {
+      "name": "starts or restarts NVDA",
+      "section": "basic-nvda-commands",
+      "desktop": "control+alt+n",
+      "laptop": "control+alt+n",
+      "context": "any",
+      "passes": true
+    },
+    {
+      "name": "stop speech",
+      "section": "basic-nvda-commands",
+      "desktop": "control",
+      "laptop": "control",
+      "context": "any",
+      "passes": true
+    },
+    {
+      "name": "pause speech",
+      "section": "basic-nvda-commands",
+      "desktop": "shift",
+      "laptop": "shift",
+      "context": "any",
+      "passes": true
+    },
+    {
+      "name": "repeat last spoken information",
+      "section": "basic-nvda-commands",
+      "desktop": "NVDA+x",
+      "laptop": "NVDA+x",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "NVDA menu",
+      "section": "basic-nvda-commands",
+      "desktop": "NVDA+n",
+      "laptop": "NVDA+n",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "toggle input help mode",
+      "section": "basic-nvda-commands",
+      "desktop": "NVDA+1",
+      "laptop": "NVDA+1",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "quit NVDA",
+      "section": "basic-nvda-commands",
+      "desktop": "NVDA+q",
+      "laptop": "NVDA+q",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "pass next key through",
+      "section": "basic-nvda-commands",
+      "desktop": "NVDA+f2",
+      "laptop": "NVDA+f2",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "toggle application sleep mode",
+      "section": "basic-nvda-commands",
+      "desktop": "NVDA+shift+s",
+      "laptop": "NVDA+shift+z",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "report current focus",
+      "section": "navigating-with-the-system-focus",
+      "desktop": "NVDA+tab",
+      "laptop": "NVDA+tab",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "report title",
+      "section": "navigating-with-the-system-focus",
+      "desktop": "NVDA+t",
+      "laptop": "NVDA+t",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "read active window",
+      "section": "navigating-with-the-system-focus",
+      "desktop": "NVDA+b",
+      "laptop": "NVDA+b",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "report status bar",
+      "section": "navigating-with-the-system-focus",
+      "desktop": "NVDA+end",
+      "laptop": "NVDA+shift+end",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "report shortcut key",
+      "section": "navigating-with-the-system-focus",
+      "desktop": "shift+numpad2",
+      "laptop": "NVDA+control+shift+.",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "toggle browse and focus modes",
+      "section": "browse-mode",
+      "desktop": "NVDA+space",
+      "laptop": "NVDA+space",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "exit focus mode",
+      "section": "browse-mode",
+      "desktop": "escape",
+      "laptop": "escape",
+      "context": "focus mode",
+      "passes": false
+    },
+    {
+      "name": "refresh browse mode document",
+      "section": "browse-mode",
+      "desktop": "NVDA+f5",
+      "laptop": "NVDA+f5",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "find",
+      "section": "browse-mode",
+      "desktop": "NVDA+control+f",
+      "laptop": "NVDA+control+f",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "find next",
+      "section": "browse-mode",
+      "desktop": "NVDA+f3",
+      "laptop": "NVDA+f3",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "find previous",
+      "section": "browse-mode",
+      "desktop": "NVDA+shift+f3",
+      "laptop": "NVDA+shift+f3",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "next heading",
+      "section": "browse-mode",
+      "desktop": "h",
+      "laptop": "h",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous heading",
+      "section": "browse-mode",
+      "desktop": "shift+h",
+      "laptop": "shift+h",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next list",
+      "section": "browse-mode",
+      "desktop": "l",
+      "laptop": "l",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous list",
+      "section": "browse-mode",
+      "desktop": "shift+l",
+      "laptop": "shift+l",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next list item",
+      "section": "browse-mode",
+      "desktop": "i",
+      "laptop": "i",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous list item",
+      "section": "browse-mode",
+      "desktop": "shift+i",
+      "laptop": "shift+i",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next table",
+      "section": "browse-mode",
+      "desktop": "t",
+      "laptop": "t",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous table",
+      "section": "browse-mode",
+      "desktop": "shift+t",
+      "laptop": "shift+t",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next link",
+      "section": "browse-mode",
+      "desktop": "k",
+      "laptop": "k",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous link",
+      "section": "browse-mode",
+      "desktop": "shift+k",
+      "laptop": "shift+k",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next non-linked text",
+      "section": "browse-mode",
+      "desktop": "n",
+      "laptop": "n",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous non-linked text",
+      "section": "browse-mode",
+      "desktop": "shift+n",
+      "laptop": "shift+n",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next form field",
+      "section": "browse-mode",
+      "desktop": "f",
+      "laptop": "f",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous form field",
+      "section": "browse-mode",
+      "desktop": "shift+f",
+      "laptop": "shift+f",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next unvisited link",
+      "section": "browse-mode",
+      "desktop": "u",
+      "laptop": "u",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous unvisited link",
+      "section": "browse-mode",
+      "desktop": "shift+u",
+      "laptop": "shift+u",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next visited link",
+      "section": "browse-mode",
+      "desktop": "v",
+      "laptop": "v",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous visited link",
+      "section": "browse-mode",
+      "desktop": "shift+v",
+      "laptop": "shift+v",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next edit field",
+      "section": "browse-mode",
+      "desktop": "e",
+      "laptop": "e",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous edit field",
+      "section": "browse-mode",
+      "desktop": "shift+e",
+      "laptop": "shift+e",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next button",
+      "section": "browse-mode",
+      "desktop": "b",
+      "laptop": "b",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous button",
+      "section": "browse-mode",
+      "desktop": "shift+b",
+      "laptop": "shift+b",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next checkbox",
+      "section": "browse-mode",
+      "desktop": "x",
+      "laptop": "x",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous checkbox",
+      "section": "browse-mode",
+      "desktop": "shift+x",
+      "laptop": "shift+x",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next combo box",
+      "section": "browse-mode",
+      "desktop": "c",
+      "laptop": "c",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous combo box",
+      "section": "browse-mode",
+      "desktop": "shift+c",
+      "laptop": "shift+c",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next radio button",
+      "section": "browse-mode",
+      "desktop": "r",
+      "laptop": "r",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous radio button",
+      "section": "browse-mode",
+      "desktop": "shift+r",
+      "laptop": "shift+r",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next block quote",
+      "section": "browse-mode",
+      "desktop": "q",
+      "laptop": "q",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous block quote",
+      "section": "browse-mode",
+      "desktop": "shift+q",
+      "laptop": "shift+q",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next separator",
+      "section": "browse-mode",
+      "desktop": "s",
+      "laptop": "s",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous separator",
+      "section": "browse-mode",
+      "desktop": "shift+s",
+      "laptop": "shift+s",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next frame",
+      "section": "browse-mode",
+      "desktop": "m",
+      "laptop": "m",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous frame",
+      "section": "browse-mode",
+      "desktop": "shift+m",
+      "laptop": "shift+m",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next graphic",
+      "section": "browse-mode",
+      "desktop": "g",
+      "laptop": "g",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous graphic",
+      "section": "browse-mode",
+      "desktop": "shift+g",
+      "laptop": "shift+g",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next landmark",
+      "section": "browse-mode",
+      "desktop": "d",
+      "laptop": "d",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous landmark",
+      "section": "browse-mode",
+      "desktop": "shift+d",
+      "laptop": "shift+d",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next embedded object",
+      "section": "browse-mode",
+      "desktop": "o",
+      "laptop": "o",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous embedded object",
+      "section": "browse-mode",
+      "desktop": "shift+o",
+      "laptop": "shift+o",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next heading at level 1",
+      "section": "browse-mode",
+      "desktop": "1",
+      "laptop": "1",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous heading at level 1",
+      "section": "browse-mode",
+      "desktop": "shift+1",
+      "laptop": "shift+1",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next heading at level 2",
+      "section": "browse-mode",
+      "desktop": "2",
+      "laptop": "2",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous heading at level 2",
+      "section": "browse-mode",
+      "desktop": "shift+2",
+      "laptop": "shift+2",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next heading at level 3",
+      "section": "browse-mode",
+      "desktop": "3",
+      "laptop": "3",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous heading at level 3",
+      "section": "browse-mode",
+      "desktop": "shift+3",
+      "laptop": "shift+3",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next heading at level 4",
+      "section": "browse-mode",
+      "desktop": "4",
+      "laptop": "4",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous heading at level 4",
+      "section": "browse-mode",
+      "desktop": "shift+4",
+      "laptop": "shift+4",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next heading at level 5",
+      "section": "browse-mode",
+      "desktop": "5",
+      "laptop": "5",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous heading at level 5",
+      "section": "browse-mode",
+      "desktop": "shift+5",
+      "laptop": "shift+5",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next heading at level 6",
+      "section": "browse-mode",
+      "desktop": "6",
+      "laptop": "6",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous heading at level 6",
+      "section": "browse-mode",
+      "desktop": "shift+6",
+      "laptop": "shift+6",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next heading at level 7",
+      "section": "browse-mode",
+      "desktop": "7",
+      "laptop": "7",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous heading at level 7",
+      "section": "browse-mode",
+      "desktop": "shift+7",
+      "laptop": "shift+7",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next heading at level 8",
+      "section": "browse-mode",
+      "desktop": "8",
+      "laptop": "8",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous heading at level 8",
+      "section": "browse-mode",
+      "desktop": "shift+8",
+      "laptop": "shift+8",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next heading at level 9",
+      "section": "browse-mode",
+      "desktop": "9",
+      "laptop": "9",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous heading at level 9",
+      "section": "browse-mode",
+      "desktop": "shift+9",
+      "laptop": "shift+9",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next annotation",
+      "section": "browse-mode",
+      "desktop": "a",
+      "laptop": "a",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous annotation",
+      "section": "browse-mode",
+      "desktop": "shift+a",
+      "laptop": "shift+a",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next text paragraph",
+      "section": "browse-mode",
+      "desktop": "p",
+      "laptop": "p",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous text paragraph",
+      "section": "browse-mode",
+      "desktop": "shift+p",
+      "laptop": "shift+p",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next spelling error",
+      "section": "browse-mode",
+      "desktop": "w",
+      "laptop": "w",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous spelling error",
+      "section": "browse-mode",
+      "desktop": "shift+w",
+      "laptop": "shift+w",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "move to start of container",
+      "section": "browse-mode",
+      "desktop": "shift+comma",
+      "laptop": "shift+comma",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "move past end of container",
+      "section": "browse-mode",
+      "desktop": "comma",
+      "laptop": "comma",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "toggle single letter navigation",
+      "section": "browse-mode",
+      "desktop": "NVDA+shift+space",
+      "laptop": "NVDA+shift+space",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "elements list",
+      "section": "browse-mode",
+      "desktop": "NVDA+f7",
+      "laptop": "NVDA+f7",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "move to containing browse mode document",
+      "section": "browse-mode",
+      "desktop": "NVDA+control+space",
+      "laptop": "NVDA+control+space",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "toggle native selection mode",
+      "section": "browse-mode",
+      "desktop": "NVDA+shift+f10",
+      "laptop": "NVDA+shift+f10",
+      "context": "browse mode",
+      "passes": false
+    }
+  ]
+}

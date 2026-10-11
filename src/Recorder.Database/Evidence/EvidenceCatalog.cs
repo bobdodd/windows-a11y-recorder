@@ -287,6 +287,34 @@ internal static class EvidenceCatalog
         Scalar("exitedUtc", ScalarType.Utc, N),
         BigInt("exitCode", N));
 
+    // Added by 0029_assistive_technology_settings.sql: NVDA's settings that
+    // its key commands depend on, as written in its configuration folder.
+    public static readonly EvidenceTable AssistiveTechnologySettings = Evidence(
+        "assistive_technology_settings",
+        Text("product"),
+        BigInt("processId"),
+        Text("copy"),
+        Text("configFolder", N),
+        Bool("read"),
+        Text("problem", N),
+        Text("keyboardLayout", N),
+        Text("nvdaModifierKeys", N),
+        Text("multiPressTimeout", N),
+        Text("autoPassThroughOnFocusChange", N),
+        Text("autoPassThroughOnCaretMove", N),
+        Text("trapNonCommandGestures", N),
+        Text("enableOnPageLoad", N),
+        TextList("profiles", R, "assistive_technology_setting_profiles"),
+        Bool("profileTriggers"),
+        new ListField(
+            "customGestures",
+            R,
+            new EvidenceTable(
+                "assistive_technology_setting_gestures",
+                TableKind.Child,
+                [Text("section"), Text("script"), Text("gesture")])),
+        Text("gesturesProblem", N));
+
     // Both a module seen loaded and one seen gone; the event type says which.
     public static readonly EvidenceTable AssistiveTechnologyModuleChanges = Evidence(
         "assistive_technology_module_changes",
@@ -1458,7 +1486,8 @@ internal static class EvidenceCatalog
             AssistiveTechnologyModuleChanges, AssistiveTechnologySoundStarts, AssistiveTechnologySoundEnds
         ]),
         (27, "keyboard_hook", [KeyboardHookKeys, KeyboardHookInstallations]),
-        (28, "input_recordability", [RecorderIntegrities, ForegroundIntegrities, InputDesktops])
+        (28, "input_recordability", [RecorderIntegrities, ForegroundIntegrities, InputDesktops]),
+        (29, "assistive_technology_settings", [AssistiveTechnologySettings])
     ];
 
     /// <summary>
@@ -1494,6 +1523,7 @@ internal static class EvidenceCatalog
             [("system.assistive-technology", "assistive-technology-process-exited")] = AssistiveTechnologyProcessExits,
             [("system.assistive-technology", "assistive-technology-module-loaded")] = AssistiveTechnologyModuleChanges,
             [("system.assistive-technology", "assistive-technology-module-unloaded")] = AssistiveTechnologyModuleChanges,
+            [("system.assistive-technology", "assistive-technology-settings")] = AssistiveTechnologySettings,
             [("system.assistive-technology", "assistive-technology-sound-started")] = AssistiveTechnologySoundStarts,
             [("system.assistive-technology", "assistive-technology-sound-ended")] = AssistiveTechnologySoundEnds,
             [("browser.preferences", "browser-preferences")] = BrowserPreferenceSnapshots,

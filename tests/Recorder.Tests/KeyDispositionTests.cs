@@ -5,7 +5,7 @@ using Recorder.Session;
 namespace Recorder.Tests;
 
 /// <summary>
-/// The key outcomes derived at playback (rule 1), from the patterns of the
+/// The key outcomes derived at playback (rules 1 and 2), from the patterns of the
 /// recordings of 2026-10-10. See docs/architecture/screen-reader-activity.md,
 /// "Key disposition".
 /// </summary>
@@ -66,7 +66,7 @@ public sealed class KeyDispositionTests
         Assert.Equal(KeyOutcomeKind.PageKeyDown, keys.Of(page.EventId)!.Kind);
         Assert.StartsWith("page keydown for H down at", keys.Of(page.EventId)!.Text, StringComparison.Ordinal);
         Assert.Contains(keys.Of(down.EventId)!.Details, line => line.Contains("2.0 ms after the hook", StringComparison.Ordinal));
-        Assert.Equal("key outcome rule 1", keys.Rule);
+        Assert.Equal("key outcome rule 2", keys.Rule);
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public sealed class KeyDispositionTests
         var running = new KeyDispositions([down], NvdaFrom(5 * Second));
         var outcome = running.Of(down.EventId)!;
         Assert.Equal(KeyOutcomeKind.Kept, outcome.Kind);
-        Assert.Equal("kept, screen reader running: NVDA", outcome.Text);
+        Assert.Equal("kept, screen reader running: NVDA; command: next heading in browse mode (h), inferred", outcome.Text);
         Assert.Contains(outcome.Details, line => line.StartsWith("inferred:", StringComparison.Ordinal));
 
         Assert.Equal("kept, no screen reader running", new KeyDispositions([down], NvdaFrom(20 * Second)).Of(down.EventId)!.Text);

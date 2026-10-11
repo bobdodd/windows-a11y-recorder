@@ -41,7 +41,8 @@ public sealed record KeyOutcome(KeyOutcomeKind Kind, string Text, IReadOnlyList<
 /// </summary>
 public sealed class KeyDispositions
 {
-    public const int RuleVersion = 1;
+    // Rule 2 adds the screen reader's command of a key (2c-1).
+    public const int RuleVersion = 2;
 
     /// <summary>A hook record and a raw input record of one key, either way.</summary>
     public const long HookRawWindowNanoseconds = 50_000_000;
@@ -66,6 +67,7 @@ public sealed class KeyDispositions
         public required int VirtualKey { get; init; }
         public required bool Up { get; init; }
         public required bool Injected { get; init; }
+        public bool Extended { get; init; }
         public Key? Partner { get; set; }
         public Key? KeptKey { get; set; }
         public List<Key> Followers { get; } = [];
@@ -76,7 +78,8 @@ public sealed class KeyDispositions
     public KeyDispositions(
         IEnumerable<KeyEvidenceRecord> records,
         AssistiveTechnologyTimeline? assistiveTechnology = null,
-        IReadOnlyList<UnrecordablePeriod>? unrecordable = null)
+        IReadOnlyList<UnrecordablePeriod>? unrecordable = null,
+        IReadOnlyList<ScreenReaderCommandData>? commandData = null)
     {
         ArgumentNullException.ThrowIfNull(records);
         assistiveTechnology ??= AssistiveTechnologyTimeline.Empty;
@@ -105,7 +108,8 @@ public sealed class KeyDispositions
                         ScanCode = scan,
                         VirtualKey = virtualKey,
                         Up = Flag(payload, "up"),
-                        Injected = Flag(payload, "injected")
+                        Injected = Flag(payload, "injected"),
+                        Extended = Flag(payload, "extended")
                     });
                     break;
                 case ("input.keyboard", "raw-keyboard")
@@ -161,6 +165,7 @@ public sealed class KeyDispositions
             }
         }
 
+        LabelCommands(hook, assistiveTechnology, commandData);
         Rule = $"key outcome rule {RuleVersion}";
     }
 
@@ -367,6 +372,239 @@ public sealed class KeyDispositions
         }
 
         return new KeyOutcome(KeyOutcomeKind.Kept, keptText, details);
+    }
+
+    // The settings the commands are worked out with, from NVDA's settings
+    // record, or its defaults where a setting is not written or not recorded.
+    private sealed record CommandSettings(
+        int ModifierKeys,
+        string Layout,
+        long MultiPressNanoseconds,
+        IReadOnlyList<NvdaCustomGesture> Custom,
+        ScreenReaderCommandData? Data,
+        IReadOnlyList<string> Basis);
+
+    private static CommandSettings? SettingsAt(
+        long time,
+        AssistiveTechnologyTimeline assistiveTechnology,
+        IReadOnlyList<ScreenReaderCommandData>? commandData,
+        Dictionary<int, CommandSettings> cache)
+    {
+        var product = AssistiveTechnologyRecords.Nvda.Product;
+        if (assistiveTechnology.ScreenReaderAt(product, time) is not { } running)
+        {
+            return null;
+        }
+
+        if (cache.TryGetValue(running.ProcessId, out var cached))
+        {
+            return cached;
+        }
+
+        var basis = new List<string>();
+        var settings = running.Settings;
+        string? Written(string name) => settings is { } payload ? Text(payload, name) : null;
+        if (settings is null)
+        {
+            basis.Add($"{product}'s settings were not recorded; its defaults are assumed");
+        }
+        else if (Text(settings.Value, "problem") is { } problem)
+        {
+            basis.Add($"{product}'s settings: {problem}");
+        }
+
+        var layout = Written("keyboardLayout") ?? NvdaSettings.DefaultKeyboardLayout;
+        basis.Add($"keyboard layout: {layout}" + (Written("keyboardLayout") is null ? " (NVDA's default)" : " (nvda.ini)"));
+        var modifierKeys = NvdaSettings.ModifierKeys(Written("nvdaModifierKeys")) ?? NvdaSettings.DefaultNvdaModifierKeys;
+        basis.Add($"NVDA keys: {ScreenReaderGestures.NvdaKeysText(modifierKeys)}" +
+            (Written("nvdaModifierKeys") is { } keys ? $" (NVDAModifierKeys {keys} in nvda.ini)" : " (NVDA's default)"));
+        var timeout = int.TryParse(Written("multiPressTimeout"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var milliseconds) && milliseconds > 0
+            ? milliseconds
+            : NvdaSettings.DefaultMultiPressTimeoutMilliseconds;
+        var custom = new List<NvdaCustomGesture>();
+        if (settings is { } recorded && recorded.TryGetProperty("customGestures", out var gestures) && gestures.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var gesture in gestures.EnumerateArray())
+            {
+                if (Text(gesture, "section") is { } section && Text(gesture, "script") is { } script && Text(gesture, "gesture") is { } name)
+                {
+                    custom.Add(new NvdaCustomGesture(section, script, name));
+                }
+            }
+        }
+
+        if (settings is { } withProfiles && withProfiles.TryGetProperty("profiles", out var profiles) &&
+            profiles.ValueKind == JsonValueKind.Array && profiles.GetArrayLength() > 0)
+        {
+            basis.Add("NVDA has configuration profiles, whose settings are not applied here");
+        }
+
+        ScreenReaderCommandData? data = null;
+        if (ScreenReaderCommandData.For(product, running.Version, commandData) is { } chosen)
+        {
+            data = chosen.Data;
+            if (chosen.Note is { } note)
+            {
+                basis.Add(note);
+            }
+        }
+        else
+        {
+            basis.Add($"no command data for {product}");
+        }
+
+        return cache[running.ProcessId] = new CommandSettings(modifierKeys, layout, timeout * 1_000_000L, custom, data, basis);
+    }
+
+    // Each physical key down, in order, with the keys held down with it,
+    // named as NVDA names the combination and looked up in the command
+    // data; a kept key gains its command, as does a passed key whose
+    // command NVDA acts on and passes on. A lone Ctrl or Shift is labelled
+    // at its press when it is released with no other key between.
+    private void LabelCommands(
+        List<Key> hook,
+        AssistiveTechnologyTimeline assistiveTechnology,
+        IReadOnlyList<ScreenReaderCommandData>? commandData)
+    {
+        var cache = new Dictionary<int, CommandSettings>();
+        var held = new List<Key>();
+        Key? lone = null;
+        (string Gesture, long Time, int Count)? last = null;
+        foreach (var key in hook.Where(key => !key.Injected))
+        {
+            var settings = SettingsAt(key.Time, assistiveTechnology, commandData, cache);
+            if (key.Up)
+            {
+                held.RemoveAll(down => down.VirtualKey == key.VirtualKey && down.Extended == key.Extended);
+                if (lone is { } alone && alone.VirtualKey == key.VirtualKey && held.Count == 0 && settings is not null &&
+                    ScreenReaderGestures.Modifier(alone.VirtualKey) is { } modifier)
+                {
+                    Label(alone, modifier, 1, settings);
+                }
+
+                lone = null;
+                continue;
+            }
+
+            if (held.Any(down => down.VirtualKey == key.VirtualKey && down.Extended == key.Extended))
+            {
+                // Held down: the keyboard's repeat.
+                continue;
+            }
+
+            held.Add(key);
+            if (settings is null)
+            {
+                lone = null;
+                continue;
+            }
+
+            if (ScreenReaderGestures.IsNvdaKey(key.VirtualKey, key.Extended, settings.ModifierKeys))
+            {
+                lone = null;
+                Note(key, "NVDA key", $"an NVDA key: {string.Join("; ", settings.Basis.Where(line => line.StartsWith("NVDA keys", StringComparison.Ordinal)))}");
+                continue;
+            }
+
+            if (ScreenReaderGestures.Modifier(key.VirtualKey) is not null)
+            {
+                lone = held.Count == 1 ? key : null;
+                continue;
+            }
+
+            lone = null;
+            if (ScreenReaderGestures.KeyName(key.VirtualKey, key.Extended) is not { } name)
+            {
+                last = null;
+                continue;
+            }
+
+            var modifiers = held.Where(down => down != key)
+                .Select(down => ScreenReaderGestures.IsNvdaKey(down.VirtualKey, down.Extended, settings.ModifierKeys)
+                    ? "NVDA"
+                    : ScreenReaderGestures.Modifier(down.VirtualKey))
+                .OfType<string>()
+                .Distinct();
+            var gesture = string.Join("+", [.. modifiers, name]);
+            var canonical = ScreenReaderGestures.Canonical(gesture);
+            var count = last is { } previous && previous.Gesture == canonical && key.Time - previous.Time <= settings.MultiPressNanoseconds
+                ? previous.Count + 1
+                : 1;
+            last = (canonical, key.Time, count);
+            Label(key, gesture, count, settings);
+        }
+    }
+
+    private void Label(Key key, string gesture, int count, CommandSettings settings)
+    {
+        if (!_outcomes.TryGetValue(key.EventId, out var outcome))
+        {
+            return;
+        }
+
+        var canonical = ScreenReaderGestures.Canonical(gesture);
+        var custom = settings.Custom.Where(item => ScreenReaderGestures.Canonical(item.Gesture) == canonical).ToList();
+        var commands = settings.Data?.Of(gesture, settings.Layout) ?? [];
+        var kept = outcome.Kind == KeyOutcomeKind.Kept;
+        var shown = commands.Where(command => kept || command.Passes).ToList();
+        var pressed = count switch
+        {
+            1 => string.Empty,
+            2 => ", pressed twice",
+            3 => ", pressed three times",
+            _ => $", pressed {count} times"
+        };
+        string text;
+        var details = new List<string>();
+        if (custom.FirstOrDefault(item => item.Script != "None") is { } bound && (kept || shown.Count > 0))
+        {
+            text = $"custom command: {bound.Script} ({gesture}){pressed}, inferred";
+            details.Add($"command (inferred from the keys held): {gesture} is bound to {bound.Script} in {bound.Section}, in gestures.ini");
+        }
+        else if (shown.Count > 0)
+        {
+            var names = string.Join(" or ", shown.Select(command =>
+                command.Name + (command.Context == "any" ? string.Empty : $" in {command.Context}")));
+            text = $"command: {names} ({gesture}){pressed}, inferred";
+            foreach (var command in shown)
+            {
+                details.Add($"command (inferred from the keys held): {gesture} is {command.Name}" +
+                    (command.Context == "any" ? string.Empty : $", in {command.Context}") +
+                    (command.Passes ? ", which NVDA acts on and passes on" : string.Empty) +
+                    $"; source: {settings.Data!.SourceOf(command)}");
+            }
+
+            if (custom.Any(item => item.Script == "None"))
+            {
+                details.Add($"note: gestures.ini unbinds {gesture} from a command; it may not have acted");
+            }
+        }
+        else if (kept)
+        {
+            details.Add($"no command of {gesture} in the command data" +
+                (settings.Data is { } data ? $" ({data.Product} {data.Version})" : string.Empty));
+            details.AddRange(settings.Basis);
+            _outcomes[key.EventId] = outcome with { Details = [.. outcome.Details, .. details] };
+            return;
+        }
+        else
+        {
+            return;
+        }
+
+        details.AddRange(settings.Basis);
+        Note(key, text, details);
+    }
+
+    private void Note(Key key, string text, params IEnumerable<string> details)
+    {
+        foreach (var id in key.Partner is { } partner ? [key.EventId, partner.EventId] : new[] { key.EventId })
+        {
+            if (_outcomes.TryGetValue(id, out var outcome))
+            {
+                _outcomes[id] = outcome with { Text = outcome.Text + "; " + text, Details = [.. outcome.Details, .. details] };
+            }
+        }
     }
 
     private static KeyOutcome RawOnlyOutcome(Key key, List<(long Time, bool Installed, string? Reason)> installs)

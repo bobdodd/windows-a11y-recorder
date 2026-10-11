@@ -38,6 +38,11 @@ public sealed class AssistiveTechnologyTimeline
         // Periods of sound: from the start record to the last sound.
         public List<(long Start, long End)> Sounds { get; } = [];
         public List<long> OpenSounds { get; } = [];
+
+        // Each main process's product version and settings record, for the
+        // key commands.
+        public Dictionary<int, string?> Versions { get; } = [];
+        public Dictionary<int, JsonElement> Settings { get; } = [];
     }
 
     public AssistiveTechnologyTimeline(IEnumerable<AssistiveTechnologyRecord> records)
@@ -88,6 +93,10 @@ public sealed class AssistiveTechnologyTimeline
                         payload.TryGetProperty("runningAtStart", out var atStart) && atStart.ValueKind == JsonValueKind.True,
                         processId,
                         DescribeProcess(payload)));
+                    state.Versions[processId] = Text(payload, "productVersion");
+                    break;
+                case NvdaSettings.SettingsEventType:
+                    state.Settings[processId] = payload;
                     break;
                 case AssistiveTechnologyRecords.ProcessExitedEventType
                     when Text(payload, "role") == AssistiveTechnologyRecords.ScreenReaderRole:
@@ -150,6 +159,33 @@ public sealed class AssistiveTechnologyTimeline
         }
 
         return running;
+    }
+
+    /// <summary>
+    /// A product's main process running at a time, the latest started: its
+    /// process, product version, and settings record (null where none was
+    /// recorded); or null where none was running.
+    /// </summary>
+    public (int ProcessId, string? Version, JsonElement? Settings)? ScreenReaderAt(string product, long time)
+    {
+        if (!_byProduct.TryGetValue(product, out var state))
+        {
+            return null;
+        }
+
+        foreach (var start in state.Starts.AsEnumerable().Reverse())
+        {
+            if ((start.AtStart || start.Time <= time) &&
+                !state.Exits.Any(exit => exit.ProcessId == start.ProcessId && exit.Time > start.Time && exit.Time <= time))
+            {
+                return (
+                    start.ProcessId,
+                    state.Versions.GetValueOrDefault(start.ProcessId),
+                    state.Settings.TryGetValue(start.ProcessId, out var settings) ? settings : null);
+            }
+        }
+
+        return null;
     }
 
     /// <summary>Whether the recording holds the assistive technology records.</summary>

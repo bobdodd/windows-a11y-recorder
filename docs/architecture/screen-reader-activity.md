@@ -490,7 +490,73 @@ recordings of 2026-10-10; a system test on the target machine, opening
 recording 20261010-211432 in the player and comparing the outcomes with
 the steps taken.
 
-## The screen reader's windows
+## NVDA's commands, mode, and windows (step 2c)
+
+Agreed with the owner on 2026-10-10: built in three parts, each tested on
+the target machine before the next: 2c-1, the commands; 2c-2, browse or
+focus mode, inferred; 2c-3, NVDA's windows. The first command data covers
+the quick reference's Basic NVDA commands, Navigating with the System
+Focus, and Browse Mode, with the Elements List; other sections are added
+as recordings need them. The mode and NVDA's windows each have a band on
+the timeline, as well as a properties panel row: "I want a band on the
+timeline".
+
+What the target machine showed, read without change on 2026-10-10:
+NVDA's portable `userConfig\nvda.ini` sets `NVDAModifierKeys = 7`, which
+NVDA's configuration specification defines as "1: CapsLock, 2:
+NumpadInsert, 4: ExtendedInsert", with a default of 6
+([NVDA configSpec.py](https://raw.githubusercontent.com/nvaccess/nvda/master/source/config/configSpec.py)),
+so Caps Lock is also an NVDA key there; the keyboard layout is not set, so
+it is the default, `desktop`; there is no `gestures.ini`, and there are no
+profiles or add-ons. In recording 20261010-211432 the Elements List came
+to the front at 92.819 s, and UI Automation recorded each tree item
+focused in it, by name; the Up arrows from 99.95 s moved through it, which
+is why they passed without reaching the page.
+
+### 2c-1, the commands
+
+The recorder reads NVDA's settings when its main process starts, or is
+running at the start, and records them (`assistive-technology-settings`):
+from `userConfig` in a portable copy's folder, or `%APPDATA%\nvda` for an
+installed copy. It reads only, and records only the keyboard layout, the
+NVDA modifier keys, the multiple press timeout, the browse mode options,
+the names of any configuration profiles, whether profile triggers are
+set, and the custom key commands of `gestures.ini`, each as written, with
+the folder and any problem. A copy started with another configuration
+path is not followed. The settings are those at the process's start; a
+change saved during the recording is not seen.
+
+At playback, the key combination of each kept key is worked out from the
+keys held down with it (Shift, Ctrl, Alt, Windows, and the NVDA keys of
+the settings), named as NVDA names keys (`NVDA+f7`, `shift+h`), and looked
+up in the command data for the product and version
+(`src/Recorder.Session/ScreenReaderCommands/nvda-2026.2.json`), in the
+keyboard layout recorded, with the defaults of the configuration
+specification where a setting is not written. A custom command in the
+settings comes first. A kept key's outcome gains its command, as an
+inference with its basis, such as "command: next heading (H), inferred";
+the same command again within the multiple press timeout is noted as
+pressed twice. A version without its own data uses the nearest earlier
+version's, and says so. A kept key with no command stays kept. A lone
+Ctrl or Shift, which NVDA passes on and acts on (stop and pause speech),
+is labelled as a passed key's command.
+
+Built as key outcome rule 2: the commands are worked out only for
+physical keys while NVDA's main process runs; a key held down is labelled
+at its first press, not at the keyboard's repeats; an NVDA key is noted as
+such; and the details give the command's source, the keyboard layout, the
+NVDA keys, and whether each comes from nvda.ini or NVDA's default. The
+first data has 90 commands. Storage: the payload rules are in
+`EventPayloadValidator`; migration 0029 makes the tables
+(`assistive_technology_settings`, with its profiles and custom gestures);
+the playback index keeps the records whole, as the channel's other
+records. Tested at the unit level (`ScreenReaderCommandTests`), and
+against recording 20261010-211432, which predates the settings record and
+so used NVDA's defaults: H was labelled next heading, D next landmark,
+Shift+D previous landmark, K next link, and Insert+F7 at 92.8 s and
+122.4 s the elements list. The system test on the target machine, with
+the settings recorded, is outstanding.
+
 
 UI Automation already records them. At playback, the records whose
 process is a detected screen reader are grouped into episodes, such as

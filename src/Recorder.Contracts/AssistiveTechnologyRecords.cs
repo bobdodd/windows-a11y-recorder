@@ -36,7 +36,7 @@ public static class AssistiveTechnologyRecords
     public static IReadOnlyList<string> EventTypes { get; } =
     [
         WatchEventType, ProcessStartedEventType, ProcessExitedEventType, ModuleLoadedEventType,
-        ModuleUnloadedEventType, SoundStartedEventType, SoundEndedEventType
+        ModuleUnloadedEventType, SoundStartedEventType, SoundEndedEventType, NvdaSettings.SettingsEventType
     ];
 
     /// <summary>A watched product's main process.</summary>

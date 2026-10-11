@@ -205,6 +205,16 @@ internal static class EvidenceSamples
             """),
         ("browser.preferences", "color-maps-sent", ColorMapsSample(false, ["kColorMenuBackground", "kColorMenuSeparator"])),
         ("browser.preferences", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
+        // Added with 0029_assistive_technology_settings.sql: NVDA's portable
+        // copy with Caps Lock as an NVDA key, as on the target machine; one
+        // with a profile and a custom key command; and a copy whose folder
+        // is not known.
+        ("system.assistive-technology", "assistive-technology-settings",
+            J("{'product':'NVDA','processId':6688,'copy':'portable','configFolder':'C:\\\\Users\\\\User\\\\Desktop\\\\NVDA\\\\userConfig','read':true,'problem':null,'keyboardLayout':null,'nvdaModifierKeys':'7','multiPressTimeout':null,'autoPassThroughOnFocusChange':null,'autoPassThroughOnCaretMove':null,'trapNonCommandGestures':null,'enableOnPageLoad':null,'profiles':[],'profileTriggers':false,'customGestures':[],'gesturesProblem':null}")),
+        ("system.assistive-technology", "assistive-technology-settings",
+            J("{'product':'NVDA','processId':6690,'copy':'installed','configFolder':'C:\\\\Users\\\\User\\\\AppData\\\\Roaming\\\\nvda','read':true,'problem':null,'keyboardLayout':'laptop','nvdaModifierKeys':'1','multiPressTimeout':'700','autoPassThroughOnFocusChange':'False','autoPassThroughOnCaretMove':'True','trapNonCommandGestures':'False','enableOnPageLoad':'True','profiles':['Reading'],'profileTriggers':true,'customGestures':[{'section':'globalCommands.GlobalCommands','script':'reportCurrentFocus','gesture':'kb:NVDA+shift+tab'}],'gesturesProblem':null}")),
+        ("system.assistive-technology", "assistive-technology-settings",
+            J("{'product':'NVDA','processId':6692,'copy':'unknown','configFolder':null,'read':false,'problem':'The configuration folder is not known for this copy.','keyboardLayout':null,'nvdaModifierKeys':null,'multiPressTimeout':null,'autoPassThroughOnFocusChange':null,'autoPassThroughOnCaretMove':null,'trapNonCommandGestures':null,'enableOnPageLoad':null,'profiles':[],'profileTriggers':false,'customGestures':[],'gesturesProblem':null}")),
         // Added with 0028_input_recordability.sql: the recorder at medium; an
         // elevated window, and one whose level could not be read; the user's
         // desktop, and the secure desktop that could not be opened.

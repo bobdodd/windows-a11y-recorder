@@ -7,6 +7,9 @@
     <ProjectReference Include="../Recorder.Contracts/Recorder.Contracts.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="ScreenReaderCommands\*.json" />
+  </ItemGroup>
+  <ItemGroup>
     <Content Include="Schemas\*.schema.json"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />

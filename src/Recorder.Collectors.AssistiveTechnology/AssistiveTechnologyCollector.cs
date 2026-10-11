@@ -448,6 +448,10 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
                 copy = path is null ? "unknown" : AssistiveTechnologyRecords.CopyOf(path, InstalledNvdaFolder()),
                 problem = path is null ? "The process's executable path could not be read." : null
             }, Now());
+            if (main is not null && product.Product == AssistiveTechnologyRecords.Nvda.Product)
+            {
+                EmitNvdaSettings(entry.ProcessId, path);
+            }
         }
 
         // The browser's processes, matched by their executable's full path.
@@ -792,6 +796,48 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
     // --- Events -----------------------------------------------------------------
 
     private long Now() => _context?.Clock.GetElapsedNanoseconds() ?? 0;
+
+    // NVDA's settings that its key commands depend on, read without change
+    // from its configuration folder when its main process is seen
+    // (screen-reader-activity.md, "2c-1, the commands").
+    private void EmitNvdaSettings(int processId, string? executablePath)
+    {
+        var copy = executablePath is null
+            ? "unknown"
+            : AssistiveTechnologyRecords.CopyOf(executablePath, InstalledNvdaFolder());
+        var folder = executablePath is null
+            ? null
+            : NvdaSettings.ConfigFolder(
+                executablePath,
+                copy,
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
+        var reading = folder is null ? null : NvdaSettings.Read(folder);
+        Emit(NvdaSettings.SettingsEventType, new
+        {
+            product = AssistiveTechnologyRecords.Nvda.Product,
+            processId,
+            copy,
+            configFolder = folder,
+            read = reading?.Read ?? false,
+            problem = reading is null ? "The configuration folder is not known for this copy." : reading.Problem,
+            keyboardLayout = reading?.KeyboardLayout,
+            nvdaModifierKeys = reading?.NvdaModifierKeys,
+            multiPressTimeout = reading?.MultiPressTimeout,
+            autoPassThroughOnFocusChange = reading?.AutoPassThroughOnFocusChange,
+            autoPassThroughOnCaretMove = reading?.AutoPassThroughOnCaretMove,
+            trapNonCommandGestures = reading?.TrapNonCommandGestures,
+            enableOnPageLoad = reading?.EnableOnPageLoad,
+            profiles = reading?.Profiles ?? [],
+            profileTriggers = reading?.ProfileTriggers ?? false,
+            customGestures = (reading?.CustomGestures ?? []).Select(gesture => new
+            {
+                section = gesture.Section,
+                script = gesture.Script,
+                gesture = gesture.Gesture
+            }).ToArray(),
+            gesturesProblem = reading?.GesturesProblem
+        }, Now());
+    }
 
     private static long Milliseconds(int milliseconds) => milliseconds * 1_000_000L;
 

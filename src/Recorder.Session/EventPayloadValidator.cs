@@ -142,6 +142,9 @@ internal static class EventPayloadValidator
             case ("system.assistive-technology", "assistive-technology-module-unloaded"):
                 ValidateAssistiveTechnologyModule(payload, eventType.EndsWith("-loaded", StringComparison.Ordinal), issues);
                 break;
+            case ("system.assistive-technology", "assistive-technology-settings"):
+                ValidateAssistiveTechnologySettings(payload, issues);
+                break;
             case ("system.assistive-technology", "assistive-technology-sound-started"):
                 ValidateAssistiveTechnologySoundStarted(payload, issues);
                 break;
@@ -1624,6 +1627,61 @@ internal static class EventPayloadValidator
                 "assistive-technology-process-problem-inconsistent",
                 "#/payload/problem",
                 "A process has a problem exactly when its executable path could not be read.");
+        }
+    }
+
+    private static void ValidateAssistiveTechnologySettings(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredText("product"),
+                RequiredInteger("processId", nonnegative: true),
+                RequiredEnum("copy", [.. Recorder.Contracts.AssistiveTechnologyRecords.Copies]),
+                NullableText("configFolder"),
+                RequiredBoolean("read"),
+                NullableText("problem"),
+                NullableText("keyboardLayout"),
+                NullableText("nvdaModifierKeys"),
+                NullableText("multiPressTimeout"),
+                NullableText("autoPassThroughOnFocusChange"),
+                NullableText("autoPassThroughOnCaretMove"),
+                NullableText("trapNonCommandGestures"),
+                NullableText("enableOnPageLoad"),
+                RequiredTextArray("profiles"),
+                RequiredBoolean("profileTriggers"),
+                RequiredObjectArray("customGestures"),
+                NullableText("gesturesProblem")
+            ],
+            issues);
+        if (payload.TryGetProperty("customGestures", out var gestures) && gestures.ValueKind == JsonValueKind.Array)
+        {
+            var index = 0;
+            foreach (var gesture in gestures.EnumerateArray())
+            {
+                if (gesture.ValueKind == JsonValueKind.Object)
+                {
+                    ValidateShape(
+                        gesture,
+                        [RequiredText("section"), RequiredText("script"), RequiredText("gesture")],
+                        issues,
+                        $"#/payload/customGestures/{index}");
+                }
+
+                index++;
+            }
+        }
+
+        if (payload.TryGetProperty("configFolder", out var folder) && folder.ValueKind == JsonValueKind.Null &&
+            payload.TryGetProperty("problem", out var problem) && problem.ValueKind != JsonValueKind.String)
+        {
+            AddError(
+                issues,
+                "assistive-technology-settings-problem-missing",
+                "#/payload/problem",
+                "Settings without a configuration folder say why.");
         }
     }
 
