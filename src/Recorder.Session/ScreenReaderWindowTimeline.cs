@@ -20,10 +20,21 @@ public sealed record ScreenReaderWindowSpan(
     /// the NVDA window row.
     /// </summary>
     public IReadOnlyList<FocusedElement> Focus { get; init; } = [];
+
+    /// <summary>
+    /// The span's events, for the timeline's strip: the foreground window
+    /// record that brought it to the front, each focus record of
+    /// <see cref="Focus"/>, and the record of the window that replaced it.
+    /// </summary>
+    public IReadOnlyList<SessionTimelineEvent> Events { get; init; } = [];
 }
 
 /// <summary>An element given the focus, as UI Automation recorded it.</summary>
-public sealed record FocusedElement(long Time, int? ProcessId, string? ControlType, string? Name);
+public sealed record FocusedElement(long Time, int? ProcessId, string? ControlType, string? Name)
+{
+    /// <summary>The timeline event of the record, where playback has it.</summary>
+    public SessionTimelineEvent? Event { get; init; }
+}
 
 /// <summary>
 /// NVDA's own windows in front, such as the Elements List, the NVDA menu,
@@ -92,6 +103,7 @@ public sealed class ScreenReaderWindowTimeline
             // a moment before each of its dialogs and menus; it is folded
             // into the window that follows it.
             var start = window.Time;
+            var first = index;
             while (window.Title == MainFrameTitle && index + 1 < windows.Count &&
                    IsNvda(windows[index + 1]) && windows[index + 1].ProcessId == window.ProcessId)
             {
@@ -126,7 +138,7 @@ public sealed class ScreenReaderWindowTimeline
             var opener = kept.LastOrDefault(command =>
                 command.Time <= start && start - command.Time <= OpenerWindowNanoseconds &&
                 command.Names.Any(item => Opens.TryGetValue(item, out var opened) && opened == name));
-            _spans.Add(new ScreenReaderWindowSpan(
+            var span = new ScreenReaderWindowSpan(
                 name,
                 start,
                 end,
@@ -137,6 +149,15 @@ public sealed class ScreenReaderWindowTimeline
                 window.ProcessId!.Value)
             {
                 Focus = FocusIn(window.ProcessId!.Value, start, end)
+            };
+            _spans.Add(span with
+            {
+                Events =
+                [
+                    .. windows[first].Event is { } opened ? [opened] : Array.Empty<SessionTimelineEvent>(),
+                    .. span.Focus.Select(item => item.Event).OfType<SessionTimelineEvent>(),
+                    .. next is not null && next.Time == end && next.Event is { } replaced ? [replaced] : Array.Empty<SessionTimelineEvent>()
+                ]
             });
         }
     }
@@ -149,6 +170,15 @@ public sealed class ScreenReaderWindowTimeline
 
     /// <summary>The spans, in order.</summary>
     public IReadOnlyList<ScreenReaderWindowSpan> Spans => _spans;
+
+    /// <summary>Every span's events, in timeline order, each once.</summary>
+    public IReadOnlyList<SessionTimelineEvent> Events =>
+    [
+        .. _spans.SelectMany(span => span.Events)
+            .DistinctBy(item => item.EventKey)
+            .OrderBy(item => item.MonotonicNanoseconds)
+            .ThenBy(item => item.EventKey)
+    ];
 
     // The elements focused in a window, UI Automation's repeat of the same
     // element at once (as at 93.009 s and 93.016 s in recording

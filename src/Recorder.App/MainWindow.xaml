@@ -740,7 +740,7 @@
                                         LookupFailed="TimelineControl_LookupFailed"
                                         PositionRequested="TimelineControl_PositionRequested"
                                         AutomationProperties.Name="Selectable session event timeline"
-                                        AutomationProperties.HelpText="Click an event, or use Left, Right, Home, and End to move within a lane and Up and Down to move between lanes while focused, to inspect captured values. Click the NVDA mode strip, under the Screen reader lane, to move the playhead there." />
+                                        AutomationProperties.HelpText="Click an event, or use Left, Right, Home, and End to move within a lane and Up and Down to move between lanes while focused, to inspect captured values. Click the NVDA mode strip, under the Screen reader lane, to move the playhead there. Click the NVDA window strip under it, or move into it with Up or Down, to select an NVDA window's events, then use Left, Right, Home, and End to step through them." />
         </Border>
         <Grid Grid.Row="1" Margin="0,8,0,4">
           <Grid.ColumnDefinitions>

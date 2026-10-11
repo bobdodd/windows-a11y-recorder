@@ -70,6 +70,14 @@ public sealed class SessionTimelineControl : FrameworkElement
     private const double WindowStripHeight = 16;
     private static readonly Brush NvdaWindowBrush = Freeze("#3F6B3A");
 
+    // A mark at the foot of the window strip for each of its events: the
+    // window coming to the front, each element focused in it, and the
+    // window that replaced it. Clicking the strip selects the nearest, and
+    // Left and Right step through them (the owner, 2026-10-11: "so that I
+    // can click on the timeline and then arrow through the events for the
+    // dialog").
+    private static readonly Brush NvdaWindowMarkBrush = Freeze("#E4F0E1");
+
     private readonly DrawingVisual _eventLayer = new();
     private readonly DrawingVisual _overlayLayer = new();
     private readonly VisualCollection _layers;
@@ -95,6 +103,11 @@ public sealed class SessionTimelineControl : FrameworkElement
     private IReadOnlyList<Recorder.Session.UnrecordablePeriod> _unrecordable = [];
     private IReadOnlyList<Recorder.Session.ScreenReaderModeSpan> _modeSpans = [];
     private IReadOnlyList<Recorder.Session.ScreenReaderWindowSpan> _windowSpans = [];
+    private List<SessionTimelineEvent> _windowEvents = [];
+
+    // Whether the keys step through the window strip's events rather than a
+    // lane's: set by a click in the strip, or moving into it with Up or Down.
+    private bool _inWindowStrip;
 
     // The lane keyboard stepping moves in: the selected event's lane, or the
     // lane last clicked.
@@ -206,6 +219,11 @@ public sealed class SessionTimelineControl : FrameworkElement
     {
         ArgumentNullException.ThrowIfNull(spans);
         _windowSpans = spans;
+        _windowEvents = [.. spans.SelectMany(span => span.Events)
+            .DistinctBy(item => item.EventKey)
+            .OrderBy(item => item.MonotonicNanoseconds)
+            .ThenBy(item => item.EventKey)];
+        _inWindowStrip = false;
         RedrawAll();
     }
 
@@ -215,7 +233,7 @@ public sealed class SessionTimelineControl : FrameworkElement
         _visibleChannels = visibleChannels;
         _request++;
         RebuildShownChannels();
-        if (_selectedEvent is not null && !_shownChannels.Contains(_selectedEvent.Channel))
+        if (_selectedEvent is not null && !_inWindowStrip && !_shownChannels.Contains(_selectedEvent.Channel))
         {
             SelectEvent(null);
         }
@@ -265,12 +283,34 @@ public sealed class SessionTimelineControl : FrameworkElement
                 _viewportDurationNanoseconds);
         var laneHeight = LaneHeight;
         var stripTop = StripTop(laneHeight);
+        if (StripHeight > 0 && point.Y >= stripTop + ModeHeight && point.Y < stripTop + StripHeight)
+        {
+            // The window strip: the nearest event of the window clicked, or
+            // the playhead there where no window was in front.
+            e.Handled = true;
+            _inWindowStrip = true;
+            var clicked = _windowSpans.FirstOrDefault(span => span.Start <= timestamp && timestamp <= span.End && span.Events.Count > 0);
+            if (clicked is null)
+            {
+                _request++;
+                SelectEvent(null);
+                PositionRequested?.Invoke(this, Math.Clamp(timestamp, 0, _durationNanoseconds));
+                return;
+            }
+
+            SelectWindowEvent(clicked.Events.MinBy(item => Math.Abs(item.MonotonicNanoseconds - timestamp))!);
+            return;
+        }
+
         if (StripHeight > 0 && point.Y >= stripTop && point.Y < stripTop + StripHeight)
         {
             e.Handled = true;
+            _inWindowStrip = false;
             PositionRequested?.Invoke(this, Math.Clamp(timestamp, 0, _durationNanoseconds));
             return;
         }
+
+        _inWindowStrip = false;
 
         var lane = Math.Clamp(
             (int)((point.Y >= stripTop + StripHeight ? point.Y - StripHeight : point.Y) / laneHeight),
@@ -365,6 +405,12 @@ public sealed class SessionTimelineControl : FrameworkElement
         }
 
         e.Handled = true;
+        if (_inWindowStrip)
+        {
+            StepInWindowStrip(e.Key);
+            return;
+        }
+
         var selected = _selectedEvent is { } item && _shownChannels.Contains(item.Channel) ? item : null;
         var lane = selected is null ? FirstShownLane(_currentLane) : GetLane(selected.Channel);
         if (lane < 0)
@@ -377,6 +423,17 @@ public sealed class SessionTimelineControl : FrameworkElement
         if (key is Key.Up or Key.Down)
         {
             var next = NextShownLane(lane, key == Key.Down ? 1 : -1);
+
+            // Moving past the Screen reader lane enters the window strip
+            // under it.
+            if (_windowEvents.Count > 0 &&
+                (key == Key.Down ? lane <= ModeLane && (next < 0 || next > ModeLane) : lane > ModeLane && next <= ModeLane))
+            {
+                var at = selected?.MonotonicNanoseconds ?? _positionNanoseconds;
+                SelectWindowEvent(_windowEvents.MinBy(item => Math.Abs(item.MonotonicNanoseconds - at))!);
+                return;
+            }
+
             if (next < 0)
             {
                 return;
@@ -398,6 +455,66 @@ public sealed class SessionTimelineControl : FrameworkElement
             _ => await timeline.AdjacentAsync(selected, key == Key.Right, laneChannels).ConfigureAwait(true) ??
                 selected
         });
+    }
+
+    // Left, Right, Home, and End step through the window strip's events;
+    // Up and Down leave it for the nearest shown lane above or below.
+    private void StepInWindowStrip(Key key)
+    {
+        if (_windowEvents.Count == 0)
+        {
+            _inWindowStrip = false;
+            return;
+        }
+
+        var selected = _selectedEvent is { } item ? _windowEvents.FindIndex(candidate => candidate.EventKey == item.EventKey) : -1;
+        if (key is Key.Up or Key.Down)
+        {
+            var lane = key == Key.Up
+                ? (ModeLane < _shownByLane.Length && _shownByLane[ModeLane].Count > 0 ? ModeLane : NextShownLane(ModeLane, -1))
+                : NextShownLane(ModeLane, 1);
+            if (lane < 0)
+            {
+                return;
+            }
+
+            _inWindowStrip = false;
+            var channels = _shownByLane[lane];
+            var time = selected >= 0 ? _windowEvents[selected].MonotonicNanoseconds : _positionNanoseconds;
+            var duration = _durationNanoseconds;
+            _currentLane = lane;
+            SelectFromLookup(timeline => timeline.NearestAsync(time, 0, duration, channels));
+            return;
+        }
+
+        var index = key switch
+        {
+            Key.Home => 0,
+            Key.End => _windowEvents.Count - 1,
+            Key.Right when selected >= 0 => Math.Min(selected + 1, _windowEvents.Count - 1),
+            Key.Left when selected >= 0 => Math.Max(selected - 1, 0),
+            // From the playhead: the next event after it, or the last before.
+            Key.Right => _windowEvents.FindIndex(candidate => candidate.MonotonicNanoseconds > _positionNanoseconds),
+            _ => _windowEvents.FindLastIndex(candidate => candidate.MonotonicNanoseconds < _positionNanoseconds)
+        };
+        if (index >= 0)
+        {
+            SelectWindowEvent(_windowEvents[index]);
+        }
+    }
+
+    // Selects a window strip event, with the strip's other events drawn at
+    // its point.
+    private void SelectWindowEvent(SessionTimelineEvent item)
+    {
+        _request++;
+        _inWindowStrip = true;
+        var reach = ActualWidth > 0 ? (long)Math.Ceiling(_viewportDurationNanoseconds / ActualWidth) : 0;
+        var together = _windowEvents
+            .Where(candidate => Math.Abs(candidate.MonotonicNanoseconds - item.MonotonicNanoseconds) <= reach)
+            .ToList();
+        var more = together.Count > MostAtPoint;
+        SelectEvent(item, together.Count > MostAtPoint ? together.Take(MostAtPoint).ToList() : together, more);
     }
 
     // The lane itself if it has shown events, or else the first lane that
@@ -565,6 +682,15 @@ public sealed class SessionTimelineControl : FrameworkElement
             {
                 drawingContext.DrawText(text, new Point(band.Left + 4, band.Top + (band.Height - text.Height) / 2));
             }
+
+            foreach (var item in span.Events)
+            {
+                if (item.MonotonicNanoseconds >= _viewportStartNanoseconds && item.MonotonicNanoseconds <= viewportEnd)
+                {
+                    drawingContext.DrawRectangle(
+                        NvdaWindowMarkBrush, null, new Rect(Math.Floor(ToX(item.MonotonicNanoseconds)), band.Bottom - 4, 1.5, 4));
+                }
+            }
         }
 
         foreach (var series in SeriesDrawOrder)
@@ -598,7 +724,7 @@ public sealed class SessionTimelineControl : FrameworkElement
         var laneHeight = LaneHeight;
         var viewportEnd = _viewportStartNanoseconds + _viewportDurationNanoseconds;
         if (_selectedEvent is not null &&
-            _shownChannels.Contains(_selectedEvent.Channel) &&
+            (_inWindowStrip || _shownChannels.Contains(_selectedEvent.Channel)) &&
             _selectedEvent.MonotonicNanoseconds >= _viewportStartNanoseconds &&
             _selectedEvent.MonotonicNanoseconds <= viewportEnd)
         {
@@ -607,7 +733,9 @@ public sealed class SessionTimelineControl : FrameworkElement
             drawingContext.DrawRectangle(
                 null,
                 HighlightPen,
-                new Rect(x - 3, LaneTop(lane, laneHeight), 7, laneHeight - 1));
+                _inWindowStrip
+                    ? new Rect(x - 3, StripTop(laneHeight) + ModeHeight, 7, WindowStripHeight - 1)
+                    : new Rect(x - 3, LaneTop(lane, laneHeight), 7, laneHeight - 1));
         }
 
         if (_positionNanoseconds >= _viewportStartNanoseconds &&

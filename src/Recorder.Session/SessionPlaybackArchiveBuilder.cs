@@ -303,7 +303,10 @@ public sealed class SessionPlaybackArchiveBuilder
             payload.ValueKind == JsonValueKind.Object)
         {
             _foreground.Add(new ForegroundWindow(
-                timestamp, ReadString(payload, "processName"), ReadInt32(payload, "processId"), ReadString(payload, "title")));
+                timestamp, ReadString(payload, "processName"), ReadInt32(payload, "processId"), ReadString(payload, "title"))
+            {
+                Event = timelineEvent
+            });
         }
 
         if (timelineEvent.Channel == "accessibility.uia.events" &&
@@ -313,7 +316,10 @@ public sealed class SessionPlaybackArchiveBuilder
             element.ValueKind == JsonValueKind.Object)
         {
             _focus.Add(new FocusedElement(
-                timestamp, ReadInt32(element, "processId"), ReadString(element, "controlType"), ReadString(element, "name")));
+                timestamp, ReadInt32(element, "processId"), ReadString(element, "controlType"), ReadString(element, "name"))
+            {
+                Event = timelineEvent
+            });
         }
 
         if (timelineEvent.Channel == BrowserPreferenceSettings.Channel &&

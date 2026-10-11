@@ -749,6 +749,21 @@ the window is now a step too: in recording 20261010-211432, the Elements
 List from 92.768 s has ten, from "Contact Us" at 93.009 s to "CNIB Come
 to Work" at 102.055 s.
 
+Then: "they also need to [be] events on the timeline too (so that I can
+click on the timeline and then arrow through the events for the dialog".
+The focus records are on the UI Automation lane, among about 1,200 other
+UI Automation events a second on the target machine, so they cannot be
+stepped through there. The window strip now has its own events: the
+foreground window record that brought the window to the front, each focus
+record of its steps, and the record of the window that replaced it, each
+marked at the strip's foot. Clicking the strip selects the nearest event
+of the window clicked, shown in Selected event values with the playhead
+moved to it; Left, Right, Home, and End step through the strip's events,
+across windows; Up and Down leave it for the lanes above and below, and
+moving past the Screen reader lane with Up or Down enters it. A click in
+the strip where no NVDA window was in front moves the playhead, as
+before.
+
 ## The screen reader's windows
 
 UI Automation already records them. At playback, NVDA's windows in front

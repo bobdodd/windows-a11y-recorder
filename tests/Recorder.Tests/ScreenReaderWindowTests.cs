@@ -194,5 +194,12 @@ public sealed class ScreenReaderWindowTests
         var span = Assert.Single(archive.ScreenReaderWindows.Spans);
         Assert.Equal(("Elements List", 5 * Second, 8 * Second), (span.Name, span.Start, span.End));
         Assert.EndsWith("focus: tree item \"Contact Us\" at 00:00:06.000", archive.ScreenReaderWindows.ValueAt(7 * Second), StringComparison.Ordinal);
+
+        // The strip's events, for stepping on the timeline: the window
+        // coming to the front, the element focused in it, and the window
+        // that replaced it.
+        Assert.Equal(
+            [("foreground-window", 5 * Second), ("focus-changed", 6 * Second), ("foreground-window", 8 * Second)],
+            archive.ScreenReaderWindows.Events.Select(item => (item.EventType, item.MonotonicNanoseconds)));
     }
 }
