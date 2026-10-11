@@ -132,15 +132,16 @@ public sealed class WindowSnapshotTests
 
     // The Elements List as NVDA 2026.2 builds it (elementsList.py): the
     // type radio buttons, the filter, the tree of the page's links, and the
-    // two buttons.
+    // two buttons. The window and the tree say they have the focus too, as
+    // in recording 20261011-195613.
     private static IReadOnlyList<WindowSnapshotElement> ElementsList(string filter = "") =>
     [
-        Element("Elements List", "ControlType.Window", null, 0, 1, localized: "dialog", id: 1),
+        Element("Elements List", "ControlType.Window", null, 0, 1, focused: true, localized: "dialog", id: 1),
         Element("Type:", "ControlType.Group", 0, 1, 1, localized: "group", id: 2),
         Element("Links", "ControlType.RadioButton", 1, 2, 1, selected: true, localized: "radio button", id: 3),
         Element("Headings", "ControlType.RadioButton", 1, 2, 2, selected: false, localized: "radio button", id: 4),
         Element("Filter by:", "ControlType.Edit", 0, 1, 2, value: filter, localized: "edit", id: 5),
-        Element(null, "ControlType.Tree", 0, 1, 3, localized: "tree view", id: 6),
+        Element(null, "ControlType.Tree", 0, 1, 3, focused: true, localized: "tree view", id: 6),
         Element("Contact Us", "ControlType.TreeItem", 5, 2, 1, selected: true, focused: true, localized: "tree item", id: 7),
         Element("Donate", "ControlType.TreeItem", 5, 2, 2, selected: false, localized: "tree item", id: 8),
         Element("CNIB Deafblind Community Services", "ControlType.TreeItem", 5, 2, 3, selected: false, localized: "tree item", id: 9),
@@ -229,12 +230,12 @@ public sealed class WindowSnapshotTests
         Assert.Equal(
             [
                 "What the window showed: 11 elements, read in 12 ms, read when focus entered the window",
-                "\"Elements List\" (dialog)",
+                "\"Elements List\" (dialog, focused)",
                 "  \"Type:\" (group)",
                 "    \"Links\" (radio button, selected)",
                 "    \"Headings\" (radio button)",
                 "  \"Filter by:\" (edit, value \"\")",
-                "  (no name) (tree view)",
+                "  (no name) (tree view, focused)",
                 "    \"Contact Us\" (tree item, selected, focused)",
                 "    \"Donate\" (tree item)",
                 "    \"CNIB Deafblind Community Services\" (tree item)",
@@ -306,7 +307,7 @@ public sealed class WindowSnapshotTests
         }
 
         var index = builder.Build();
-        Assert.Equal(14, index.Version);
+        Assert.Equal(15, index.Version);
         var kept = index.Events.Where(item => item.EventType == WindowSnapshotRecords.EventType).ToList();
         Assert.Equal(2, kept.Count);
         Assert.All(kept, item => Assert.False(item.Payload.TryGetProperty("elements", out _)));

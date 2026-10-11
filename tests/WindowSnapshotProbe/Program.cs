@@ -95,7 +95,7 @@ public static class Program
                 Find(first, "Links") is { } links && Bool(links, "isSelected") == true &&
                 Find(first, "Headings") is { } headings && Bool(headings, "isSelected") == false,
                 Describe(first));
-            Record("The snapshot holds the filter edit and its empty value", Find(first, "Filter by:") is { } filter && Text(filter, "value") == "",
+            Record("The snapshot holds the filter edit and its empty value", Find(first, "Filter by:", "ControlType.Edit") is { } filter && Text(filter, "value") == "",
                 Describe(first));
             Record("The snapshot holds the tree's three items", Count(first, "ControlType.TreeItem") == 3, Describe(first));
             Record("The snapshot holds the selected tree item", Find(first, "Contact Us") is { } contact && Bool(contact, "isSelected") == true,
@@ -117,7 +117,7 @@ public static class Program
             form.Filter.Text = "con";
             form.Fill(["Contact Us"]);
         });
-        var filtered = await Next(mark, snapshot => Find(snapshot, "Filter by:") is { } edit && Text(edit, "value") == "con");
+        var filtered = await Next(mark, snapshot => Find(snapshot, "Filter by:", "ControlType.Edit") is { } edit && Text(edit, "value") == "con");
         Record("Typing in the filter reads the dialog again with the text", filtered is not null, Describe(filtered));
         if (filtered is { } refilled)
         {
@@ -259,8 +259,13 @@ public static class Program
 
     private static List<JsonElement> Elements(JsonElement snapshot) => [.. snapshot.GetProperty("elements").EnumerateArray()];
 
-    private static JsonElement? Find(JsonElement snapshot, string name) =>
-        Elements(snapshot).Where(element => Name(element) == name).Select(element => (JsonElement?)element).FirstOrDefault();
+    // The first element of the name, and of the control type where given:
+    // the filter's label has the edit's name too.
+    private static JsonElement? Find(JsonElement snapshot, string name, string? controlType = null) =>
+        Elements(snapshot)
+            .Where(element => Name(element) == name && (controlType is null || Text(element, "controlType") == controlType))
+            .Select(element => (JsonElement?)element)
+            .FirstOrDefault();
 
     private static int Count(JsonElement snapshot, string controlType) =>
         Elements(snapshot).Count(element => Text(element, "controlType") == controlType);

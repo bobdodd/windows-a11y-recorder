@@ -47,7 +47,10 @@ public sealed record PlaybackIndex
     // their elements and with a summary of what the window showed
     // (WindowSnapshots.Compact); the whole tree is read from the recording
     // for Selected event values.
-    public const int CurrentVersion = 14;
+    // Version 15 derives the snapshots' summaries again, now naming the
+    // deepest focused element (in NVDA's dialogs the window and the tree
+    // also say they have the focus).
+    public const int CurrentVersion = 15;
 
     public required int Version { get; init; }
 

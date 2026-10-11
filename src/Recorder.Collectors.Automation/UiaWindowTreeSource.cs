@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Interop.UIAutomationClient;
 
 namespace Recorder.Collectors.Automation;
@@ -73,9 +74,14 @@ public sealed class UiaWindowTreeSource : IWindowTreeSource<IUIAutomationElement
     public IUIAutomationElement Cached(IUIAutomationElement element) => element.BuildUpdatedCache(_cache);
 
     /// <summary>
-    /// The top-level window an element is in: its ancestor whose parent is
-    /// the desktop, or the element itself when its parent is; null for the
-    /// desktop, or an element no longer there.
+    /// The top-level window an element is in: its nearest ancestor, or
+    /// itself, that is a top-level Win32 window, whose parent is the desktop
+    /// window; or else its ancestor whose parent in UI Automation's tree is
+    /// the desktop. A window owned by another, as a dialog opened from a
+    /// dialog, is top-level in Win32 but placed under its owner in UI
+    /// Automation's tree, so the Win32 parent decides (found by the Windows
+    /// probe on 2026-10-11, where a second form was read as part of the
+    /// first). Null for the desktop, or an element no longer there.
     /// </summary>
     public IUIAutomationElement? TopLevelOf(IUIAutomationElement element)
     {
@@ -87,6 +93,11 @@ public sealed class UiaWindowTreeSource : IWindowTreeSource<IUIAutomationElement
             if (_automation.CompareElements(current, root) != 0)
             {
                 return null;
+            }
+
+            if (current.CurrentNativeWindowHandle is var handle && handle != IntPtr.Zero && IsTopLevel(handle))
+            {
+                return Cached(current);
             }
 
             var parent = raw.GetParentElement(current);
@@ -105,6 +116,16 @@ public sealed class UiaWindowTreeSource : IWindowTreeSource<IUIAutomationElement
 
         return null;
     }
+
+    private const uint GaParent = 1;
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetDesktopWindow();
+
+    private static bool IsTopLevel(IntPtr window) => GetAncestor(window, GaParent) == GetDesktopWindow();
 
     public bool Same(IUIAutomationElement first, IUIAutomationElement second) =>
         _automation.CompareElements(first, second) != 0;

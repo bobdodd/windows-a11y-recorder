@@ -206,7 +206,7 @@ public sealed class KeyDispositionTests
         builder.Add(2, RecorderEventFactory.Create("s", Collector, "input.keyboard", 2, raw.MonotonicNanoseconds,
             raw.EventType, raw.Payload) with { EventId = "r1" });
         var index = builder.Build();
-        Assert.Equal(14, PlaybackIndex.CurrentVersion);
+        Assert.Equal(15, PlaybackIndex.CurrentVersion);
         var keptRaw = Assert.Single(index.Events, item => item.Channel == "input.keyboard");
         Assert.Equal(raw.Payload.GetRawText(), keptRaw.Payload.GetRawText());
 

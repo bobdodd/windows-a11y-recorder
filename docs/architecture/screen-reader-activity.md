@@ -860,6 +860,33 @@ change is read only when focus next moves to an element it changed. The
 target run checks this; a fallback, such as reading again while the
 window is in front, is a question for then.
 
+First target run, 2026-10-11, package d6f0ab5, recording
+20261011-195613: 18 snapshots, none truncated, read in 28 to 406 ms, with
+no evidence dropped. The Welcome to NVDA dialog, with its three check
+boxes and keyboard layout "desktop". The Elements List from 23.199 s:
+read on focus entering it, with 63 links and the Links type selected;
+again on choosing Headings (an invoke, then a structure change), 16
+headings; and again as the filter was typed, from text changes and
+structure changes, with the filter's value and the tree each time ("n",
+13 headings; "ne", 3; "new", 1; back to "n" and empty; "vo", 3; "vol",
+2). So NVDA's wx dialogs do raise the events, and the question above is
+settled for the Elements List. The NVDA menu, a menu named "Context" with
+its nine items, after NVDA's untitled window, read as a single pane. Exit
+NVDA, with its combo box's value, "Exit". In NVDA's dialogs the window and
+the tree also say they have the keyboard focus, so the summary names the
+deepest element that has it; a value that repeats the name, as each tree
+item's does, is not repeated. Playback index version 15 derives the
+summaries again.
+
+The Windows probe's first run on the target machine passed 12 of 16
+checks. Two failures were the probe's own: it found the filter's label,
+which has the edit's name, in place of the edit. The other two were the
+collector's: a window owned by another, a second form shown by the
+first, is placed under its owner in UI Automation's tree, so it was read
+as part of the first, and focus coming back was not a new entry. A
+window is now the element's nearest ancestor that is a top-level Win32
+window, whose parent is the desktop window, as an owned window is.
+
 Tested at the unit level (`WindowSnapshotTests`: the walk's order and
 limits on a fixed tree, a failed child list, the validator, the summary,
 the outline, the compact form, and the player through the playback

@@ -136,7 +136,9 @@ public static class WindowSnapshots
             parts.Add($"{label} \"{Text(element, "value")}\"");
         }
 
-        if (elements.Skip(1).FirstOrDefault(element => Bool(element, "hasKeyboardFocus") == true) is { ValueKind: JsonValueKind.Object } focused)
+        // The deepest element with the focus: in NVDA's dialogs the window
+        // and the tree also say they have it (recording 20261011-195613).
+        if (elements.Skip(1).LastOrDefault(element => Bool(element, "hasKeyboardFocus") == true) is { ValueKind: JsonValueKind.Object } focused)
         {
             parts.Add("focus: " + Describe(focused));
         }
@@ -206,7 +208,9 @@ public static class WindowSnapshots
             ? localized
             : ControlName(Text(element, "controlType"));
         var states = new List<string>();
-        if (Text(element, "value") is { } value)
+        // A value that repeats the name, as each tree item of NVDA's
+        // Elements List has (recording 20261011-195613), is not repeated.
+        if (Text(element, "value") is { } value && value != name)
         {
             states.Add($"value \"{value}\"");
         }
