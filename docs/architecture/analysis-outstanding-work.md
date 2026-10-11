@@ -85,8 +85,9 @@ Designed in [screen reader activity](screen-reader-activity.md), agreed
   recorded, as in its "Input the recorder cannot receive"; the secure
   desktop of a permission prompt is still to check. Recording elevated
   programs is ruled out by the owner.
-- To build, in the order agreed on 2026-10-10: the key dispositions (2b);
-  NVDA's commands, the mode band, and the screen reader window episodes
+- Built 2026-10-10, not yet tested on the target machine: the key
+  outcomes (2b), as in its "Key disposition".
+- To build, in the order agreed on 2026-10-10: NVDA's commands, the mode band, and the screen reader window episodes
   (2c); a low-level mouse hook, for NVDA's speaking of the content under
   the pointer; then the test of NVDA's requests to Chromium, and the
   reading position.

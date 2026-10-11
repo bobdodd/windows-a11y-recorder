@@ -481,7 +481,7 @@ public partial class MainWindow : Window
             PlaybackStatusTextBlock.Text =
                 $"Selected {FormatTime(e.TimelineEvent.MonotonicNanoseconds)} | " +
                 $"{e.TimelineEvent.Channel} | {e.TimelineEvent.EventType} | " +
-                e.TimelineEvent.Summary;
+                (_playbackArchive?.Describe(e.TimelineEvent) ?? e.TimelineEvent.Summary);
         }
 
         try
@@ -489,9 +489,18 @@ public partial class MainWindow : Window
             var rawJson = _playbackArchive?.ReadEventJson(e.TimelineEvent) ??
                 throw new InvalidOperationException("No recording is open.");
             using var document = JsonDocument.Parse(rawJson);
-            EventDetailsTextBox.Text = JsonSerializer.Serialize(
+            var json = JsonSerializer.Serialize(
                 document.RootElement,
                 InspectorJsonOptions);
+            // A key record's outcome, and the records it was joined with,
+            // come before the record (screen-reader-activity.md, "Key
+            // disposition").
+            EventDetailsTextBox.Text =
+                _playbackArchive.KeyDispositions.Of(e.TimelineEvent.EventId) is { } outcome
+                    ? $"Key outcome ({_playbackArchive.KeyDispositions.Rule}): {outcome.Text}{Environment.NewLine}" +
+                      string.Join(Environment.NewLine, outcome.Details) +
+                      Environment.NewLine + Environment.NewLine + json
+                    : json;
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or
@@ -1128,7 +1137,7 @@ public partial class MainWindow : Window
                 PlaybackStatusTextBlock.Text = item is null
                     ? "No matching event before this position."
                     : $"{FormatTime(item.MonotonicNanoseconds)} | " +
-                      $"{item.Channel} | {item.Summary}";
+                      $"{item.Channel} | {archive.Describe(item)}";
             }
         }
         catch (Exception exception) when (

@@ -42,6 +42,24 @@ public sealed record SessionPlaybackArchive(
     public InputRecordabilityTimeline InputRecordability { get; init; } = InputRecordabilityTimeline.Empty;
 
     /// <summary>
+    /// What happened to each key record (docs/architecture/screen-reader-activity.md,
+    /// "Key disposition"), for the status line and the selected event's
+    /// details; empty for a recording without key records.
+    /// </summary>
+    public KeyDispositions KeyDispositions { get; init; } = KeyDispositions.Empty;
+
+    /// <summary>An event's description, ending with its key outcome where it has one.</summary>
+    public string Describe(SessionTimelineEvent item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        return KeyDispositions.Of(item.EventId) is { } outcome
+            ? item.EventType == "raw-keyboard" && outcome.Key is { } key
+                ? $"{item.Summary}: {key}, {outcome.Text}"
+                : $"{item.Summary}, {outcome.Text}"
+            : item.Summary;
+    }
+
+    /// <summary>
     /// The browser preferences of the recording and those sent to its pages,
     /// for the properties panel; empty for a recording made before they were
     /// recorded or without a browser.

@@ -411,7 +411,8 @@ In the player:
   0028 makes the tables; the playback index keeps the records whole
   (version 10).
 - Key disposition (step 2b) treats these periods as gaps, so a key missing
-  from both records there is not reported as lost.
+  from both records there is not reported as lost, and notes a press or
+  release that fell in one.
 
 Tests:
 
@@ -427,27 +428,62 @@ Tests:
 
 ## Key disposition
 
-A key is not judged lost in a period when input was not recordable (see
-"Input the recorder cannot receive").
+Step 2b. Agreed with the owner on 2026-10-10: the outcomes and their
+wording ("I guess so"); the windows to be tried and adjusted after testing
+("We will see, we build and we test"); and the event list and details as
+enough for now, with nothing on the timeline ("It's enough for now").
 
-Derived at playback from the records, with the rule versioned so that a
-recording can be read again under a later rule.
+Derived at playback from the records, so a recording made before it is
+read the same way; nothing changes in the recorder
+(`src/Recorder.Session/KeyDispositions.cs`). The rule carries a version,
+1, so a recording can be read again under a later rule.
 
-- Join: a hook record joins a raw input record of the same key and
-  direction within 300 ms, where an injected hook record joins only a raw
-  input record with no device handle, and a physical one only a record
-  with a device handle. A page `keydown` joins the raw input record it
-  follows within the window used by the validation scripts.
-- Kept: a physical key with a hook record and no raw input record. When a
-  screen reader is running, this is attributed to it as an inference: the
-  records do not name the process that kept the key.
-- Passed: a key with a raw input record from a device; "received by the
-  page" when a page `keydown` joins it.
-- Injected: a hook record with the injected flag, or a raw input record
-  with no device handle. Joined to the screen reader when it follows a
-  kept key of the same virtual key within the window, as NVDA's Tab did;
-  otherwise the injecting process is unknown.
-- Unjoined records are shown as they are, with the reason.
+Each key record, down and up, gets one outcome:
+
+- Passed: a key from the keyboard that both the hook and raw input
+  recorded, so it went on to Windows; "received by the page" when the
+  page's trusted `keydown` joins it.
+- Kept: a key from the keyboard that the hook recorded and raw input did
+  not, so a program stopped it. "screen reader running", with the
+  product, when a screen reader's main process was running; this is an
+  inference, as Windows does not say which program kept the key.
+- Injected: a key a program sent, not the keyboard: a hook record with the
+  injected flag, or a raw input record with no device handle. Linked to a
+  kept key of the same virtual key that it follows, as NVDA's own Tab
+  after the Tab it kept.
+- Unexplained: shown as recorded, with the reason, such as "raw input
+  only, hook not installed".
+
+A note is added where a key's press or release fell in a period when
+input was not recordable (see "Input the recorder cannot receive"), such
+as "release not recorded: input not recordable"; such a key is not judged
+lost.
+
+The joins, from the first keyboard hook run
+([validation](../validation/keyboard-hook-2026-10-10.md)), recording
+20261010-211432:
+
+| Join | Window | Measured |
+| --- | --- | --- |
+| A hook record to a raw input record of the same scan code, direction, and source (injected or from a device) | 50 ms either way | raw input 0.2 to 1.9 ms after the hook, 136 pairs |
+| An injected key to the kept key of the same virtual key it follows | 50 ms after | NVDA's Tab about 2 ms after the Tab it kept |
+| A passed or injected key down to the page's next trusted `keydown` | 0 to 100 ms after | 0.7 to 2.3 ms, and once 58 ms, 44 keydowns |
+
+The page's `keydown` record does not say which key it was, so it is
+joined by order and time only.
+
+In the player, the status line's description of a key record, and of a
+joined `keydown`, ends with its outcome, and the selected event's details
+start with the outcome and the records it was joined with, and their
+times. The playback index keeps the key records, the hook installations,
+and the page's trusted `keydown` dispatches whole for this (version 11),
+so a recording made before is read again, once, when it is opened. A
+recording without a recording file, from before 0013, gets no outcomes.
+
+Tests: unit tests of each outcome and note, from the patterns of the
+recordings of 2026-10-10; a system test on the target machine, opening
+recording 20261010-211432 in the player and comparing the outcomes with
+the steps taken.
 
 ## The screen reader's windows
 

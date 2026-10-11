@@ -126,6 +126,32 @@ public sealed class AssistiveTechnologyTimeline
 
     public static AssistiveTechnologyTimeline Empty { get; } = new([]);
 
+    /// <summary>
+    /// The products whose screen reader main process was running at a time:
+    /// started at or before it, or running at the start, and not exited by
+    /// it. For the key outcomes, which attribute a kept key to a running
+    /// screen reader as an inference.
+    /// </summary>
+    public IReadOnlyList<string> ScreenReadersRunningAt(long time)
+    {
+        var running = new List<string>();
+        foreach (var name in _products)
+        {
+            var state = _byProduct[name];
+            foreach (var start in state.Starts)
+            {
+                if ((start.AtStart || start.Time <= time) &&
+                    !state.Exits.Any(exit => exit.ProcessId == start.ProcessId && exit.Time > start.Time && exit.Time <= time))
+                {
+                    running.Add(name);
+                    break;
+                }
+            }
+        }
+
+        return running;
+    }
+
     /// <summary>Whether the recording holds the assistive technology records.</summary>
     public bool Recorded { get; }
 

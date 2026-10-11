@@ -108,6 +108,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<BrowserPreferenceRecord> _browserPreferences = [];
     private readonly List<AssistiveTechnologyRecord> _assistiveTechnology = [];
     private readonly List<InputRecordabilityRecord> _inputRecordability = [];
+    private readonly List<KeyEvidenceRecord> _keyEvidence = [];
     private readonly List<BrowserPageCommit> _pageCommits = [];
     private readonly bool _retainEvents;
     private long _maximumTimestamp;
@@ -288,6 +289,13 @@ public sealed class SessionPlaybackArchiveBuilder
             _inputRecordability.Add(new InputRecordabilityRecord(timestamp, timelineEvent.EventType, payload.Clone()));
         }
 
+        if (payload.ValueKind == JsonValueKind.Object &&
+            KeyDispositions.IsKeyEvidence(timelineEvent.Channel, timelineEvent.EventType, payload))
+        {
+            _keyEvidence.Add(new KeyEvidenceRecord(
+                timelineEvent.EventId, timestamp, timelineEvent.Channel, timelineEvent.EventType, payload.Clone()));
+        }
+
         if (timelineEvent.Channel == BrowserPreferenceSettings.Channel &&
             payload.ValueKind == JsonValueKind.Object)
         {
@@ -348,6 +356,12 @@ public sealed class SessionPlaybackArchiveBuilder
         var browserNavigations = BrowserNavigationCorrelator.Build(
             _browserProjections,
             duration);
+        var assistiveTechnology = _assistiveTechnology.Count == 0
+            ? AssistiveTechnologyTimeline.Empty
+            : new AssistiveTechnologyTimeline(_assistiveTechnology);
+        var inputRecordability = _inputRecordability.Count == 0
+            ? InputRecordabilityTimeline.Empty
+            : new InputRecordabilityTimeline(_inputRecordability);
         return new SessionPlaybackArchive(
             _root,
             manifest,
@@ -368,12 +382,11 @@ public sealed class SessionPlaybackArchiveBuilder
             BrowserPreferences = _browserPreferences.Count == 0
                 ? BrowserPreferenceTimeline.Empty
                 : new BrowserPreferenceTimeline(_browserPreferences, _pageCommits),
-            AssistiveTechnology = _assistiveTechnology.Count == 0
-                ? AssistiveTechnologyTimeline.Empty
-                : new AssistiveTechnologyTimeline(_assistiveTechnology),
-            InputRecordability = _inputRecordability.Count == 0
-                ? InputRecordabilityTimeline.Empty
-                : new InputRecordabilityTimeline(_inputRecordability)
+            AssistiveTechnology = assistiveTechnology,
+            InputRecordability = inputRecordability,
+            KeyDispositions = _keyEvidence.Count == 0
+                ? KeyDispositions.Empty
+                : new KeyDispositions(_keyEvidence, assistiveTechnology, inputRecordability.Unrecordable)
         };
     }
 

@@ -30,7 +30,10 @@ public sealed record PlaybackIndex
     // Version 10 keeps the input recordability records (window.foreground:
     // recorder-integrity, foreground-integrity, input-desktop) whole, for the
     // panel's Keyboard and mouse row and the timeline's band.
-    public const int CurrentVersion = 10;
+    // Version 11 keeps the key records (input.keyboard, input.keyboard-hook)
+    // and the page's trusted keydown dispatches (browser.dispatch) whole, for
+    // the key outcomes (KeyDispositions).
+    public const int CurrentVersion = 11;
 
     public required int Version { get; init; }
 
@@ -227,6 +230,15 @@ public sealed class PlaybackIndexBuilder
             return;
         }
 
+        if (KeyDispositions.IsKeyEvidence(channel, record.EventType, payload))
+        {
+            Keep(eventKey, record);
+            if (!channel.StartsWith("browser.", StringComparison.Ordinal))
+            {
+                return;
+            }
+        }
+
         if (channel == Recorder.Contracts.WindowsPreferenceSettings.Channel ||
             channel == Recorder.Contracts.MagnifierChanges.Channel ||
             channel == Recorder.Contracts.BrowserPreferenceSettings.Channel ||
@@ -361,7 +373,8 @@ public sealed class PlaybackIndexBuilder
              record.Channel == Recorder.Contracts.MagnifierChanges.Channel ||
              record.Channel == Recorder.Contracts.BrowserPreferenceSettings.Channel ||
              record.Channel == Recorder.Contracts.AssistiveTechnologyRecords.Channel ||
-             IsInputRecordabilityRecord(record.Channel, record.EventType)) &&
+             IsInputRecordabilityRecord(record.Channel, record.EventType) ||
+             KeyDispositions.IsKeyEvidence(record.Channel, record.EventType, record.Payload)) &&
             record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()
                 : PlaybackPayload(record.Payload)));

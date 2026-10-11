@@ -40,9 +40,11 @@ public static class KeyboardHookRecords
     public const int RefreshMilliseconds = 1000;
 
     /// <summary>
-    /// How far apart a hook call and a raw input record of the same key may
-    /// be and still be one key (docs/architecture/screen-reader-activity.md,
-    /// "Key disposition").
+    /// How long the recorder waits for the hook call of a key raw input
+    /// recorded before it judges the hook lost. Generous, so a slow call is
+    /// not taken for a loss; the player's key outcomes join the records
+    /// within a narrower window (KeyDispositions, and
+    /// docs/architecture/screen-reader-activity.md, "Key disposition").
     /// </summary>
     public const int JoinWindowMilliseconds = 300;
 
