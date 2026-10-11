@@ -111,3 +111,33 @@ Not shown by this run: the secure desktop. The elevated PowerShell was the
 one left open from the previous run, so no permission prompt appeared,
 and the input desktop stayed `Default` throughout (one `input-desktop`
 record, at the start).
+
+## The key outcomes in the player
+
+Recording 20261010-211432 opened in the player by the owner, with the key
+outcomes of step 2b ([screen reader activity](../architecture/screen-reader-activity.md),
+"Key disposition"), rule 1.
+
+Package wr-61aee0c:
+
+- 28.5 s, Tab before NVDA started: "passed", as expected.
+- 33.5 s, the Tab NVDA kept: "kept, screen reader running: NVDA". NVDA's
+  own Tab, 2 ms later, could not be selected: at the greatest zoom of the
+  time, 32 times, the two were in one pixel column.
+- 51.8 s, H: kept, as expected.
+- 92.8 s, F7 (of Insert+F7), its release: "kept, screen reader running:
+  NVDA", as expected.
+- 181.4 s onwards, typing: "passed, received by the page", as expected.
+
+Package wr-5d1dafb, after the owner's requirements of the same day (a kept
+key names the injected key that followed it; zoom to 4,096 times; every
+event at a clicked point listed in "Selected event values"); all three
+confirmed by the owner:
+
+1. A click at 33.5 s at the normal zoom listed the kept Tab, NVDA's Tab,
+   and their raw input records together, the kept Tab ending "followed by
+   an injected Tab, received by the page".
+2. Zoomed in, the kept Tab and NVDA's Tab were separate markers, each
+   selectable.
+3. A click in the mouse lane where it was busy listed up to 50 events and
+   said where there were more.
