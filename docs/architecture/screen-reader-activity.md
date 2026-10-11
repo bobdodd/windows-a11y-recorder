@@ -887,6 +887,11 @@ as part of the first, and focus coming back was not a new entry. A
 window is now the element's nearest ancestor that is a top-level Win32
 window, whose parent is the desktop window, as an owned window is.
 
+Second run of the probe, 2026-10-11, package f027fc5: all 17 checks
+passed. The second form was read on its own, 8 elements, and focus coming
+back read the dialog again; the tree of 6,000 items stopped at the
+element limit, 5,000, in 919 ms.
+
 Tested at the unit level (`WindowSnapshotTests`: the walk's order and
 limits on a fixed tree, a failed child list, the validator, the summary,
 the outline, the compact form, and the player through the playback
