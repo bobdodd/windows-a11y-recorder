@@ -458,6 +458,19 @@ public partial class MainWindow : Window
         PlaybackStatusTextBlock.Text = $"The timeline could not be read: {message}";
     }
 
+    // A click in the NVDA mode strip moves the playhead there, so the NVDA
+    // mode row of the properties panel shows the mode and its basis.
+    private void TimelineControl_PositionRequested(object? sender, long positionNanoseconds)
+    {
+        if (_playbackArchive is null)
+        {
+            return;
+        }
+
+        PausePlayback();
+        SeekTo(positionNanoseconds, synchronizeAudio: false);
+    }
+
     private void TimelineControl_SelectedEventChanged(
         object? sender,
         TimelineEventSelectedEventArgs e)

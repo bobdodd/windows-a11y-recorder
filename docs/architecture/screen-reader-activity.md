@@ -593,10 +593,16 @@ the mode is unknown. Between two evidences of one mode, the mode is drawn
 as unbroken, an inference: it could have switched and switched back
 without a key the recording shows.
 
-In the player: the band on the Screen reader lane, browse mode solid,
-focus mode in upright stripes, and the span in which it changed in
-leaning stripes, so the band does not rely on colour alone; no band where
-the mode is unknown. The Screen reader group has an "NVDA mode" row: for
+In the player: the band in a strip of its own, 16 pixels high, directly
+under the Screen reader lane, so the lane's event marks never cover it;
+browse mode solid blue, focus mode solid amber, and the span in which it
+changed grey stripes, with the words "browse", "focus", or "changed"
+written in the band where they fit, so it does not rely on colour; the
+strip is empty where the mode is unknown. Clicking the strip moves the
+playhead to that point, so the NVDA mode row shows the mode, with the
+mouse alone. Contrast against the timeline's background: browse 3.2:1,
+focus 6.8:1, the stripes 5.7:1; the words 5.2:1 (white on blue) and 6.8:1
+(dark on amber), the word "changed" on a dark backing. The Screen reader group has an "NVDA mode" row: for
 example "browse mode, inferred from H kept (next heading) at 00:00:51.782
 to NVDA+f7 kept (elements list) at 00:02:02.382", "changed between
 00:04:12.221 and 00:04:13.613, from focus mode to browse mode, inferred",
@@ -622,6 +628,12 @@ and an older index is derived again when the recording is opened; a test
 now builds the mode through the index and the archive, as the player does
 (`ThePlayerFindsTheModeThroughThePlaybackIndex`), and fails without the
 fix.
+
+Second target run, 2026-10-11: the band was there, but drawn within the
+Screen reader lane, about 6 pixels high, focus mode's upright stripes were
+gold flecks that read as event marks. Agreed with the owner ("All three"):
+a strip of its own, solid fills with words, and a click in the strip
+moves the playhead, as above.
 
 ## The screen reader's windows
 

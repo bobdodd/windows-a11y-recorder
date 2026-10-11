@@ -727,7 +727,7 @@
 
       <Grid x:Name="TimelinePanel" Grid.Row="1">
         <Grid.RowDefinitions>
-          <RowDefinition Height="96" />
+          <RowDefinition Height="112" />
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -738,8 +738,9 @@
           <local:SessionTimelineControl x:Name="TimelineControl"
                                         SelectedEventChanged="TimelineControl_SelectedEventChanged"
                                         LookupFailed="TimelineControl_LookupFailed"
+                                        PositionRequested="TimelineControl_PositionRequested"
                                         AutomationProperties.Name="Selectable session event timeline"
-                                        AutomationProperties.HelpText="Click an event, or use Left, Right, Home, and End to move within a lane and Up and Down to move between lanes while focused, to inspect captured values." />
+                                        AutomationProperties.HelpText="Click an event, or use Left, Right, Home, and End to move within a lane and Up and Down to move between lanes while focused, to inspect captured values. Click the NVDA mode strip, under the Screen reader lane, to move the playhead there." />
         </Border>
         <Grid Grid.Row="1" Margin="0,8,0,4">
           <Grid.ColumnDefinitions>

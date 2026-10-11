@@ -47,14 +47,20 @@ public sealed class SessionTimelineControl : FrameworkElement
     private static readonly Brush UnrecordableBrush = CreateUnrecordableBrush();
     private static readonly Brush OtherChannelBrush = Freeze("#BAB9B4");
 
-    // The band of NVDA's inferred mode over the Screen reader lane, each
-    // kind with its own pattern, so it does not rely on colour alone:
-    // browse mode solid, focus mode upright stripes, and the span in which
-    // the mode changed stripes leaning the other way from the unrecordable
-    // band's. Where the mode is unknown, there is no band.
+    // The band of NVDA's inferred mode, in a strip of its own directly under
+    // the Screen reader lane, so the lane's event marks never cover it:
+    // browse mode solid blue, focus mode solid amber, and the span in which
+    // the mode changed grey stripes. The words "browse", "focus", and
+    // "changed" are written in the band where they fit, so it does not
+    // rely on colour. Where the mode is unknown, the strip is empty.
+    // Agreed with the owner on 2026-10-11, after the band drawn within the
+    // lane, about 6 pixels high, could not be read.
+    private const double ModeStripHeight = 16;
     private static readonly Brush BrowseModeBrush = Freeze("#4F6F96");
-    private static readonly Brush FocusModeBrush = CreateStripeBrush("#C9A05A", new Point(4, 0), new Point(4, 8), 3);
+    private static readonly Brush FocusModeBrush = Freeze("#C9A05A");
     private static readonly Brush ModeChangedBrush = CreateStripeBrush("#9A9894", new Point(0, 0), new Point(8, 8), 1.5);
+    private static readonly Brush ModeLightTextBrush = Brushes.White;
+    private static readonly Brush ModeDarkTextBrush = BackgroundBrush;
     private static readonly Pen HighlightPen = FreezePen(Brushes.White, 2);
 
     private readonly DrawingVisual _eventLayer = new();
@@ -97,6 +103,26 @@ public sealed class SessionTimelineControl : FrameworkElement
 
     /// <summary>Raised with a message when the timeline cannot be read.</summary>
     public event EventHandler<string>? LookupFailed;
+
+    /// <summary>
+    /// Raised with the time clicked in the NVDA mode strip, so the window
+    /// moves the playhead there and the NVDA mode row shows the mode.
+    /// </summary>
+    public event EventHandler<long>? PositionRequested;
+
+    // The strip's height: none when the recording has no mode spans.
+    private double StripHeight => _modeSpans.Count > 0 ? ModeStripHeight : 0;
+
+    private double LaneHeight => Math.Max(3, (ActualHeight - StripHeight) / LaneCount);
+
+    // A lane's top: the lanes after the Screen reader lane sit below the
+    // mode strip.
+    private double LaneTop(int lane, double laneHeight) =>
+        lane * laneHeight + (lane > ModeLane ? StripHeight : 0);
+
+    private double StripTop(double laneHeight) => (ModeLane + 1) * laneHeight;
+
+    private static int ModeLane => GetLane(Recorder.Contracts.AssistiveTechnologyRecords.Channel);
 
     public long PositionNanoseconds
     {
@@ -214,8 +240,19 @@ public sealed class SessionTimelineControl : FrameworkElement
         var timestamp = _viewportStartNanoseconds +
             (long)(Math.Clamp(point.X / ActualWidth, 0, 1) *
                 _viewportDurationNanoseconds);
-        var laneHeight = Math.Max(3, ActualHeight / LaneCount);
-        var lane = Math.Clamp((int)(point.Y / laneHeight), 0, LaneCount - 1);
+        var laneHeight = LaneHeight;
+        var stripTop = StripTop(laneHeight);
+        if (StripHeight > 0 && point.Y >= stripTop && point.Y < stripTop + StripHeight)
+        {
+            e.Handled = true;
+            PositionRequested?.Invoke(this, Math.Clamp(timestamp, 0, _durationNanoseconds));
+            return;
+        }
+
+        var lane = Math.Clamp(
+            (int)((point.Y >= stripTop + StripHeight ? point.Y - StripHeight : point.Y) / laneHeight),
+            0,
+            LaneCount - 1);
         var start = _viewportStartNanoseconds;
         var end = start + _viewportDurationNanoseconds;
         var laneChannels = _shownByLane[lane];
@@ -420,7 +457,7 @@ public sealed class SessionTimelineControl : FrameworkElement
             return;
         }
 
-        var laneHeight = Math.Max(3, height / LaneCount);
+        var laneHeight = LaneHeight;
         var columns = (int)Math.Ceiling(width);
         var viewportEnd = _viewportStartNanoseconds + _viewportDurationNanoseconds;
         foreach (var period in _unrecordable)
@@ -435,10 +472,11 @@ public sealed class SessionTimelineControl : FrameworkElement
             drawingContext.DrawRectangle(
                 UnrecordableBrush,
                 null,
-                new Rect(left, GetLane("input.keyboard") * laneHeight, Math.Max(1, right - left), 2 * laneHeight - 1));
+                new Rect(left, LaneTop(GetLane("input.keyboard"), laneHeight), Math.Max(1, right - left), 2 * laneHeight - 1));
         }
 
-        var modeLane = GetLane(Recorder.Contracts.AssistiveTechnologyRecords.Channel);
+        var stripTop = StripTop(laneHeight);
+        var pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
         foreach (var span in _modeSpans)
         {
             if (span.End < _viewportStartNanoseconds || span.Start > viewportEnd)
@@ -448,15 +486,34 @@ public sealed class SessionTimelineControl : FrameworkElement
 
             var left = Math.Max(0, ToX(Math.Max(span.Start, _viewportStartNanoseconds)));
             var right = Math.Min(width, ToX(Math.Min(span.End, viewportEnd)));
-            drawingContext.DrawRectangle(
-                span.Kind switch
+            var band = new Rect(left, stripTop + 1, Math.Max(2, right - left), ModeStripHeight - 2);
+            var (fill, word, textBrush) = span.Kind switch
+            {
+                Recorder.Session.ScreenReaderModeKind.Browse => (BrowseModeBrush, "browse", ModeLightTextBrush),
+                Recorder.Session.ScreenReaderModeKind.Focus => (FocusModeBrush, "focus", ModeDarkTextBrush),
+                _ => (ModeChangedBrush, "changed", ModeLightTextBrush)
+            };
+            drawingContext.DrawRectangle(fill, null, band);
+            var text = new FormattedText(
+                word,
+                System.Globalization.CultureInfo.CurrentUICulture,
+                FlowDirection.LeftToRight,
+                new Typeface("Segoe UI"),
+                11,
+                textBrush,
+                pixelsPerDip);
+            if (text.Width + 8 <= band.Width)
+            {
+                var origin = new Point(band.Left + 4, band.Top + (band.Height - text.Height) / 2);
+                if (span.Kind == Recorder.Session.ScreenReaderModeKind.Changed)
                 {
-                    Recorder.Session.ScreenReaderModeKind.Browse => BrowseModeBrush,
-                    Recorder.Session.ScreenReaderModeKind.Focus => FocusModeBrush,
-                    _ => ModeChangedBrush
-                },
-                null,
-                new Rect(left, modeLane * laneHeight, Math.Max(2, right - left), laneHeight - 1));
+                    // The stripes would cross the word: a backing behind it.
+                    drawingContext.DrawRectangle(
+                        BackgroundBrush, null, new Rect(origin.X - 2, band.Top + 1, text.Width + 4, band.Height - 2));
+                }
+
+                drawingContext.DrawText(text, origin);
+            }
         }
 
         foreach (var series in SeriesDrawOrder)
@@ -472,7 +529,7 @@ public sealed class SessionTimelineControl : FrameworkElement
                 drawingContext.DrawRectangle(
                     brush,
                     null,
-                    new Rect(column, lane * laneHeight, 1.5, laneHeight - 1));
+                    new Rect(column, LaneTop(lane, laneHeight), 1.5, laneHeight - 1));
             }
         }
     }
@@ -487,7 +544,7 @@ public sealed class SessionTimelineControl : FrameworkElement
             return;
         }
 
-        var laneHeight = Math.Max(3, ActualHeight / LaneCount);
+        var laneHeight = LaneHeight;
         var viewportEnd = _viewportStartNanoseconds + _viewportDurationNanoseconds;
         if (_selectedEvent is not null &&
             _shownChannels.Contains(_selectedEvent.Channel) &&
@@ -499,7 +556,7 @@ public sealed class SessionTimelineControl : FrameworkElement
             drawingContext.DrawRectangle(
                 null,
                 HighlightPen,
-                new Rect(x - 3, lane * laneHeight, 7, laneHeight - 1));
+                new Rect(x - 3, LaneTop(lane, laneHeight), 7, laneHeight - 1));
         }
 
         if (_positionNanoseconds >= _viewportStartNanoseconds &&
