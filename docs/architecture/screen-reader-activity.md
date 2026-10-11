@@ -392,6 +392,16 @@ window.
   and by a check every 250 ms, in case the event is not delivered across
   desktops; the record's reason says which.
 
+All of the channel's records are written by the collector's one queue, in
+the order of their times, each time taken with its write under one lock.
+Before 2026-10-11 the input desktop and recorder integrity records were
+written at once from their threads, while foreground windows waited in
+the queue; the first foreground window of every recording, queued before
+the first input desktop record was written, went backward in time, and
+the check refused it and its `foreground-integrity` record
+(`event-time-regressed`), which made every recording since 20261010-224236
+fail.
+
 In the player:
 
 - Input is not recordable on another desktop, or while the foreground

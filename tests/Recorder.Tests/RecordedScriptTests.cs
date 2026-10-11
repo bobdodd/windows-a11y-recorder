@@ -119,6 +119,16 @@ public sealed class RecordedScriptTests : IDisposable
         Assert.NotEmpty(Validate("script-parsed", Parsed(kind: "wasm")));
         Assert.NotEmpty(Validate("script-parsed", Parsed(line: 0)));
         Assert.Contains(Validate("script-parsed", Parsed(evalFrom: "9")), issue => issue.Code == "browser-script-parsed-eval-from");
+        // Recording 20261011-150323: new Function code names the script
+        // that made it, as V8 records it; and an empty script, of bat.bing.com,
+        // has empty text.
+        Assert.Empty(Validate("script-parsed", Parsed(scriptId: "41", kind: "function",
+            text: "(function anonymous(element,jscript,java,global\n) {\nreturn !!(jscript)\n})", evalFrom: "40")));
+        Assert.Empty(Validate("script-parsed", Parsed(text: "", line: 1, column: 1)));
+        Assert.Empty(Validate("script-text", ScriptText("")));
+        var wrongSize = JsonNode.Parse(ScriptText(""))!.AsObject();
+        wrongSize["size"] = "1";
+        Assert.Contains(Validate("script-text", wrongSize.ToJsonString()), issue => issue.Code == "browser-resource-bytes-invalid");
         var digest = JsonNode.Parse(Parsed())!.AsObject();
         digest["digest"] = "ABC";
         Assert.NotEmpty(Validate("script-parsed", digest.ToJsonString()));

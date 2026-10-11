@@ -2618,13 +2618,19 @@ internal static class EventPayloadValidator
             issues);
         ValidateBrowserContextProperty(payload, issues);
         ValidateBrowserExecutionWorldProperty(payload, issues);
-        if (HasNonnullProperty(payload, "evalFromScriptId") && ReadString(payload, "kind") != "eval")
+        // V8 compiles new Function code as it does eval, and names the
+        // script that made it (compiler.cc, GetFunctionFromEval, with
+        // CompilationKind::kFunctionConstructor): the "function" kind may
+        // name one too. Refusing it lost 36 scripts of recording
+        // 20261011-150323.
+        if (HasNonnullProperty(payload, "evalFromScriptId") &&
+            ReadString(payload, "kind") is not ("eval" or "function"))
         {
             AddError(
                 issues,
                 "browser-script-parsed-eval-from",
                 "#/payload/evalFromScriptId",
-                "Only eval code names the script that called eval.");
+                "Only eval and new Function code name the script that made them.");
         }
     }
 
@@ -5800,7 +5806,8 @@ internal static class EventPayloadValidator
                 RequiredObject("context"),
                 DigestRule("digest"),
                 RequiredDecimalText("size"),
-                RequiredString("bytes")
+                // Empty for an empty script or style sheet, of size 0.
+                RequiredText("bytes")
             ],
             issues);
         ValidateBrowserContextProperty(payload, issues);

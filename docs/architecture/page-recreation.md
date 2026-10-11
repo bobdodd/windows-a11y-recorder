@@ -7594,7 +7594,18 @@ Differences from the design:
   `classic`, with no element.
 - `script-parsed` keeps the world, as the timer records give it, in a
   `world` member, and names the eval caller in `evalFromScriptId`; the
-  validator refuses an eval caller on a script that is not eval code.
+  validator refuses a caller on a script that is not eval or `function`
+  code. V8 compiles `new Function` code as it does eval, and names the
+  script that made it
+  ([V8 compiler.cc](https://chromium.googlesource.com/v8/v8/+/refs/heads/main/src/codegen/compiler.cc),
+  `GetFunctionFromEval`, `CompilationKind::kFunctionConstructor`). The
+  first rule, eval only, refused every `function` script with its caller:
+  36 in recording 20261011-150323 and 36 in 20261010-211432, which made
+  both recordings fail (found 2026-10-11).
+- `script-text` bytes may be empty, for an empty script of size 0; the
+  first rule, a nonempty string, refused the empty script of
+  bat.bing.com in each of those recordings. The same holds for the other
+  resource bytes records.
 - The table gives the size in bytes, not the line count, so that no text is
   read until it is shown; the viewer gives the line count. Lines are split
   as V8 counts them, at CR LF, LF, CR, U+2028, and U+2029.

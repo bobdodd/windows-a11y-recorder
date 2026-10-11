@@ -26,6 +26,7 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
 
     private readonly object _gate = new();
     private readonly Channel<WindowObservation> _observations;
+    private readonly object _writeOrder = new();
     private Thread? _hookThread;
     private Task? _processorTask;
     private TaskCompletionSource<bool>? _ready;
@@ -338,7 +339,7 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
         }
 
         _lastDesktop = (name, problem);
-        EmitEvent(
+        EnqueueRecord(
             InputRecordabilityRecords.InputDesktopEventType,
             new
             {
@@ -346,8 +347,7 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
                 desktopName = name,
                 problem,
                 inputRecordable = name == InputRecordabilityRecords.DefaultDesktop
-            },
-            _context?.Clock.GetElapsedNanoseconds() ?? 0);
+            });
     }
 
     private static (string? Name, string? Problem) ReadInputDesktop()
@@ -379,7 +379,7 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
             _recorderIntegrityRid = rid;
         }
 
-        EmitEvent(
+        EnqueueRecord(
             InputRecordabilityRecords.RecorderIntegrityEventType,
             new
             {
@@ -388,8 +388,7 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
                 integrityRid = own.Rid,
                 uiAccess = own.UiAccess,
                 problem = own.Problem
-            },
-            _context?.Clock.GetElapsedNanoseconds() ?? 0);
+            });
     }
 
     private object ForegroundIntegrity(WindowSnapshot snapshot)
@@ -485,20 +484,38 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
         uint? eventThreadId,
         uint? nativeEventTimeMilliseconds)
     {
-        if (window == nint.Zero || _context is null)
+        if (window == nint.Zero)
         {
             return;
         }
 
-        if (!_observations.Writer.TryWrite(
-                new WindowObservation(
-                    window,
-                    reason,
-                    eventThreadId,
-                    nativeEventTimeMilliseconds,
-                    _context.Clock.GetElapsedNanoseconds())))
+        Write(time => new WindowObservation(window, reason, eventThreadId, nativeEventTimeMilliseconds, time));
+    }
+
+    // A record read on the hook thread or at the start, such as the input
+    // desktop, written through the queue with the foreground windows.
+    private void EnqueueRecord(string eventType, object payload) =>
+        Write(time => new WindowObservation(nint.Zero, eventType, null, null, time) { Record = payload });
+
+    // Every record of the channel is written by the queue's one reader, in
+    // the order of its time, taken here under a lock with the write: a
+    // record written at once by another thread, with a later time, made the
+    // queued window's earlier time go backward, and the check refused it
+    // (event-time-regressed; the first foreground window of every
+    // recording, 2026-10-11).
+    private void Write(Func<long, WindowObservation> create)
+    {
+        if (_context is not { } context)
         {
-            Interlocked.Increment(ref _dropped);
+            return;
+        }
+
+        lock (_writeOrder)
+        {
+            if (!_observations.Writer.TryWrite(create(context.Clock.GetElapsedNanoseconds())))
+            {
+                Interlocked.Increment(ref _dropped);
+            }
         }
     }
 
@@ -506,6 +523,12 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
     {
         await foreach (var observation in _observations.Reader.ReadAllAsync().ConfigureAwait(false))
         {
+            if (observation.Record is { } record)
+            {
+                EmitEvent(observation.Reason, record, observation.MonotonicNanoseconds);
+                continue;
+            }
+
             var snapshot = ReadWindowSnapshot(observation);
             EmitEvent(
                 "foreground-window",
@@ -710,7 +733,11 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
         string Reason,
         uint? EventThreadId,
         uint? NativeEventTimeMilliseconds,
-        long MonotonicNanoseconds);
+        long MonotonicNanoseconds)
+    {
+        // A record other than a window, with its event type in Reason.
+        public object? Record { get; init; }
+    }
 
     private sealed record WindowSnapshot(
         string Reason,
