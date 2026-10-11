@@ -201,5 +201,16 @@ public sealed class ScreenReaderWindowTests
         Assert.Equal(
             [("foreground-window", 5 * Second), ("focus-changed", 6 * Second), ("foreground-window", 8 * Second)],
             archive.ScreenReaderWindows.Events.Select(item => (item.EventType, item.MonotonicNanoseconds)));
+
+        // Each says, in Selected event values, which window it belongs to.
+        var events = archive.ScreenReaderWindows.Events;
+        Assert.Equal(
+            [
+                "NVDA window: Elements List, in front from 00:00:05.000 to 00:00:08.000; left the front at 00:00:08.000, when \"Home | CNIB\" (chrome) came to the front",
+                "This record: element 1 of 1 focused in it, tree item \"Contact Us\""
+            ],
+            archive.ScreenReaderWindows.Describe(events[1]));
+        Assert.Equal("This record: the window coming to the front", archive.ScreenReaderWindows.Describe(events[0])[1]);
+        Assert.Equal("This record: the window that replaced it in front, so it left the front", archive.ScreenReaderWindows.Describe(events[2])[1]);
     }
 }

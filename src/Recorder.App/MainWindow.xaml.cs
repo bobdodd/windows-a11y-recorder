@@ -556,6 +556,15 @@ public partial class MainWindow : Window
     {
         using var document = JsonDocument.Parse(archive.ReadEventJson(item));
         var json = JsonSerializer.Serialize(document.RootElement, InspectorJsonOptions);
+
+        // A record of NVDA's windows: the window and its part in it come
+        // before the record (screen-reader-activity.md, "2c-3, NVDA's
+        // windows").
+        if (archive.ScreenReaderWindows.Describe(item) is { Count: > 0 } window)
+        {
+            json = string.Join(Environment.NewLine, window) + Environment.NewLine + Environment.NewLine + json;
+        }
+
         return archive.KeyDispositions.Of(item.EventId) is { } outcome
             ? $"Key outcome ({archive.KeyDispositions.Rule}): {outcome.Text}{Environment.NewLine}" +
               string.Join(Environment.NewLine, outcome.Details) +

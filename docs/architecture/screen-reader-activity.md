@@ -764,6 +764,17 @@ moving past the Screen reader lane with Up or Down enters it. A click in
 the strip where no NVDA window was in front moves the playhead, as
 before.
 
+Then: "When I look at one of the events, I don't see anything identifying
+it as an NVDA dialog event". The records are UI Automation's and the
+foreground window collector's, unchanged. Selected event values now gives,
+before a record of an NVDA window, the window and the record's part in
+it, as the key outcome comes before a key record: for example "NVDA
+window: Elements List, in front from 00:02:02.384 to 00:02:13.987, opened
+by NVDA+f7 (elements list) at 00:02:02.382, inferred; left the front at
+...", then "This record: element 6 of 11 focused in it, tree item "CNIB
+Deafblind Community Services"". A record that ends one window's span and
+starts the next, as Exit NVDA replacing the NVDA menu, is given for both.
+
 ## The screen reader's windows
 
 UI Automation already records them. At playback, NVDA's windows in front

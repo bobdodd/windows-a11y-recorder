@@ -180,6 +180,52 @@ public sealed class ScreenReaderWindowTimeline
             .ThenBy(item => item.EventKey)
     ];
 
+    /// <summary>
+    /// What a record is to NVDA's windows, for Selected event values: for
+    /// each span it belongs to, the window and the record's part in it; an
+    /// empty list for a record of none. A record can end one span and start
+    /// the next, as Exit NVDA replacing the NVDA menu.
+    /// </summary>
+    public IReadOnlyList<string> Describe(SessionTimelineEvent item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        var lines = new List<string>();
+        foreach (var span in _spans)
+        {
+            var index = span.Events.ToList().FindIndex(candidate => candidate.EventKey == item.EventKey);
+            if (index < 0)
+            {
+                continue;
+            }
+
+            var window = $"NVDA window: {span.Name}, in front from {WindowsPreferenceTimeline.Clock(span.Start)}" +
+                $" to {WindowsPreferenceTimeline.Clock(span.End)}" +
+                (span.Opener is { } opener ? $", {opener}" : string.Empty) +
+                $"; {span.EndBasis}";
+            var step = span.Focus.ToList().FindIndex(candidate => candidate.Event?.EventKey == item.EventKey);
+            string part;
+            if (step >= 0)
+            {
+                var focused = span.Focus[step];
+                part = $"This record: element {step + 1} of {span.Focus.Count} focused in it, {ControlName(focused.ControlType)}" +
+                    (string.IsNullOrEmpty(focused.Name) ? string.Empty : $" \"{focused.Name}\"");
+            }
+            else if (index == 0 && item.EventType == "foreground-window")
+            {
+                part = "This record: the window coming to the front";
+            }
+            else
+            {
+                part = "This record: the window that replaced it in front, so it left the front";
+            }
+
+            lines.Add(window);
+            lines.Add(part);
+        }
+
+        return lines;
+    }
+
     // The elements focused in a window, UI Automation's repeat of the same
     // element at once (as at 93.009 s and 93.016 s in recording
     // 20261010-211432) given once.
