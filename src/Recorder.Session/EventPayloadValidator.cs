@@ -96,6 +96,9 @@ internal static class EventPayloadValidator
             case ("accessibility.uia.events", "property-changed"):
                 ValidateUiaEvent(payload, issues);
                 break;
+            case ("accessibility.uia.events", Recorder.Contracts.WindowSnapshotRecords.EventType):
+                ValidateWindowSnapshot(payload, issues);
+                break;
             case ("browser.preferences", "browser-preferences"):
                 ValidateBrowserPreferences(payload, issues);
                 break;
@@ -1264,6 +1267,116 @@ internal static class EventPayloadValidator
                 ValidateNumberRectangle,
                 issues,
                 "#/payload/element");
+        }
+    }
+
+    // A window snapshot (screen-reader-activity.md, "2c-4, what NVDA's
+    // windows show"): the window first, then each element after its parent,
+    // one level deeper, numbered from 1 among its parent's children.
+    private static void ValidateWindowSnapshot(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredEnum("reason", [.. Recorder.Contracts.WindowSnapshotRecords.Reasons]),
+                NullableObject("trigger"),
+                NullableInteger("processId"),
+                RequiredInteger("elementCount", positive: true),
+                NullableEnum("truncated", [.. Recorder.Contracts.WindowSnapshotRecords.Truncations]),
+                RequiredInteger("readNanoseconds", nonnegative: true),
+                RequiredInteger("maximumElements", positive: true),
+                RequiredInteger("maximumReadNanoseconds", positive: true),
+                RequiredObjectArray("elements"),
+                RequiredStringArray("problems")
+            ],
+            issues);
+        if (payload.TryGetProperty("trigger", out var trigger) && trigger.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                trigger,
+                [
+                    RequiredString("eventType"),
+                    RequiredString("eventId"),
+                    RequiredInteger("atNanoseconds", nonnegative: true)
+                ],
+                issues,
+                "#/payload/trigger");
+        }
+
+        if (!payload.TryGetProperty("elements", out var elements) || elements.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        void Inconsistent(string path, string message) =>
+            AddError(issues, "window-snapshot-inconsistent", path, message);
+
+        var depths = new List<int>();
+        var index = 0;
+        foreach (var element in elements.EnumerateArray())
+        {
+            var path = $"#/payload/elements/{index}";
+            ValidateShape(
+                element,
+                [
+                    NullableInteger("parent", nonnegative: true),
+                    RequiredInteger("depth", nonnegative: true),
+                    RequiredInteger("position", positive: true),
+                    NullableIntegerArray("runtimeId"),
+                    NullableString("name"),
+                    NullableString("controlType"),
+                    NullableString("localizedControlType"),
+                    NullableString("automationId"),
+                    NullableString("className"),
+                    NullableString("frameworkId"),
+                    NullableString("accessKey"),
+                    NullableString("helpText"),
+                    NullableBoolean("isEnabled"),
+                    NullableBoolean("isOffscreen"),
+                    NullableBoolean("hasKeyboardFocus"),
+                    NullableBoolean("isKeyboardFocusable"),
+                    NullableBoolean("isPassword"),
+                    NullableObject("boundingRectangle"),
+                    NullableString("value"),
+                    NullableBoolean("valueIsReadOnly"),
+                    NullableString("toggleState"),
+                    NullableBoolean("isSelected"),
+                    NullableString("expandCollapseState"),
+                    RequiredStringArray("qualityFlags")
+                ],
+                issues,
+                path);
+            ValidateOptionalObject(element, "boundingRectangle", ValidateNumberRectangle, issues, path);
+            var depth = element.TryGetProperty("depth", out var depthValue) && IsInteger(depthValue) ? depthValue.GetInt32() : -1;
+            var parent = element.TryGetProperty("parent", out var parentValue) && IsInteger(parentValue)
+                ? parentValue.GetInt32()
+                : (int?)null;
+            if (index == 0 ? parent is not null || depth != 0 : parent is not { } at || at >= index || depths[at] + 1 != depth)
+            {
+                Inconsistent(path, "The window comes first, and each element after its parent, one level deeper.");
+            }
+
+            if (element.TryGetProperty("isPassword", out var password) && password.ValueKind == JsonValueKind.True &&
+                element.TryGetProperty("value", out var value) && value.ValueKind != JsonValueKind.Null)
+            {
+                Inconsistent(path, "A password's value is not recorded.");
+            }
+
+            depths.Add(depth);
+            index++;
+        }
+
+        if (payload.TryGetProperty("elementCount", out var count) && IsInteger(count) && count.GetInt64() != index)
+        {
+            Inconsistent("#/payload/elementCount", "The element count is the number of elements.");
+        }
+
+        if (ReadString(payload, "truncated") == Recorder.Contracts.WindowSnapshotRecords.ElementLimit &&
+            payload.TryGetProperty("maximumElements", out var maximum) && IsInteger(maximum) && maximum.GetInt64() != index)
+        {
+            Inconsistent("#/payload/truncated", "A snapshot stopped at the element limit holds that many elements.");
         }
     }
 

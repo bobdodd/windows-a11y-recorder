@@ -42,7 +42,12 @@ public sealed record PlaybackIndex
     // (accessibility.uia.events, focus-changed) whole, for the element
     // focused in NVDA's own windows (ScreenReaderWindowTimeline); a
     // recording has a few hundred of each.
-    public const int CurrentVersion = 13;
+    // Version 14 keeps the window snapshots of NVDA's windows
+    // (accessibility.uia.events, window-snapshot) in compact form, without
+    // their elements and with a summary of what the window showed
+    // (WindowSnapshots.Compact); the whole tree is read from the recording
+    // for Selected event values.
+    public const int CurrentVersion = 14;
 
     public required int Version { get; init; }
 
@@ -254,7 +259,8 @@ public sealed class PlaybackIndexBuilder
             channel == Recorder.Contracts.AssistiveTechnologyRecords.Channel ||
             IsInputRecordabilityRecord(channel, record.EventType) ||
             (channel == "window.foreground" && record.EventType == "foreground-window") ||
-            (channel == "accessibility.uia.events" && record.EventType == "focus-changed"))
+            (channel == "accessibility.uia.events" && record.EventType == "focus-changed") ||
+            WindowSnapshots.IsSnapshot(channel, record.EventType))
         {
             Keep(eventKey, record);
             return;
@@ -390,7 +396,9 @@ public sealed class PlaybackIndexBuilder
              KeyDispositions.IsKeyEvidence(record.Channel, record.EventType, record.Payload)) &&
             record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()
-                : PlaybackPayload(record.Payload)));
+                : WindowSnapshots.IsSnapshot(record.Channel, record.EventType)
+                    ? WindowSnapshots.Compact(record.Payload)
+                    : PlaybackPayload(record.Payload)));
 
     private void AddBoundary(long time)
     {

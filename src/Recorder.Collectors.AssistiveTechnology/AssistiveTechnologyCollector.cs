@@ -82,6 +82,21 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
     /// </summary>
     public event Action<bool, bool>? ScreenReaderRunningChanged;
 
+    /// <summary>
+    /// A watched product's main process IDs, raised on the collector's
+    /// thread when one starts or exits; for the NVDA window snapshot
+    /// collector, which reads the windows of NVDA's main process.
+    /// </summary>
+    public event Action<string, IReadOnlyCollection<int>>? ScreenReaderProcessesChanged;
+
+    private void RaiseScreenReaderProcesses(string product) =>
+        ScreenReaderProcessesChanged?.Invoke(
+            product,
+            [.. _processes.Values
+                .Where(process => process.Role == AssistiveTechnologyRecords.ScreenReaderRole &&
+                    process.Product.Product == product)
+                .Select(process => process.ProcessId)]);
+
     public CollectorLifecycleState LifecycleState { get; private set; } = CollectorLifecycleState.Created;
     public CollectorHealthState HealthState { get; private set; } = CollectorHealthState.Unknown;
     public string? HealthReason { get; private set; }
@@ -363,6 +378,11 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
                 exitCode = GetExitCodeProcess(process.Handle, out var code) ? (long?)code : null
             }, exitedAt);
             process.Handle.Dispose();
+            if (process.Role == AssistiveTechnologyRecords.ScreenReaderRole)
+            {
+                RaiseScreenReaderProcesses(process.Product.Product);
+            }
+
             if (process.Role == AssistiveTechnologyRecords.ScreenReaderRole &&
                 !_processes.Values.Any(other => other.Role == AssistiveTechnologyRecords.ScreenReaderRole))
             {
@@ -428,6 +448,7 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
                 // Listed at once, and often until it has a session.
                 _awaitingSession = true;
                 ScreenReaderRunningChanged?.Invoke(true, !atStart);
+                RaiseScreenReaderProcesses(product.Product);
             }
             var version = path is null ? null : FileVersion(path);
             Emit(AssistiveTechnologyRecords.ProcessStartedEventType, new

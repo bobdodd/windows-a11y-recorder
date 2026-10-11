@@ -41,6 +41,14 @@ public sealed class UiAutomationCollector : ICaptureCollector
     }
 
     public CollectorDescriptor Descriptor { get; }
+
+    /// <summary>
+    /// Each event as it is written, with its element, on the collector's
+    /// processing thread; for the NVDA window snapshot collector. A handler
+    /// must return at once.
+    /// </summary>
+    public event Action<UiaObservationNotice>? ObservationRecorded;
+
     public CollectorLifecycleState LifecycleState { get; private set; } = CollectorLifecycleState.Created;
     public CollectorHealthState HealthState { get; private set; } = CollectorHealthState.Unknown;
 
@@ -440,6 +448,22 @@ public sealed class UiAutomationCollector : ICaptureCollector
                 },
                 observation.MonotonicNanoseconds,
                 snapshot.QualityFlags.ToArray());
+            if (ObservationRecorded is { } recorded)
+            {
+                try
+                {
+                    recorded(new UiaObservationNotice(
+                        observation.MonotonicNanoseconds,
+                        observation.ObservationType,
+                        observation.EventId,
+                        snapshot.ProcessId,
+                        observation.Element));
+                }
+                catch (InvalidOperationException)
+                {
+                    // A queue completed or disposed at stop.
+                }
+            }
         }
     }
 

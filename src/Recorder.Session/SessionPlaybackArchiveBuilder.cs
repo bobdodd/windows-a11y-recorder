@@ -112,6 +112,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<BrowserPageCommit> _pageCommits = [];
     private readonly List<ForegroundWindow> _foreground = [];
     private readonly List<FocusedElement> _focus = [];
+    private readonly List<WindowSnapshot> _windowSnapshots = [];
     private readonly bool _retainEvents;
     private long _maximumTimestamp;
     private bool _built;
@@ -322,6 +323,12 @@ public sealed class SessionPlaybackArchiveBuilder
             });
         }
 
+        if (WindowSnapshots.IsSnapshot(timelineEvent.Channel, timelineEvent.EventType) &&
+            WindowSnapshots.Read(timestamp, payload) is { } snapshot)
+        {
+            _windowSnapshots.Add(snapshot with { Event = timelineEvent });
+        }
+
         if (timelineEvent.Channel == BrowserPreferenceSettings.Channel &&
             payload.ValueKind == JsonValueKind.Object)
         {
@@ -424,7 +431,8 @@ public sealed class SessionPlaybackArchiveBuilder
             KeyDispositions = keyDispositions,
             ScreenReaderMode = screenReaderMode,
             ScreenReaderWindows = assistiveTechnology.Recorded
-                ? new ScreenReaderWindowTimeline(_foreground, _focus, assistiveTechnology, keyDispositions.KeptCommands, duration)
+                ? new ScreenReaderWindowTimeline(
+                    _foreground, _focus, assistiveTechnology, keyDispositions.KeptCommands, duration, _windowSnapshots)
                 : ScreenReaderWindowTimeline.Empty
         };
     }
@@ -723,6 +731,12 @@ public sealed class SessionPlaybackArchiveBuilder
             }
 
             return JoinSummary(eventType, string.Join("; ", parts));
+        }
+
+        if (WindowSnapshots.IsSnapshot(channel, eventType))
+        {
+            var snapshot = WindowSnapshots.Compact(payload);
+            return JoinSummary(eventType, ReadString(snapshot, "windowName"), ReadString(snapshot, "summary"));
         }
 
         if (channel == "accessibility.uia.events")

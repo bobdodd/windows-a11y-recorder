@@ -20,5 +20,6 @@
     <Project Path="tests/Recorder.Tests/Recorder.Tests.csproj" />
     <Project Path="tests/UiaLoadSource/UiaLoadSource.csproj" />
     <Project Path="tests/RecordingEventExport/RecordingEventExport.csproj" />
+    <Project Path="tests/WindowSnapshotProbe/WindowSnapshotProbe.csproj" />
   </Folder>
 </Solution>

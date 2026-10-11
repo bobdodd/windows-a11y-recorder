@@ -560,6 +560,14 @@ public partial class MainWindow : Window
         // A record of NVDA's windows: the window and its part in it come
         // before the record (screen-reader-activity.md, "2c-3, NVDA's
         // windows").
+        // A window snapshot's tree as an outline, before the record
+        // (screen-reader-activity.md, "2c-4, what NVDA's windows show").
+        if (WindowSnapshots.IsSnapshot(item.Channel, item.EventType) &&
+            document.RootElement.TryGetProperty("payload", out var snapshot))
+        {
+            json = WindowSnapshots.Outline(snapshot) + Environment.NewLine + Environment.NewLine + json;
+        }
+
         if (archive.ScreenReaderWindows.Describe(item) is { Count: > 0 } window)
         {
             json = string.Join(Environment.NewLine, window) + Environment.NewLine + Environment.NewLine + json;

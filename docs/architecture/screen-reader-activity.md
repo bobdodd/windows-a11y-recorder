@@ -775,13 +775,110 @@ by NVDA+f7 (elements list) at 00:02:02.382, inferred; left the front at
 Deafblind Community Services"". A record that ends one window's span and
 starts the next, as Exit NVDA replacing the NVDA menu, is given for both.
 
+### 2c-4, what NVDA's windows show
+
+Asked by the owner on 2026-10-11, after the 2c-3 runs: "what do we
+actually store for these dialogs when they open, do we record the entire
+menus, or is it just the content reported on focus?" It was only the
+latter. The UI Automation collector reads each event's own element
+(`TreeScope_Element`), so a window was recorded only as far as the
+elements focused or selected in it. In recording 20261010-211432, NVDA's
+main processes (it was started twice) gave 51 focus changes, 42 structure changes that do not name the
+child, 18 selections, and 3 invokes, and no property or text changes: not
+the rest of the Elements List, its element type, its filter text, or the
+option chosen in Exit NVDA. The owner chose to record the windows' trees,
+"for test reporting. To know accurately what NVDA was displaying at any
+time. It should also help with automated test analysis later", and agreed
+the design on 2026-10-11: limits of 5,000 elements and 2 seconds, "Only
+NVDA", and the outline and summary below.
+
+A window snapshot collector (`NvdaWindowSnapshotCollector`, collector
+type `windows.ui-automation.nvda-window-snapshots`) is given each event
+the UI Automation collector records, with its element, and NVDA's main
+process IDs from assistive technology tracking. It reads a window of
+NVDA's main process, the element's ancestor whose parent is the desktop:
+
+- when focus enters it from another window or from outside NVDA
+  (`focus-entered-window`);
+- when the window has been quiet for 300 ms after a structure change,
+  selection, invoke, text change, or watched property change in it, so
+  one burst gives one snapshot (`window-changed`);
+- when focus moves within it to an element the last snapshot did not hold
+  (`focused-element-not-in-snapshot`), or held with another name, value,
+  toggle, selection, expansion, or enabled state
+  (`focused-element-changed`).
+
+The tree is UI Automation's control view, the view assistive technology
+is given, read in document order, each element before its children. Each
+element has its parent's index, its depth, and its place among its
+siblings; its runtime ID, name, control type, automation ID, class,
+framework, access key, help text, enabled, off screen, focus, and
+password states, and bounding rectangle; and, only where the element says
+it has the pattern, its value and whether that is read only, its toggle
+state, whether it is selected, and its expanded or collapsed state, so a
+default is never taken for a state. A password's value is not recorded. A
+read stops at 5,000 elements or after 2 seconds, and the record says
+which (`truncated`). A child list whose read fails ends there, with the
+failure in the record's `problems`, and the read goes on.
+
+The trees are read on a thread and UI Automation connection of their own,
+so the UI Automation collector's queue never waits for them, and written
+under their own collector instance on `accessibility.uia.events`, so
+their times are in order within it. Notices queue up to 256; any refused,
+and any whose handling failed, are counted and stated at stop as
+collector omissions. NVDA's windows are read only while NVDA runs; no
+other process's windows are read. The database's typed evidence tables do
+not cover the record; it is stored as a recorded event, as other records
+without a typed table are.
+
+The record, `window-snapshot`: `reason`; `trigger`, the event that led to
+it (type, ID, and time); `processId`; `elementCount`; `truncated`, null,
+`element-limit`, or `time-limit`; `readNanoseconds`; the limits;
+`elements`; and `problems`. It is timed at the start of the read. The
+validator requires the window first, each element after its parent and
+one level deeper, the count to match, a snapshot stopped at the element
+limit to hold that many, and no password value.
+
+In the player: each snapshot is a step of the NVDA window row and an
+event of the window strip, belonging to the span of its process it was
+read in. The row adds what the window showed at the playhead, for
+example "showing at 00:01:33.020: 2 radio buttons, 47 tree items;
+selected: "Links" (radio button, selected), "Contact Us" (tree item,
+selected, focused); Filter by: ""; focus: ..."; the counts are of the
+window's items (tree, list, menu, data, and tab items, radio buttons, and
+check boxes). Selected event values gives a snapshot as an indented
+outline before the record, each element under its parent with its type
+and states, for example `"Contact Us" (tree item, selected, focused)`,
+then any reads that failed. Playback index version 14 keeps each snapshot
+without its elements, with the summary in their place
+(`WindowSnapshots.Compact`); the outline is read from the recording.
+
+Unknown until the target machine shows it: whether NVDA's wx dialogs
+raise UI Automation events when the Elements List is filled again, on
+choosing another element type or typing in the filter. If they do not, a
+change is read only when focus next moves to an element it changed. The
+target run checks this; a fallback, such as reading again while the
+window is in front, is a question for then.
+
+Tested at the unit level (`WindowSnapshotTests`: the walk's order and
+limits on a fixed tree, a failed child list, the validator, the summary,
+the outline, the compact form, and the player through the playback
+index), and on Windows by `tests/WindowSnapshotProbe`, which runs the UI
+Automation and snapshot collectors in its own process, standing in for
+NVDA's, against a dialog of standard Win32 controls built like the
+Elements List, and checks a snapshot on focus entering it, on selecting
+another tree item, on typing in the filter with the tree filled again, on
+choosing the other type, on another window of the process and back, and
+a stop at a limit with 6,000 tree items; and that every record passes the
+recorder's checks with no evidence dropped.
+
 ## The screen reader's windows
 
 UI Automation already records them. At playback, NVDA's windows in front
 are spans, with the element focused in each, as built in "2c-3, NVDA's
-windows". The text typed into such a window, and its closing, are not
-shown: the foreground records show only that another window came to the
-front.
+windows", and what each showed, read as its whole tree, as built in
+"2c-4, what NVDA's windows show". Their closing is not shown: the
+foreground records show only that another window came to the front.
 
 ## Settings and key commands
 
@@ -862,6 +959,11 @@ The others were settled on 2026-10-10; see "Decisions of 2026-10-10".
 - Integration tests on Windows: the hook installs without administrator
   privileges, never blocks a key, and records the injected flags; the
   callback's duration stays far below the timeout under load.
+- For NVDA's window snapshots: unit tests of the walk, its limits, the
+  validator, the summary, outline, and compact form; an integration test
+  on Windows against a dialog of standard Win32 controls
+  (`tests/WindowSnapshotProbe`); and a target run with NVDA's Elements
+  List, NVDA menu, and Exit NVDA dialog.
 - A system test on the target machine, extending
   `scripts/Test-ScreenReaderKeys.ps1`: every key of the script's hook is in
   the recorder's hook with the same disposition; NVDA started after the

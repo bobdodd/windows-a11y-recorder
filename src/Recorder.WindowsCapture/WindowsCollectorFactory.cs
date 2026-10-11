@@ -33,9 +33,19 @@ public static class WindowsCollectorFactory
             collectors.Add(keyboardHook);
         }
 
+        NvdaWindowSnapshotCollector? windowSnapshots = null;
         if (options.CaptureUiAutomation)
         {
-            collectors.Add(new UiAutomationCollector());
+            var uiAutomation = new UiAutomationCollector();
+            collectors.Add(uiAutomation);
+
+            // What NVDA's windows show: their whole tree, read on the UI
+            // Automation collector's events in NVDA's main process. See
+            // docs/architecture/screen-reader-activity.md, "2c-4, what
+            // NVDA's windows show".
+            windowSnapshots = new NvdaWindowSnapshotCollector();
+            uiAutomation.ObservationRecorded += windowSnapshots.Observe;
+            collectors.Add(windowSnapshots);
         }
 
         if (options.CaptureForegroundWindow)
@@ -59,6 +69,11 @@ public static class WindowsCollectorFactory
         if (keyboardHook is not null)
         {
             assistiveTechnology.ScreenReaderRunningChanged += keyboardHook.SetScreenReaderRunning;
+        }
+
+        if (windowSnapshots is not null)
+        {
+            assistiveTechnology.ScreenReaderProcessesChanged += windowSnapshots.SetScreenReaderProcesses;
         }
 
         collectors.Add(assistiveTechnology);

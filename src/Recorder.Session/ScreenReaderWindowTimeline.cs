@@ -22,9 +22,17 @@ public sealed record ScreenReaderWindowSpan(
     public IReadOnlyList<FocusedElement> Focus { get; init; } = [];
 
     /// <summary>
+    /// What the window showed: each snapshot of NVDA's process read while it
+    /// was in front, in order (screen-reader-activity.md, "2c-4, what
+    /// NVDA's windows show"); each is a step of the row.
+    /// </summary>
+    public IReadOnlyList<WindowSnapshot> Snapshots { get; init; } = [];
+
+    /// <summary>
     /// The span's events, for the timeline's strip: the foreground window
     /// record that brought it to the front, each focus record of
-    /// <see cref="Focus"/>, and the record of the window that replaced it.
+    /// <see cref="Focus"/> and snapshot of <see cref="Snapshots"/>, and the
+    /// record of the window that replaced it.
     /// </summary>
     public IReadOnlyList<SessionTimelineEvent> Events { get; init; } = [];
 }
@@ -72,7 +80,8 @@ public sealed class ScreenReaderWindowTimeline
         IEnumerable<FocusedElement> focus,
         AssistiveTechnologyTimeline assistiveTechnology,
         IEnumerable<KeptCommand> commands,
-        long duration)
+        long duration,
+        IEnumerable<WindowSnapshot>? snapshots = null)
     {
         ArgumentNullException.ThrowIfNull(foreground);
         ArgumentNullException.ThrowIfNull(focus);
@@ -80,6 +89,7 @@ public sealed class ScreenReaderWindowTimeline
         ArgumentNullException.ThrowIfNull(commands);
         Recorded = assistiveTechnology.Recorded;
         _focus = [.. focus.OrderBy(item => item.Time)];
+        var read = (snapshots ?? []).OrderBy(item => item.Time).ToList();
         var kept = commands.OrderBy(item => item.Time).ToList();
         var windows = foreground.OrderBy(window => window.Time).ToList();
         int? NvdaAt(long time) => assistiveTechnology.ScreenReaderAt(AssistiveTechnologyRecords.Nvda.Product, time)?.ProcessId;
@@ -148,14 +158,19 @@ public sealed class ScreenReaderWindowTimeline
                     : $"opened by {opener.Gesture} ({string.Join(" or ", opener.Names)}) at {WindowsPreferenceTimeline.Clock(opener.Time)}, inferred",
                 window.ProcessId!.Value)
             {
-                Focus = FocusIn(window.ProcessId!.Value, start, end)
+                Focus = FocusIn(window.ProcessId!.Value, start, end),
+                Snapshots = [.. read.Where(item => item.ProcessId == window.ProcessId && item.Time >= start && item.Time < end)]
             };
             _spans.Add(span with
             {
                 Events =
                 [
                     .. windows[first].Event is { } opened ? [opened] : Array.Empty<SessionTimelineEvent>(),
-                    .. span.Focus.Select(item => item.Event).OfType<SessionTimelineEvent>(),
+                    .. span.Focus.Select(item => item.Event)
+                        .Concat(span.Snapshots.Select(item => item.Event))
+                        .OfType<SessionTimelineEvent>()
+                        .OrderBy(item => item.MonotonicNanoseconds)
+                        .ThenBy(item => item.EventKey),
                     .. next is not null && next.Time == end && next.Event is { } replaced ? [replaced] : Array.Empty<SessionTimelineEvent>()
                 ]
             });
@@ -203,8 +218,15 @@ public sealed class ScreenReaderWindowTimeline
                 (span.Opener is { } opener ? $", {opener}" : string.Empty) +
                 $"; {span.EndBasis}";
             var step = span.Focus.ToList().FindIndex(candidate => candidate.Event?.EventKey == item.EventKey);
+            var snapshot = span.Snapshots.ToList().FindIndex(candidate => candidate.Event?.EventKey == item.EventKey);
             string part;
-            if (step >= 0)
+            if (snapshot >= 0)
+            {
+                var read = span.Snapshots[snapshot];
+                part = $"This record: what it showed, snapshot {snapshot + 1} of {span.Snapshots.Count}, " +
+                    $"{WindowSnapshots.ReasonText(read.Reason)}: {read.Summary}";
+            }
+            else if (step >= 0)
             {
                 var focused = span.Focus[step];
                 part = $"This record: element {step + 1} of {span.Focus.Count} focused in it, {ControlName(focused.ControlType)}" +
@@ -305,6 +327,12 @@ public sealed class ScreenReaderWindowTimeline
                 $" at {WindowsPreferenceTimeline.Clock(focused.Time)}";
         }
 
+        var shown = span.Snapshots.LastOrDefault(item => item.Time <= time);
+        if (shown is not null)
+        {
+            text += $"; showing at {WindowsPreferenceTimeline.Clock(shown.Time)}: {shown.Summary}";
+        }
+
         return text;
     }
 
@@ -322,6 +350,11 @@ public sealed class ScreenReaderWindowTimeline
             times.Add(span.Start);
             times.Add(span.End);
             foreach (var item in span.Focus)
+            {
+                times.Add(item.Time);
+            }
+
+            foreach (var item in span.Snapshots)
             {
                 times.Add(item.Time);
             }
