@@ -727,7 +727,7 @@
 
       <Grid x:Name="TimelinePanel" Grid.Row="1">
         <Grid.RowDefinitions>
-          <RowDefinition Height="112" />
+          <RowDefinition Height="128" />
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>

@@ -111,6 +111,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<KeyEvidenceRecord> _keyEvidence = [];
     private readonly List<BrowserPageCommit> _pageCommits = [];
     private readonly List<ForegroundWindow> _foreground = [];
+    private readonly List<FocusedElement> _focus = [];
     private readonly bool _retainEvents;
     private long _maximumTimestamp;
     private bool _built;
@@ -301,7 +302,18 @@ public sealed class SessionPlaybackArchiveBuilder
             timelineEvent.EventType == "foreground-window" &&
             payload.ValueKind == JsonValueKind.Object)
         {
-            _foreground.Add(new ForegroundWindow(timestamp, ReadString(payload, "processName")));
+            _foreground.Add(new ForegroundWindow(
+                timestamp, ReadString(payload, "processName"), ReadInt32(payload, "processId"), ReadString(payload, "title")));
+        }
+
+        if (timelineEvent.Channel == "accessibility.uia.events" &&
+            timelineEvent.EventType == "focus-changed" &&
+            payload.ValueKind == JsonValueKind.Object &&
+            payload.TryGetProperty("element", out var element) &&
+            element.ValueKind == JsonValueKind.Object)
+        {
+            _focus.Add(new FocusedElement(
+                timestamp, ReadInt32(element, "processId"), ReadString(element, "controlType"), ReadString(element, "name")));
         }
 
         if (timelineEvent.Channel == BrowserPreferenceSettings.Channel &&
@@ -404,7 +416,10 @@ public sealed class SessionPlaybackArchiveBuilder
             AssistiveTechnology = assistiveTechnology,
             InputRecordability = inputRecordability,
             KeyDispositions = keyDispositions,
-            ScreenReaderMode = screenReaderMode
+            ScreenReaderMode = screenReaderMode,
+            ScreenReaderWindows = assistiveTechnology.Recorded
+                ? new ScreenReaderWindowTimeline(_foreground, _focus, assistiveTechnology, keyDispositions.KeptCommands, duration)
+                : ScreenReaderWindowTimeline.Empty
         };
     }
 

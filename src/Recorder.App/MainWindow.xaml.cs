@@ -458,8 +458,9 @@ public partial class MainWindow : Window
         PlaybackStatusTextBlock.Text = $"The timeline could not be read: {message}";
     }
 
-    // A click in the NVDA mode strip moves the playhead there, so the NVDA
-    // mode row of the properties panel shows the mode and its basis.
+    // A click in the NVDA mode or window strip moves the playhead there, so
+    // the NVDA mode and NVDA window rows of the properties panel show the
+    // mode, the window, and their basis.
     private void TimelineControl_PositionRequested(object? sender, long positionNanoseconds)
     {
         if (_playbackArchive is null)
@@ -789,6 +790,7 @@ public partial class MainWindow : Window
                 _playbackArchive.DurationNanoseconds);
             TimelineControl.SetUnrecordablePeriods(_playbackArchive.InputRecordability.Unrecordable);
             TimelineControl.SetScreenReaderModeSpans(_playbackArchive.ScreenReaderMode.Spans);
+            TimelineControl.SetScreenReaderWindowSpans(_playbackArchive.ScreenReaderWindows.Spans);
             ApplyBrowserNavigationFilter();
             BrowserCorrelationTextBox.Text =
                 _playbackArchive.BrowserNavigations.Count == 0

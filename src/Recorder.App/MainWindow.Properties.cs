@@ -78,6 +78,7 @@ public partial class MainWindow
         .. archive.BrowserPreferences.RowsAt(time),
         .. archive.AssistiveTechnology.RowsAt(time),
         .. archive.ScreenReaderMode.RowsAt(time),
+        .. archive.ScreenReaderWindows.RowsAt(time),
         .. archive.InputRecordability.RowsAt(time)
     ];
 
@@ -101,7 +102,8 @@ public partial class MainWindow
         {
             times = PropertyChangeSteps.TimesOf(
                 row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences,
-                archive.AssistiveTechnology, archive.InputRecordability, archive.ScreenReaderMode);
+                archive.AssistiveTechnology, archive.InputRecordability, archive.ScreenReaderMode,
+                archive.ScreenReaderWindows);
             _propertyChangeTimes[row.Key] = times;
         }
 
@@ -166,7 +168,8 @@ public partial class MainWindow
         var name = PropertyRowView.InSentence(row.Setting);
         if (PropertyChangeSteps.TimesOf(
                 row.Row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences,
-                archive.AssistiveTechnology, archive.InputRecordability, archive.ScreenReaderMode) is not { } times)
+                archive.AssistiveTechnology, archive.InputRecordability, archive.ScreenReaderMode,
+                archive.ScreenReaderWindows) is not { } times)
         {
             _busy.AnnounceLayout(row.Group switch
             {

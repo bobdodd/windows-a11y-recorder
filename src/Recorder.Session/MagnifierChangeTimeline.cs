@@ -69,6 +69,7 @@ public static class PropertyChangeSteps
     /// A Screen reader row's are those of <see cref="AssistiveTechnologyTimeline.ChangeTimesOf"/>.
     /// The Keyboard and mouse row's are those of <see cref="InputRecordabilityTimeline.ChangeTimesOf"/>.
     /// The NVDA mode row's are those of <see cref="ScreenReaderModeTimeline.ChangeTimesOf"/>.
+    /// The NVDA window row's are those of <see cref="ScreenReaderWindowTimeline.ChangeTimesOf"/>.
     /// </summary>
     public static IReadOnlyList<long>? TimesOf(
         PropertyRow row,
@@ -77,7 +78,8 @@ public static class PropertyChangeSteps
         BrowserPreferenceTimeline? browser = null,
         AssistiveTechnologyTimeline? assistiveTechnology = null,
         InputRecordabilityTimeline? inputRecordability = null,
-        ScreenReaderModeTimeline? screenReaderMode = null)
+        ScreenReaderModeTimeline? screenReaderMode = null,
+        ScreenReaderWindowTimeline? screenReaderWindows = null)
     {
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(settings);
@@ -86,6 +88,11 @@ public static class PropertyChangeSteps
             row.Key.StartsWith(BrowserPreferenceTimeline.PageKeyPrefix, StringComparison.Ordinal))
         {
             return (browser ?? BrowserPreferenceTimeline.Empty).ChangeTimesOf(row.Key);
+        }
+
+        if (row.Key == ScreenReaderWindowTimeline.Key)
+        {
+            return (screenReaderWindows ?? ScreenReaderWindowTimeline.Empty).ChangeTimesOf(row.Key);
         }
 
         if (row.Key == ScreenReaderModeTimeline.Key)

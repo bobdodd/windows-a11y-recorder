@@ -40,6 +40,9 @@ public enum ModeEvidenceKind
 /// </summary>
 public sealed record ModeEvidence(long Time, string EventId, ModeEvidenceKind Kind, string Basis);
 
+/// <summary>A kept key labelled with NVDA commands: its time, the keys as NVDA names them, and the commands' names.</summary>
+public sealed record KeptCommand(long Time, string Gesture, IReadOnlyList<string> Names);
+
 public sealed record KeyOutcome(KeyOutcomeKind Kind, string Text, IReadOnlyList<string> Details)
 {
     /// <summary>The key and direction, such as "Tab down"; null for a page keydown.</summary>
@@ -73,6 +76,7 @@ public sealed class KeyDispositions
 
     private readonly Dictionary<string, KeyOutcome> _outcomes = new(StringComparer.Ordinal);
     private readonly List<ModeEvidence> _modeEvidence = [];
+    private readonly List<KeptCommand> _keptCommands = [];
 
     private sealed class Key
     {
@@ -198,6 +202,9 @@ public sealed class KeyDispositions
     /// switch); and Escape kept (back to browse mode).
     /// </summary>
     public IReadOnlyList<ModeEvidence> ModeEvidence => _modeEvidence;
+
+    /// <summary>The kept keys labelled with a command from the command data, in order.</summary>
+    public IReadOnlyList<KeptCommand> KeptCommands => _keptCommands;
 
     /// <summary>The number of records with an outcome.</summary>
     public int Count => _outcomes.Count;
@@ -655,6 +662,11 @@ public sealed class KeyDispositions
             var names = string.Join(" or ", shown.Select(command =>
                 command.Name + (command.Context == "any" ? string.Empty : $" in {command.Context}")));
             text = $"command: {names} ({gesture}){pressed}, inferred";
+            if (kept)
+            {
+                _keptCommands.Add(new KeptCommand(key.Time, gesture, [.. shown.Select(command => command.Name)]));
+            }
+
             foreach (var command in shown)
             {
                 details.Add($"command (inferred from the keys held): {gesture} is {command.Name}" +

@@ -63,6 +63,13 @@ public sealed class SessionTimelineControl : FrameworkElement
     private static readonly Brush ModeDarkTextBrush = BackgroundBrush;
     private static readonly Pen HighlightPen = FreezePen(Brushes.White, 2);
 
+    // NVDA's own windows in front, such as the Elements List, in a second
+    // strip under the mode strip, as a mode span can cover them: solid green
+    // with the window's name where it fits; where none is in front, empty.
+    // White on #3F6B3A is about 6:1. Agreed with the owner on 2026-10-11.
+    private const double WindowStripHeight = 16;
+    private static readonly Brush NvdaWindowBrush = Freeze("#3F6B3A");
+
     private readonly DrawingVisual _eventLayer = new();
     private readonly DrawingVisual _overlayLayer = new();
     private readonly VisualCollection _layers;
@@ -87,6 +94,7 @@ public sealed class SessionTimelineControl : FrameworkElement
     private SessionTimelineEvent? _selectedEvent;
     private IReadOnlyList<Recorder.Session.UnrecordablePeriod> _unrecordable = [];
     private IReadOnlyList<Recorder.Session.ScreenReaderModeSpan> _modeSpans = [];
+    private IReadOnlyList<Recorder.Session.ScreenReaderWindowSpan> _windowSpans = [];
 
     // The lane keyboard stepping moves in: the selected event's lane, or the
     // lane last clicked.
@@ -105,13 +113,16 @@ public sealed class SessionTimelineControl : FrameworkElement
     public event EventHandler<string>? LookupFailed;
 
     /// <summary>
-    /// Raised with the time clicked in the NVDA mode strip, so the window
-    /// moves the playhead there and the NVDA mode row shows the mode.
+    /// Raised with the time clicked in the NVDA mode or window strip, so the
+    /// window moves the playhead there and the NVDA mode and NVDA window rows
+    /// show the mode and the window.
     /// </summary>
     public event EventHandler<long>? PositionRequested;
 
-    // The strip's height: none when the recording has no mode spans.
-    private double StripHeight => _modeSpans.Count > 0 ? ModeStripHeight : 0;
+    // The strips' heights: each none when the recording has no spans of it.
+    private double ModeHeight => _modeSpans.Count > 0 ? ModeStripHeight : 0;
+
+    private double StripHeight => ModeHeight + (_windowSpans.Count > 0 ? WindowStripHeight : 0);
 
     private double LaneHeight => Math.Max(3, (ActualHeight - StripHeight) / LaneCount);
 
@@ -183,6 +194,18 @@ public sealed class SessionTimelineControl : FrameworkElement
     {
         ArgumentNullException.ThrowIfNull(spans);
         _modeSpans = spans;
+        RedrawAll();
+    }
+
+    /// <summary>
+    /// The spans of NVDA's own windows in front, drawn as a strip under the
+    /// mode strip. The properties panel's NVDA window row gives the window
+    /// and the element focused in it in text.
+    /// </summary>
+    public void SetScreenReaderWindowSpans(IReadOnlyList<Recorder.Session.ScreenReaderWindowSpan> spans)
+    {
+        ArgumentNullException.ThrowIfNull(spans);
+        _windowSpans = spans;
         RedrawAll();
     }
 
@@ -513,6 +536,34 @@ public sealed class SessionTimelineControl : FrameworkElement
                 }
 
                 drawingContext.DrawText(text, origin);
+            }
+        }
+
+        var windowTop = stripTop + ModeHeight;
+        foreach (var span in _windowSpans)
+        {
+            if (span.End < _viewportStartNanoseconds || span.Start > viewportEnd)
+            {
+                continue;
+            }
+
+            var left = Math.Max(0, ToX(Math.Max(span.Start, _viewportStartNanoseconds)));
+            var right = Math.Min(width, ToX(Math.Min(span.End, viewportEnd)));
+            // A pixel short at the right, so windows that follow one another
+            // show as two.
+            var band = new Rect(left, windowTop + 1, Math.Max(2, right - left - 1), WindowStripHeight - 2);
+            drawingContext.DrawRectangle(NvdaWindowBrush, null, band);
+            var text = new FormattedText(
+                span.Name,
+                System.Globalization.CultureInfo.CurrentUICulture,
+                FlowDirection.LeftToRight,
+                new Typeface("Segoe UI"),
+                11,
+                ModeLightTextBrush,
+                pixelsPerDip);
+            if (text.Width + 8 <= band.Width)
+            {
+                drawingContext.DrawText(text, new Point(band.Left + 4, band.Top + (band.Height - text.Height) / 2));
             }
         }
 

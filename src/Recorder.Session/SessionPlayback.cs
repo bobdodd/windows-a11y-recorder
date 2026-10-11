@@ -55,6 +55,9 @@ public sealed record SessionPlaybackArchive(
     /// </summary>
     public ScreenReaderModeTimeline ScreenReaderMode { get; init; } = ScreenReaderModeTimeline.Empty;
 
+    /// <summary>NVDA's own windows in front, for the timeline's strip and the NVDA window row.</summary>
+    public ScreenReaderWindowTimeline ScreenReaderWindows { get; init; } = ScreenReaderWindowTimeline.Empty;
+
     /// <summary>An event's description, ending with its key outcome where it has one.</summary>
     public string Describe(SessionTimelineEvent item)
     {

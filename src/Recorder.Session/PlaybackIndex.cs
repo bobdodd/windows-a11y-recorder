@@ -37,7 +37,12 @@ public sealed record PlaybackIndex
     // foreground-window) with their process name, for NVDA's inferred mode,
     // which counts keys only while the browser is in front
     // (ScreenReaderModeTimeline).
-    public const int CurrentVersion = 12;
+    // Version 13 keeps the foreground window records whole, for their
+    // process ID and title, and the UI Automation focus records
+    // (accessibility.uia.events, focus-changed) whole, for the element
+    // focused in NVDA's own windows (ScreenReaderWindowTimeline); a
+    // recording has a few hundred of each.
+    public const int CurrentVersion = 13;
 
     public required int Version { get; init; }
 
@@ -248,7 +253,8 @@ public sealed class PlaybackIndexBuilder
             channel == Recorder.Contracts.BrowserPreferenceSettings.Channel ||
             channel == Recorder.Contracts.AssistiveTechnologyRecords.Channel ||
             IsInputRecordabilityRecord(channel, record.EventType) ||
-            (channel == "window.foreground" && record.EventType == "foreground-window"))
+            (channel == "window.foreground" && record.EventType == "foreground-window") ||
+            (channel == "accessibility.uia.events" && record.EventType == "focus-changed"))
         {
             Keep(eventKey, record);
             return;
@@ -379,6 +385,8 @@ public sealed class PlaybackIndexBuilder
              record.Channel == Recorder.Contracts.BrowserPreferenceSettings.Channel ||
              record.Channel == Recorder.Contracts.AssistiveTechnologyRecords.Channel ||
              IsInputRecordabilityRecord(record.Channel, record.EventType) ||
+             (record.Channel == "window.foreground" && record.EventType == "foreground-window") ||
+             (record.Channel == "accessibility.uia.events" && record.EventType == "focus-changed") ||
              KeyDispositions.IsKeyEvidence(record.Channel, record.EventType, record.Payload)) &&
             record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()

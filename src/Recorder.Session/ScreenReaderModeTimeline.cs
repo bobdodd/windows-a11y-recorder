@@ -19,8 +19,8 @@ public sealed record ScreenReaderModeSpan(
     string StartBasis,
     string EndBasis);
 
-/// <summary>A window brought to the front: its time and process name.</summary>
-public sealed record ForegroundWindow(long Time, string? ProcessName);
+/// <summary>A window brought to the front: its time, process name, process ID, and title.</summary>
+public sealed record ForegroundWindow(long Time, string? ProcessName, int? ProcessId = null, string? Title = null);
 
 /// <summary>
 /// NVDA's browse or focus mode, inferred from the keys it kept or passed

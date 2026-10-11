@@ -674,13 +674,76 @@ gold flecks that read as event marks. Agreed with the owner ("All three"):
 a strip of its own, solid fills with words, and a click in the strip
 moves the playhead, as above.
 
+### 2c-3, NVDA's windows
+
+Agreed with the owner on 2026-10-11: the proposal below; NVDA's main
+frame, which comes to the front for a moment before each of its dialogs,
+is folded into the window that follows it ("I guess we merge"); and a
+window that another window replaces in front "left the front", not
+"closed" ("Yes"), as the foreground records do not show a window closing.
+
+The evidence, in recording 20261010-211432: the foreground window records
+name NVDA's main process (the `screen-reader` role of the assistive
+technology records, process 20008) with each window's title, and UI
+Automation's focus records name each element focused in it:
+
+- "NVDA", NVDA's main frame, at 92.768 s, then "Elements List" at
+  92.819 s, its tree items focused by name ("Contact Us" to "CNIB Come to
+  Work"), until the Perplexity app came to the front at 105.010 s;
+- the Elements List again from 122.384 s to 133.987 s;
+- an untitled window from 221.978 s, focused items a menu ("Context") and
+  its items ("Exit", "Donate", "Save configuration"), the NVDA menu;
+- "Exit NVDA" from 223.483 s, its combo box "What would you like to do?"
+  and its OK button pressed at 225.470 s.
+
+The spans (`src/Recorder.Session/ScreenReaderWindowTimeline.cs`): while a
+window of NVDA's main process is the front window, from its foreground
+window record to the next one of another window, NVDA exiting, or the end
+of the recording. NVDA's main frame, titled "NVDA", is folded into the
+NVDA window that follows it; alone, as when NVDA starts, it is a span of
+its own. A window is named by its title; an untitled one with a menu or
+menu item focused in it is the "NVDA menu", another untitled one "NVDA
+window (untitled)". A span whose window came to the front within 1 s
+after a kept key whose command opens that window (NVDA+F7, the elements
+list; NVDA+N, the NVDA menu; NVDA+Q, Exit NVDA, by the command data's
+names) is noted as "opened by NVDA+f7 (elements list) at ..., inferred".
+A window opened from the tray icon has no such key, and no opener.
+
+In the player: a second strip, 16 pixels high, under the mode strip, as a
+mode span can cover an NVDA window (browse mode from 33.5 s to 122.4 s
+covers the first Elements List); solid green (#3F6B3A) with the window's
+name in white where it fits, 6.2:1, one pixel short at the right so that
+windows that follow one another show as two; empty where none is in
+front. Clicking it moves the playhead there, as the mode strip does. The
+Screen reader group has an "NVDA window" row: for example "Elements List,
+in front from 00:01:32.768, opened by NVDA+f7 (elements list) at
+00:01:32.766, inferred; focus: tree item "Contact Us" at 00:01:33.009", or
+"none in front; Elements List left the front at 00:01:45.010, when
+"Perplexity" (Perplexity) came to the front", with the change buttons and
+count, at each span's start and end.
+
+Storage: playback index version 13 keeps the foreground window records
+whole, for their process ID and title, and the UI Automation focus
+records (`focus-changed`) whole, a few hundred a recording; an older
+index is derived again when the recording is opened. Mode inference is
+unchanged: keys in NVDA's windows already do not count. Not in this
+part: what the page did after the Elements List closed, which belongs to
+the reading position (step 4), and the text typed into the list's filter.
+
+Against recording 20261010-211432, as the player opens it: the spans
+above, with both Elements Lists opened by NVDA+F7, the NVDA menu from
+221.969 s to 223.483 s, Exit NVDA to 225.498 s; NVDA's main frame alone
+at 15.7 s and 238.1 s as NVDA started. Tested at the unit level
+(`ScreenReaderWindowTests`, including through the playback index); the
+system test on the target machine is outstanding.
+
 ## The screen reader's windows
 
-UI Automation already records them. At playback, the records whose
-process is a detected screen reader are grouped into episodes, such as
-the elements list: the window opening and closing, the items focused and
-their names, the text typed into its filter, and the button pressed. The
-keys typed into such a window are passed keys, shown with the episode.
+UI Automation already records them. At playback, NVDA's windows in front
+are spans, with the element focused in each, as built in "2c-3, NVDA's
+windows". The text typed into such a window, and its closing, are not
+shown: the foreground records show only that another window came to the
+front.
 
 ## Settings and key commands
 
