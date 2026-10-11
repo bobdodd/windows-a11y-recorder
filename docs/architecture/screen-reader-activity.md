@@ -645,7 +645,18 @@ to the Tab. Corrected as above: focus mode from 68.0 s to 74.7 s. NVDA+Space
 from a mode not known now reads "unknown; NVDA+Space switched from an
 unknown mode at ...". NVDA was then exited from its menu and crashed on
 exit (0xC0000409 in UIAutomationCore.dll), and the recorder crashed in
-the same place after its collectors had stopped; under investigation.
+the same place after its collectors had stopped. Open fault, agreed with
+the owner to note it without crash dumps: it did not recur in the next
+recording (20261011-150323), where NVDA exited cleanly. The crash left
+the recorder's database server running, which held the files the start
+script removes; it was stopped with `pg_ctl stop -m fast`.
+
+Fourth target run, 2026-10-11, recording 20261011-150323: Tab kept at
+35.5 s, browse mode; the form page reloaded at 39.2 s to 40.0 s, ending
+the inference; NVDA+Space at 49.3 s from an unknown mode; focus mode from
+53.3 s to 56.1 s; both Escapes, at 59.2 s and 62.2 s, kept and sent on,
+so no switch, as NVDA's source says for focus mode entered with
+NVDA+Space.
 
 Second target run, 2026-10-11: the band was there, but drawn within the
 Screen reader lane, about 6 pixels high, focus mode's upright stripes were
