@@ -734,8 +734,12 @@ Against recording 20261010-211432, as the player opens it: the spans
 above, with both Elements Lists opened by NVDA+F7, the NVDA menu from
 221.969 s to 223.483 s, Exit NVDA to 225.498 s; NVDA's main frame alone
 at 15.7 s and 238.1 s as NVDA started. Tested at the unit level
-(`ScreenReaderWindowTests`, including through the playback index); the
-system test on the target machine is outstanding.
+(`ScreenReaderWindowTests`, including through the playback index).
+
+First target run, 2026-10-11, package 74c5c3f: the owner confirmed the
+green strips line up with NVDA's dialogs, and the NVDA window row reads
+correctly in the properties panel ("Yes the green strips line up with
+NVDA dialogs, and they appear correctly in the properties panel").
 
 ## The screen reader's windows
 
