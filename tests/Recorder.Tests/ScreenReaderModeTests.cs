@@ -106,6 +106,36 @@ public sealed class ScreenReaderModeTests
         Assert.DoesNotContain(mode.Spans, span => span.Kind == ScreenReaderModeKind.Changed);
     }
 
+    private static KeyEvidenceRecord Injected(long time, int virtualKey, bool up) =>
+        new($"hook-{++_id}", time, KeyboardHookRecords.Channel, KeyboardHookRecords.KeyEventType,
+            J($"{{'installation':1,'virtualKey':{virtualKey},'scanCode':1,'flags':16,'up':{(up ? "true" : "false")},'extended':false," +
+              "'injected':true,'lowerIntegrityInjected':false,'altDown':false,'extraInformation':0,'eventTimeMilliseconds':1}"));
+
+    [Fact]
+    public void AnEscapeNvdaSendsOnShowsNoMode()
+    {
+        // Recording 20261011-144503, with Insert for its Caps Lock: focus
+        // mode entered with NVDA+Space;
+        // NVDA kept Escape at 70.854 s and sent its own on at 70.855 s,
+        // so focus mode did not end (NVDA browseMode.py,
+        // script_disablePassThrough).
+        var space = new List<KeyEvidenceRecord>
+        {
+            Hook(61_833 * Millisecond, 0x2D, up: false, extended: true), Hook(61_870 * Millisecond, 0x20, up: false),
+            Hook(62_110 * Millisecond, 0x20, up: true), Hook(62_200 * Millisecond, 0x2D, up: true, extended: true)
+        };
+        var escape = new List<KeyEvidenceRecord>
+        {
+            Hook(70_854 * Millisecond, 0x1B, up: false),
+            Injected(70_855 * Millisecond, 0x1B, up: false), Raw(70_856 * Millisecond, 0x1B, up: false), Page(70_857 * Millisecond),
+            Injected(70_856 * Millisecond, 0x1B, up: true), Raw(70_857 * Millisecond, 0x1B, up: true)
+        };
+        var mode = Mode([.. space, .. Typed(68 * Second, 0x48), .. escape, .. Typed(74_726 * Millisecond, 0x09)]);
+        var span = Assert.Single(mode.Spans);
+        Assert.Equal((ScreenReaderModeKind.Focus, 68 * Second, 74_726 * Millisecond), (span.Kind, span.Start, span.End));
+        Assert.Equal("unknown; NVDA+Space switched from an unknown mode at 00:01:01.870", mode.ValueAt(65 * Second));
+    }
+
     [Fact]
     public void KeysInAnotherWindowOrWithModifiersDoNotCount()
     {

@@ -114,6 +114,12 @@ public sealed class ScreenReaderModeTimeline
                         var after = kind == ScreenReaderModeKind.Browse ? ScreenReaderModeKind.Focus : ScreenReaderModeKind.Browse;
                         current = (after, time, basis, time, basis);
                     }
+                    else
+                    {
+                        // A switch from a mode not known: the row says so,
+                        // in place of an older reason.
+                        _breaks.Add((time, "NVDA+Space switched from an unknown mode"));
+                    }
 
                     break;
                 case ModeEvidenceKind.ExitFocus:
@@ -146,6 +152,7 @@ public sealed class ScreenReaderModeTimeline
         }
 
         Close();
+        _breaks.Sort((left, right) => left.Time.CompareTo(right.Time));
         _spans.Sort((left, right) => left.Start != right.Start
             ? left.Start.CompareTo(right.Start)
             : left.Kind == ScreenReaderModeKind.Changed ? -1 : 1);

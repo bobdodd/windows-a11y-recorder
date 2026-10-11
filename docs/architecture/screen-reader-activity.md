@@ -574,9 +574,17 @@ may be):
   `trapNonCommandGestures`), even a letter that is not a command;
 - focus mode: a letter, digit, arrow, or Tab that passed and that the page
   received;
-- a switch: NVDA+Space kept switches to the other mode, and Escape kept
-  returns to browse mode
-  ([NVDA 2026.2 commands quick reference](https://download.nvaccess.org/releases/2026.2/documentation/keyCommands.html#browse-mode)).
+- a switch: NVDA+Space kept switches to the other mode
+  ([NVDA 2026.2 commands quick reference](https://download.nvaccess.org/releases/2026.2/documentation/keyCommands.html#browse-mode)),
+  and Escape kept, with no Escape sent on after it, returns to browse
+  mode. NVDA keeps Escape in both modes, and sends it on where it does not
+  switch: in browse mode, in focus mode entered with NVDA+Space, and in a
+  menu
+  ([NVDA browseMode.py, release-2026.2](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/browseMode.py),
+  `script_disablePassThrough`), seen as an injected Escape just after the
+  kept one. Such an Escape shows no mode. A kept Tab stays browse mode
+  evidence, as NVDA keeps Tab only in browse mode (`script_tab`), sending
+  it on or moving the focus itself.
 
 A key that passed but that no page received, such as one in the browser's
 toolbar, shows neither mode. Keys in NVDA's own windows, such as the
@@ -628,6 +636,16 @@ and an older index is derived again when the recording is opened; a test
 now builds the mode through the index and the archive, as the player does
 (`ThePlayerFindsTheModeThroughThePlaybackIndex`), and fails without the
 fix.
+
+Third target run, 2026-10-11, recording 20261011-144503: NVDA+Space at
+61.9 s, typing from 68.0 s, Escape at 70.9 s, Tab at 74.7 s. NVDA kept
+Escape and sent its own on 1.4 ms later, so focus mode did not end; the
+first rule, Escape kept means browse mode, drew a "changed between" span
+to the Tab. Corrected as above: focus mode from 68.0 s to 74.7 s. NVDA+Space
+from a mode not known now reads "unknown; NVDA+Space switched from an
+unknown mode at ...". NVDA was then exited from its menu and crashed on
+exit (0xC0000409 in UIAutomationCore.dll), and the recorder crashed in
+the same place after its collectors had stopped; under investigation.
 
 Second target run, 2026-10-11: the band was there, but drawn within the
 Screen reader lane, about 6 pixels high, focus mode's upright stripes were

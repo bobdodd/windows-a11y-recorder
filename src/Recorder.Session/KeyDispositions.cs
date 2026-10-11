@@ -585,9 +585,19 @@ public sealed class KeyDispositions
             return;
         }
 
+        // NVDA keeps Escape in both modes. It returns to browse mode only
+        // where it does not send the key on; in browse mode, in focus mode
+        // entered with NVDA+Space, and in a menu, it sends the key on, seen
+        // as an injected Escape, and the mode does not change, so that
+        // Escape shows no mode (NVDA browseMode.py, script_disablePassThrough;
+        // recording 20261011-144503 at 70.85 s).
         if (kept && canonical == "escape")
         {
-            _modeEvidence.Add(new ModeEvidence(key.Time, key.EventId, ModeEvidenceKind.ExitFocus, "Escape kept"));
+            if (key.Followers.Count == 0)
+            {
+                _modeEvidence.Add(new ModeEvidence(key.Time, key.EventId, ModeEvidenceKind.ExitFocus, "Escape kept"));
+            }
+
             return;
         }
 
