@@ -1265,9 +1265,13 @@ key outcomes, and the foreground window records.
   selection did not change. The caret moved with the selection, without a
   trace.
 
-The Tab results follow NVDA's browse mode, which passes Tab to the page
-when the caret is already at the focused object; the first Tab moved the
-focus from the caret's object. The keys with traces sent their request 16
+The Tab results follow NVDA's browse mode: Tab and Shift+Tab move the
+focus to the next or previous focusable object after the caret when the
+caret is not within the focused object, and are passed to the page when it
+is, or when the caret last moved because the focus did
+([NVDA 2026.2 browseMode.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/browseMode.py),
+`_tabOverride`). The first Tab moved the focus from "Test site", the
+caret's object, to the next focusable one. The keys with traces sent their request 16
 to 40 ms after the key.
 
 ## The screen reader's windows
