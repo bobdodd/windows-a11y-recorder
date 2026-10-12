@@ -24,6 +24,7 @@ public sealed class ScreenReaderCommandData
     private readonly Dictionary<string, List<ScreenReaderCommand>> _desktop = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<ScreenReaderCommand>> _laptop = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _sectionTitles = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _sectionSources = new(StringComparer.Ordinal);
 
     public ScreenReaderCommandData(string json)
     {
@@ -34,7 +35,12 @@ public sealed class ScreenReaderCommandData
         Source = root.GetProperty("source").GetString()!;
         foreach (var section in root.GetProperty("sections").EnumerateArray())
         {
-            _sectionTitles[section.GetProperty("id").GetString()!] = section.GetProperty("title").GetString()!;
+            var id = section.GetProperty("id").GetString()!;
+            _sectionTitles[id] = section.GetProperty("title").GetString()!;
+            if (section.TryGetProperty("source", out var source) && source.ValueKind == JsonValueKind.String)
+            {
+                _sectionSources[id] = source.GetString()!;
+            }
         }
 
         var commands = new List<ScreenReaderCommand>();
@@ -67,12 +73,24 @@ public sealed class ScreenReaderCommandData
     public IReadOnlyList<ScreenReaderCommand> Of(string gesture, string layout) =>
         (layout == "laptop" ? _laptop : _desktop).GetValueOrDefault(ScreenReaderGestures.Canonical(gesture)) ?? [];
 
-    /// <summary>A command's source: the section of the reference, with its address.</summary>
+    /// <summary>
+    /// A command's source: the section of the reference, with its address, or
+    /// for a section with a source of its own, such as NVDA's source code,
+    /// the section and that source.
+    /// </summary>
     public string SourceOf(ScreenReaderCommand command) =>
-        $"{Product} {Version} commands quick reference, {_sectionTitles.GetValueOrDefault(command.Section, command.Section)}, {Source}#{command.Section}";
+        _sectionSources.TryGetValue(command.Section, out var source)
+            ? $"{Product} {Version}, {_sectionTitles.GetValueOrDefault(command.Section, command.Section)}, {source}"
+            : $"{Product} {Version} commands quick reference, {_sectionTitles.GetValueOrDefault(command.Section, command.Section)}, {Source}#{command.Section}";
 
     private static void Add(Dictionary<string, List<ScreenReaderCommand>> map, string key, ScreenReaderCommand command)
     {
+        // A key the reference does not give for a layout is empty.
+        if (key.Length == 0)
+        {
+            return;
+        }
+
         if (!map.TryGetValue(key, out var list))
         {
             map[key] = list = [];

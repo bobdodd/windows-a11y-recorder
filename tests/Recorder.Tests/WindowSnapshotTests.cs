@@ -307,7 +307,7 @@ public sealed class WindowSnapshotTests
         }
 
         var index = builder.Build();
-        Assert.Equal(17, index.Version);
+        Assert.Equal(18, index.Version);
         var kept = index.Events.Where(item => item.EventType == WindowSnapshotRecords.EventType).ToList();
         Assert.Equal(2, kept.Count);
         Assert.All(kept, item => Assert.False(item.Payload.TryGetProperty("elements", out _)));

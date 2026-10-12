@@ -309,7 +309,8 @@ public sealed class SessionPlaybackArchiveBuilder
         }
 
         if (payload.ValueKind == JsonValueKind.Object &&
-            AccessibilityRequests.IsRequestEvidence(timelineEvent.Channel, timelineEvent.EventType))
+            (AccessibilityRequests.IsRequestEvidence(timelineEvent.Channel, timelineEvent.EventType) ||
+             AccessibilityRequests.IsTreeEvidence(timelineEvent.Channel, timelineEvent.EventType)))
         {
             _accessibilityRequests.Add(new KeyEvidenceRecord(
                 timelineEvent.EventId, timestamp, timelineEvent.Channel, timelineEvent.EventType, payload.Clone()));

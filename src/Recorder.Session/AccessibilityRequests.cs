@@ -69,6 +69,27 @@ public sealed class AccessibilityRequests
 
     private readonly List<long> _pointerChanges = [];
 
+    // The accessibility tree as Chromium serialized it, by document token and
+    // node: each node's versions in time order. Checkpoints are update
+    // batches that do not record deletions, so a node's latest version at a
+    // time is the best known (accessibility-checkpoint-evidence-model.md).
+    private readonly Dictionary<string, Dictionary<long, List<TreeNode>>> _trees = new(StringComparer.Ordinal);
+
+    // The nodes that listed a node as a child, by document token and child.
+    private readonly Dictionary<(string Token, long Child), List<(long Time, long Parent)>> _parents = [];
+
+    // The document token of each tree, from the renderer's records, which
+    // name both.
+    private readonly Dictionary<string, string> _documents = new(StringComparer.Ordinal);
+
+    private sealed record TreeNode(long Time, string Role, string Name, long[] Children);
+
+    private static readonly System.Text.RegularExpressions.Regex ChildIds =
+        new(@"(?:^|\s)child_ids=([0-9,]+)", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>The most characters of an unnamed object's text the row gives.</summary>
+    public const int HeldTextCharacters = 60;
+
     private sealed record Node(string TreeId, long NodeId, string Role, string Name, string Bounds, Box? Box);
 
     private sealed record Box(long X, long Y, long Width, long Height)
@@ -115,6 +136,8 @@ public sealed class AccessibilityRequests
         IEnumerable<KeyEvidenceRecord>? mouseRecords = null)
     {
         ArgumentNullException.ThrowIfNull(records);
+        records = records as IReadOnlyCollection<KeyEvidenceRecord> ?? records.ToList();
+        ReadTrees(records);
         var items = records
             .Where(record => IsRequestEvidence(record.Channel, record.EventType) &&
                 record.Payload.ValueKind == JsonValueKind.Object)
@@ -233,10 +256,10 @@ public sealed class AccessibilityRequests
         }
 
         var request = _requests[index];
-        var given = request.Given is { } node ? Describe(node) : "no object";
+        var given = request.Given is { } node ? DescribeInTree(node, request.Time) : "no object";
         var precise = request.Precise is not { } found
             ? "no precise result"
-            : SameNode(request.Given, found) ? "the page found the same" : $"the page found {Describe(found)}";
+            : SameNode(request.Given, found) ? "the page found the same" : $"the page found {DescribeInTree(found, request.Time)}";
         return
         [
             new PropertyRow(
@@ -258,8 +281,180 @@ public sealed class AccessibilityRequests
     public IReadOnlyList<long>? ChangeTimesOf(string key) =>
         key == PointerKey && _requests.Count > 0 ? _pointerChanges : null;
 
+    /// <summary>Whether playback keeps a record for the accessibility tree the Under the pointer (Chromium) row reads.</summary>
+    public static bool IsTreeEvidence(string channel, string eventType) =>
+        channel == Channel && eventType == BrowserEvidenceEventTypes.AccessibilityCheckpointNode;
+
     public static bool IsRequestEvidence(string channel, string eventType) =>
         channel == Channel && EventTypes.Contains(eventType);
+
+    // The checkpoints' nodes, and the document token of each tree.
+    private void ReadTrees(IEnumerable<KeyEvidenceRecord> records)
+    {
+        foreach (var record in records.OrderBy(record => record.MonotonicNanoseconds))
+        {
+            var payload = record.Payload;
+            if (payload.ValueKind != JsonValueKind.Object || record.Channel != Channel ||
+                !payload.TryGetProperty("context", out var context) || context.ValueKind != JsonValueKind.Object ||
+                ReadString(context, "documentToken") is not { } token)
+            {
+                continue;
+            }
+
+            if (record.EventType is BrowserEvidenceEventTypes.AccessibilityHitTestComputed or BrowserEvidenceEventTypes.AccessibilityActionReceived &&
+                ReadString(payload, "treeId") is { } treeId)
+            {
+                _documents.TryAdd(treeId, token);
+                continue;
+            }
+
+            if (record.EventType != BrowserEvidenceEventTypes.AccessibilityCheckpointNode ||
+                ReadInt64(payload, "accessibilityNodeId") is not { } id)
+            {
+                continue;
+            }
+
+            var match = ChildIds.Match(ReadString(payload, "serializedProperties") ?? string.Empty);
+            var children = match.Success
+                ? match.Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(value => long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var child) ? child : -1)
+                    .Where(child => child >= 0)
+                    .ToArray()
+                : [];
+            if (!_trees.TryGetValue(token, out var tree))
+            {
+                _trees[token] = tree = [];
+            }
+
+            if (!tree.TryGetValue(id, out var versions))
+            {
+                tree[id] = versions = [];
+            }
+
+            versions.Add(new TreeNode(
+                record.MonotonicNanoseconds, ReadString(payload, "roleName") ?? "object", ReadString(payload, "name") ?? string.Empty, children));
+            foreach (var child in children)
+            {
+                if (!_parents.TryGetValue((token, child), out var parents))
+                {
+                    _parents[(token, child)] = parents = [];
+                }
+
+                parents.Add((record.MonotonicNanoseconds, id));
+            }
+        }
+    }
+
+    private TreeNode? NodeAt(string token, long id, long time)
+    {
+        if (!_trees.TryGetValue(token, out var tree) || !tree.TryGetValue(id, out var versions))
+        {
+            return null;
+        }
+
+        TreeNode? found = null;
+        foreach (var version in versions)
+        {
+            if (version.Time > time)
+            {
+                break;
+            }
+
+            found = version;
+        }
+
+        return found;
+    }
+
+    // The node that lists a node as a child at a time, in its latest version.
+    private (long Id, TreeNode Node)? ParentAt(string token, long id, long time)
+    {
+        if (!_parents.TryGetValue((token, id), out var parents))
+        {
+            return null;
+        }
+
+        for (var index = parents.Count - 1; index >= 0; index--)
+        {
+            var (at, parent) = parents[index];
+            if (at <= time && NodeAt(token, parent, time) is { } node && node.Children.Contains(id))
+            {
+                return (parent, node);
+            }
+        }
+
+        return null;
+    }
+
+    // The text an object holds: its static text's names, in tree order, up
+    // to HeldTextCharacters.
+    private string TextWithin(string token, long id, long time)
+    {
+        var text = new System.Text.StringBuilder();
+        var stack = new Stack<long>([id]);
+        var visited = new HashSet<long>();
+        while (stack.Count > 0 && visited.Count < 500 && text.Length <= HeldTextCharacters)
+        {
+            var current = stack.Pop();
+            if (!visited.Add(current) || NodeAt(token, current, time) is not { } node)
+            {
+                continue;
+            }
+
+            if (node.Role == "staticText" && node.Name.Trim().Length > 0)
+            {
+                if (text.Length > 0)
+                {
+                    text.Append(' ');
+                }
+
+                text.Append(node.Name.Trim());
+                continue;
+            }
+
+            for (var child = node.Children.Length - 1; child >= 0; child--)
+            {
+                stack.Push(node.Children[child]);
+            }
+        }
+
+        var all = System.Text.RegularExpressions.Regex.Replace(text.ToString(), @"\s+", " ");
+        return all.Length > HeldTextCharacters ? all[..HeldTextCharacters].TrimEnd() + "…" : all;
+    }
+
+    // An object as the Under the pointer (Chromium) row gives it: an object
+    // with no name also with the text it holds and the object it is in, from
+    // the accessibility tree as Chromium last serialized it before the time.
+    private string DescribeInTree(Node node, long time)
+    {
+        var text = Describe(node);
+        if (!string.IsNullOrEmpty(node.Name))
+        {
+            return text;
+        }
+
+        if (!_documents.TryGetValue(node.TreeId, out var token) || !_trees.ContainsKey(token))
+        {
+            return $"{text}, whose document's accessibility tree was not recorded";
+        }
+
+        if (NodeAt(token, node.NodeId, time) is null)
+        {
+            return $"{text}, not in the recorded accessibility tree";
+        }
+
+        var held = TextWithin(token, node.NodeId, time);
+        text += held.Length == 0 ? ", holding no text" : $", holding \"{held}\"";
+        if (ParentAt(token, node.NodeId, time) is { } parent)
+        {
+            var id = parent.Id.ToString(CultureInfo.InvariantCulture);
+            text += string.IsNullOrEmpty(parent.Node.Name)
+                ? $", in {parent.Node.Role} with no name (node {id})"
+                : $", in {parent.Node.Role} \"{parent.Node.Name}\" (node {id})";
+        }
+
+        return text;
+    }
 
     // Hit test records at one point, each within RequestGapNanoseconds of the
     // one before, with no hit test at another point between, are one request.

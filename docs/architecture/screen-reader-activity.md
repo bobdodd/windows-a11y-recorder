@@ -798,6 +798,21 @@ Shift+D previous landmark, K next link, and Insert+F7 at 92.8 s and
 122.4 s the elements list. The system test on the target machine, with
 the settings recorded, is outstanding.
 
+Added on 2026-10-12, as the owner agreed after the arrow key recording
+(20261012-163736), where kept arrows had no command: the quick
+reference's Navigating with the System Caret (17 commands, such as say all
+and next sentence; four have no laptop key there, so none is listed), and
+the browse mode caret movement and selection keys (29), which the quick
+reference does not list. NVDA binds those in its source, `cursorManager.py`
+([NVDA 2026.2 cursorManager.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/cursorManager.py)),
+whose scripts have no descriptions but Find's, so the recorder names them
+from the scripts' names (`moveByLine_forward` is "next line"), and the
+data's section says so and gives that source. Find, copy (Ctrl+C), and next
+and previous sentence are left out of that section, as the reference lists
+Find and the sentences and copy is not a caret key. The data now has 136
+commands; over recording 20261012-163736, each Down arrow is labelled next
+line and each Up arrow previous line.
+
 ### 2c-2, browse or focus mode
 
 Agreed with the owner on 2026-10-11: the rules below ("yes"); where the

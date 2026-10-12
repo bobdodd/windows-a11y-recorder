@@ -215,7 +215,27 @@ with hit test records: the object the latest request at or before the
 playhead was given, its last hit test's, and the page's precise result for
 it ("the page found the same", or the object it found). Its previous and
 next change buttons and count step through the requests given another
-object than the request before. The row names what Chromium gave a program
+object than the request before.
+
+An object with no name, such as a paragraph or a section, which Chromium
+gives when the point is over its margin or between lines rather than on
+its text, also says the text it holds and the object it is in, as the owner
+asked on 2026-10-12: `paragraph with no name (node 49), holding "This page
+is for testing what an assistive technology asks o…", in sectionWithoutName
+with no name (node 44)`. The text is that of the static text within it, in
+tree order, up to 60 characters; the object it is in is the node that lists
+it as a child. Both come from the accessibility checkpoints' node records
+of the object's document, found from its tree through the renderer's
+records, which name both, as Chromium serialized them before the request.
+The checkpoints are update batches that do not record deletions
+([accessibility checkpoint evidence model](accessibility-checkpoint-evidence-model.md)),
+so each node's latest version before the request is taken as the best
+known. When the document's tree was not recorded, or the object is not in
+it, the row says so; an object with no static text within it is said to
+hold no text, such as an icon in a button on cnib.ca, "in button
+"Forward"". The playback index keeps the checkpoints' node records whole
+for this (version 18). Over both target run recordings, every unnamed
+object the row gives was found in the recorded tree. The row names what Chromium gave a program
 asking about a point, which, with NVDA's mouse tracking on, is the point
 under the pointer; it is not what NVDA spoke.
 

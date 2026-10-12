@@ -56,7 +56,11 @@ public sealed record PlaybackIndex
     // Version 17 keeps protocol 0.60's accessibility request records
     // (browser.accessibility) whole, for their outcomes
     // (AccessibilityRequests).
-    public const int CurrentVersion = 17;
+    // Version 18 keeps the accessibility checkpoints' node records
+    // (browser.accessibility, accessibility-checkpoint-node) whole too, for
+    // the text an unnamed object holds and the object it is in, in the Under
+    // the pointer (Chromium) row.
+    public const int CurrentVersion = 18;
 
     public required int Version { get; init; }
 
@@ -271,7 +275,8 @@ public sealed class PlaybackIndexBuilder
             (channel == "accessibility.uia.events" && record.EventType == "focus-changed") ||
             WindowSnapshots.IsSnapshot(channel, record.EventType) ||
             MouseActivity.IsMouseEvidence(channel, record.EventType) ||
-            AccessibilityRequests.IsRequestEvidence(channel, record.EventType))
+            AccessibilityRequests.IsRequestEvidence(channel, record.EventType) ||
+            AccessibilityRequests.IsTreeEvidence(channel, record.EventType))
         {
             Keep(eventKey, record);
             return;
@@ -406,7 +411,8 @@ public sealed class PlaybackIndexBuilder
              (record.Channel == "accessibility.uia.events" && record.EventType == "focus-changed") ||
              KeyDispositions.IsKeyEvidence(record.Channel, record.EventType, record.Payload) ||
              MouseActivity.IsMouseEvidence(record.Channel, record.EventType) ||
-             AccessibilityRequests.IsRequestEvidence(record.Channel, record.EventType)) &&
+             AccessibilityRequests.IsRequestEvidence(record.Channel, record.EventType) ||
+             AccessibilityRequests.IsTreeEvidence(record.Channel, record.EventType)) &&
             record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()
                 : WindowSnapshots.IsSnapshot(record.Channel, record.EventType)

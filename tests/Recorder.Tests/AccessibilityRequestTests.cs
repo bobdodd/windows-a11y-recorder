@@ -291,7 +291,10 @@ public sealed class AccessibilityRequestTests
         Assert.Equal(AssistiveTechnologyTimeline.Group, start.Group);
 
         var row = Assert.Single(requests.RowsAt(Second + 500 * Millisecond));
-        Assert.Equal("sectionWithoutName with no name (node 640); the page found link \"Donate\" (node 700)", row.Value);
+        Assert.Equal(
+            "sectionWithoutName with no name (node 640), whose document's accessibility tree was not recorded; " +
+            "the page found link \"Donate\" (node 700)",
+            row.Value);
         Assert.Equal("00:00:01.000", row.WhenSet);
         Assert.True(row.Changed);
         Assert.Equal("link \"Donate\" (node 700); the page found the same", Assert.Single(requests.RowsAt(2 * Second)).Value);
@@ -306,6 +309,62 @@ public sealed class AccessibilityRequestTests
             PropertyChangeSteps.TimesOf(row, WindowsPreferenceTimeline.Empty, MagnifierChangeTimeline.Empty, accessibilityRequests: requests));
         Assert.Empty(AccessibilityRequests.Empty.RowsAt(Second));
         Assert.Null(AccessibilityRequests.Empty.ChangeTimesOf(AccessibilityRequests.PointerKey));
+    }
+
+    private static KeyEvidenceRecord TreeNode(string id, long time, int node, string role, string name, string children) =>
+        Record(id, time, BrowserEvidenceEventTypes.AccessibilityCheckpointNode, J(
+            $"{{'context':{RendererContext},'checkpointId':'c','nodeIndex':0,'accessibilityNodeId':{node},'parentAccessibilityNodeId':null," +
+            $"'domNodeId':null,'role':0,'roleName':'{role}','name':'{name}','description':'','serializedProperties':'id={node} {role}{(children.Length == 0 ? "" : " child_ids=" + children)}','focused':false}}"));
+
+    private static string Unnamed(string tree, int node, string role) =>
+        $"{{'treeId':'{tree}','nodeId':{node},'role':'{role}','name':'','bounds':{{'x':400,'y':250,'width':500,'height':400}}}}";
+
+    [Fact]
+    public void TheRowGivesAnUnnamedObjectsTextAndTheObjectItIsIn()
+    {
+        var text = "This paragraph is long enough that the row gives only the start of it, and no more.";
+        var requests = new AccessibilityRequests(
+        [
+            TreeNode("n1", Second / 10, 600, "main", "", "640"),
+            TreeNode("n2", Second / 10, 640, "sectionWithoutName", "", "641,650"),
+            TreeNode("n3", Second / 10, 641, "heading", "Contact us", "642"),
+            TreeNode("n4", Second / 10, 642, "staticText", "Contact us", ""),
+            TreeNode("n5", Second / 10, 650, "paragraph", "", "651"),
+            TreeNode("n6", Second / 10, 651, "staticText", text, ""),
+            TreeNode("n7", Second / 10, 660, "genericContainer", "", ""),
+            TreeNode("n8", Second / 10, 659, "button", "Forward", "660"),
+            Record("c1", Second / 5, BrowserEvidenceEventTypes.AccessibilityHitTestComputed, Computed(640, false)),
+            Record("h1", 2 * Second, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("cached-tree-guess", true, Section)),
+            Record("r1", 2 * Second + 5 * Millisecond, BrowserEvidenceEventTypes.AccessibilityHitTestResult, Result(Unnamed("TREE-1", 650, "paragraph"))),
+            // A later serialization of the section, without its heading.
+            TreeNode("n9", 3 * Second, 640, "sectionWithoutName", "", "650"),
+            Record("h2", 4 * Second, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("cached-tree-guess", false, Section, 600, 300)),
+            Record("h3", 5 * Second, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("cached-tree-guess", false, Unnamed("TREE-1", 660, "genericContainer"), 610, 300)),
+            Record("h4", 6 * Second, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("cached-tree-guess", false, Unnamed("TREE-1", 777, "genericContainer"), 620, 300)),
+            Record("h5", 7 * Second, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("cached-tree-guess", false, Unnamed("TREE-2", 5, "genericContainer"), 630, 300)),
+            Record("h6", 8 * Second, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("cached-tree-guess", false, Heading, 640, 300))
+        ]);
+
+        Assert.True(AccessibilityRequests.IsTreeEvidence(BrowserEvidenceChannels.Accessibility, BrowserEvidenceEventTypes.AccessibilityCheckpointNode));
+        Assert.False(AccessibilityRequests.IsRequestEvidence(BrowserEvidenceChannels.Accessibility, BrowserEvidenceEventTypes.AccessibilityCheckpointNode));
+        string Value(long time) => Assert.Single(requests.RowsAt(time)).Value;
+        Assert.Equal(
+            "sectionWithoutName with no name (node 640), holding \"Contact us This paragraph is long enough that the row gives…\", " +
+            "in main with no name (node 600); the page found paragraph with no name (node 650), " +
+            "holding \"This paragraph is long enough that the row gives only the st…\", in sectionWithoutName with no name (node 640)",
+            Value(2 * Second));
+        Assert.Equal(
+            "sectionWithoutName with no name (node 640), holding \"This paragraph is long enough that the row gives only the st…\", " +
+            "in main with no name (node 600); no precise result",
+            Value(4 * Second));
+        Assert.Equal(
+            "genericContainer with no name (node 660), holding no text, in button \"Forward\" (node 659); no precise result",
+            Value(5 * Second));
+        Assert.Equal("genericContainer with no name (node 777), not in the recorded accessibility tree; no precise result", Value(6 * Second));
+        Assert.Equal(
+            "genericContainer with no name (node 5), whose document's accessibility tree was not recorded; no precise result",
+            Value(7 * Second));
+        Assert.Equal("heading \"Contact us\" (node 652); no precise result", Value(8 * Second));
     }
 
     [Fact]
@@ -496,7 +555,7 @@ public sealed class AccessibilityRequestTests
         }
 
         var index = builder.Build();
-        Assert.Equal(17, index.Version);
+        Assert.Equal(18, index.Version);
         var kept = Assert.Single(index.Events, item => item.EventType == BrowserEvidenceEventTypes.AccessibilityHitTest);
         Assert.True(kept.Payload.TryGetProperty("answer", out var answer) && answer.TryGetProperty("bounds", out _));
 

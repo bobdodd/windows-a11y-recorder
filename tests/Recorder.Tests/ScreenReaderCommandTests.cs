@@ -91,6 +91,35 @@ public sealed class ScreenReaderCommandTests
     }
 
     [Fact]
+    public void TheCaretKeysComeFromTheReferenceAndNvdasSource()
+    {
+        // Agreed 2026-10-12: Navigating with the System Caret, from the
+        // reference, and the browse mode caret keys NVDA binds in
+        // cursorManager.py, named by the recorder.
+        var data = Assert.Single(ScreenReaderCommandData.All);
+        Assert.Equal(136, data.Commands.Count);
+        Assert.Equal("say all", Assert.Single(data.Of("NVDA+downArrow", "desktop")).Name);
+        Assert.Equal("say all", Assert.Single(data.Of("NVDA+a", "laptop")).Name);
+        Assert.Equal("next sentence", Assert.Single(data.Of("alt+downArrow", "desktop")).Name);
+        Assert.Equal("say all in column", Assert.Single(data.Of("NVDA+control+alt+downArrow", "desktop")).Name);
+        Assert.Empty(data.Of(string.Empty, "laptop"));
+        Assert.Equal(
+            "NVDA 2026.2 commands quick reference, Navigating with the System Caret, https://download.nvaccess.org/releases/2026.2/documentation/keyCommands.html#navigating-with-the-system-caret",
+            data.SourceOf(data.Of("alt+downArrow", "desktop")[0]));
+
+        var line = Assert.Single(data.Of("downArrow", "desktop"));
+        Assert.Equal(("next line", "browse mode", false), (line.Name, line.Context, line.Passes));
+        Assert.Equal("previous word", Assert.Single(data.Of("control+leftArrow", "laptop")).Name);
+        Assert.Equal("select to top of document", Assert.Single(data.Of("control+shift+home", "desktop")).Name);
+        Assert.Equal("select all", Assert.Single(data.Of("control+a", "desktop")).Name);
+        Assert.Empty(data.Of("control+c", "desktop"));
+        Assert.Equal(
+            "NVDA 2026.2, browse mode caret keys, from NVDA's source (cursorManager.py), named by the recorder, " +
+            "https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/cursorManager.py",
+            data.SourceOf(line));
+    }
+
+    [Fact]
     public void AVersionWithoutItsOwnDataUsesTheNearestEarlier()
     {
         Assert.Null(ScreenReaderCommandData.For("NVDA", "2026.2.0.1")!.Value.Note);

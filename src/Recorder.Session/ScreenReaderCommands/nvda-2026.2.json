@@ -2,7 +2,7 @@
   "product": "NVDA",
   "version": "2026.2",
   "source": "https://download.nvaccess.org/releases/2026.2/documentation/keyCommands.html",
-  "note": "From the NVDA 2026.2 Commands Quick Reference, the sections agreed on 2026-10-10: Basic NVDA commands, Navigating with the System Focus, and Browse Mode (its commands, Single Letter Navigation, the Elements List, Searching for text, Embedded Objects, and Native Selection Mode). Keys as the reference writes them; where it gives one key column, the key is for both layouts. Searching for text repeats Find, Find next and Find previous, listed once. passes: NVDA acts on the key and passes it on, so it is labelled on a passed key.",
+  "note": "From the NVDA 2026.2 Commands Quick Reference, the sections agreed on 2026-10-10: Basic NVDA commands, Navigating with the System Focus, and Browse Mode (its commands, Single Letter Navigation, the Elements List, Searching for text, Embedded Objects, and Native Selection Mode), and, agreed on 2026-10-12, Navigating with the System Caret. Keys as the reference writes them; where it gives one key column, the key is for both layouts; a key the reference does not give for the laptop layout is empty. Searching for text repeats Find, Find next and Find previous, listed once. Also agreed on 2026-10-12: the browse mode caret movement and selection keys NVDA binds in its source (cursorManager.py), which the reference does not list; that file names only Find, so the recorder names them from the scripts' names, and leaves out Find (listed from the reference), copy (control+c), and next and previous sentence (listed from the reference). passes: NVDA acts on the key and passes it on, so it is labelled on a passed key.",
   "sections": [
     {
       "id": "basic-nvda-commands",
@@ -15,6 +15,15 @@
     {
       "id": "browse-mode",
       "title": "Browse Mode"
+    },
+    {
+      "id": "navigating-with-the-system-caret",
+      "title": "Navigating with the System Caret"
+    },
+    {
+      "id": "cursor-manager",
+      "title": "browse mode caret keys, from NVDA's source (cursorManager.py), named by the recorder",
+      "source": "https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/cursorManager.py"
     }
   ],
   "commands": [
@@ -735,6 +744,374 @@
       "section": "browse-mode",
       "desktop": "NVDA+shift+f10",
       "laptop": "NVDA+shift+f10",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "say all",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "NVDA+downArrow",
+      "laptop": "NVDA+a",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "read current line",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "NVDA+upArrow",
+      "laptop": "NVDA+l",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "read current text selection",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "NVDA+shift+upArrow",
+      "laptop": "NVDA+shift+s",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "next sentence",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "alt+downArrow",
+      "laptop": "alt+downArrow",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "previous sentence",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "alt+upArrow",
+      "laptop": "alt+upArrow",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "move to previous column",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "control+alt+leftArrow",
+      "laptop": "control+alt+leftArrow",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "move to next column",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "control+alt+rightArrow",
+      "laptop": "control+alt+rightArrow",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "move to previous row",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "control+alt+upArrow",
+      "laptop": "control+alt+upArrow",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "move to next row",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "control+alt+downArrow",
+      "laptop": "control+alt+downArrow",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "move to first column",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "control+alt+home",
+      "laptop": "control+alt+home",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "move to last column",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "control+alt+end",
+      "laptop": "control+alt+end",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "move to first row",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "control+alt+pageUp",
+      "laptop": "control+alt+pageUp",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "move to last row",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "control+alt+pageDown",
+      "laptop": "control+alt+pageDown",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "say all in column",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "NVDA+control+alt+downArrow",
+      "laptop": "",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "say all in row",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "NVDA+control+alt+rightArrow",
+      "laptop": "",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "read entire column",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "NVDA+control+alt+upArrow",
+      "laptop": "",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "read entire row",
+      "section": "navigating-with-the-system-caret",
+      "desktop": "NVDA+control+alt+leftArrow",
+      "laptop": "",
+      "context": "any",
+      "passes": false
+    },
+    {
+      "name": "previous page",
+      "section": "cursor-manager",
+      "desktop": "pageUp",
+      "laptop": "pageUp",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next page",
+      "section": "cursor-manager",
+      "desktop": "pageDown",
+      "laptop": "pageDown",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous line",
+      "section": "cursor-manager",
+      "desktop": "upArrow",
+      "laptop": "upArrow",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next line",
+      "section": "cursor-manager",
+      "desktop": "downArrow",
+      "laptop": "downArrow",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous character",
+      "section": "cursor-manager",
+      "desktop": "leftArrow",
+      "laptop": "leftArrow",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next character",
+      "section": "cursor-manager",
+      "desktop": "rightArrow",
+      "laptop": "rightArrow",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous word",
+      "section": "cursor-manager",
+      "desktop": "control+leftArrow",
+      "laptop": "control+leftArrow",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next word",
+      "section": "cursor-manager",
+      "desktop": "control+rightArrow",
+      "laptop": "control+rightArrow",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "previous paragraph",
+      "section": "cursor-manager",
+      "desktop": "control+upArrow",
+      "laptop": "control+upArrow",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "next paragraph",
+      "section": "cursor-manager",
+      "desktop": "control+downArrow",
+      "laptop": "control+downArrow",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "start of line",
+      "section": "cursor-manager",
+      "desktop": "home",
+      "laptop": "home",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "end of line",
+      "section": "cursor-manager",
+      "desktop": "end",
+      "laptop": "end",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "top of document",
+      "section": "cursor-manager",
+      "desktop": "control+home",
+      "laptop": "control+home",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "bottom of document",
+      "section": "cursor-manager",
+      "desktop": "control+end",
+      "laptop": "control+end",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "select next character",
+      "section": "cursor-manager",
+      "desktop": "shift+rightArrow",
+      "laptop": "shift+rightArrow",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "select previous character",
+      "section": "cursor-manager",
+      "desktop": "shift+leftArrow",
+      "laptop": "shift+leftArrow",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "select next word",
+      "section": "cursor-manager",
+      "desktop": "shift+control+rightArrow",
+      "laptop": "shift+control+rightArrow",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "select previous word",
+      "section": "cursor-manager",
+      "desktop": "shift+control+leftArrow",
+      "laptop": "shift+control+leftArrow",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "select next line",
+      "section": "cursor-manager",
+      "desktop": "shift+downArrow",
+      "laptop": "shift+downArrow",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "select previous line",
+      "section": "cursor-manager",
+      "desktop": "shift+upArrow",
+      "laptop": "shift+upArrow",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "select next page",
+      "section": "cursor-manager",
+      "desktop": "shift+pageDown",
+      "laptop": "shift+pageDown",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "select previous page",
+      "section": "cursor-manager",
+      "desktop": "shift+pageUp",
+      "laptop": "shift+pageUp",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "select next paragraph",
+      "section": "cursor-manager",
+      "desktop": "shift+control+downArrow",
+      "laptop": "shift+control+downArrow",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "select previous paragraph",
+      "section": "cursor-manager",
+      "desktop": "shift+control+upArrow",
+      "laptop": "shift+control+upArrow",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "select to end of line",
+      "section": "cursor-manager",
+      "desktop": "shift+end",
+      "laptop": "shift+end",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "select to start of line",
+      "section": "cursor-manager",
+      "desktop": "shift+home",
+      "laptop": "shift+home",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "select to bottom of document",
+      "section": "cursor-manager",
+      "desktop": "shift+control+end",
+      "laptop": "shift+control+end",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "select to top of document",
+      "section": "cursor-manager",
+      "desktop": "shift+control+home",
+      "laptop": "shift+control+home",
+      "context": "browse mode",
+      "passes": false
+    },
+    {
+      "name": "select all",
+      "section": "cursor-manager",
+      "desktop": "control+a",
+      "laptop": "control+a",
       "context": "browse mode",
       "passes": false
     }
