@@ -221,3 +221,30 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   its "Build stages".
 - To test: as in its "Required tests", including the fixture page that
   responds to the preferences.
+
+## The whole screen's accessibility tree
+
+Raised by the owner on 2026-10-12, for later work, not designed. The
+recorder works outside Chromium too, so it should record the whole
+screen's accessibility tree, not only Chromium's, and track the changes in
+it. This would let a test follow a task through every program it uses:
+for example, a website that sends a two-factor code or a notification by
+email, with the participant reading the email in a mail program, so the
+whole circle is recorded.
+
+What is known so far:
+
+- The objects the player names, such as link "Home" (node 28), are
+  Chromium's own accessibility tree nodes, not UI Automation's or
+  IAccessible2's.
+- Chromium gives a page element's UI Automation runtime ID as the frame
+  and the element's DOM node ID, or a generated unique number when it has
+  no DOM node, and its IAccessible2 unique ID as that generated number,
+  negated
+  ([Chromium ax_platform_node_win.cc](https://raw.githubusercontent.com/chromium/chromium/main/ui/accessibility/platform/ax_platform_node_win.cc)).
+  The accessibility checkpoints record each node's DOM node ID, so
+  Chromium's nodes might be matched to UI Automation runtime IDs.
+- To check: whether the recording holds what Chromium uses for the frame
+  part of the runtime ID, and how often the UI Automation records
+  (`accessibility.uia.events`) hold runtime IDs; in the one record looked
+  at, the field was null.
