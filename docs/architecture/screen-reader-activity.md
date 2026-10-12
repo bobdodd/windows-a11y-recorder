@@ -892,6 +892,10 @@ passed. The second form was read on its own, 8 elements, and focus coming
 back read the dialog again; the tree of 6,000 items stopped at the
 element limit, 5,000, in 919 ms.
 
+In the player, package f027fc5, recording 20261011-195613: the owner
+confirmed the snapshots show on the window strip: "I have checked the
+recording and I saw the NVDA settings when I look at the green strips".
+
 Tested at the unit level (`WindowSnapshotTests`: the walk's order and
 limits on a fixed tree, a failed child list, the validator, the summary,
 the outline, the compact form, and the player through the playback
