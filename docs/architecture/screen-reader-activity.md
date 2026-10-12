@@ -1309,9 +1309,12 @@ judgment, and agreed to the selection rule.
    settle it later.
 
 Test runs on the target machine from now on cover one behaviour each, in
-at most five steps, with what to listen for, as the owner asked: "You are
+at most five steps, with what to check on screen, as the owner asked: "You are
 creating too complex a test script. I can't remember it all and I lose my
 place trying to follow. That reduces my ability to observe."
+The owner checks the player by reading it on screen as an auditor, not
+with a screen reader, so each step says what to look for, not what to
+listen for (2026-10-12).
 
 ### 4a as built
 
