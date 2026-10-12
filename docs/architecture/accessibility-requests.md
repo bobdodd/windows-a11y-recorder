@@ -376,3 +376,28 @@ actions with a key, and said nothing was sent after five keys NVDA kept: H
 after the last heading, D after the last landmark on each page, and NVDA+F7
 twice, as the Elements List opens without asking the page. The Under the
 pointer (Chromium) row has 159 changes.
+
+## Arrow keys, 2026-10-12
+
+A second NVDA recording (20261012-163736-47b4e2114dd74ba6881c1108ebe26fae)
+on the test page, at c4a47a0, checked rule 2 with arrow keys.
+
+- **Down and Up arrow** in browse mode, 15 presses, each sent
+  `scrollToMakeVisible` on the object at the new line, 22 to 25 ms after the
+  key, centered and not scrolling if visible, with the accessibility focus
+  moved to it. The rectangle was the whole object's, not the line's.
+- **A Down arrow within one paragraph**, to its second line, sent
+  `scrollToMakeVisible` on the paragraph again and no accessibility focus
+  action, as Chromium leaves the accessibility focus alone when the object
+  is the same (see "Accessibility focus").
+- **Arrow keys are not named as NVDA commands**: the command data holds the
+  sections of the Commands Quick Reference agreed on 2026-10-10, without the
+  arrow keys, so a kept arrow's outcome is "kept" with no command.
+- **The Elements List was used with the mouse**: "Move to" was clicked, and
+  the button released 170 ms before the actions on the heading "Far down the
+  page". Rule 2 links actions with keys only, so they say no key was pressed
+  in the 500 ms before them.
+- **Under the pointer**: 677 requests. Judged by the last hit test, 10 were
+  given another object than the page's precise result: 7 a container the
+  pointer had moved into, and 3 a different object; none involved the frame.
+  The Under the pointer (Chromium) row has 74 changes.
