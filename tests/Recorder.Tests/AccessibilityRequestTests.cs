@@ -161,14 +161,26 @@ public sealed class AccessibilityRequestTests
 
     // --- The player -------------------------------------------------------------
 
+    private const string Section =
+        "{'treeId':'TREE-1','nodeId':640,'role':'sectionWithoutName','name':'','bounds':{'x':400,'y':250,'width':500,'height':400}}";
+
+    private const string FrameDocument =
+        "{'treeId':'TREE-2','nodeId':5,'role':'rootWebArea','name':'Frame','bounds':{'x':480,'y':280,'width':300,'height':200}}";
+
+    private static KeyEvidenceRecord KeyDown(string id, long time, int virtualKey, bool injected = false)
+    {
+        using var document = JsonDocument.Parse(J($"{{'virtualKey':{virtualKey},'up':false,'injected':{(injected ? "true" : "false")}}}"));
+        return new KeyEvidenceRecord(id, time, KeyboardHookRecords.Channel, KeyboardHookRecords.KeyEventType, document.RootElement.Clone());
+    }
+
     [Fact]
     public void AHitTestIsJoinedWithThePagesPreciseResult()
     {
         var requests = new AccessibilityRequests(
         [
             Record("h1", Second, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("cached-tree-guess", true, Link)),
-            Record("h2", Second + 2 * Millisecond, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("cached-tree-guess", true, Link)),
-            Record("r1", Second + 10 * Millisecond, BrowserEvidenceEventTypes.AccessibilityHitTestResult, Result(Heading)),
+            Record("h2", Second + 30 * Millisecond, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("cached-tree-guess", true, Link, 600, 300)),
+            Record("r1", Second + 40 * Millisecond, BrowserEvidenceEventTypes.AccessibilityHitTestResult, Result(Heading)),
             Record("h3", 2 * Second, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("last-precise-result", true, Heading)),
             Record("r2", 2 * Second + 5 * Millisecond, BrowserEvidenceEventTypes.AccessibilityHitTestResult, Result(Heading)),
             Record("h4", 5 * Second, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("cached-tree-guess", true, null, -5, 12))
@@ -180,19 +192,25 @@ public sealed class AccessibilityRequestTests
             guess.Text);
         Assert.Contains("Point: 512, 300 on the screen, in physical pixels.", guess.Details);
         Assert.Contains(
-            "The page's precise hit test then found heading \"Contact us\" (node 652), 10 ms later: not the object given.",
+            "The page was asked for a precise hit test; no result arrived before the next request, 30 ms later. A point with no object fires no result.",
             guess.Details);
-        Assert.Contains(guess.Details, line => line.StartsWith("1 other hit test was asked before it arrived", StringComparison.Ordinal));
         Assert.Contains(guess.Details, line => line.StartsWith("Chromium cannot tell which program asked", StringComparison.Ordinal));
+
+        var later = requests.Of("h2")!;
+        Assert.Contains(
+            "The page's precise hit test then found heading \"Contact us\" (node 652), 10 ms after the request began: not the object given.",
+            later.Details);
+        Assert.Contains("The object given is a different object from the page's precise result.", later.Details);
+        Assert.Contains("The next request, 970 ms later, was given heading \"Contact us\" (node 652).", later.Details);
 
         var precise = requests.Of("h3")!;
         Assert.Equal(
             "Given at once: heading \"Contact us\" (node 652), from the page's last precise result, whose bounds held the point",
             precise.Text);
         Assert.Contains(
-            "The page's precise hit test then found heading \"Contact us\" (node 652), 5 ms later: the object given.",
+            "The page's precise hit test then found heading \"Contact us\" (node 652), 5 ms after the request began: the object given.",
             precise.Details);
-        Assert.DoesNotContain(precise.Details, line => line.Contains("other hit test", StringComparison.Ordinal));
+        Assert.DoesNotContain(precise.Details, line => line.StartsWith("The next request", StringComparison.Ordinal));
 
         var nothing = requests.Of("h4")!;
         Assert.Equal("Given at once: no object, from a guess from Chromium's own copy of the tree, by bounds", nothing.Text);
@@ -200,7 +218,140 @@ public sealed class AccessibilityRequestTests
 
         var result = requests.Of("r1")!;
         Assert.Equal("The page's precise hit test found heading \"Contact us\" (node 652)", result.Text);
-        Assert.Contains("The latest hit test before it was asked 8 ms earlier, at 512, 300.", result.Details);
+        Assert.Contains(
+            "Joined with the request at 00:00:01.030, 1 hit test at 600, 300, the latest before it, 10 ms after the request began.",
+            result.Details);
+    }
+
+    [Fact]
+    public void HitTestsAtOnePointInQuickSuccessionAreOneRequest()
+    {
+        // A program's accHitTest recursion: the document is given the
+        // section, the section the heading. The precise result, the link, is
+        // inside the section's bounds, so the program was given a container
+        // the pointer had moved into; the next request has the link.
+        var requests = new AccessibilityRequests(
+        [
+            Record("h1", Second, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("last-precise-result", true, Section, 500, 335)),
+            Record("h2", Second + 2 * Millisecond, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("last-precise-result", true, Section, 500, 335)),
+            Record("h3", Second + 4 * Millisecond, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("last-precise-result", true, Section, 500, 335)),
+            Record("r1", Second + 9 * Millisecond, BrowserEvidenceEventTypes.AccessibilityHitTestResult, Result(Link)),
+            Record("r2", Second + 10 * Millisecond, BrowserEvidenceEventTypes.AccessibilityHitTestResult, Result(Link)),
+            Record("h4", Second + 31 * Millisecond, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("last-precise-result", true, Link, 502, 336)),
+            Record("h5", Second + 60 * Millisecond, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("last-precise-result", true, Link, 502, 336)),
+            Record("r3", Second + 65 * Millisecond, BrowserEvidenceEventTypes.AccessibilityHitTestResult, Result(FrameDocument)),
+            Record("h6", 2 * Second, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("cached-tree-guess", true, Section, 600, 380)),
+            Record("r4", 2 * Second + 8 * Millisecond, BrowserEvidenceEventTypes.AccessibilityHitTestResult, Result(FrameDocument))
+        ]);
+
+        var first = requests.Of("h1")!;
+        Assert.Equal(
+            "Given at once: sectionWithoutName with no name (node 640), from the page's last precise result, whose bounds held the point; " +
+            "one request of 3 hit tests at 500, 335 within 4 ms",
+            first.Text);
+        Assert.Contains(first.Details, line => line.EndsWith("The last was given sectionWithoutName with no name (node 640).", StringComparison.Ordinal));
+        Assert.Contains("2 precise results arrived, all for that object.", first.Details);
+        Assert.Contains(
+            "The object given is a container the pointer had moved into: its bounds hold those of the precise result.",
+            first.Details);
+        Assert.Contains("The next request, 31 ms later, was given link \"Donate\" (node 700).", first.Details);
+
+        Assert.Equal(
+            "Part of the request at 00:00:01.000: hit test 2 of 3, given sectionWithoutName with no name (node 640)",
+            requests.Of("h2")!.Text);
+        Assert.Equal(
+            "Part of the request at 00:00:01.000: hit test 3 of 3, given sectionWithoutName with no name (node 640)",
+            requests.Of("h3")!.Text);
+
+        // A record more than 20 ms after the one before, at the same point,
+        // begins another request.
+        Assert.DoesNotContain("one request", requests.Of("h4")!.Text, StringComparison.Ordinal);
+        Assert.Contains(requests.Of("h4")!.Details, line => line.StartsWith("The page was asked for a precise hit test; no result arrived before the next request, 29 ms later.", StringComparison.Ordinal));
+        Assert.Contains("The precise result is in another document's tree, such as a frame's.", requests.Of("h5")!.Details);
+        Assert.Contains("The precise result is in another document's tree, such as a frame's.", requests.Of("h6")!.Details);
+        Assert.DoesNotContain(requests.Of("h6")!.Details, line => line.StartsWith("The next request", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TheUnderThePointerRowGivesTheLatestRequestsObject()
+    {
+        var requests = new AccessibilityRequests(
+        [
+            Record("h1", Second, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("cached-tree-guess", true, Section)),
+            Record("r1", Second + 5 * Millisecond, BrowserEvidenceEventTypes.AccessibilityHitTestResult, Result(Link)),
+            Record("h2", 2 * Second, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("last-precise-result", true, Link, 500, 335)),
+            Record("r2", 2 * Second + 5 * Millisecond, BrowserEvidenceEventTypes.AccessibilityHitTestResult, Result(Link)),
+            Record("h3", 3 * Second, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("last-precise-result", true, Link, 501, 335)),
+            Record("h4", 4 * Second, BrowserEvidenceEventTypes.AccessibilityHitTest, HitTest("cached-tree-guess", false, Heading, 490, 300))
+        ]);
+
+        var start = Assert.Single(requests.RowsAt(Second / 2));
+        Assert.Equal(AccessibilityRequests.PointerSetting, start.Setting);
+        Assert.Equal("no hit test yet", start.Value);
+        Assert.Equal(AssistiveTechnologyTimeline.Group, start.Group);
+
+        var row = Assert.Single(requests.RowsAt(Second + 500 * Millisecond));
+        Assert.Equal("sectionWithoutName with no name (node 640); the page found link \"Donate\" (node 700)", row.Value);
+        Assert.Equal("00:00:01.000", row.WhenSet);
+        Assert.True(row.Changed);
+        Assert.Equal("link \"Donate\" (node 700); the page found the same", Assert.Single(requests.RowsAt(2 * Second)).Value);
+        Assert.Equal("link \"Donate\" (node 700); no precise result", Assert.Single(requests.RowsAt(3 * Second + Millisecond)).Value);
+        Assert.False(Assert.Single(requests.RowsAt(9 * Second)).Changed);
+
+        // A step is a request given another object than the one before.
+        Assert.Equal([Second, 2 * Second, 4 * Second], requests.ChangeTimesOf(AccessibilityRequests.PointerKey));
+        Assert.Null(requests.ChangeTimesOf(MouseActivity.PointerKey));
+        Assert.Equal(
+            requests.ChangeTimesOf(AccessibilityRequests.PointerKey),
+            PropertyChangeSteps.TimesOf(row, WindowsPreferenceTimeline.Empty, MagnifierChangeTimeline.Empty, accessibilityRequests: requests));
+        Assert.Empty(AccessibilityRequests.Empty.RowsAt(Second));
+        Assert.Null(AccessibilityRequests.Empty.ChangeTimesOf(AccessibilityRequests.PointerKey));
+    }
+
+    [Fact]
+    public void AnActionIsLinkedWithTheKeyBeforeIt()
+    {
+        var focusExtra = "'targetRect':{'x':0,'y':0,'width':0,'height':0},'targetPoint':null,'horizontalScrollAlignment':'center','verticalScrollAlignment':'center','scrollBehavior':'do-not-scroll-if-visible','selection':null";
+        var requests = new AccessibilityRequests(
+            [
+                Record("s1", Second + 25 * Millisecond, BrowserEvidenceEventTypes.AccessibilityActionSent, Sent("scrollToMakeVisible", 652, Heading, focusExtra)),
+                Record("s2", Second + 25 * Millisecond + 100_000, BrowserEvidenceEventTypes.AccessibilityActionSent, Sent("clearAccessibilityFocus", 700, Link)),
+                Record("s3", Second + 25 * Millisecond + 200_000, BrowserEvidenceEventTypes.AccessibilityActionSent, Sent("setAccessibilityFocus", 652, Heading)),
+                Record("s4", 5 * Second, BrowserEvidenceEventTypes.AccessibilityActionSent, Sent("doDefault", 700, Link)),
+                Record("s5", 5 * Second + 450 * Millisecond, BrowserEvidenceEventTypes.AccessibilityActionSent, Sent("focus", 700, Link))
+            ],
+            [
+                KeyDown("k1", Second, 0x48),
+                KeyDown("k2", 3 * Second, 0x48),
+                KeyDown("k3", 4 * Second, 0x09),
+                KeyDown("k4", 4 * Second + 100 * Millisecond, 0x09, injected: true)
+            ],
+            [new KeptCommand(Second, "h", ["next heading"]), new KeptCommand(3 * Second, "h", ["next heading"])]);
+
+        var scroll = requests.Of("s1")!;
+        Assert.Contains("After the key H, 25 ms earlier, which NVDA kept as next heading (h), inferred.", scroll.Details);
+        Assert.Contains(
+            "Sent with it, as one step: clear Chromium's accessibility focus from link \"Donate\" (node 700); " +
+            "move Chromium's accessibility focus, its note of the assistive technology's position, to heading \"Contact us\" (node 652).",
+            scroll.Details);
+        Assert.Equal(
+            "Asked the page to move Chromium's accessibility focus, its note of the assistive technology's position, to heading \"Contact us\" (node 652)",
+            requests.Of("s3")!.Text);
+        Assert.Equal("Asked the page to clear Chromium's accessibility focus from link \"Donate\" (node 700)", requests.Of("s2")!.Text);
+        Assert.Equal(
+            "Sent to the page after it: scroll heading \"Contact us\" (node 652) into view; " +
+            "clear Chromium's accessibility focus from link \"Donate\" (node 700); " +
+            "move Chromium's accessibility focus, its note of the assistive technology's position, to heading \"Contact us\" (node 652).",
+            requests.AfterKey("k1"));
+
+        // A key NVDA kept that no action followed says so; one it did not
+        // keep says nothing. An injected key is not one pressed.
+        Assert.Equal("Nothing was sent to the page in the 500 ms after it.", requests.AfterKey("k2"));
+        Assert.Null(requests.AfterKey("k4"));
+        Assert.Contains("No key was pressed in the 500 ms before it.", requests.Of("s4")!.Details);
+        Assert.Contains(requests.Of("s5")!.Details, line => line.StartsWith("No key was pressed", StringComparison.Ordinal));
+        Assert.Null(requests.AfterKey("k3"));
+        Assert.Null(AccessibilityRequests.Empty.AfterKey("k1"));
     }
 
     [Fact]
@@ -321,7 +472,7 @@ public sealed class AccessibilityRequestTests
         var outcome = archive.AccessibilityRequests.Of("e1")!;
         Assert.StartsWith("Given at once: link \"Donate\" (node 700)", outcome.Text, StringComparison.Ordinal);
         Assert.Contains(
-            "The page's precise hit test then found heading \"Contact us\" (node 652), 10 ms later: not the object given.",
+            "The page's precise hit test then found heading \"Contact us\" (node 652), 10 ms after the request began: not the object given.",
             outcome.Details);
     }
 }

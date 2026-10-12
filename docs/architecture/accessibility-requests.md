@@ -7,8 +7,12 @@ Step 3 of the NVDA work in
 2026-10-12, hooks built into the instrumented Chromium rather than a trace
 first, and a test on [cnib.ca](https://cnib.ca) and on a test page in the
 repository. The hook design was agreed the same day, with the fuller player
-view held until after the target run. Built as protocol 0.60; to build in
-the owner's checkout and to run on the target machine. Listed in
+view held until after the target run. Built as protocol 0.60, built in the
+owner's checkout, and run on the target machine on 2026-10-12. The fuller
+player view (rule 2) was agreed after the target run, the same day: actions
+linked with keys, hit tests grouped into requests, a request given a
+container flagged, the Under the pointer (Chromium) row, and new wording for
+accessibility focus. Listed in
 [outstanding work](analysis-outstanding-work.md).
 
 ## The problem
@@ -128,25 +132,85 @@ file, `render_frame_host_impl.cc`, and `render_accessibility_impl.cc`;
 
 The event list summarizes each record, for example
 `accessibility-hit-test: at 512, 300, heading "Contact us", guess from the tree`.
-Selected event values begins with the record's outcome (rule 1,
-`AccessibilityRequests`):
+Selected event values begins with the record's outcome (rule 2,
+`AccessibilityRequests`).
 
-- **A hit test:** what was given at once and from what, then the page's
-  precise result, joined as the first `accessibility-hit-test-result` within
-  1 second after it, and whether it is the same object (the same tree and
-  node). When other hit tests were asked before that result arrived, it says
-  the result may answer one of them, since Chromium does not say which
-  request a result answers. No result within 1 second is said too: a point
-  with no object fires none.
-- **A precise result:** the object found, its bounds, and the latest hit
-  test before it.
+### Requests
+
+Hit test records at one point, each within 20 ms of the one before, with no
+hit test at another point between, are one request: a program's
+`accHitTest` asks each object it is given in turn, as NVDA's recursion does
+([NVDA, IAccessible objects](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/NVDAObjects/IAccessible/__init__.py)).
+In the target run, a request's records spanned a median 5 ms, and 17 ms
+for 95 in 100, and requests were a median 31 ms apart. A precise result
+(`accessibility-hit-test-result`) is joined with the latest request before
+it, within 1 second, since Chromium does not say which request a result
+answers.
+
+- **A request's first hit test:** what was given at once and from what, the
+  number of hit tests and their span, what the last was given, and the
+  page's precise result, the last joined with it, and whether it is the
+  object the last hit test was given (the same tree and node). When several
+  precise results arrived, it says whether they were all one object. When
+  the object given is not the precise result, it says which of these it is,
+  and what the next request was given and when:
+  - a container the pointer had moved into, when its bounds hold those of
+    the precise result;
+  - in another document's tree than the precise result, such as a frame's;
+  - a different object.
+
+  No result before the next request, or within 1 second, is said too: a
+  point with no object fires none.
+- **A request's other hit tests:** the request they are part of, their place
+  in it, and what each was given.
+- **A precise result:** the object found, its bounds, and the request it is
+  joined with.
+
+### Actions and keys
+
 - **An action sent:** what it asked, in words ("scroll heading "Contact us"
-  (node 652) into view"), its alignment, rectangle or point, and selection,
-  and whether the renderer received it, joined as the first
+  (node 652) into view"), its alignment, rectangle or point, and selection;
+  whether the renderer received it, joined as the first
   `accessibility-action-received` with the same tree, action, and target
-  within 1 second.
+  within 1 second; the actions sent within 1 ms of it, as one step; and the
+  key it is linked with.
+- **The key:** an action is linked with the latest key pressed in the 500 ms
+  before it, from the keyboard hook's records, leaving out keys a program
+  injected. In the target run, H and D sent their actions 20 to 30 ms after
+  the key, the Elements List's Enter 0.22 to 0.30 s after, and the scroll
+  that followed "Activate" 0.15 s after. The owner chose to try 500 ms and
+  see. When NVDA kept the key, its inferred command is named.
+- **A key's Selected event values:** after the key's outcome, what was sent
+  to the page after it: the actions linked with it. For a key NVDA kept
+  that no action followed, it says nothing was sent in the 500 ms after it,
+  as for H after the last heading.
 - **An action received, and the renderer's hit test:** what the renderer
   was asked or found, and the browser's sending of it.
+
+### Accessibility focus
+
+`setAccessibilityFocus` reads as "move Chromium's accessibility focus, its
+note of the assistive technology's position, to …", and
+`clearAccessibilityFocus` as "clear Chromium's accessibility focus from …".
+On platforms without an accessibility focus API, Windows among them,
+Chromium sets it itself after each scroll into view an assistive technology
+asks for: it clears the previous object's and sets the new one's, unless the
+object is the same
+([browser_accessibility_manager.cc](https://raw.githubusercontent.com/chromium/chromium/main/ui/accessibility/platform/browser_accessibility_manager.cc),
+`ScrollToMakeVisible` and `UpdateAccessibilityFocus`). It is so Chromium's
+record of the last object a program scrolled to, such as NVDA's browse mode
+position after H.
+
+### Under the pointer (Chromium)
+
+A row of the Properties panel, in the Screen reader group, for a recording
+with hit test records: the object the latest request at or before the
+playhead was given, its last hit test's, and the page's precise result for
+it ("the page found the same", or the object it found). Its previous and
+next change buttons and count step through the requests given another
+object than the request before. The row names what Chromium gave a program
+asking about a point, which, with NVDA's mouse tracking on, is the point
+under the pointer; it is not what NVDA spoke.
 
 Every outcome of a request says that Chromium cannot tell which program
 asked. The playback index keeps these records whole (version 17).
@@ -154,9 +218,13 @@ asked. The playback index keeps these records whole (version 17).
 ## Limits
 
 - Which program made a request is not recorded; Chromium does not know.
-- A precise result is joined to the hit test before it by time; with
-  several hit tests in flight, the player says it cannot tell which one it
-  answers.
+- A precise result is joined with the request before it by time; Chromium
+  does not say which request it answers, and the player says so.
+- A request is grouped by time and point, not by what asked: two programs
+  asking about one point within 20 ms would be one request.
+- An action is linked with a key by time alone. A key pressed just before an
+  action it did not cause, such as a key in another window, is linked all
+  the same; the 500 ms window is a first choice, to be checked.
 - The renderer's hit test point is in the frame's coordinates, not the
   screen's.
 - What NVDA spoke is not recorded. The records show what NVDA asked and was
@@ -167,8 +235,10 @@ asked. The playback index keeps these records whole (version 17).
 - **Unit tests** (`tests/Recorder.Tests/AccessibilityRequestTests.cs`, with
   samples in `EvidenceSamples` for the database tests in
   `EvidenceTableTests`): the payload rules, each record read as its typed
-  shape, the joins and outcomes, the summaries, and the outcomes through the
-  playback index. The integration script's tests
+  shape, the joins and outcomes, the grouping of hit tests into requests,
+  the container and frame flags, the link of actions with keys, the
+  wording of accessibility focus, the Under the pointer (Chromium) row and
+  its steps, the summaries, and the outcomes through the playback index. The integration script's tests
   (`AccessibilityRequestIntegrationTests` in `chromium/test_integrate.py`)
   patch excerpts of the 156 sources.
 - **An integration test on Windows** (`tests/AccessibilityRequestProbe`):
@@ -279,11 +349,16 @@ between requests was 31 ms.
 
 - 841 were answered from the page's last precise result and 108 by
   Chromium's guess.
-- 112 were given an object other than the page's precise result for that
-  request. In 91 of them, the object given was larger, and its bounds held
-  the precise result: Chromium's last precise result, or its guess, was a
-  container the pointer had moved into. The next request, a median 34 ms
-  later, had the deeper object.
+- Judged by the first hit test of each request, 112 were given an object
+  other than the page's precise result. In 91 of them, the object given
+  was larger, and its bounds held the precise result: Chromium's last
+  precise result, or its guess, was a container the pointer had moved into.
+  The next request, a median 34 ms later, had the deeper object.
+- Judged by the last hit test, the object the program finished with, as the
+  player's rule 2 does, 62 were: 29 a container the pointer had moved into,
+  21 in another document's tree than the precise result, and 12 a different
+  object. The rest were put right within the request, because a precise
+  result arrived between its hit tests.
 - Entering the frame, 21 requests were given the section around it while
   the precise result was in the frame's document.
 - Over the sticky header, with the page scrolled, 94 requests were made.
@@ -293,3 +368,11 @@ between requests was 31 ms.
 What NVDA spoke is not recorded. A request given a container a pointer
 has moved into shows what NVDA had to announce until its next request, not
 what it said.
+
+### The player's rule 2 over the recording
+
+Run over the recording, rule 2 counted the same 949 requests, linked all 97
+actions with a key, and said nothing was sent after five keys NVDA kept: H
+after the last heading, D after the last landmark on each page, and NVDA+F7
+twice, as the Elements List opens without asking the page. The Under the
+pointer (Chromium) row has 159 changes.

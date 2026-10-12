@@ -448,7 +448,11 @@ once and the page's precise result that follows, and each action, such as
 scrolling an object into view, focusing it, or activating it, as the
 browser sent it and the page received it. The event list names each
 request, and Selected event values says what was given and found, or what
-was asked. Chromium cannot tell which program asked. See
+was asked. Hit tests at one point in quick succession are one request; an
+action is linked with the key pressed before it, and a key with what was
+sent to the page after it. The Properties panel's Under the pointer
+(Chromium) row gives the object the latest request was given. Chromium
+cannot tell which program asked. See
 [accessibility requests](docs/architecture/accessibility-requests.md).
 
 Protocol 0.59 records the browser's theme, its color, color style,

@@ -71,6 +71,7 @@ public static class PropertyChangeSteps
     /// The NVDA mode row's are those of <see cref="ScreenReaderModeTimeline.ChangeTimesOf"/>.
     /// The NVDA window row's are those of <see cref="ScreenReaderWindowTimeline.ChangeTimesOf"/>.
     /// The Pointer and NVDA mouse tracking rows' are those of <see cref="MouseActivity.ChangeTimesOf"/>.
+    /// The Under the pointer (Chromium) row's are those of <see cref="AccessibilityRequests.ChangeTimesOf"/>.
     /// </summary>
     public static IReadOnlyList<long>? TimesOf(
         PropertyRow row,
@@ -81,7 +82,8 @@ public static class PropertyChangeSteps
         InputRecordabilityTimeline? inputRecordability = null,
         ScreenReaderModeTimeline? screenReaderMode = null,
         ScreenReaderWindowTimeline? screenReaderWindows = null,
-        MouseActivity? mouse = null)
+        MouseActivity? mouse = null,
+        AccessibilityRequests? accessibilityRequests = null)
     {
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(settings);
@@ -90,6 +92,11 @@ public static class PropertyChangeSteps
             row.Key.StartsWith(BrowserPreferenceTimeline.PageKeyPrefix, StringComparison.Ordinal))
         {
             return (browser ?? BrowserPreferenceTimeline.Empty).ChangeTimesOf(row.Key);
+        }
+
+        if (row.Key == AccessibilityRequests.PointerKey)
+        {
+            return (accessibilityRequests ?? AccessibilityRequests.Empty).ChangeTimesOf(row.Key);
         }
 
         if (row.Key is MouseActivity.PointerKey or MouseActivity.NvdaTrackingKey)

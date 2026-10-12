@@ -11,19 +11,39 @@ public sealed record AccessibilityRequestOutcome(string Text, IReadOnlyList<stri
 /// The requests an assistive technology made of a page through the platform
 /// accessibility API, and how Chromium answered them, from protocol 0.60's
 /// records on the <c>browser.accessibility</c> channel: each record's
-/// outcome, for Selected event values. A hit test is joined with the page's
-/// precise result that follows it, and an action the browser process sent
-/// with the renderer's receipt of it. Chromium cannot tell which program made
-/// a request. See docs/architecture/accessibility-requests.md.
+/// outcome, for Selected event values, and the Under the pointer (Chromium)
+/// row of the Properties panel. Hit test records at one point in quick
+/// succession are one request, as a program's <c>accHitTest</c> asks each
+/// object it is given in turn; a request is joined with the page's precise
+/// results that follow it. An action the browser process sent is joined with
+/// the renderer's receipt of it, and with the key pressed before it. Chromium
+/// cannot tell which program made a request. Rule 2, as in
+/// docs/architecture/accessibility-requests.md.
 /// </summary>
 public sealed class AccessibilityRequests
 {
-    public const int RuleVersion = 1;
+    public const int RuleVersion = 2;
 
     /// <summary>The longest a precise result or a receipt is joined after its request.</summary>
     public const long JoinWindowNanoseconds = 1_000_000_000;
 
+    /// <summary>The longest a hit test record follows the one before at the same point, within one request.</summary>
+    public const long RequestGapNanoseconds = 20_000_000;
+
+    /// <summary>The longest an action follows the key it is linked with.</summary>
+    public const long KeyWindowNanoseconds = 500_000_000;
+
+    /// <summary>Actions sent within this of one another are one step.</summary>
+    public const long StepNanoseconds = 1_000_000;
+
     public const string Channel = BrowserEvidenceChannels.Accessibility;
+
+    /// <summary>The key of the Under the pointer (Chromium) row.</summary>
+    public const string PointerKey = "accessibility.pointer";
+
+    public const string PointerSetting = "Under the pointer (Chromium)";
+
+    private const long ChangedWindowNanoseconds = 1_000_000_000;
 
     private static readonly HashSet<string> EventTypes = new(StringComparer.Ordinal)
     {
@@ -40,11 +60,54 @@ public sealed class AccessibilityRequests
 
     private readonly Dictionary<string, AccessibilityRequestOutcome> _outcomes = new(StringComparer.Ordinal);
 
-    private sealed record Node(string TreeId, long NodeId, string Role, string Name, string Bounds);
+    private readonly Dictionary<string, string> _afterKeys = new(StringComparer.Ordinal);
+
+    private readonly List<Request> _requests = [];
+
+    private readonly List<long> _requestTimes = [];
+
+    private readonly List<long> _pointerChanges = [];
+
+    private sealed record Node(string TreeId, long NodeId, string Role, string Name, string Bounds, Box? Box);
+
+    private sealed record Box(long X, long Y, long Width, long Height)
+    {
+        public bool Holds(Box other) =>
+            X <= other.X && Y <= other.Y && X + Width >= other.X + other.Width && Y + Height >= other.Y + other.Height;
+    }
 
     private sealed record Item(string EventId, long Time, string EventType, JsonElement Payload);
 
-    public AccessibilityRequests(IEnumerable<KeyEvidenceRecord> records)
+    private sealed record Key(string EventId, long Time, int VirtualKey);
+
+    // One request: its hit test records, in order, the precise results joined
+    // with it, and the time of the next request, when there is one.
+    private sealed class Request
+    {
+        public required List<Item> HitTests { get; init; }
+
+        public required string Point { get; init; }
+
+        public List<Item> Results { get; } = [];
+
+        public long? NextTime { get; set; }
+
+        public Node? Given => NodeOf(HitTests[^1].Payload, "answer");
+
+        public Node? Precise => Results.Count == 0 ? null : NodeOf(Results[^1].Payload, "result");
+
+        public long Time => HitTests[0].Time;
+    }
+
+    /// <summary>
+    /// The outcomes of the request records. The key records, when given, are
+    /// the keyboard hook's and raw input's records the key outcomes come
+    /// from; the kept commands are the keys NVDA kept, with its commands.
+    /// </summary>
+    public AccessibilityRequests(
+        IEnumerable<KeyEvidenceRecord> records,
+        IEnumerable<KeyEvidenceRecord>? keyRecords = null,
+        IReadOnlyList<KeptCommand>? keptCommands = null)
     {
         ArgumentNullException.ThrowIfNull(records);
         var items = records
@@ -53,15 +116,35 @@ public sealed class AccessibilityRequests
             .OrderBy(record => record.MonotonicNanoseconds)
             .Select(record => new Item(record.EventId, record.MonotonicNanoseconds, record.EventType, record.Payload))
             .ToList();
+        Recorded = items.Count > 0;
+        var keys = (keyRecords ?? [])
+            .Where(record => record.Channel == KeyboardHookRecords.Channel &&
+                record.EventType == KeyboardHookRecords.KeyEventType &&
+                record.Payload.ValueKind == JsonValueKind.Object &&
+                !ReadBoolean(record.Payload, "up") && !ReadBoolean(record.Payload, "injected") &&
+                ReadInt64(record.Payload, "virtualKey") is not null)
+            .OrderBy(record => record.MonotonicNanoseconds)
+            .Select(record => new Key(record.EventId, record.MonotonicNanoseconds, (int)ReadInt64(record.Payload, "virtualKey")!.Value))
+            .ToList();
+        var kept = (keptCommands ?? []).GroupBy(command => command.Time).ToDictionary(group => group.Key, group => group.First());
+
+        GroupRequests(items);
+        var resultRequests = new Dictionary<string, Request>(StringComparer.Ordinal);
+        foreach (var request in _requests)
+        {
+            foreach (var result in request.Results)
+            {
+                resultRequests[result.EventId] = request;
+            }
+        }
 
         for (var index = 0; index < items.Count; index++)
         {
             var item = items[index];
             var outcome = item.EventType switch
             {
-                BrowserEvidenceEventTypes.AccessibilityHitTest => HitTest(items, index),
-                BrowserEvidenceEventTypes.AccessibilityHitTestResult => HitTestResult(items, index),
-                BrowserEvidenceEventTypes.AccessibilityActionSent => ActionSent(items, index),
+                BrowserEvidenceEventTypes.AccessibilityHitTestResult => HitTestResult(item, resultRequests.GetValueOrDefault(item.EventId)),
+                BrowserEvidenceEventTypes.AccessibilityActionSent => ActionSent(items, index, keys, kept),
                 BrowserEvidenceEventTypes.AccessibilityActionReceived => ActionReceived(items, index),
                 BrowserEvidenceEventTypes.AccessibilityHitTestComputed => HitTestComputed(item.Payload),
                 _ => null
@@ -71,71 +154,221 @@ public sealed class AccessibilityRequests
                 _outcomes[item.EventId] = outcome;
             }
         }
+
+        for (var index = 0; index < _requests.Count; index++)
+        {
+            var request = _requests[index];
+            var next = index + 1 < _requests.Count ? _requests[index + 1] : null;
+            _outcomes[request.HitTests[0].EventId] = RequestOutcome(request, next);
+            for (var part = 1; part < request.HitTests.Count; part++)
+            {
+                _outcomes[request.HitTests[part].EventId] = PartOutcome(request, part);
+            }
+
+            _requestTimes.Add(request.Time);
+            var previous = index > 0 ? _requests[index - 1].Given : null;
+            if (index == 0 || !SameNode(previous, request.Given))
+            {
+                _pointerChanges.Add(request.Time);
+            }
+        }
+
+        LinkKeys(items, keys, kept);
     }
 
     public static AccessibilityRequests Empty { get; } = new([]);
+
+    /// <summary>Whether the recording holds request records.</summary>
+    public bool Recorded { get; }
 
     public string Rule => $"rule {RuleVersion.ToString(CultureInfo.InvariantCulture)}";
 
     public AccessibilityRequestOutcome? Of(string eventId) => _outcomes.GetValueOrDefault(eventId);
 
+    /// <summary>
+    /// For a key record, what was sent to the page after it: a line for the
+    /// key's Selected event values; null for a key no action followed and
+    /// NVDA did not keep, or a recording without request records.
+    /// </summary>
+    public string? AfterKey(string eventId) => _afterKeys.GetValueOrDefault(eventId);
+
+    /// <summary>
+    /// The Under the pointer (Chromium) row at a time, in the Screen reader
+    /// group: the object the latest request at or before it was given, and
+    /// the page's precise result for it; none for a recording without hit
+    /// test records.
+    /// </summary>
+    public IReadOnlyList<PropertyRow> RowsAt(long time)
+    {
+        if (_requests.Count == 0)
+        {
+            return [];
+        }
+
+        var index = _requestTimes.BinarySearch(time);
+        if (index < 0)
+        {
+            index = ~index - 1;
+        }
+
+        if (index < 0)
+        {
+            return
+            [
+                new PropertyRow(AssistiveTechnologyTimeline.Group, PointerSetting, "no hit test yet", "at start", null, false, PointerKey)
+            ];
+        }
+
+        var request = _requests[index];
+        var given = request.Given is { } node ? Describe(node) : "no object";
+        var precise = request.Precise is not { } found
+            ? "no precise result"
+            : SameNode(request.Given, found) ? "the page found the same" : $"the page found {Describe(found)}";
+        return
+        [
+            new PropertyRow(
+                AssistiveTechnologyTimeline.Group,
+                PointerSetting,
+                $"{given}; {precise}",
+                WindowsPreferenceTimeline.Clock(request.Time),
+                request.Time,
+                time - request.Time < ChangedWindowNanoseconds,
+                PointerKey)
+        ];
+    }
+
+    /// <summary>
+    /// The times the Under the pointer (Chromium) row's object changed, for
+    /// stepping: each request given another object than the request before;
+    /// null for another key or a recording without hit test records.
+    /// </summary>
+    public IReadOnlyList<long>? ChangeTimesOf(string key) =>
+        key == PointerKey && _requests.Count > 0 ? _pointerChanges : null;
+
     public static bool IsRequestEvidence(string channel, string eventType) =>
         channel == Channel && EventTypes.Contains(eventType);
 
-    private static AccessibilityRequestOutcome HitTest(List<Item> items, int index)
+    // Hit test records at one point, each within RequestGapNanoseconds of the
+    // one before, with no hit test at another point between, are one request.
+    // A precise result is joined with the latest request before it, within
+    // the join window.
+    private void GroupRequests(List<Item> items)
     {
-        var item = items[index];
-        var payload = item.Payload;
+        Request? current = null;
+        long last = 0;
+        foreach (var item in items)
+        {
+            if (item.EventType == BrowserEvidenceEventTypes.AccessibilityHitTest)
+            {
+                var point = PointOf(item.Payload, "point") ?? "an unrecorded point";
+                if (current is not null && current.Point == point && item.Time - last <= RequestGapNanoseconds)
+                {
+                    current.HitTests.Add(item);
+                }
+                else
+                {
+                    if (current is not null)
+                    {
+                        current.NextTime = item.Time;
+                    }
+
+                    current = new Request { HitTests = [item], Point = point };
+                    _requests.Add(current);
+                }
+
+                last = item.Time;
+            }
+            else if (item.EventType == BrowserEvidenceEventTypes.AccessibilityHitTestResult &&
+                current is not null && item.Time - current.Time <= JoinWindowNanoseconds &&
+                NodeOf(item.Payload, "result") is not null)
+            {
+                current.Results.Add(item);
+            }
+        }
+    }
+
+    private static AccessibilityRequestOutcome RequestOutcome(Request request, Request? next)
+    {
+        var first = request.HitTests[0];
+        var payload = first.Payload;
         var answer = NodeOf(payload, "answer");
-        var basis = ReadString(payload, "basis") == BrowserAccessibilityRequests.LastPreciseResult
-            ? "the page's last precise result, whose bounds held the point"
-            : "a guess from Chromium's own copy of the tree, by bounds";
+        var basis = BasisText(payload);
+        var count = request.HitTests.Count;
         var text = answer is null
             ? $"Given at once: no object, from {basis}"
             : $"Given at once: {Describe(answer)}, from {basis}";
-        var details = new List<string>();
-        if (PointOf(payload, "point") is { } point)
+        if (count > 1)
         {
-            details.Add($"Point: {point} on the screen, in physical pixels.");
+            text += $"; one request of {count.ToString(CultureInfo.InvariantCulture)} hit tests at {request.Point} " +
+                $"within {Milliseconds(request.HitTests[^1].Time - first.Time)}";
         }
 
-        if (payload.TryGetProperty("preciseRequested", out var requested) && requested.ValueKind == JsonValueKind.True)
+        var details = new List<string> { $"Point: {request.Point} on the screen, in physical pixels." };
+        var given = request.Given;
+        if (count > 1)
         {
-            var others = 0;
-            Item? result = null;
-            for (var next = index + 1; next < items.Count && items[next].Time - item.Time <= JoinWindowNanoseconds; next++)
-            {
-                if (items[next].EventType == BrowserEvidenceEventTypes.AccessibilityHitTestResult)
-                {
-                    result = items[next];
-                    break;
-                }
+            details.Add(
+                $"The {count.ToString(CultureInfo.InvariantCulture)} hit tests followed one another at the same point, each within " +
+                $"{Milliseconds(RequestGapNanoseconds)} of the one before, as a program's accHitTest asks each object it is given in turn. " +
+                $"The last was given {(given is null ? "no object" : Describe(given))}.");
+        }
 
-                if (items[next].EventType == BrowserEvidenceEventTypes.AccessibilityHitTest)
-                {
-                    others++;
-                }
+        var asked = request.HitTests.Any(item =>
+            item.Payload.TryGetProperty("preciseRequested", out var requested) && requested.ValueKind == JsonValueKind.True);
+        if (request.Precise is { } found)
+        {
+            var results = request.Results.Count;
+            var distinct = request.Results
+                .Select(item => NodeOf(item.Payload, "result")!)
+                .DistinctBy(node => (node.TreeId, node.NodeId))
+                .ToList();
+            var same = SameNode(given, found);
+            details.Add(
+                $"The page's precise hit test then found {Describe(found)}, " +
+                $"{Milliseconds(request.Results[^1].Time - first.Time)} after the request began: " +
+                (same ? "the object given." : "not the object given."));
+            if (results > 1)
+            {
+                details.Add(distinct.Count == 1
+                    ? $"{results.ToString(CultureInfo.InvariantCulture)} precise results arrived, all for that object."
+                    : $"{results.ToString(CultureInfo.InvariantCulture)} precise results arrived: " +
+                      string.Join("; ", distinct.Select(Describe)) + ".");
             }
 
-            if (result is not null && NodeOf(result.Payload, "result") is { } found)
+            if (!same && given is not null)
             {
-                var same = answer is not null && answer.TreeId == found.TreeId && answer.NodeId == found.NodeId;
-                details.Add(
-                    $"The page's precise hit test then found {Describe(found)}, {Milliseconds(result.Time - item.Time)} later: " +
-                    (same ? "the object given." : "not the object given."));
-                if (others > 0)
+                if (given.TreeId != found.TreeId)
+                {
+                    details.Add("The precise result is in another document's tree, such as a frame's.");
+                }
+                else if (given.Box is { } outer && found.Box is { } inner && outer.Holds(inner))
                 {
                     details.Add(
-                        $"{Count(others, "other hit test was", "other hit tests were")} asked before it arrived, " +
-                        "so it may answer one of them: Chromium does not say which request a result answers.");
+                        "The object given is a container the pointer had moved into: its bounds hold those of the precise result.");
+                }
+                else
+                {
+                    details.Add("The object given is a different object from the page's precise result.");
+                }
+
+                if (next is not null)
+                {
+                    details.Add(
+                        $"The next request, {Milliseconds(next.Time - request.Time)} later, was given " +
+                        $"{(next.Given is { } then ? Describe(then) : "no object")}.");
                 }
             }
-            else
-            {
-                details.Add(
-                    "The page was asked for a precise hit test; no result was recorded within " +
-                    $"{Milliseconds(JoinWindowNanoseconds)}. A point with no object fires no result.");
-            }
+
+            details.Add(
+                "Chromium does not say which request a result answers: each is joined with the latest request before it.");
+        }
+        else if (asked)
+        {
+            details.Add(request.NextTime is { } nextTime && nextTime - first.Time < JoinWindowNanoseconds
+                ? $"The page was asked for a precise hit test; no result arrived before the next request, " +
+                  $"{Milliseconds(nextTime - first.Time)} later. A point with no object fires no result."
+                : $"The page was asked for a precise hit test; no result was recorded within " +
+                  $"{Milliseconds(JoinWindowNanoseconds)}. A point with no object fires no result.");
         }
         else
         {
@@ -146,9 +379,24 @@ public sealed class AccessibilityRequests
         return new AccessibilityRequestOutcome(text, details);
     }
 
-    private static AccessibilityRequestOutcome? HitTestResult(List<Item> items, int index)
+    private static AccessibilityRequestOutcome PartOutcome(Request request, int part)
     {
-        var item = items[index];
+        var item = request.HitTests[part];
+        var answer = NodeOf(item.Payload, "answer");
+        return new AccessibilityRequestOutcome(
+            $"Part of the request at {WindowsPreferenceTimeline.Clock(request.Time)}: hit test " +
+            $"{(part + 1).ToString(CultureInfo.InvariantCulture)} of {request.HitTests.Count.ToString(CultureInfo.InvariantCulture)}, " +
+            $"given {(answer is null ? "no object" : Describe(answer))}",
+            [
+                $"Point: {request.Point} on the screen, in physical pixels.",
+                $"Given from {BasisText(item.Payload)}.",
+                "The request's outcome is on its first hit test.",
+                AnyProgram
+            ]);
+    }
+
+    private static AccessibilityRequestOutcome? HitTestResult(Item item, Request? request)
+    {
         if (NodeOf(item.Payload, "result") is not { } found)
         {
             return null;
@@ -158,21 +406,21 @@ public sealed class AccessibilityRequests
         {
             $"Kept for the next hit test whose point lies within its bounds, {found.Bounds} on the screen in physical pixels."
         };
-        for (var previous = index - 1; previous >= 0 && item.Time - items[previous].Time <= JoinWindowNanoseconds; previous--)
-        {
-            if (items[previous].EventType == BrowserEvidenceEventTypes.AccessibilityHitTest)
-            {
-                details.Add(
-                    $"The latest hit test before it was asked {Milliseconds(item.Time - items[previous].Time)} earlier, " +
-                    (PointOf(items[previous].Payload, "point") is { } point ? $"at {point}." : "."));
-                break;
-            }
-        }
-
+        details.Add(request is null
+            ? $"No hit test was recorded in the {Milliseconds(JoinWindowNanoseconds)} before it."
+            : $"Joined with the request at {WindowsPreferenceTimeline.Clock(request.Time)}, " +
+              $"{Count(request.HitTests.Count, "hit test", "hit tests")} at {request.Point}, the latest before it, " +
+              $"{Milliseconds(item.Time - request.Time)} after the request began.");
         return new AccessibilityRequestOutcome($"The page's precise hit test found {Describe(found)}", details);
     }
 
-    private static AccessibilityRequestOutcome? ActionSent(List<Item> items, int index)
+    private static string BasisText(JsonElement payload) =>
+        ReadString(payload, "basis") == BrowserAccessibilityRequests.LastPreciseResult
+            ? "the page's last precise result, whose bounds held the point"
+            : "a guess from Chromium's own copy of the tree, by bounds";
+
+    private static AccessibilityRequestOutcome? ActionSent(
+        List<Item> items, int index, List<Key> keys, Dictionary<long, KeptCommand> kept)
     {
         var item = items[index];
         var payload = item.Payload;
@@ -235,8 +483,91 @@ public sealed class AccessibilityRequests
         details.Add(received is null
             ? $"No receipt by the page's renderer was recorded within {Milliseconds(JoinWindowNanoseconds)}."
             : $"The page's renderer received it {Milliseconds(received.Time - item.Time)} later.");
+        var with = items
+            .Where(other => !ReferenceEquals(other, item) && other.EventType == BrowserEvidenceEventTypes.AccessibilityActionSent &&
+                Math.Abs(other.Time - item.Time) <= StepNanoseconds)
+            .Select(SentText)
+            .OfType<string>()
+            .ToList();
+        if (with.Count > 0)
+        {
+            details.Add($"Sent with it, as one step: {string.Join("; ", with)}.");
+        }
+
+        details.Add(KeyBefore(keys, item.Time) is { } key
+            ? $"After the key {KeyboardHookRecords.KeyName(key.VirtualKey)}, {Milliseconds(item.Time - key.Time)} earlier" +
+              (kept.GetValueOrDefault(key.Time) is { } command
+                  ? $", which NVDA kept as {string.Join(" or ", command.Names)} ({command.Gesture}), inferred."
+                  : ".")
+            : $"No key was pressed in the {Milliseconds(KeyWindowNanoseconds)} before it.");
         details.Add(AnyProgram);
         return new AccessibilityRequestOutcome($"Asked the page to {ActionText(action, target)}", details);
+    }
+
+    // The latest key pressed at or before a time, within the key window.
+    private static Key? KeyBefore(List<Key> keys, long time)
+    {
+        for (var index = keys.Count - 1; index >= 0; index--)
+        {
+            if (keys[index].Time <= time)
+            {
+                return time - keys[index].Time <= KeyWindowNanoseconds ? keys[index] : null;
+            }
+        }
+
+        return null;
+    }
+
+    // What an action sent asks, for lists of actions.
+    private static string? SentText(Item item)
+    {
+        if (ReadString(item.Payload, "action") is not { } action)
+        {
+            return null;
+        }
+
+        var targetId = ReadInt64(item.Payload, "targetNodeId");
+        var target = NodeOf(item.Payload, "target") is { } node
+            ? Describe(node)
+            : targetId is { } id ? $"node {id.ToString(CultureInfo.InvariantCulture)}" : null;
+        return ActionText(action, target);
+    }
+
+    // For each key, the actions sent after it and linked with it: those whose
+    // latest key, within the key window, it is. A key NVDA kept that no
+    // action followed says so.
+    private void LinkKeys(List<Item> items, List<Key> keys, Dictionary<long, KeptCommand> kept)
+    {
+        if (!Recorded)
+        {
+            return;
+        }
+
+        var linked = new Dictionary<Key, List<string>>();
+        foreach (var item in items.Where(item => item.EventType == BrowserEvidenceEventTypes.AccessibilityActionSent))
+        {
+            if (KeyBefore(keys, item.Time) is { } key && SentText(item) is { } text)
+            {
+                if (!linked.TryGetValue(key, out var list))
+                {
+                    linked[key] = list = [];
+                }
+
+                list.Add(text);
+            }
+        }
+
+        foreach (var key in keys)
+        {
+            if (linked.TryGetValue(key, out var sent))
+            {
+                _afterKeys[key.EventId] = $"Sent to the page after it: {string.Join("; ", sent)}.";
+            }
+            else if (kept.ContainsKey(key.Time))
+            {
+                _afterKeys[key.EventId] = $"Nothing was sent to the page in the {Milliseconds(KeyWindowNanoseconds)} after it.";
+            }
+        }
     }
 
     private static AccessibilityRequestOutcome? ActionReceived(List<Item> items, int index)
@@ -308,6 +639,8 @@ public sealed class AccessibilityRequests
             "decrement" => $"decrement {on}",
             "loadInlineTextBoxes" => $"load the inline text boxes of {on}",
             "setSequentialFocusNavigationStartingPoint" => $"start the next Tab navigation from {on}",
+            "setAccessibilityFocus" => $"move Chromium's accessibility focus, its note of the assistive technology's position, to {on}",
+            "clearAccessibilityFocus" => $"clear Chromium's accessibility focus from {on}",
             _ => $"perform {action} on {on}"
         };
     }
@@ -328,8 +661,20 @@ public sealed class AccessibilityRequests
             return null;
         }
 
-        return new Node(tree, id, ReadString(node, "role") ?? "object", ReadString(node, "name") ?? string.Empty, RectOf(node, "bounds") ?? "unrecorded");
+        Box? box = node.TryGetProperty("bounds", out var bounds) && bounds.ValueKind == JsonValueKind.Object &&
+            ReadInt64(bounds, "x") is { } x && ReadInt64(bounds, "y") is { } y &&
+            ReadInt64(bounds, "width") is { } width && ReadInt64(bounds, "height") is { } height
+                ? new Box(x, y, width, height)
+                : null;
+        return new Node(
+            tree, id, ReadString(node, "role") ?? "object", ReadString(node, "name") ?? string.Empty, RectOf(node, "bounds") ?? "unrecorded", box);
     }
+
+    private static bool SameNode(Node? first, Node? second) =>
+        first is null ? second is null : second is not null && first.TreeId == second.TreeId && first.NodeId == second.NodeId;
+
+    private static bool ReadBoolean(JsonElement value, string property) =>
+        value.TryGetProperty(property, out var item) && item.ValueKind == JsonValueKind.True;
 
     private static string? PointOf(JsonElement payload, string name) =>
         payload.TryGetProperty(name, out var point) && point.ValueKind == JsonValueKind.Object &&

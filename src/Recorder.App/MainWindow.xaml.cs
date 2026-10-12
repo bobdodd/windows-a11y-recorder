@@ -590,11 +590,16 @@ public partial class MainWindow : Window
                 string.Join(Environment.NewLine, request.Details) + Environment.NewLine + Environment.NewLine + json;
         }
 
+        // What was sent to the page after a key (accessibility-requests.md,
+        // "Actions and keys"), after the key's outcome.
+        var afterKey = archive.AccessibilityRequests.AfterKey(item.EventId) is { } sent
+            ? $"{sent} (accessibility requests, {archive.AccessibilityRequests.Rule}){Environment.NewLine}"
+            : string.Empty;
         return archive.KeyDispositions.Of(item.EventId) is { } outcome
             ? $"Key outcome ({archive.KeyDispositions.Rule}): {outcome.Text}{Environment.NewLine}" +
-              string.Join(Environment.NewLine, outcome.Details) +
-              Environment.NewLine + Environment.NewLine + json
-            : json;
+              string.Join(Environment.NewLine, outcome.Details) + Environment.NewLine +
+              afterKey + Environment.NewLine + json
+            : afterKey.Length > 0 ? afterKey + Environment.NewLine + json : json;
     }
 
     private void BrowserNavigationFilter_Click(object sender, RoutedEventArgs e) =>

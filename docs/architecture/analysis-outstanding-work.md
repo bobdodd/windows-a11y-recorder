@@ -190,10 +190,13 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   tests with the object given at once and the page's precise result, and
   actions as sent and received, in the event list and Selected event
   values: agreed and built 2026-10-12
-  ([accessibility requests](accessibility-requests.md)). To build in the
-  owner's checkout, run `tests/AccessibilityRequestProbe` on the target
-  machine, and record an NVDA session on the test page and cnib.ca. The
-  fuller player view waits for that run.
+  ([accessibility requests](accessibility-requests.md)). Built and run on
+  the target machine 2026-10-12: the probe passed, and an NVDA session was
+  recorded on the test page and cnib.ca. The fuller player view (rule 2:
+  actions linked with keys, hit tests grouped into requests, the Under the
+  pointer (Chromium) row) was agreed and built after it; to check with a
+  recording with arrow keys on the test page, which the first did not
+  have.
 - Left open by the owner's decision 2026-10-08, to start stage 2 first:
   the Magnifier change records on a real Magnifier recording
   (`scripts/Test-MagnifierChanges.ps1`); applying a Windows color filter
