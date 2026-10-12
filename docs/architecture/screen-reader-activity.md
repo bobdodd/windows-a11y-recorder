@@ -1274,6 +1274,43 @@ is, or when the caret last moved because the focus did
 caret's object, to the next focusable one. The keys with traces sent their request 16
 to 40 ms after the key.
 
+### Decisions after the target run
+
+Made on 2026-10-12. The owner left rules 6 and 7 to the recorder's
+judgment, and agreed to the selection rule.
+
+6. **Say all** makes the reading position unknown from the key until the
+   next request or focus change. NVDA's reference says say all "Starts
+   reading from the current position of the system caret, moving it along
+   as it goes"
+   ([NVDA 2026.2 commands quick reference](https://download.nvaccess.org/releases/2026.2/documentation/keyCommands.html#navigating-with-the-system-caret)),
+   and the run showed it sends nothing as it goes, so where it stopped is
+   not in the recording. "Uncertain" would claim more than is known.
+7. **A key while a window other than the browser is in front**, such as
+   NVDA's "0 matches" or its Find window, leaves the reading position where
+   it was, not uncertain: the key went to that window, not to the browse
+   mode document, as the foreground window records show. A move made from
+   NVDA's window, such as Find's Enter, sends its own request, and rule 1
+   applies to it.
+8. **Selection commands** that send nothing (the Shift+arrow commands, and
+   the other selection commands of the command data) make the reading
+   position unknown, as say all does: NVDA's source moves the caret with
+   the selection
+   ([NVDA 2026.2 cursorManager.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/cursorManager.py)).
+   Rule 4's "uncertain" stays for other kept keys that send nothing, such
+   as Find next with no match.
+9. **Page Down and Page Up** follow rule 1, marked uncertain. NVDA moves
+   them by its lines per page, 25 by default (`linesPerPage`, in
+   `cursorManager.py` and NVDA's configuration specification), but in the
+   run both Page Downs sent a request on the paragraph the caret started
+   on, so the request may not be where the caret went. A short test can
+   settle it later.
+
+Test runs on the target machine from now on cover one behaviour each, in
+at most five steps, with what to listen for, as the owner asked: "You are
+creating too complex a test script. I can't remember it all and I lose my
+place trying to follow. That reduces my ability to observe."
+
 ## The screen reader's windows
 
 UI Automation already records them. At playback, NVDA's windows in front
