@@ -344,8 +344,9 @@ when keyboard and mouse are recorded, as raw input is.
 
 ## The mouse hook
 
-Built 2026-10-11, proposed and agreed the same day. Not yet run on the
-target machine. The owner's answers to the proposal's questions:
+Built 2026-10-11, proposed and agreed the same day, and first run on the
+target machine the same day; see "First run on the target machine" below.
+The owner's answers to the proposal's questions:
 
 - Every pointer move is recorded: "yes, I want to create heat maps so I
   will probably need that granularity". Heat maps are a later step and are
@@ -503,6 +504,40 @@ says so.
 - A target run with NVDA: the physical mouse and the probe's injected
   input, first with NVDA's "ignore mouse input from other applications"
   off, then on, NVDA restarted after the change.
+
+### First run on the target machine
+
+Package `43bc82d`, recording `20261012-003548-2377708138ab4e598dc99dc7dda1e894`,
+232 seconds, run by the owner on 2026-10-11 as above: NVDA started 60
+seconds in, the physical mouse used, the probe run, NVDA's "ignore mouse
+input from other applications" turned on, NVDA restarted at 186 seconds,
+and the probe run again.
+
+- The mouse hook recorded 8,065 events: 8,035 from the mouse (7,957
+  moves, 38 left and 1 right click) and 30 injected by the probe, 15 in
+  each run. Raw input recorded 8,064 mouse records.
+- Every one of the 8,035 events from the mouse was joined with a raw input
+  record from a device within 50 ms.
+- The mouse hook was installed 164 times: at the start, at each of NVDA's
+  two starts, and 161 refreshes while NVDA ran. No hook was lost, and no
+  event was dropped. The longest callback was 5,972.5 microseconds
+  (installation 39, at the right click); every other was under 1,700.
+- The probe's second run passed all 20 checks. The first run's output was
+  written over by the second.
+- NVDA's settings record of each run held `enableMouseTracking` written as
+  `False`: mouse tracking was off in this copy of NVDA's configuration
+  throughout. `ignoreInjectedMouseInput` was not written in the first run
+  (off, the default) and was written `True` in the second, read after the
+  restart as designed.
+- The player's outcomes follow from those settings and NVDA's order of
+  rules: in the first run every event, from the mouse or injected, "NVDA
+  ignores it, inferred: NVDA's mouse tracking is off"; in the second, the
+  injected events "NVDA ignores it, inferred: injected, and NVDA ignores
+  mouse input from other applications", the injected check coming first.
+  The Pointer and NVDA mouse tracking rows gave the same values.
+- Not shown by this run, because tracking was off: an outcome with
+  tracking on, where NVDA notes a move and a left or right press stops
+  speech.
 
 ## Input the recorder cannot receive
 
