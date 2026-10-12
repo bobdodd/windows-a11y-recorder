@@ -452,7 +452,9 @@
           <ListView x:Name="PropertiesListView"
                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
                     VirtualizingPanel.IsVirtualizingWhenGrouping="True"
+                    VirtualizingPanel.ScrollUnit="Pixel"
                     PreviewKeyDown="PropertiesListView_PreviewKeyDown"
+                    MouseLeave="PropertiesListView_MouseLeave"
                     MouseDoubleClick="PropertiesListView_MouseDoubleClick"
                     AutomationProperties.Name="Properties at the frame shown"
                     AutomationProperties.HelpText="Each row reads setting, value, when it was set, and, for a setting that changed during the recording, which of its changes is in effect. Its previous and next change buttons, or Ctrl+Left and Ctrl+Right, move to the setting's previous and next change. Enter: the change that set the value.">

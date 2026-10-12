@@ -1046,6 +1046,31 @@ by the owner by mouse and keyboard on the target machine the same day
   rows moved the buttons away from a pointer held still over them. The
   buttons were also stretched to the row's height, with the triangle in
   the middle; they are now 44 pixels high at the top of the row.
+
+### Change buttons stay in place
+
+Agreed with the owner on 2026-10-12 (option A of two; the other, rows cut
+to one line, was not taken): a change button stays under a pointer held
+still when it is clicked, for head pointer and eye tracking use, where a
+click is a dwell on the spot. The rows above the clicked row may change
+height at the new time, as their values wrap to more or fewer lines, or
+appear or go, and the list is rebuilt when the number of rows changes.
+
+- Before the move, the player notes where the clicked row is in the list.
+  Once the new values are laid out, it scrolls the list so the row is
+  where it was. The list scrolls by pixels, not by rows, for this.
+- Where the rows above shrank and the list cannot scroll up far enough,
+  the player adds blank space above the rows, below the column headers;
+  where there is blank space and the row moved down, it takes the space
+  away before scrolling. The space goes when the pointer leaves the list,
+  which scrolls up by as much as it can, so nothing moves while the
+  pointer is over the list.
+- A clicked row that is not shown at the new time is not followed.
+- Ctrl+Left and Ctrl+Right are unchanged: the keyboard follows the selected
+  row, which the list keeps in view.
+- Built in `MainWindow.Properties.cs` (`StepPropertyInPlace`). It is a
+  layout behaviour of the window, so it is tested at the system level, on
+  the target machine, by the owner; that test is outstanding.
 - Each button acts on its own row, without the row being selected, and
   does not take keyboard focus, so a click leaves the focus and the
   selection where they were. They are therefore not Tab stops: from the

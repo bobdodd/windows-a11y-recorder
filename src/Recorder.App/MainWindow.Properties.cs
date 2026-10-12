@@ -1,8 +1,11 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
 using Recorder.Session;
 
 namespace Recorder.App;
@@ -22,6 +25,14 @@ public partial class MainWindow
     private readonly Dictionary<string, IReadOnlyList<long>?> _propertyChangeTimes = new(StringComparer.Ordinal);
     private SessionPlaybackArchive? _propertyChangeTimesArchive;
     private bool _propertiesBound;
+
+    // Blank space above the rows, added after a change button's click when
+    // the rows above shrank and the list could not scroll up far enough to
+    // keep the button under the pointer; removed when the pointer leaves
+    // the list. See "Change buttons stay in place" in
+    // docs/architecture/accessibility-preferences.md.
+    private double _propertiesSpace;
+    private Thickness? _propertiesMargin;
 
     private void DisplayPropertiesAt(long positionNanoseconds)
     {
@@ -124,18 +135,138 @@ public partial class MainWindow
     // Ctrl+Right do the same from the keyboard.
     private void PropertyPreviousChange_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: PropertyRowView row })
+        if (sender is FrameworkElement { DataContext: PropertyRowView row } button)
         {
-            StepProperty(row, forward: false);
+            StepPropertyInPlace(button, row, forward: false);
         }
     }
 
     private void PropertyNextChange_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: PropertyRowView row })
+        if (sender is FrameworkElement { DataContext: PropertyRowView row } button)
         {
-            StepProperty(row, forward: true);
+            StepPropertyInPlace(button, row, forward: true);
         }
+    }
+
+    // A change button's click moves as Ctrl+Left or Ctrl+Right does, then
+    // keeps the clicked row, and so its buttons, where it was in the list,
+    // so the button stays under a pointer held still: for head pointer and
+    // eye tracking use, where a click is a dwell on the spot. The rows above
+    // may change height, or appear or go, at the new time.
+    private void StepPropertyInPlace(FrameworkElement button, PropertyRowView row, bool forward)
+    {
+        if (ItemsControl.ContainerFromElement(PropertiesListView, button) is not FrameworkElement container)
+        {
+            StepProperty(row, forward);
+            return;
+        }
+
+        var before = container.TranslatePoint(new Point(0, 0), PropertiesListView).Y;
+        var identity = IdentityOf(row);
+        StepProperty(row, forward);
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => KeepPropertyRowAt(identity, before));
+    }
+
+    private static string IdentityOf(PropertyRowView row) =>
+        row.Row.Key.Length > 0 ? row.Row.Key : $"{row.Group}\u001f{row.Setting}";
+
+    // Scrolls the list so the row is again at the place it was, by pixels;
+    // where the list cannot scroll up far enough, adds blank space above the
+    // rows, and where there is blank space, takes it away before scrolling
+    // down. A row that is no longer shown is not followed.
+    private void KeepPropertyRowAt(string identity, double before)
+    {
+        if (_propertyRows.FirstOrDefault(candidate => IdentityOf(candidate) == identity) is not { } item ||
+            DescendantOf<ScrollViewer>(PropertiesListView) is not { } scroll)
+        {
+            return;
+        }
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            PropertiesListView.UpdateLayout();
+            if (PropertiesListView.ItemContainerGenerator.ContainerFromItem(item) is not FrameworkElement container)
+            {
+                return;
+            }
+
+            var moved = container.TranslatePoint(new Point(0, 0), PropertiesListView).Y - before;
+            if (Math.Abs(moved) < 0.5)
+            {
+                return;
+            }
+
+            var offset = scroll.VerticalOffset;
+            if (moved > 0)
+            {
+                var fromSpace = Math.Min(_propertiesSpace, moved);
+                SetPropertiesSpace(_propertiesSpace - fromSpace);
+                scroll.ScrollToVerticalOffset(offset + moved - fromSpace);
+            }
+            else
+            {
+                var up = Math.Min(offset, -moved);
+                scroll.ScrollToVerticalOffset(offset - up);
+                SetPropertiesSpace(_propertiesSpace + (-moved - up));
+            }
+        }
+    }
+
+    // The space is the margin of the list's scrolled area, below the column
+    // headers, so the headers stay where they are.
+    private void SetPropertiesSpace(double space)
+    {
+        // The column headers have a scroll viewer of their own, inside the
+        // list's, so the rows' area is found by its part name.
+        if (DescendantOf<ScrollViewer>(PropertiesListView) is not { } scroll ||
+            scroll.Template?.FindName("PART_ScrollContentPresenter", scroll) is not ScrollContentPresenter rows)
+        {
+            return;
+        }
+
+        _propertiesMargin ??= rows.Margin;
+        var margin = _propertiesMargin.Value;
+        _propertiesSpace = Math.Max(0, space);
+        rows.Margin = new Thickness(margin.Left, margin.Top + _propertiesSpace, margin.Right, margin.Bottom);
+    }
+
+    // The blank space goes when the pointer leaves the list, scrolling up as
+    // far as it can by the same amount, so the rows move as little as they
+    // can.
+    private void PropertiesListView_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (_propertiesSpace <= 0)
+        {
+            return;
+        }
+
+        var space = _propertiesSpace;
+        SetPropertiesSpace(0);
+        if (DescendantOf<ScrollViewer>(PropertiesListView) is { } scroll)
+        {
+            scroll.ScrollToVerticalOffset(Math.Max(0, scroll.VerticalOffset - space));
+        }
+    }
+
+    private static T? DescendantOf<T>(DependencyObject parent)
+        where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is T found)
+            {
+                return found;
+            }
+
+            if (DescendantOf<T>(child) is { } deeper)
+            {
+                return deeper;
+            }
+        }
+
+        return null;
     }
 
     // Enter, or a double click, on a row set during the recording moves to
