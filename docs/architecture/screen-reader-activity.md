@@ -537,7 +537,40 @@ and the probe run again.
   The Pointer and NVDA mouse tracking rows gave the same values.
 - Not shown by this run, because tracking was off: an outcome with
   tracking on, where NVDA notes a move and a left or right press stops
-  speech.
+  speech. The second run, below, shows it.
+
+### Second run on the target machine, mouse tracking on
+
+Package `43bc82d`, recording `20261012-005438-eb89151848024f6fb04042e603ccb318`,
+163 seconds, run by the owner on 2026-10-11 after turning NVDA's mouse
+tracking on: NVDA started 8 seconds in with "ignore mouse input from other
+applications" on, the physical mouse used, the probe run at 79 seconds,
+the setting turned off, NVDA restarted at 130 seconds, and the probe run
+again at 144 seconds.
+
+- NVDA's settings records: the first run `enableMouseTracking` `True`,
+  `ignoreInjectedMouseInput` `True`; the second `True` and `False`.
+- The mouse hook recorded 4,971 events, 4,941 from the mouse and 30
+  injected; every one from the mouse was joined with a raw input record
+  from a device. 155 installations, no hook lost, no event dropped; the
+  longest callback was 36.7 microseconds. The probe's second run passed
+  all 20 checks.
+- The player's outcomes, rule 1:
+  - before NVDA started and between its runs, events from the mouse with
+    no NVDA part;
+  - with NVDA running, moves from the mouse "NVDA notes the position,
+    inferred", left presses "NVDA stops speech, inferred", releases and
+    wheel turns "NVDA notes the position and does nothing more with it";
+  - the first probe run, every injected event "NVDA ignores it, inferred:
+    injected, and NVDA ignores mouse input from other applications";
+  - the second probe run, injected moves noted, the injected left and
+    right presses, the touch one too, "NVDA stops speech, inferred", the
+    middle and X buttons and the wheels noted only.
+- NVDA's sound, measured, agrees but does not prove it: NVDA was making
+  sound through both probe runs, as the probe's window took the focus. In
+  the second run a period of sound ended at 143.96 seconds, 80 ms after
+  the injected left press at 143.88; in the first, the period from 76.82
+  to 85.59 seconds went on through the injected left press at 79.03.
 
 ## Input the recorder cannot receive
 
