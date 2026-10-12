@@ -25,7 +25,18 @@ public sealed record NvdaSettingsReading(
     IReadOnlyList<string> Profiles,
     bool ProfileTriggers,
     IReadOnlyList<NvdaCustomGesture> CustomGestures,
-    string? GesturesProblem);
+    string? GesturesProblem)
+{
+    // NVDA's [mouse] settings, as written or null where NVDA's default
+    // applies. See docs/architecture/screen-reader-activity.md, "The mouse
+    // hook".
+    public string? EnableMouseTracking { get; init; }
+    public string? IgnoreInjectedMouseInput { get; init; }
+    public string? MouseTextUnit { get; init; }
+    public string? ReportObjectRoleOnMouseEnter { get; init; }
+    public string? AudioCoordinatesOnMouseMove { get; init; }
+    public string? ReportMouseShapeChanges { get; init; }
+}
 
 /// <summary>
 /// Reads NVDA's settings: <c>nvda.ini</c>, the names of the profiles in
@@ -47,7 +58,13 @@ public static class NvdaSettings
         ("virtualBuffers", "autoPassThroughOnFocusChange"),
         ("virtualBuffers", "autoPassThroughOnCaretMove"),
         ("virtualBuffers", "trapNonCommandGestures"),
-        ("virtualBuffers", "enableOnPageLoad")
+        ("virtualBuffers", "enableOnPageLoad"),
+        ("mouse", "enableMouseTracking"),
+        ("mouse", "ignoreInjectedMouseInput"),
+        ("mouse", "mouseTextUnit"),
+        ("mouse", "reportObjectRoleOnMouseEnter"),
+        ("mouse", "audioCoordinatesOnMouseMove"),
+        ("mouse", "reportMouseShapeChanges")
     ];
 
     // The defaults of NVDA's configuration specification, for the player.
@@ -55,6 +72,35 @@ public static class NvdaSettings
     public const int DefaultNvdaModifierKeys = 6;
     public const int DefaultMultiPressTimeoutMilliseconds = 500;
     public const bool DefaultTrapNonCommandGestures = true;
+
+    // The [mouse] defaults: "enableMouseTracking = boolean(default=True)",
+    // "ignoreInjectedMouseInput = boolean(default=false)",
+    // "mouseTextUnit = string(default="paragraph")"
+    // (https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/config/configSpec.py).
+    public const bool DefaultEnableMouseTracking = true;
+    public const bool DefaultIgnoreInjectedMouseInput = false;
+    public const string DefaultMouseTextUnit = "paragraph";
+    public const bool DefaultReportObjectRoleOnMouseEnter = false;
+    public const bool DefaultAudioCoordinatesOnMouseMove = false;
+    public const bool DefaultReportMouseShapeChanges = false;
+
+    /// <summary>
+    /// A boolean setting as configobj reads it, with the default where it is
+    /// not written; null where it is written as something configobj does not
+    /// read as a boolean. configobj takes "on", "1", "true", and "yes" as
+    /// true and "off", "0", "false", and "no" as false, in any case
+    /// (https://raw.githubusercontent.com/DiffSK/configobj/master/src/configobj/validate.py,
+    /// is_boolean).
+    /// </summary>
+    public static bool? Boolean(string? written, bool defaultValue) =>
+        written is null
+            ? defaultValue
+            : written.Trim().ToLowerInvariant() switch
+            {
+                "true" or "on" or "yes" or "1" => true,
+                "false" or "off" or "no" or "0" => false,
+                _ => null
+            };
 
     // NVDAModifierKeys: "1: CapsLock, 2: NumpadInsert, 4: ExtendedInsert".
     public const int CapsLockModifier = 1;
@@ -155,7 +201,15 @@ public static class NvdaSettings
             profiles,
             triggers,
             gestures,
-            gesturesProblem);
+            gesturesProblem)
+        {
+            EnableMouseTracking = Value("mouse", "enableMouseTracking"),
+            IgnoreInjectedMouseInput = Value("mouse", "ignoreInjectedMouseInput"),
+            MouseTextUnit = Value("mouse", "mouseTextUnit"),
+            ReportObjectRoleOnMouseEnter = Value("mouse", "reportObjectRoleOnMouseEnter"),
+            AudioCoordinatesOnMouseMove = Value("mouse", "audioCoordinatesOnMouseMove"),
+            ReportMouseShapeChanges = Value("mouse", "reportMouseShapeChanges")
+        };
     }
 
     /// <summary>

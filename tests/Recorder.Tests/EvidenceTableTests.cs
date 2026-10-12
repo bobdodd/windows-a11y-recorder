@@ -884,6 +884,8 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         record.Channel != "system.assistive-technology" &&
         // 0027 added the tables of the keyboard hook records.
         record.Channel != "input.keyboard-hook" &&
+        // 0030 added the tables of the mouse hook records.
+        record.Channel != "input.mouse-hook" &&
         // 0028 added the tables of the input recordability records.
         !Recorder.Contracts.InputRecordabilityRecords.EventTypes.Contains(record.EventType);
 

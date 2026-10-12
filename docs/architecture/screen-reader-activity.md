@@ -121,7 +121,7 @@ next, as agreed on 2026-10-10:
   see "Settings and key commands".
 - A low-level mouse hook, later in step 2, on the same terms as the
   keyboard hook: needed in case the user is using NVDA's speaking of the
-  content under the pointer (the owner, 2026-10-10).
+  content under the pointer (the owner, 2026-10-10). Built 2026-10-11; see "The mouse hook".
 
 The open questions of step 2, settled by the owner on 2026-10-10:
 
@@ -341,6 +341,168 @@ when keyboard and mouse are recorded, as raw input is.
   keys; the payload rules; the summaries and key names. The system test
   below was run on 2026-10-10, with the elevated window; the integration
   tests on Windows are still to write.
+
+## The mouse hook
+
+Built 2026-10-11, proposed and agreed the same day. Not yet run on the
+target machine. The owner's answers to the proposal's questions:
+
+- Every pointer move is recorded: "yes, I want to create heat maps so I
+  will probably need that granularity". Heat maps are a later step and are
+  not built here.
+- The mouse hook is installed again with the keyboard hook: "yes, It is
+  used by NVDA for announcing content under cursor".
+- No head pointer or eye tracking software is on the target machine: "no
+  it is not, for now the issue is with NVDA and heatmaps". Input injected
+  by a test program stands in for it.
+
+The collector of the keyboard hook, `windows.keyboard-hook`
+(`src/Recorder.Collectors.Input/KeyboardHookCollector.cs`), also installs a
+`WH_MOUSE_LL` hook, on the same thread, now named "Keyboard and mouse
+hooks", on the same terms as the keyboard hook:
+
+- It observes only: every call passes the event on unchanged. The hook
+  "is called in the context of the thread that installed it", which "must
+  have a message loop", and one that takes too long "is silently removed
+  without being called", with the timeout at most 1000 ms on Windows 10
+  version 1709 and later
+  ([Microsoft, LowLevelMouseProc](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelmouseproc)).
+  The callback copies the event into the collector's bounded queue and
+  returns.
+- Its records are on their own channel, `input.mouse-hook`
+  (`src/Recorder.Contracts/MouseHookRecords.cs`), so a recording's mouse
+  hook records are counted, filtered, and stored apart from the keys.
+- Record `hook-mouse`, one for every call: the installation that saw it;
+  the message, and from it the kind (`move`, `button-down`, `button-up`,
+  `wheel`, `horizontal-wheel`, `other`) and the button (`left`, `right`,
+  `middle`, `x1`, `x2`); the point "in per-monitor-aware screen
+  coordinates"; the mouse data, and for a wheel its delta, the signed high
+  word, "positive ... forward, away from the user"; the flags, and each of
+  them, injected and injected at lower integrity; the extra information;
+  and the event's own time in milliseconds
+  ([Microsoft, MSLLHOOKSTRUCT](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-msllhookstruct)).
+- Pen and touch: Windows marks the mouse messages it makes from a pen or
+  touch screen in the extra information, with the signature `0xFF515700`
+  under the mask `0xFFFFFF00`, and bit `0x80` set for touch
+  ([Microsoft, system events and mouse messages](https://learn.microsoft.com/en-us/windows/win32/tablet/system-events-and-mouse-messages)).
+  The record gives `penOrTouch` as `pen`, `touch`, or null.
+- Installations: the mouse hook is installed with the keyboard hook, at
+  the start, at once when a screen reader starts, and every second while
+  one runs; the new hook before the old is removed, as for the keys. Each
+  is recorded as `hook-mouse-installed`, with the keyboard hook's reasons
+  and fields, counted in events: the previous installation's events and
+  longest callback, and the events dropped. NVDA passes every mouse event
+  on, as below, so the order of the hooks does not decide what the
+  recorder sees while NVDA is the only other hook; it would for software
+  that keeps mouse events.
+- Loss: as for the keys, the collector compares its records with raw
+  input's. A button pressed or released on a device that raw input
+  records, with no hook call of the same button and direction within the
+  join window either side, means the mouse hook was removed: both hooks
+  are installed again, the mouse hook's record with reason `hook-lost`,
+  the raw button's time and button, and the time of the last event the
+  hook saw; the keyboard hook's with reason `mouse-hook-lost`. A keyboard
+  hook loss gives the mouse hook's record reason `keyboard-hook-lost`.
+  Moves and wheels are not checked: raw input's moves are a device's
+  counts, not the pointer's steps, and do not pair one for one. The left
+  and right buttons are matched as one, because raw input gives the
+  physical button and the hook the button after the buttons are swapped
+  in the settings, which is not recorded. Injected events, which raw input
+  records with no device, are not checked.
+- Raw input stays as built: it is the only record of the device.
+
+### NVDA's mouse settings
+
+NVDA's settings record (`nvda-settings`) gains the `[mouse]` section's
+values, as written in `nvda.ini`, or null where it holds none:
+`enableMouseTracking`, `ignoreInjectedMouseInput`, `mouseTextUnit`,
+`reportObjectRoleOnMouseEnter`, `audioCoordinatesOnMouseMove`, and
+`reportMouseShapeChanges`. A setting absent from the file has NVDA's
+default: mouse tracking on, ignoring injected mouse input off, the text
+unit a paragraph, the others off
+([NVDA configSpec.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/config/configSpec.py)).
+A written value is read as NVDA's configuration library reads a boolean:
+`on`, `1`, `true`, `yes` and `off`, `0`, `false`, `no`, in any case
+([configobj validate.py](https://raw.githubusercontent.com/DiffSK/configobj/master/src/configobj/validate.py));
+any other is not known. Records made before 2026-10-11 lack the six
+fields and still pass the recorder's checks. The settings are read when
+tracking first sees NVDA's process, so a change made while NVDA runs is
+seen only after NVDA is started again.
+
+### What NVDA does with an event
+
+NVDA's mouse handler
+([mouseHandler.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/mouseHandler.py),
+`internal_mouseEvent`) decides, in this order:
+
+1. An injected event is ignored where NVDA ignores injected mouse input,
+   or while NVDA is making its own mouse events (`ignoreInjected`, set
+   around `executeMouseEvent`); buttons too.
+2. Every event is ignored where mouse tracking is off.
+3. Otherwise the position is noted. A move marks that the mouse moved, and
+   NVDA reads the object at the latest position the next time it runs its
+   queue (`pumpAll`, `executeMouseMoveEvent`, `objectFromPoint`), so not
+   every move is read. A left or right button press queues a stop of
+   speech.
+
+NVDA always passes the event on. The player infers its outcome from
+these rules and the settings of the NVDA running at the time; its
+`ignoreInjected` periods are not recorded, so an injected event's outcome
+says so.
+
+### The player
+
+- Selected event values shows each `hook-mouse` record's outcome first
+  (`src/Recorder.Session/MouseActivity.cs`, rule 1): what it was and where,
+  and who made it, from a device, injected by software (at a lower
+  integrity level where flagged), or from a pen or touch screen; while
+  NVDA runs, what NVDA did with it, as an inference, with the settings it
+  rests on; the raw input record of the same event from a device within
+  50 ms either side, with its device, or that there was none.
+- The properties panel's Screen reader group has two rows, with the
+  change buttons and count: "Pointer", the latest mouse event, its point
+  and what made it, stepping through every event; and "NVDA mouse
+  tracking", the two settings that decide the outcomes, as read at NVDA's
+  start, stepping through NVDA's starts and exits. A recording without
+  the mouse hook's records has neither row.
+- The timeline puts the hook's events on the mouse lane, under the mouse
+  filter; the event list names the kind, button, point, and whether it was
+  injected or from a pen or touch screen.
+- Storage: the payload rules are in `EventPayloadValidator`; migration
+  0030 makes the tables `mouse_hook_events` and `mouse_hook_installations`
+  and adds the six settings to `assistive_technology_settings`; the
+  playback index, version 16, keeps the mouse hook's and raw input's mouse
+  records whole.
+
+### Limits
+
+- What was under the pointer is not recorded; that is step 3.
+- The left and right buttons are matched as one for the loss check.
+- NVDA's settings are read at its start; a change while it runs is not
+  seen.
+- NVDA reads only the latest position at each run of its queue; the
+  player says a move was noted, not that it was read.
+- Moves and wheels are not checked for loss.
+
+### Tests
+
+- Unit tests (`tests/Recorder.Tests/MouseHookTests.cs`, and the database
+  tests in `EvidenceTableTests`): the messages, wheel delta, pen and touch
+  signature, and raw buttons; the loss check from generated sequences,
+  with the buttons swapped and an injected click; the payload rules, and an
+  older settings record; the reading of NVDA's `[mouse]` settings and of
+  booleans; the outcomes and rows, including through the playback index.
+- An integration test on Windows (`tests/MouseHookProbe`): it runs the
+  collector and raw input in its own process and injects, with
+  `SendInput`
+  ([Microsoft, MOUSEINPUT](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-mouseinput)),
+  moves, each button, both wheels, and a click marked as touch, over its
+  own window; it checks the records, the reinstallation when a screen
+  reader starts, the longest callback, every record against the
+  recorder's checks, and the player's outcomes.
+- A target run with NVDA: the physical mouse and the probe's injected
+  input, first with NVDA's "ignore mouse input from other applications"
+  off, then on, NVDA restarted after the change.
 
 ## Input the recorder cannot receive
 
@@ -1000,6 +1162,11 @@ The others were settled on 2026-10-10; see "Decisions of 2026-10-10".
   on Windows against a dialog of standard Win32 controls
   (`tests/WindowSnapshotProbe`); and a target run with NVDA's Elements
   List, NVDA menu, and Exit NVDA dialog.
+- For the mouse hook: unit tests of the contract, validator, loss check,
+  NVDA's mouse settings, and the outcomes; an integration test on Windows
+  that injects input (`tests/MouseHookProbe`); and a target run with the
+  physical mouse and injected input, with NVDA ignoring injected mouse
+  input off and then on.
 - A system test on the target machine, extending
   `scripts/Test-ScreenReaderKeys.ps1`: every key of the script's hook is in
   the recorder's hook with the same disposition; NVDA started after the

@@ -814,7 +814,8 @@ public sealed class SessionTimelineControl : FrameworkElement
     {
         // The keyboard hook's keys share the keyboard lane with raw input's.
         "input.keyboard" or "input.keyboard-hook" => 0,
-        "input.mouse" => 1,
+        // The mouse hook's events share the mouse lane with raw input's.
+        "input.mouse" or "input.mouse-hook" => 1,
         "accessibility.uia.events" => 2,
         "window.foreground" => 3,
         "graphics.desktop.frames" => 4,

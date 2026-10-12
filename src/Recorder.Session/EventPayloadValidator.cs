@@ -132,6 +132,12 @@ internal static class EventPayloadValidator
             case ("input.keyboard-hook", "hook-installed"):
                 ValidateHookInstalled(payload, issues);
                 break;
+            case ("input.mouse-hook", "hook-mouse"):
+                ValidateHookMouse(payload, issues);
+                break;
+            case ("input.mouse-hook", "hook-mouse-installed"):
+                ValidateHookMouseInstalled(payload, issues);
+                break;
             case ("system.assistive-technology", "assistive-technology-watch"):
                 ValidateAssistiveTechnologyWatch(payload, issues);
                 break;
@@ -1676,6 +1682,139 @@ internal static class EventPayloadValidator
         }
     }
 
+    // The mouse hook's records (input.mouse-hook): each event its low-level
+    // hook was called with, and each installation of the hook. See
+    // docs/architecture/screen-reader-activity.md, "The mouse hook".
+    private static void ValidateHookMouse(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredInteger("installation", positive: true),
+                RequiredInteger("message", nonnegative: true),
+                RequiredEnum("kind", [.. Recorder.Contracts.MouseHookRecords.Kinds]),
+                NullableEnum("button", [.. Recorder.Contracts.MouseHookRecords.Buttons]),
+                RequiredInteger("x"),
+                RequiredInteger("y"),
+                RequiredInteger("mouseData"),
+                NullableInteger("wheelDelta"),
+                RequiredInteger("flags", nonnegative: true),
+                RequiredBoolean("injected"),
+                RequiredBoolean("lowerIntegrityInjected"),
+                NullableEnum("penOrTouch", "pen", "touch"),
+                RequiredInteger("extraInformation"),
+                RequiredInteger("eventTimeMilliseconds", nonnegative: true)
+            ],
+            issues);
+        if (!payload.TryGetProperty("message", out var messageValue) || !messageValue.TryGetInt32(out var message) ||
+            !payload.TryGetProperty("mouseData", out var dataValue) || !dataValue.TryGetInt32(out var mouseData))
+        {
+            return;
+        }
+
+        var (kind, button) = Recorder.Contracts.MouseHookRecords.Describe(message, mouseData);
+        if (Text(payload, "kind") != kind || Text(payload, "button") != button)
+        {
+            AddError(
+                issues,
+                "hook-mouse-message-inconsistent",
+                "#/payload/kind",
+                "kind and button must be those of message and mouseData.");
+        }
+
+        var delta = Recorder.Contracts.MouseHookRecords.WheelDelta(kind, mouseData);
+        var recordedDelta = payload.TryGetProperty("wheelDelta", out var deltaValue) && deltaValue.ValueKind == JsonValueKind.Number &&
+            deltaValue.TryGetInt32(out var read)
+                ? read
+                : (int?)null;
+        if (recordedDelta != delta)
+        {
+            AddError(
+                issues,
+                "hook-mouse-message-inconsistent",
+                "#/payload/wheelDelta",
+                "wheelDelta must be the high word of mouseData for a wheel, and null otherwise.");
+        }
+
+        if (payload.TryGetProperty("flags", out var flagsValue) && flagsValue.TryGetInt32(out var flags))
+        {
+            foreach (var (name, bit) in new[]
+                     {
+                         ("injected", Recorder.Contracts.MouseHookRecords.InjectedFlag),
+                         ("lowerIntegrityInjected", Recorder.Contracts.MouseHookRecords.LowerIntegrityInjectedFlag)
+                     })
+            {
+                if (payload.TryGetProperty(name, out var value) &&
+                    value.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+                    (value.ValueKind == JsonValueKind.True) != ((flags & bit) != 0))
+                {
+                    AddError(
+                        issues,
+                        "hook-mouse-flag-inconsistent",
+                        "#/payload/" + name,
+                        $"{name} must match its bit of flags.");
+                }
+            }
+        }
+
+        if (payload.TryGetProperty("extraInformation", out var extraValue) && extraValue.TryGetInt64(out var extra) &&
+            Text(payload, "penOrTouch") != Recorder.Contracts.MouseHookRecords.PenOrTouch(extra))
+        {
+            AddError(
+                issues,
+                "hook-mouse-flag-inconsistent",
+                "#/payload/penOrTouch",
+                "penOrTouch must be what extraInformation's signature says.");
+        }
+    }
+
+    private static void ValidateHookMouseInstalled(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredInteger("installation", positive: true),
+                RequiredEnum("reason", [.. Recorder.Contracts.MouseHookRecords.Reasons]),
+                RequiredBoolean("installed"),
+                NullableText("problem"),
+                NullableInteger("previousInstallation", positive: true),
+                NullableInteger("previousEvents", nonnegative: true),
+                RequiredNullableNumber("previousMaxCallbackMicroseconds", nonnegative: true),
+                RequiredInteger("eventsDropped", nonnegative: true),
+                NullableInteger("lastHookEventAt", nonnegative: true),
+                NullableInteger("unmatchedRawButtonAt", nonnegative: true),
+                NullableInteger("unmatchedButton", nonnegative: true)
+            ],
+            issues);
+        bool IsNull(string name) => !payload.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null;
+        if (payload.TryGetProperty("installed", out var installed) &&
+            installed.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+            (installed.ValueKind == JsonValueKind.True) != IsNull("problem"))
+        {
+            AddError(
+                issues,
+                "hook-installed-problem-inconsistent",
+                "#/payload/problem",
+                "An installation has a problem exactly when the hook was not installed.");
+        }
+
+        var lost = Text(payload, "reason") == Recorder.Contracts.KeyboardHookRecords.HookLostReason;
+        var hasRaw = !IsNull("unmatchedRawButtonAt");
+        var hasButton = !IsNull("unmatchedButton");
+        if (lost ? !(hasRaw && hasButton) : hasRaw || hasButton)
+        {
+            AddError(
+                issues,
+                "hook-installed-loss-inconsistent",
+                "#/payload/unmatchedRawButtonAt",
+                "An installation after a loss names the raw button that showed it, and no other does.");
+        }
+    }
+
     // The assistive technology collector's records (system.assistive-technology):
     // what it watches, each watched process's start and exit, each of its
     // modules seen in or gone from the instrumented Chromium, and each period
@@ -1766,7 +1905,15 @@ internal static class EventPayloadValidator
                 RequiredTextArray("profiles"),
                 RequiredBoolean("profileTriggers"),
                 RequiredObjectArray("customGestures"),
-                NullableText("gesturesProblem")
+                NullableText("gesturesProblem"),
+                // NVDA's [mouse] settings, from the mouse hook's step on;
+                // a record made before has none.
+                OptionalNullableText("enableMouseTracking"),
+                OptionalNullableText("ignoreInjectedMouseInput"),
+                OptionalNullableText("mouseTextUnit"),
+                OptionalNullableText("reportObjectRoleOnMouseEnter"),
+                OptionalNullableText("audioCoordinatesOnMouseMove"),
+                OptionalNullableText("reportMouseShapeChanges")
             ],
             issues);
         if (payload.TryGetProperty("customGestures", out var gestures) && gestures.ValueKind == JsonValueKind.Array)

@@ -21,5 +21,6 @@
     <Project Path="tests/UiaLoadSource/UiaLoadSource.csproj" />
     <Project Path="tests/RecordingEventExport/RecordingEventExport.csproj" />
     <Project Path="tests/WindowSnapshotProbe/WindowSnapshotProbe.csproj" />
+    <Project Path="tests/MouseHookProbe/MouseHookProbe.csproj" />
   </Folder>
 </Solution>

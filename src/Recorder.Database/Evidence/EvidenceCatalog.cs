@@ -245,6 +245,41 @@ internal static class EvidenceCatalog
         BigInt("unmatchedRawKeyAt", N),
         Int("unmatchedScanCode", N));
 
+    // Added by 0030_mouse_hook.sql. The mouse hook's records
+    // (input.mouse-hook): each event its low-level hook was called with, and
+    // each installation of the hook. See
+    // docs/architecture/screen-reader-activity.md, "The mouse hook".
+    public static readonly EvidenceTable MouseHookEvents = Evidence(
+        "mouse_hook_events",
+        Int("installation"),
+        Int("message"),
+        Text("kind"),
+        Text("button", N),
+        Int("x"),
+        Int("y"),
+        Int("mouseData"),
+        Int("wheelDelta", N),
+        Int("flags"),
+        Bool("injected"),
+        Bool("lowerIntegrityInjected"),
+        Text("penOrTouch", N),
+        BigInt("extraInformation"),
+        BigInt("eventTimeMilliseconds"));
+
+    public static readonly EvidenceTable MouseHookInstallations = Evidence(
+        "mouse_hook_installations",
+        Int("installation"),
+        Text("reason"),
+        Bool("installed"),
+        Text("problem", N),
+        Int("previousInstallation", N),
+        BigInt("previousEvents", N),
+        Double("previousMaxCallbackMicroseconds", N),
+        BigInt("eventsDropped"),
+        BigInt("lastHookEventAt", N),
+        BigInt("unmatchedRawButtonAt", N),
+        Int("unmatchedButton", N));
+
     // Added by 0026_assistive_technology.sql. The assistive technology
     // collector's records (system.assistive-technology): what it watches,
     // each watched process's start and exit, each of its modules seen in or
@@ -313,7 +348,14 @@ internal static class EvidenceCatalog
                 "assistive_technology_setting_gestures",
                 TableKind.Child,
                 [Text("section"), Text("script"), Text("gesture")])),
-        Text("gesturesProblem", N));
+        Text("gesturesProblem", N),
+        // Added by 0030_mouse_hook.sql: NVDA's [mouse] settings.
+        Text("enableMouseTracking", N),
+        Text("ignoreInjectedMouseInput", N),
+        Text("mouseTextUnit", N),
+        Text("reportObjectRoleOnMouseEnter", N),
+        Text("audioCoordinatesOnMouseMove", N),
+        Text("reportMouseShapeChanges", N));
 
     // Both a module seen loaded and one seen gone; the event type says which.
     public static readonly EvidenceTable AssistiveTechnologyModuleChanges = Evidence(
@@ -1487,7 +1529,8 @@ internal static class EvidenceCatalog
         ]),
         (27, "keyboard_hook", [KeyboardHookKeys, KeyboardHookInstallations]),
         (28, "input_recordability", [RecorderIntegrities, ForegroundIntegrities, InputDesktops]),
-        (29, "assistive_technology_settings", [AssistiveTechnologySettings])
+        (29, "assistive_technology_settings", [AssistiveTechnologySettings]),
+        (30, "mouse_hook", [MouseHookEvents, MouseHookInstallations])
     ];
 
     /// <summary>
@@ -1518,6 +1561,8 @@ internal static class EvidenceCatalog
             [("window.foreground", "input-desktop")] = InputDesktops,
             [("input.keyboard-hook", "hook-keyboard")] = KeyboardHookKeys,
             [("input.keyboard-hook", "hook-installed")] = KeyboardHookInstallations,
+            [("input.mouse-hook", "hook-mouse")] = MouseHookEvents,
+            [("input.mouse-hook", "hook-mouse-installed")] = MouseHookInstallations,
             [("system.assistive-technology", "assistive-technology-watch")] = AssistiveTechnologyWatches,
             [("system.assistive-technology", "assistive-technology-process-started")] = AssistiveTechnologyProcessStarts,
             [("system.assistive-technology", "assistive-technology-process-exited")] = AssistiveTechnologyProcessExits,

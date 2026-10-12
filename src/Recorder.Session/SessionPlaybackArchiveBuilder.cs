@@ -109,6 +109,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<AssistiveTechnologyRecord> _assistiveTechnology = [];
     private readonly List<InputRecordabilityRecord> _inputRecordability = [];
     private readonly List<KeyEvidenceRecord> _keyEvidence = [];
+    private readonly List<KeyEvidenceRecord> _mouseEvidence = [];
     private readonly List<BrowserPageCommit> _pageCommits = [];
     private readonly List<ForegroundWindow> _foreground = [];
     private readonly List<FocusedElement> _focus = [];
@@ -299,6 +300,13 @@ public sealed class SessionPlaybackArchiveBuilder
                 timelineEvent.EventId, timestamp, timelineEvent.Channel, timelineEvent.EventType, payload.Clone()));
         }
 
+        if (payload.ValueKind == JsonValueKind.Object &&
+            MouseActivity.IsMouseEvidence(timelineEvent.Channel, timelineEvent.EventType))
+        {
+            _mouseEvidence.Add(new KeyEvidenceRecord(
+                timelineEvent.EventId, timestamp, timelineEvent.Channel, timelineEvent.EventType, payload.Clone()));
+        }
+
         if (timelineEvent.Channel == "window.foreground" &&
             timelineEvent.EventType == "foreground-window" &&
             payload.ValueKind == JsonValueKind.Object)
@@ -433,7 +441,10 @@ public sealed class SessionPlaybackArchiveBuilder
             ScreenReaderWindows = assistiveTechnology.Recorded
                 ? new ScreenReaderWindowTimeline(
                     _foreground, _focus, assistiveTechnology, keyDispositions.KeptCommands, duration, _windowSnapshots)
-                : ScreenReaderWindowTimeline.Empty
+                : ScreenReaderWindowTimeline.Empty,
+            Mouse = _mouseEvidence.Any(record => record.Channel == MouseHookRecords.Channel)
+                ? new MouseActivity(_mouseEvidence, assistiveTechnology)
+                : MouseActivity.Empty
         };
     }
 
@@ -699,6 +710,11 @@ public sealed class SessionPlaybackArchiveBuilder
             return KeyboardHookSummary(eventType, payload);
         }
 
+        if (channel == MouseHookRecords.Channel)
+        {
+            return MouseHookSummary(eventType, payload);
+        }
+
         if (channel == MagnifierChanges.Channel &&
             payload.TryGetProperty("changed", out var changed) && changed.ValueKind == JsonValueKind.Object &&
             payload.TryGetProperty("current", out var now) && now.ValueKind == JsonValueKind.Object)
@@ -864,6 +880,44 @@ public sealed class SessionPlaybackArchiveBuilder
         items.Count <= 1
             ? string.Concat(items)
             : $"{string.Join(", ", items.Take(items.Count - 1))} and {items[^1]}";
+
+    // A mouse hook record as the event list shows it: its kind and button,
+    // the point, and whether it was injected or came from a pen or touch
+    // screen; or the installation's reason.
+    private static string MouseHookSummary(string eventType, JsonElement payload)
+    {
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        bool Flag(string name) => payload.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
+        if (eventType == MouseHookRecords.EventType)
+        {
+            var point = ReadInt32(payload, "x") is { } x && ReadInt32(payload, "y") is { } y
+                ? string.Create(culture, $"({x}, {y})")
+                : null;
+            var kind = ReadString(payload, "kind");
+            var button = ReadString(payload, "button");
+            return JoinSummary(
+                eventType,
+                button is null ? kind : $"{button} {kind}",
+                point,
+                ReadString(payload, "penOrTouch"),
+                Flag("lowerIntegrityInjected") ? "injected at lower integrity" : Flag("injected") ? "injected" : null);
+        }
+
+        if (eventType == MouseHookRecords.InstalledEventType)
+        {
+            var number = ReadInt32(payload, "installation") is { } value
+                ? "installation " + value.ToString(culture)
+                : null;
+            return JoinSummary(
+                eventType,
+                ReadString(payload, "reason"),
+                number,
+                Flag("installed") ? null : "not installed",
+                ReadString(payload, "problem"));
+        }
+
+        return eventType;
+    }
 
     // A keyboard hook record as the event list shows it: the key, its
     // direction, and whether it was injected; or the installation's reason.

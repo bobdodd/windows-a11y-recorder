@@ -856,7 +856,13 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
                 script = gesture.Script,
                 gesture = gesture.Gesture
             }).ToArray(),
-            gesturesProblem = reading?.GesturesProblem
+            gesturesProblem = reading?.GesturesProblem,
+            enableMouseTracking = reading?.EnableMouseTracking,
+            ignoreInjectedMouseInput = reading?.IgnoreInjectedMouseInput,
+            mouseTextUnit = reading?.MouseTextUnit,
+            reportObjectRoleOnMouseEnter = reading?.ReportObjectRoleOnMouseEnter,
+            audioCoordinatesOnMouseMove = reading?.AudioCoordinatesOnMouseMove,
+            reportMouseShapeChanges = reading?.ReportMouseShapeChanges
         }, Now());
     }
 

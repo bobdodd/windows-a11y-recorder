@@ -50,7 +50,10 @@ public sealed record PlaybackIndex
     // Version 15 derives the snapshots' summaries again, now naming the
     // deepest focused element (in NVDA's dialogs the window and the tree
     // also say they have the focus).
-    public const int CurrentVersion = 15;
+    // Version 16 keeps the mouse hook's records (input.mouse-hook) and raw
+    // input's mouse records (input.mouse, raw-mouse) whole, for the mouse
+    // outcomes and the Pointer row (MouseActivity).
+    public const int CurrentVersion = 16;
 
     public required int Version { get; init; }
 
@@ -263,7 +266,8 @@ public sealed class PlaybackIndexBuilder
             IsInputRecordabilityRecord(channel, record.EventType) ||
             (channel == "window.foreground" && record.EventType == "foreground-window") ||
             (channel == "accessibility.uia.events" && record.EventType == "focus-changed") ||
-            WindowSnapshots.IsSnapshot(channel, record.EventType))
+            WindowSnapshots.IsSnapshot(channel, record.EventType) ||
+            MouseActivity.IsMouseEvidence(channel, record.EventType))
         {
             Keep(eventKey, record);
             return;
@@ -396,7 +400,8 @@ public sealed class PlaybackIndexBuilder
              IsInputRecordabilityRecord(record.Channel, record.EventType) ||
              (record.Channel == "window.foreground" && record.EventType == "foreground-window") ||
              (record.Channel == "accessibility.uia.events" && record.EventType == "focus-changed") ||
-             KeyDispositions.IsKeyEvidence(record.Channel, record.EventType, record.Payload)) &&
+             KeyDispositions.IsKeyEvidence(record.Channel, record.EventType, record.Payload) ||
+             MouseActivity.IsMouseEvidence(record.Channel, record.EventType)) &&
             record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()
                 : WindowSnapshots.IsSnapshot(record.Channel, record.EventType)

@@ -25,10 +25,19 @@ namespace Recorder.Collectors.Input;
 /// </list>
 /// Agreed with the owner on 2026-10-07 and 2026-10-10. See
 /// docs/architecture/screen-reader-activity.md, "The keyboard hook".
+/// <para>
+/// It also records every mouse event from a low-level mouse hook
+/// (<c>WH_MOUSE_LL</c>), on <c>input.mouse-hook</c>, on the same thread and
+/// terms: the mouse hook is installed and installed again with the keyboard
+/// hook, each installation recorded, and checked against raw input's mouse
+/// buttons. Agreed with the owner on 2026-10-11; see
+/// docs/architecture/screen-reader-activity.md, "The mouse hook".
+/// </para>
 /// </summary>
 public sealed class KeyboardHookCollector : ICaptureCollector
 {
     private const int WhKeyboardLl = 13;
+    private const int WhMouseLl = 14;
     private const uint WmTimer = 0x0113;
     private const uint WmQuit = 0x0012;
     private const uint WmInstall = 0x8000 + 1;
@@ -37,6 +46,8 @@ public sealed class KeyboardHookCollector : ICaptureCollector
     private readonly object _gate = new();
     private readonly object _detectorGate = new();
     private readonly HookLossDetector _detector =
+        new(KeyboardHookRecords.JoinWindowMilliseconds * 1_000_000L);
+    private readonly HookLossDetector _mouseDetector =
         new(KeyboardHookRecords.JoinWindowMilliseconds * 1_000_000L);
     private readonly Channel<Item> _queue = Channel.CreateBounded<Item>(
         new BoundedChannelOptions(QueueCapacity)
@@ -60,9 +71,11 @@ public sealed class KeyboardHookCollector : ICaptureCollector
     private Installation? _current;
     private int _installations;
     private long _dropped;
+    private long _mouseDropped;
 
     // Set by the writer when it finds a loss, read by the hook thread.
     private HookLoss? _pendingLoss;
+    private HookLoss? _pendingMouseLoss;
 
     private sealed class Installation(int number, nint handle, HookProc procedure)
     {
@@ -71,13 +84,27 @@ public sealed class KeyboardHookCollector : ICaptureCollector
         public HookProc Procedure { get; } = procedure;
         public long Keys { get; set; }
         public long MaxCallbackTicks { get; set; }
+
+        // The mouse hook installed with it; zero where it could not be.
+        public nint MouseHandle { get; init; }
+        public HookProc? MouseProcedure { get; init; }
+        public long MouseEvents { get; set; }
+        public long MouseMaxCallbackTicks { get; set; }
     }
 
     private abstract record Item;
 
     private sealed record KeyItem(long At, int Installation, KbdLlHookStruct Key) : Item;
 
-    private sealed record InstalledItem(long At, object Payload) : Item;
+    private sealed record MouseItem(long At, int Installation, MsLlHookStruct Mouse, int Message) : Item;
+
+    private sealed record InstalledItem(long At, object Payload) : Item
+    {
+        public InstalledItem(long at, MouseInstalled mouse)
+            : this(at, (object)mouse)
+        {
+        }
+    }
 
     public KeyboardHookCollector()
     {
@@ -85,7 +112,7 @@ public sealed class KeyboardHookCollector : ICaptureCollector
             "windows.keyboard-hook",
             nameof(KeyboardHookCollector),
             typeof(KeyboardHookCollector).Assembly.GetName().Version?.ToString() ?? "0.0.0",
-            [KeyboardHookRecords.Channel],
+            [KeyboardHookRecords.Channel, MouseHookRecords.Channel],
             "win32.low-level-keyboard-hook");
     }
 
@@ -100,6 +127,18 @@ public sealed class KeyboardHookCollector : ICaptureCollector
         lock (_detectorGate)
         {
             _detector.ObserveRaw(key.At, key.ScanCode, key.VirtualKey, key.Up, key.FromDevice);
+        }
+    }
+
+    /// <summary>A raw input mouse record's buttons, for the check that the mouse hook is still installed.</summary>
+    public void ObserveRawMouse(RawMouseObservation mouse)
+    {
+        lock (_detectorGate)
+        {
+            foreach (var (button, up) in MouseHookRecords.RawButtons(mouse.ButtonFlags))
+            {
+                _mouseDetector.ObserveRaw(mouse.At, button, 0, up, mouse.FromDevice);
+            }
         }
     }
 
@@ -162,7 +201,7 @@ public sealed class KeyboardHookCollector : ICaptureCollector
             _hookThread = new Thread(HookLoop)
             {
                 IsBackground = true,
-                Name = "Keyboard hook"
+                Name = "Keyboard and mouse hooks"
             };
             _hookThread.Start();
         }
@@ -253,7 +292,7 @@ public sealed class KeyboardHookCollector : ICaptureCollector
 
         // Makes the thread's message queue, so posted messages are kept.
         PeekMessageW(out _, nint.Zero, 0, 0, 0);
-        if (!Install(KeyboardHookRecords.RecordingStartedReason))
+        if (!Install(KeyboardHookRecords.RecordingStartedReason, KeyboardHookRecords.RecordingStartedReason))
         {
             _ready?.TrySetException(new Win32Exception("The keyboard hook could not be installed."));
             return;
@@ -266,15 +305,18 @@ public sealed class KeyboardHookCollector : ICaptureCollector
             switch (message.Message)
             {
                 case WmTimer when _screenReaderRunning:
-                    Install(KeyboardHookRecords.RefreshReason);
+                    Install(KeyboardHookRecords.RefreshReason, KeyboardHookRecords.RefreshReason);
                     break;
                 case WmTimer:
                     break;
                 case WmInstall when message.WParam == 1:
-                    Install(KeyboardHookRecords.ScreenReaderStartedReason);
+                    Install(KeyboardHookRecords.ScreenReaderStartedReason, KeyboardHookRecords.ScreenReaderStartedReason);
                     break;
                 case WmInstall when message.WParam == 2:
-                    Install(KeyboardHookRecords.HookLostReason);
+                    Install(KeyboardHookRecords.HookLostReason, MouseHookRecords.KeyboardHookLostReason);
+                    break;
+                case WmInstall when message.WParam == 3:
+                    Install(KeyboardHookRecords.MouseHookLostReason, KeyboardHookRecords.HookLostReason);
                     break;
                 default:
                     TranslateMessage(ref message);
@@ -291,27 +333,37 @@ public sealed class KeyboardHookCollector : ICaptureCollector
         if (_current is { } current)
         {
             UnhookWindowsHookEx(current.Handle);
+            if (current.MouseHandle != 0)
+            {
+                UnhookWindowsHookEx(current.MouseHandle);
+            }
+
             _current = null;
         }
     }
 
-    // Installs a new hook ahead of the current one, then removes the
-    // current one, so that a key is always seen by one of them.
-    private bool Install(string reason)
+    // Installs new hooks ahead of the current ones, then removes the
+    // current ones, so that a key or mouse event is always seen by one of
+    // them. The keyboard hook decides: where it cannot be installed the
+    // current hooks stay. A mouse hook that cannot be installed is recorded
+    // and leaves the keyboard hook recording.
+    private bool Install(string reason, string mouseReason)
     {
         var number = ++_installations;
         var at = Now();
-        HookLoss? loss = null;
-        if (reason == KeyboardHookRecords.HookLostReason)
-        {
-            loss = Interlocked.Exchange(ref _pendingLoss, null);
-        }
+        var loss = reason == KeyboardHookRecords.HookLostReason
+            ? Interlocked.Exchange(ref _pendingLoss, null)
+            : null;
+        var mouseLoss = mouseReason == KeyboardHookRecords.HookLostReason
+            ? Interlocked.Exchange(ref _pendingMouseLoss, null)
+            : null;
 
         HookProc procedure = null!;
         procedure = (code, wParam, lParam) => OnKey(number, code, wParam, lParam);
         var handle = SetWindowsHookExW(WhKeyboardLl, procedure, GetModuleHandleW(null), 0);
         var previous = _current;
         var dropped = Interlocked.Exchange(ref _dropped, 0);
+        var mouseDropped = Interlocked.Exchange(ref _mouseDropped, 0);
         if (handle == 0)
         {
             var error = Marshal.GetLastWin32Error();
@@ -319,18 +371,68 @@ public sealed class KeyboardHookCollector : ICaptureCollector
             HealthReason = $"The keyboard hook could not be installed: error {error}.";
             Queue(new InstalledItem(at, Payload(number, reason, null, dropped, loss,
                 $"SetWindowsHookEx failed with error {error}.")));
+            Queue(new InstalledItem(at, MousePayload(number, mouseReason, null, mouseDropped, mouseLoss,
+                "The keyboard hook could not be installed, so the mouse hook was not installed again.")));
             return false;
         }
 
-        _current = new Installation(number, handle, procedure);
+        HookProc mouseProcedure = null!;
+        mouseProcedure = (code, wParam, lParam) => OnMouse(number, code, wParam, lParam);
+        var mouseHandle = SetWindowsHookExW(WhMouseLl, mouseProcedure, GetModuleHandleW(null), 0);
+        string? mouseProblem = null;
+        if (mouseHandle == 0)
+        {
+            var error = Marshal.GetLastWin32Error();
+            HealthState = CollectorHealthState.Degraded;
+            HealthReason = $"The mouse hook could not be installed: error {error}.";
+            mouseProblem = $"SetWindowsHookEx failed with error {error}.";
+        }
+
+        _current = new Installation(number, handle, procedure)
+        {
+            MouseHandle = mouseHandle,
+            MouseProcedure = mouseHandle == 0 ? null : mouseProcedure
+        };
         if (previous is not null)
         {
             UnhookWindowsHookEx(previous.Handle);
+            if (previous.MouseHandle != 0)
+            {
+                UnhookWindowsHookEx(previous.MouseHandle);
+            }
         }
 
         Queue(new InstalledItem(at, Payload(number, reason, previous, dropped, loss, null)));
+        Queue(new InstalledItem(at, MousePayload(
+            number, mouseReason, previous is { MouseHandle: not 0 } ? previous : null, mouseDropped, mouseLoss, mouseProblem)));
         return true;
     }
+
+    private static MouseInstalled MousePayload(
+        int number,
+        string reason,
+        Installation? previous,
+        long dropped,
+        HookLoss? loss,
+        string? problem) => new(new
+    {
+        installation = number,
+        reason,
+        installed = problem is null,
+        problem,
+        previousInstallation = previous?.Number,
+        previousEvents = previous?.MouseEvents,
+        previousMaxCallbackMicroseconds = previous is null
+            ? (double?)null
+            : Math.Round(previous.MouseMaxCallbackTicks * 1_000_000.0 / Stopwatch.Frequency, 1),
+        eventsDropped = dropped,
+        lastHookEventAt = loss?.LastHookKeyAt,
+        unmatchedRawButtonAt = loss?.UnmatchedRawKeyAt,
+        unmatchedButton = loss?.UnmatchedScanCode
+    });
+
+    // A mouse hook installation's payload, told apart from the keyboard's.
+    private sealed record MouseInstalled(object Payload);
 
     private static object Payload(
         int number,
@@ -371,6 +473,26 @@ public sealed class KeyboardHookCollector : ICaptureCollector
 
             current.Keys++;
             current.MaxCallbackTicks = Math.Max(current.MaxCallbackTicks, Stopwatch.GetTimestamp() - started);
+        }
+
+        return CallNextHookEx(0, code, wParam, lParam);
+    }
+
+    // The mouse callback: copies the event into the queue and passes it
+    // on, as the keyboard callback does.
+    private nint OnMouse(int number, int code, nint wParam, nint lParam)
+    {
+        if (code >= 0 && _current is { } current && current.Number == number)
+        {
+            var started = Stopwatch.GetTimestamp();
+            var mouse = Marshal.PtrToStructure<MsLlHookStruct>(lParam);
+            if (!_queue.Writer.TryWrite(new MouseItem(Now(), number, mouse, (int)wParam)))
+            {
+                Interlocked.Increment(ref _mouseDropped);
+            }
+
+            current.MouseEvents++;
+            current.MouseMaxCallbackTicks = Math.Max(current.MouseMaxCallbackTicks, Stopwatch.GetTimestamp() - started);
         }
 
         return CallNextHookEx(0, code, wParam, lParam);
@@ -446,6 +568,41 @@ public sealed class KeyboardHookCollector : ICaptureCollector
                     eventTimeMilliseconds = (long)key.Key.Time
                 }, key.At);
                 break;
+            case MouseItem mouse:
+                var mouseFlags = (int)mouse.Mouse.Flags;
+                var mouseData = unchecked((int)mouse.Mouse.MouseData);
+                var (kind, button) = MouseHookRecords.Describe(mouse.Message, mouseData);
+                var injected = (mouseFlags & MouseHookRecords.InjectedFlag) != 0;
+                if (MouseHookRecords.HookButton(kind, button) is { } hookButton)
+                {
+                    lock (_detectorGate)
+                    {
+                        _mouseDetector.ObserveHook(mouse.At, hookButton.Button, hookButton.Up, injected);
+                    }
+                }
+
+                var extra = (long)mouse.Mouse.ExtraInformation;
+                Emit(MouseHookRecords.EventType, new
+                {
+                    installation = mouse.Installation,
+                    message = mouse.Message,
+                    kind,
+                    button,
+                    x = mouse.Mouse.X,
+                    y = mouse.Mouse.Y,
+                    mouseData,
+                    wheelDelta = MouseHookRecords.WheelDelta(kind, mouseData),
+                    flags = mouseFlags,
+                    injected,
+                    lowerIntegrityInjected = (mouseFlags & MouseHookRecords.LowerIntegrityInjectedFlag) != 0,
+                    penOrTouch = MouseHookRecords.PenOrTouch(extra),
+                    extraInformation = extra,
+                    eventTimeMilliseconds = (long)mouse.Mouse.Time
+                }, mouse.At, MouseHookRecords.Channel);
+                break;
+            case InstalledItem { Payload: MouseInstalled mouseInstalled } installed:
+                Emit(MouseHookRecords.InstalledEventType, mouseInstalled.Payload, installed.At, MouseHookRecords.Channel);
+                break;
             case InstalledItem installed:
                 Emit(KeyboardHookRecords.InstalledEventType, installed.Payload, installed.At);
                 break;
@@ -455,9 +612,12 @@ public sealed class KeyboardHookCollector : ICaptureCollector
     private void CheckForLoss()
     {
         HookLoss? loss;
+        HookLoss? mouseLoss;
         lock (_detectorGate)
         {
-            loss = _detector.Poll(Now());
+            var now = Now();
+            loss = _detector.Poll(now);
+            mouseLoss = _mouseDetector.Poll(now);
         }
 
         if (loss is not null && _hookThreadId != 0)
@@ -465,13 +625,18 @@ public sealed class KeyboardHookCollector : ICaptureCollector
             Volatile.Write(ref _pendingLoss, loss);
             PostThreadMessageW(_hookThreadId, WmInstall, 2, 0);
         }
+        else if (mouseLoss is not null && _hookThreadId != 0)
+        {
+            Volatile.Write(ref _pendingMouseLoss, mouseLoss);
+            PostThreadMessageW(_hookThreadId, WmInstall, 3, 0);
+        }
     }
 
     // --- Events -----------------------------------------------------------------
 
     private long Now() => _context?.Clock.GetElapsedNanoseconds() ?? 0;
 
-    private void Emit(string eventType, object payload, long monotonicNanoseconds)
+    private void Emit(string eventType, object payload, long monotonicNanoseconds, string channel = KeyboardHookRecords.Channel)
     {
         var context = _context;
         if (context is null)
@@ -483,7 +648,7 @@ public sealed class KeyboardHookCollector : ICaptureCollector
         context.EventSink.TryWrite(RecorderEventFactory.Create(
             context.SessionId,
             Descriptor,
-            KeyboardHookRecords.Channel,
+            channel,
             sequence,
             monotonicNanoseconds,
             eventType,
@@ -519,6 +684,19 @@ public sealed class KeyboardHookCollector : ICaptureCollector
     {
         public readonly uint VirtualKey;
         public readonly uint ScanCode;
+        public readonly uint Flags;
+        public readonly uint Time;
+        public readonly nuint ExtraInformation;
+    }
+
+    // MSLLHOOKSTRUCT: the point, then the mouse data, flags, time, and
+    // extra information.
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly struct MsLlHookStruct
+    {
+        public readonly int X;
+        public readonly int Y;
+        public readonly uint MouseData;
         public readonly uint Flags;
         public readonly uint Time;
         public readonly nuint ExtraInformation;

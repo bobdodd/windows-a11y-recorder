@@ -34,8 +34,15 @@ public static class KeyboardHookRecords
     /// </summary>
     public const string HookLostReason = "hook-lost";
 
+    /// <summary>
+    /// The mouse hook, installed with this one, was found lost: a button of
+    /// a mouse reached raw input with no call of the mouse hook for it
+    /// (MouseHookRecords).
+    /// </summary>
+    public const string MouseHookLostReason = "mouse-hook-lost";
+
     public static IReadOnlyList<string> Reasons { get; } =
-        [RecordingStartedReason, ScreenReaderStartedReason, RefreshReason, HookLostReason];
+        [RecordingStartedReason, ScreenReaderStartedReason, RefreshReason, HookLostReason, MouseHookLostReason];
 
     public const int RefreshMilliseconds = 1000;
 

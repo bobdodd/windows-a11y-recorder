@@ -28,8 +28,11 @@ public static class WindowsCollectorFactory
             // low-level hook sees them. It is checked against raw input, and
             // kept first in the chain while a screen reader runs. See
             // docs/architecture/screen-reader-activity.md, "The keyboard hook".
+            // Its mouse hook is checked against raw input's mouse buttons
+            // ("The mouse hook").
             keyboardHook = new KeyboardHookCollector();
             rawInput.KeyboardObserved += keyboardHook.ObserveRawKey;
+            rawInput.MouseObserved += keyboardHook.ObserveRawMouse;
             collectors.Add(keyboardHook);
         }
 

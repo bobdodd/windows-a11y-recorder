@@ -79,6 +79,7 @@ public partial class MainWindow
         .. archive.AssistiveTechnology.RowsAt(time),
         .. archive.ScreenReaderMode.RowsAt(time),
         .. archive.ScreenReaderWindows.RowsAt(time),
+        .. archive.Mouse.RowsAt(time),
         .. archive.InputRecordability.RowsAt(time)
     ];
 
@@ -103,7 +104,7 @@ public partial class MainWindow
             times = PropertyChangeSteps.TimesOf(
                 row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences,
                 archive.AssistiveTechnology, archive.InputRecordability, archive.ScreenReaderMode,
-                archive.ScreenReaderWindows);
+                archive.ScreenReaderWindows, archive.Mouse);
             _propertyChangeTimes[row.Key] = times;
         }
 
@@ -169,7 +170,7 @@ public partial class MainWindow
         if (PropertyChangeSteps.TimesOf(
                 row.Row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences,
                 archive.AssistiveTechnology, archive.InputRecordability, archive.ScreenReaderMode,
-                archive.ScreenReaderWindows) is not { } times)
+                archive.ScreenReaderWindows, archive.Mouse) is not { } times)
         {
             _busy.AnnounceLayout(row.Group switch
             {

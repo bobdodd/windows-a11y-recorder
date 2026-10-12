@@ -45,6 +45,13 @@ public sealed class RawInputCollector : ICaptureCollector
     /// </summary>
     public event Action<RawKeyObservation>? KeyboardObserved;
 
+    /// <summary>
+    /// Each mouse record's buttons as it is written, on the message thread,
+    /// for the keyboard hook collector's check that its mouse hook is still
+    /// installed.
+    /// </summary>
+    public event Action<RawMouseObservation>? MouseObserved;
+
     public CollectorLifecycleState LifecycleState { get; private set; } = CollectorLifecycleState.Created;
     public CollectorHealthState HealthState { get; private set; } = CollectorHealthState.Unknown;
 
@@ -343,12 +350,13 @@ public sealed class RawInputCollector : ICaptureCollector
         GetWindowThreadProcessId(GetForegroundWindow(), out var processId);
 
         var sequence = _mouseSequence++;
+        var at = context.Clock.GetElapsedNanoseconds();
         var record = RecorderEventFactory.Create(
             context.SessionId,
             Descriptor,
             "input.mouse",
             sequence,
-            context.Clock.GetElapsedNanoseconds(),
+            at,
             "raw-mouse",
             new
             {
@@ -367,6 +375,10 @@ public sealed class RawInputCollector : ICaptureCollector
             "receipt-time-stamp",
             "cursor-position-sampled");
         context.EventSink.TryWrite(record);
+        if (mouse.usButtonFlags != 0)
+        {
+            MouseObserved?.Invoke(new RawMouseObservation(at, mouse.usButtonFlags, input.header.hDevice != nint.Zero));
+        }
     }
 
     private void EmitLifecycle(string action, SessionBoundary boundary)

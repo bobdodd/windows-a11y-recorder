@@ -58,6 +58,12 @@ public sealed record SessionPlaybackArchive(
     /// <summary>NVDA's own windows in front, for the timeline's strip and the NVDA window row.</summary>
     public ScreenReaderWindowTimeline ScreenReaderWindows { get; init; } = ScreenReaderWindowTimeline.Empty;
 
+    /// <summary>
+    /// The mouse hook's events: each one's outcome, and the Pointer and NVDA
+    /// mouse tracking rows (screen-reader-activity.md, "The mouse hook").
+    /// </summary>
+    public MouseActivity Mouse { get; init; } = MouseActivity.Empty;
+
     /// <summary>An event's description, ending with its key outcome where it has one.</summary>
     public string Describe(SessionTimelineEvent item)
     {

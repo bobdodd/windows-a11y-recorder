@@ -210,11 +210,11 @@ internal static class EvidenceSamples
         // with a profile and a custom key command; and a copy whose folder
         // is not known.
         ("system.assistive-technology", "assistive-technology-settings",
-            J("{'product':'NVDA','processId':6688,'copy':'portable','configFolder':'C:\\\\Users\\\\User\\\\Desktop\\\\NVDA\\\\userConfig','read':true,'problem':null,'keyboardLayout':null,'nvdaModifierKeys':'7','multiPressTimeout':null,'autoPassThroughOnFocusChange':null,'autoPassThroughOnCaretMove':null,'trapNonCommandGestures':null,'enableOnPageLoad':null,'profiles':[],'profileTriggers':false,'customGestures':[],'gesturesProblem':null}")),
+            J("{'product':'NVDA','processId':6688,'copy':'portable','configFolder':'C:\\\\Users\\\\User\\\\Desktop\\\\NVDA\\\\userConfig','read':true,'problem':null,'keyboardLayout':null,'nvdaModifierKeys':'7','multiPressTimeout':null,'autoPassThroughOnFocusChange':null,'autoPassThroughOnCaretMove':null,'trapNonCommandGestures':null,'enableOnPageLoad':null,'profiles':[],'profileTriggers':false,'customGestures':[],'gesturesProblem':null,'enableMouseTracking':null,'ignoreInjectedMouseInput':null,'mouseTextUnit':null,'reportObjectRoleOnMouseEnter':null,'audioCoordinatesOnMouseMove':null,'reportMouseShapeChanges':null}")),
         ("system.assistive-technology", "assistive-technology-settings",
-            J("{'product':'NVDA','processId':6690,'copy':'installed','configFolder':'C:\\\\Users\\\\User\\\\AppData\\\\Roaming\\\\nvda','read':true,'problem':null,'keyboardLayout':'laptop','nvdaModifierKeys':'1','multiPressTimeout':'700','autoPassThroughOnFocusChange':'False','autoPassThroughOnCaretMove':'True','trapNonCommandGestures':'False','enableOnPageLoad':'True','profiles':['Reading'],'profileTriggers':true,'customGestures':[{'section':'globalCommands.GlobalCommands','script':'reportCurrentFocus','gesture':'kb:NVDA+shift+tab'}],'gesturesProblem':null}")),
+            J("{'product':'NVDA','processId':6690,'copy':'installed','configFolder':'C:\\\\Users\\\\User\\\\AppData\\\\Roaming\\\\nvda','read':true,'problem':null,'keyboardLayout':'laptop','nvdaModifierKeys':'1','multiPressTimeout':'700','autoPassThroughOnFocusChange':'False','autoPassThroughOnCaretMove':'True','trapNonCommandGestures':'False','enableOnPageLoad':'True','profiles':['Reading'],'profileTriggers':true,'customGestures':[{'section':'globalCommands.GlobalCommands','script':'reportCurrentFocus','gesture':'kb:NVDA+shift+tab'}],'gesturesProblem':null,'enableMouseTracking':'False','ignoreInjectedMouseInput':'True','mouseTextUnit':null,'reportObjectRoleOnMouseEnter':null,'audioCoordinatesOnMouseMove':null,'reportMouseShapeChanges':null}")),
         ("system.assistive-technology", "assistive-technology-settings",
-            J("{'product':'NVDA','processId':6692,'copy':'unknown','configFolder':null,'read':false,'problem':'The configuration folder is not known for this copy.','keyboardLayout':null,'nvdaModifierKeys':null,'multiPressTimeout':null,'autoPassThroughOnFocusChange':null,'autoPassThroughOnCaretMove':null,'trapNonCommandGestures':null,'enableOnPageLoad':null,'profiles':[],'profileTriggers':false,'customGestures':[],'gesturesProblem':null}")),
+            J("{'product':'NVDA','processId':6692,'copy':'unknown','configFolder':null,'read':false,'problem':'The configuration folder is not known for this copy.','keyboardLayout':null,'nvdaModifierKeys':null,'multiPressTimeout':null,'autoPassThroughOnFocusChange':null,'autoPassThroughOnCaretMove':null,'trapNonCommandGestures':null,'enableOnPageLoad':null,'profiles':[],'profileTriggers':false,'customGestures':[],'gesturesProblem':null,'enableMouseTracking':null,'ignoreInjectedMouseInput':null,'mouseTextUnit':null,'reportObjectRoleOnMouseEnter':null,'audioCoordinatesOnMouseMove':null,'reportMouseShapeChanges':null}")),
         // Added with 0028_input_recordability.sql: the recorder at medium; an
         // elevated window, and one whose level could not be read; the user's
         // desktop, and the secure desktop that could not be opened.
@@ -228,6 +228,27 @@ internal static class EvidenceSamples
             J("{'reason':'start','desktopName':'Default','problem':null,'inputRecordable':true}")),
         ("window.foreground", "input-desktop",
             J("{'reason':'switch','desktopName':null,'problem':'OpenInputDesktop failed with error 5.','inputRecordable':false}")),
+        // Added with 0030_mouse_hook.sql: a move from a device, an injected
+        // left button press, a wheel turned back, an X button release from a
+        // touch screen; the first installation, a refresh, one after a loss
+        // of the mouse hook, and one after a loss of the keyboard hook whose
+        // mouse hook could not be installed.
+        ("input.mouse-hook", "hook-mouse",
+            J("{'installation':1,'message':512,'kind':'move','button':null,'x':640,'y':-12,'mouseData':0,'wheelDelta':null,'flags':0,'injected':false,'lowerIntegrityInjected':false,'penOrTouch':null,'extraInformation':0,'eventTimeMilliseconds':123456789}")),
+        ("input.mouse-hook", "hook-mouse",
+            J("{'installation':1,'message':513,'kind':'button-down','button':'left','x':640,'y':480,'mouseData':0,'wheelDelta':null,'flags':1,'injected':true,'lowerIntegrityInjected':false,'penOrTouch':null,'extraInformation':0,'eventTimeMilliseconds':123456790}")),
+        ("input.mouse-hook", "hook-mouse",
+            J("{'installation':2,'message':522,'kind':'wheel','button':null,'x':640,'y':480,'mouseData':-7864320,'wheelDelta':-120,'flags':0,'injected':false,'lowerIntegrityInjected':false,'penOrTouch':null,'extraInformation':0,'eventTimeMilliseconds':123456800}")),
+        ("input.mouse-hook", "hook-mouse",
+            J("{'installation':2,'message':524,'kind':'button-up','button':'x1','x':10,'y':20,'mouseData':65536,'wheelDelta':null,'flags':0,'injected':false,'lowerIntegrityInjected':false,'penOrTouch':'touch','extraInformation':4283520896,'eventTimeMilliseconds':123456900}")),
+        ("input.mouse-hook", "hook-mouse-installed",
+            J("{'installation':1,'reason':'recording-started','installed':true,'problem':null,'previousInstallation':null,'previousEvents':null,'previousMaxCallbackMicroseconds':null,'eventsDropped':0,'lastHookEventAt':null,'unmatchedRawButtonAt':null,'unmatchedButton':null}")),
+        ("input.mouse-hook", "hook-mouse-installed",
+            J("{'installation':2,'reason':'refresh','installed':true,'problem':null,'previousInstallation':1,'previousEvents':412,'previousMaxCallbackMicroseconds':21.5,'eventsDropped':0,'lastHookEventAt':null,'unmatchedRawButtonAt':null,'unmatchedButton':null}")),
+        ("input.mouse-hook", "hook-mouse-installed",
+            J("{'installation':3,'reason':'hook-lost','installed':true,'problem':null,'previousInstallation':2,'previousEvents':9,'previousMaxCallbackMicroseconds':30.25,'eventsDropped':1,'lastHookEventAt':1200,'unmatchedRawButtonAt':1500,'unmatchedButton':1}")),
+        ("input.mouse-hook", "hook-mouse-installed",
+            J("{'installation':4,'reason':'keyboard-hook-lost','installed':false,'problem':'SetWindowsHookEx failed with error 5.','previousInstallation':null,'previousEvents':null,'previousMaxCallbackMicroseconds':null,'eventsDropped':0,'lastHookEventAt':null,'unmatchedRawButtonAt':null,'unmatchedButton':null}")),
         // Added with 0027_keyboard_hook.sql: a key NVDA kept, the injected Tab
         // NVDA put in place of a physical one, an extended key up; the first
         // installation, a refresh, and one after a loss.

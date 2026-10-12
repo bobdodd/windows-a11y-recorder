@@ -45,6 +45,7 @@ public partial class MainWindow : Window
         "input.keyboard",
         "input.keyboard-hook",
         "input.mouse",
+        "input.mouse-hook",
         "accessibility.uia.events",
         "window.foreground",
         "system.preferences",
@@ -571,6 +572,14 @@ public partial class MainWindow : Window
         if (archive.ScreenReaderWindows.Describe(item) is { Count: > 0 } window)
         {
             json = string.Join(Environment.NewLine, window) + Environment.NewLine + Environment.NewLine + json;
+        }
+
+        // A mouse hook record's outcome, before the record, as a key's
+        // (screen-reader-activity.md, "The mouse hook").
+        if (archive.Mouse.Of(item.EventId) is { } mouse)
+        {
+            json = $"Mouse outcome ({archive.Mouse.Rule}): {mouse.Text}{Environment.NewLine}" +
+                string.Join(Environment.NewLine, mouse.Details) + Environment.NewLine + Environment.NewLine + json;
         }
 
         return archive.KeyDispositions.Of(item.EventId) is { } outcome
@@ -1302,6 +1311,7 @@ public partial class MainWindow : Window
         AddVisibleChannel(FilterKeyboardCheckBox, "input.keyboard", visibleChannels);
         AddVisibleChannel(FilterKeyboardCheckBox, "input.keyboard-hook", visibleChannels);
         AddVisibleChannel(FilterMouseCheckBox, "input.mouse", visibleChannels);
+        AddVisibleChannel(FilterMouseCheckBox, "input.mouse-hook", visibleChannels);
         AddVisibleChannel(
             FilterAutomationCheckBox,
             "accessibility.uia.events",
