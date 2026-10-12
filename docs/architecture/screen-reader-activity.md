@@ -1154,6 +1154,61 @@ choosing the other type, on another window of the process and back, and
 a stop at a limit with 6,000 tree items; and that every record passes the
 recorder's checks with no evidence dropped.
 
+## The reading position (step 4)
+
+Agreed with the owner on 2026-10-12. The reading position is the object
+NVDA's browse mode caret was last on, inferred from what NVDA asked of
+Chromium, with the accessibility tree and the commands given, and shown
+with its basis. Step 3 showed what it rests on: in the two NVDA recordings
+of 2026-10-12, H, Shift+H, D, Shift+D, the Down and Up arrows, and the
+Elements List's "Move to" each sent `scrollToMakeVisible` on the object
+moved to, Tab sent `focus`, and Enter `doDefault`
+([accessibility requests](accessibility-requests.md), "The target run" and
+"Arrow keys, 2026-10-12").
+
+The rules:
+
+1. A scroll request from NVDA (`scrollToMakeVisible`) moves the reading
+   position to its object. The basis is the request, with the key and its
+   command, or the click, it is linked with.
+2. When the page's focus moves, in focus mode or after a focus request,
+   the reading position moves to the focused object.
+3. A scroll request on the object already at the reading position keeps
+   it there; where within it, such as the line of a paragraph, is said to
+   be unknown.
+4. A navigation key NVDA kept that sent nothing, such as H after the last
+   heading, leaves the reading position where it was, marked uncertain
+   from that key until the next request or focus change.
+5. Before the first request or focus change on a page, and after the page
+   changes, the reading position is unknown. NVDA may start at the top,
+   but nothing recorded shows it.
+
+The object is described as in the Under the pointer (Chromium) row: its
+role, name, the text it holds, and the object it is in.
+
+Built in three parts, each tested on the target machine before the next:
+
+- 4a, the reading position: a Properties row, "Reading position
+  (inferred)", in the Screen reader group, with change buttons and a
+  count; a timeline band; and the basis in Selected event values.
+- 4b, the list of steps: each move, with its time, the key and command or
+  the click, the object reached, and the basis; a step moves the playhead
+  to it, with targets of 44 by 44 pixels.
+- 4c, a view of the tree: read only, at the playhead, rebuilt from the
+  accessibility checkpoints, with the reading position and the object
+  under the pointer marked; as the checkpoints do not record deletions,
+  each node's latest version is the best known.
+
+What NVDA had to announce is a later step, as it needs NVDA's rules of
+speech for each role.
+
+Before 4a, a run on the target machine of the browse mode commands not yet
+tried (say all, Ctrl+Home and Ctrl+End, moving by character and word, Home
+and End, Page Down and Page Up, Find, moving into a frame, focus mode, and
+selecting), to check the rules against them. Tests of the rules are at the
+unit level, and of the row, band, list, and tree view at the system level
+on the target machine.
+
 ## The screen reader's windows
 
 UI Automation already records them. At playback, NVDA's windows in front
