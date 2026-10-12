@@ -237,3 +237,59 @@ came from 7 requests.
 The probe now tells its two requests apart halfway through the pause
 between them. It also accepts the control or its text as the precise
 result, and names the role found.
+
+## Second run of the probe, and the target run, 2026-10-12
+
+The probe at 374ea36 passed all 32 checks. The owner then recorded an NVDA
+session (recording 20261012-144923-4dcba29d9944417ca005cf793f9dde01),
+with mouse tracking on: the test page, opened from disk, from 2 s to 215 s,
+then [cnib.ca](https://cnib.ca). It holds 3393 hit tests, 3393 precise
+results, 3639 renderer hit tests, and 97 actions sent and received. Every
+record passed the recorder's checks.
+
+### NVDA's keys and the actions they sent
+
+- **H and Shift+H** each sent, within 30 ms of the key, `scrollToMakeVisible`
+  on the heading (centered, not scrolling if visible) and
+  `setAccessibilityFocus` on it, with `clearAccessibilityFocus` on the
+  heading before. An H past the last heading sent nothing.
+- **D** sent the same three actions, but the target was the landmark's first
+  content: an unnamed paragraph on the test page, a link or heading on
+  cnib.ca. A D past the last landmark sent nothing.
+- **Enter on the button**, in browse mode, sent `doDefault` on it, and no
+  Enter reached the page.
+- **The Elements List**: "Move to" sent the three scrolling actions on the
+  chosen object, the link "Far down" on the test page and the link "Donate"
+  on cnib.ca. "Activate" on the link "Read more about the test" sent
+  `doDefault`; the page then moved to its fragment, and NVDA sent the
+  scrolling actions on the heading "Section two" 0.1 s later.
+- **Tab** in browse mode was passed to the page as an injected Tab and sent
+  no action. Once on cnib.ca, after D had moved to "Other CNIB Sites", a
+  Shift+Tab reached the page as no Tab; Chromium was asked instead to
+  focus the link "Privacy Policy". That this was NVDA moving the focus to
+  its browse-mode position is an inference.
+- No arrow keys were pressed in the page, so arrow navigation is not yet
+  tested.
+
+### What was under the pointer
+
+949 requests: groups of hit test records at one point, mostly four, one
+for each object NVDA's `accHitTest` recursion asked. The median time
+between requests was 31 ms.
+
+- 841 were answered from the page's last precise result and 108 by
+  Chromium's guess.
+- 112 were given an object other than the page's precise result for that
+  request. In 91 of them, the object given was larger, and its bounds held
+  the precise result: Chromium's last precise result, or its guess, was a
+  container the pointer had moved into. The next request, a median 34 ms
+  later, had the deeper object.
+- Entering the frame, 21 requests were given the section around it while
+  the precise result was in the frame's document.
+- Over the sticky header, with the page scrolled, 94 requests were made.
+  None was given the content under the header, unlike the probe's first
+  request at a point.
+
+What NVDA spoke is not recorded. A request given a container a pointer
+has moved into shows what NVDA had to announce until its next request, not
+what it said.
