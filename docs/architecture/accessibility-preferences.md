@@ -1070,7 +1070,8 @@ appear or go, and the list is rebuilt when the number of rows changes.
   row, which the list keeps in view.
 - Built in `MainWindow.Properties.cs` (`StepPropertyInPlace`). It is a
   layout behaviour of the window, so it is tested at the system level, on
-  the target machine, by the owner; that test is outstanding.
+  the target machine, by the owner. Passed on 2026-10-12 with dc330ca:
+  the owner confirmed that the change buttons stay under the pointer.
 - Each button acts on its own row, without the row being selected, and
   does not take keyboard focus, so a click leaves the focus and the
   selection where they were. They are therefore not Tab stops: from the
