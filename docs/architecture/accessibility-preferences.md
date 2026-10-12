@@ -1041,6 +1041,11 @@ by the owner by mouse and keyboard on the target machine the same day
   reads in full as "Change 2 of 4", or "Before the first of 4 changes";
   the row's name ends with the same words, for example "Color filter, on,
   00:00:12.000, change 2 of 4".
+- The rows are top aligned, as the owner asked on 2026-10-12: a row's
+  height changes as its value wraps to more or fewer lines, and centred
+  rows moved the buttons away from a pointer held still over them. The
+  buttons were also stretched to the row's height, with the triangle in
+  the middle; they are now 44 pixels high at the top of the row.
 - Each button acts on its own row, without the row being selected, and
   does not take keyboard focus, so a click leaves the focus and the
   selection where they were. They are therefore not Tab stops: from the

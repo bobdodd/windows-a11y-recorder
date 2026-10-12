@@ -458,6 +458,9 @@
                     AutomationProperties.HelpText="Each row reads setting, value, when it was set, and, for a setting that changed during the recording, which of its changes is in effect. Its previous and next change buttons, or Ctrl+Left and Ctrl+Right, move to the setting's previous and next change. Enter: the change that set the value.">
             <ListView.ItemContainerStyle>
               <Style TargetType="ListViewItem">
+                <!-- Top aligned: a row's height changes as its value does,
+                     and the change buttons must stay under a still pointer. -->
+                <Setter Property="VerticalContentAlignment" Value="Top" />
                 <Setter Property="AutomationProperties.Name" Value="{Binding Spoken}" />
                 <Setter Property="ToolTip" Value="{Binding Spoken}" />
                 <Style.Triggers>
@@ -508,11 +511,13 @@
                      focus; their keyboard equivalents are Ctrl+Left and
                      Ctrl+Right on the row. A disabled button still shows its
                      tooltip. The count has a fixed width, so the buttons do
-                     not move as it changes. -->
+                     not move as it changes, and the buttons are at the top of
+                     the row, so they do not move as its height changes. -->
                 <GridViewColumn Header="Changes" Width="150">
                   <GridViewColumn.CellTemplate>
                     <DataTemplate>
                       <StackPanel Orientation="Horizontal"
+                                  VerticalAlignment="Top"
                                   Visibility="{Binding HasChanges, Converter={StaticResource BooleanToVisibility}}">
                         <Button Style="{StaticResource PropertyChangeButton}"
                                 Content="&#x25C0;"
