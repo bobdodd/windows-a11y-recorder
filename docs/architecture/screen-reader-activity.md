@@ -1209,6 +1209,67 @@ selecting), to check the rules against them. Tests of the rules are at the
 unit level, and of the row, band, list, and tree view at the system level
 on the target machine.
 
+### The target run of 2026-10-12
+
+Recording 20261012-182946-7c45f6facb4043b7b2d9ea8a6f65621c, at dc330ca,
+on the test page (`tests/fixtures/accessibility-requests`), with the
+pointer still on the taskbar, read from the requests NVDA made of Chromium
+(`accessibility-action-sent`), the page's focus and selection records, the
+key outcomes, and the foreground window records.
+
+- **Page start**: a click in the page at 4.9 s set the page's caret, at the
+  end of the link "Read more about the test"; NVDA asked nothing until the
+  first key, 45 s later. Rule 5 holds: nothing shows where NVDA started.
+- **Ctrl+End and Ctrl+Home** each sent `scrollToMakeVisible`: on the
+  footer's paragraph, and on "Test site" (`strong`, the first object).
+- **Lines**: each Down arrow sent `scrollToMakeVisible` on the next object:
+  the link "Home", the heading "Accessibility requests test page", then
+  "Section one", then the paragraph after it.
+- **Within the paragraph**: Right arrow three times, Ctrl+Right three
+  times, End, and Home each sent `scrollToMakeVisible` on the same
+  paragraph, with no accessibility focus action. The target rectangle was
+  the whole paragraph's (866 by 55, at 0, 0), the same each time, so it does
+  not show the line, word, or character. Rule 3 holds.
+- **Page Down**, twice, sent `scrollToMakeVisible` on the same paragraph;
+  Page Up then sent it on "Test site", at the top.
+- **H and Shift+H** sent `scrollToMakeVisible` on each heading, and **into
+  the frame**: H after "Section two" went to "Inside the frame" in the
+  frame's own tree (another tree ID), and the next H back to "Section
+  three" in the page's. Down arrows also went into the frame: the paragraph
+  after "Section two", "Inside the frame", then "Frame button".
+- **Find**: NVDA+Ctrl+F opened NVDA's Find window, whose typed letters
+  reached it; Enter there sent `scrollToMakeVisible` on the paragraph
+  "Content that scrolls under the sticky header.", 0.16 s after the key.
+  **NVDA+F3** found no other match: it sent nothing, and NVDA's window "0
+  matches" came to the front. The next Ctrl+Home, at 340.4 s, went to that
+  window, not the page; the page came back to the front at 344.7 s, and at
+  346.3 s the page's selection was set, by the browser, to the end of the
+  heading "Section three"'s text, which nothing recorded explains.
+- **Say all** (NVDA+Down arrow, at 382.3 s) sent nothing while NVDA read,
+  to Shift (pause speech) at 395.7 s and Ctrl (stop) at 413.1 s. The
+  reading position moved as NVDA read, without a trace. The next Ctrl+Home
+  sent `scrollToMakeVisible` on "Test site" with no accessibility focus
+  action, as Chromium's accessibility focus was still there from before.
+- **Tab**: the first Tab, which NVDA kept, sent `focus` on the link "Home",
+  and the page's focus moved there. The next two Tabs and Shift+Tab passed
+  to the page, which moved its focus to the links "Section two", "Far
+  down", and "Section two" again, with no requests. Chromium's
+  accessibility focus stayed on "Test site" throughout, so it alone is not
+  the reading position after a focus change: rule 2 is needed.
+- **Focus mode**: NVDA+Space, then Tab twice moved the page's focus to "Far
+  down" and the button "Show message"; NVDA+Space back to browse mode, and
+  Down arrow then sent `scrollToMakeVisible` on the link "Read more about
+  the test", the object after the button. So the browse mode caret had
+  followed the focus to the button, as rule 2 says.
+- **Selection**: Shift+Down arrow, twice, sent nothing, and the page's
+  selection did not change. The caret moved with the selection, without a
+  trace.
+
+The Tab results follow NVDA's browse mode, which passes Tab to the page
+when the caret is already at the focused object; the first Tab moved the
+focus from the caret's object. The keys with traces sent their request 16
+to 40 ms after the key.
+
 ## The screen reader's windows
 
 UI Automation already records them. At playback, NVDA's windows in front
