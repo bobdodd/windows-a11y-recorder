@@ -240,7 +240,7 @@ public sealed class MouseActivity
         var injected = ignore switch
         {
             true => "ignores mouse input from other applications",
-            false => "follows mouse input from other applications",
+            false => "does not ignore mouse input from other applications",
             null => "whether it ignores mouse input from other applications is not known"
         };
         return $"{tracked} ({trackingText}), {injected} ({ignoreText}), as read at NVDA's start";

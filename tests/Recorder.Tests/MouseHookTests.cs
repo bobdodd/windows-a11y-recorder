@@ -355,7 +355,7 @@ public sealed class MouseHookTests
         Assert.Equal("move to (101, 200), from a device", rows[0].Value);
         Assert.Equal(2 * Second + 8 * Millisecond, rows[0].SetAt);
         Assert.Equal(
-            "tracking on (on, NVDA's default), follows mouse input from other applications (off, NVDA's default), as read at NVDA's start",
+            "tracking on (on, NVDA's default), does not ignore mouse input from other applications (off, NVDA's default), as read at NVDA's start",
             rows[1].Value);
         Assert.Equal("no mouse event yet", mouse.RowsAt(Second).Single(row => row.Key == MouseActivity.PointerKey).Value);
         Assert.Equal("NVDA not running", mouse.RowsAt(21 * Second)[1].Value);
