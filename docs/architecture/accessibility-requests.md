@@ -132,8 +132,10 @@ file, `render_frame_host_impl.cc`, and `render_accessibility_impl.cc`;
 
 The event list summarizes each record, for example
 `accessibility-hit-test: at 512, 300, heading "Contact us", guess from the tree`.
-Selected event values begins with the record's outcome (rule 2,
-`AccessibilityRequests`).
+Selected event values begins with the record's outcome (rule 3,
+`AccessibilityRequests`). Rule 2 linked actions with keys only; rule 3,
+agreed after the arrow key run of 2026-10-12, links them with mouse clicks
+too.
 
 ### Requests
 
@@ -166,22 +168,27 @@ answers.
 - **A precise result:** the object found, its bounds, and the request it is
   joined with.
 
-### Actions and keys
+### Actions, keys, and clicks
 
 - **An action sent:** what it asked, in words ("scroll heading "Contact us"
   (node 652) into view"), its alignment, rectangle or point, and selection;
   whether the renderer received it, joined as the first
   `accessibility-action-received` with the same tree, action, and target
   within 1 second; the actions sent within 1 ms of it, as one step; and the
-  key it is linked with.
-- **The key:** an action is linked with the latest key pressed in the 500 ms
-  before it, from the keyboard hook's records, leaving out keys a program
-  injected. In the target run, H and D sent their actions 20 to 30 ms after
+  key or click it is linked with.
+- **The key or click:** an action is linked with the latest key pressed or
+  mouse button released in the 500 ms before it, from the keyboard and mouse
+  hooks' records. Keys a program injected are left out, as NVDA injects the
+  keys it passes on in browse mode. Clicks a program injected are kept, and
+  said to be injected, as head pointer and eye tracking software clicks by
+  injecting them; a click reads as "After a left click at 1095, 732, the
+  button released 170 ms earlier". In the target run, H and D sent their actions 20 to 30 ms after
   the key, the Elements List's Enter 0.22 to 0.30 s after, and the scroll
   that followed "Activate" 0.15 s after. The owner chose to try 500 ms and
   see. When NVDA kept the key, its inferred command is named.
-- **A key's Selected event values:** after the key's outcome, what was sent
-  to the page after it: the actions linked with it. For a key NVDA kept
+- **A key's or a click's Selected event values:** after the key's or the
+  mouse button release's outcome, what was sent to the page after it: the
+  actions linked with it. For a key NVDA kept
   that no action followed, it says nothing was sent in the 500 ms after it,
   as for H after the last heading.
 - **An action received, and the renderer's hit test:** what the renderer
@@ -222,9 +229,10 @@ asked. The playback index keeps these records whole (version 17).
   does not say which request it answers, and the player says so.
 - A request is grouped by time and point, not by what asked: two programs
   asking about one point within 20 ms would be one request.
-- An action is linked with a key by time alone. A key pressed just before an
-  action it did not cause, such as a key in another window, is linked all
-  the same; the 500 ms window is a first choice, to be checked.
+- An action is linked with a key or click by time alone. A key pressed or a
+  click just before an action it did not cause, such as one in another
+  window, is linked all the same; the 500 ms window is a first choice, to be
+  checked.
 - The renderer's hit test point is in the frame's coordinates, not the
   screen's.
 - What NVDA spoke is not recorded. The records show what NVDA asked and was
@@ -395,8 +403,9 @@ on the test page, at c4a47a0, checked rule 2 with arrow keys.
   arrow keys, so a kept arrow's outcome is "kept" with no command.
 - **The Elements List was used with the mouse**: "Move to" was clicked, and
   the button released 170 ms before the actions on the heading "Far down the
-  page". Rule 2 links actions with keys only, so they say no key was pressed
-  in the 500 ms before them.
+  page". Rule 2 links actions with keys only, so they said no key was
+  pressed in the 500 ms before them. Rule 3 links them with the click; over
+  both recordings, these three actions are the only ones whose link changed.
 - **Under the pointer**: 677 requests. Judged by the last hit test, 10 were
   given another object than the page's precise result: 7 a container the
   pointer had moved into, and 3 a different object; none involved the frame.

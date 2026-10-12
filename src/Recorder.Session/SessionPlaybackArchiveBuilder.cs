@@ -455,7 +455,7 @@ public sealed class SessionPlaybackArchiveBuilder
                 : MouseActivity.Empty,
             AccessibilityRequests = _accessibilityRequests.Count == 0
                 ? AccessibilityRequests.Empty
-                : new AccessibilityRequests(_accessibilityRequests, _keyEvidence, keyDispositions.KeptCommands)
+                : new AccessibilityRequests(_accessibilityRequests, _keyEvidence, keyDispositions.KeptCommands, _mouseEvidence)
         };
     }
 

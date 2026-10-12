@@ -195,9 +195,9 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   recorded on the test page and cnib.ca. The fuller player view (rule 2:
   actions linked with keys, hit tests grouped into requests, the Under the
   pointer (Chromium) row) was agreed and built after it, and checked with
-  a recording with arrow keys on the test page the same day. Open: actions
-  after a mouse click, such as the Elements List used with the mouse, are
-  not linked with it; arrow keys are not named as NVDA commands.
+  a recording with arrow keys on the test page the same day. Rule 3 links
+  actions with mouse clicks too. Open: arrow keys are not named as NVDA
+  commands.
 - Left open by the owner's decision 2026-10-08, to start stage 2 first:
   the Magnifier change records on a real Magnifier recording
   (`scripts/Test-MagnifierChanges.ps1`); applying a Windows color filter

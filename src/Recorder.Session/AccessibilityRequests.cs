@@ -16,13 +16,14 @@ public sealed record AccessibilityRequestOutcome(string Text, IReadOnlyList<stri
 /// succession are one request, as a program's <c>accHitTest</c> asks each
 /// object it is given in turn; a request is joined with the page's precise
 /// results that follow it. An action the browser process sent is joined with
-/// the renderer's receipt of it, and with the key pressed before it. Chromium
-/// cannot tell which program made a request. Rule 2, as in
+/// the renderer's receipt of it, and with the key pressed or the mouse button
+/// released before it. Chromium cannot tell which program made a request.
+/// Rule 3, as in
 /// docs/architecture/accessibility-requests.md.
 /// </summary>
 public sealed class AccessibilityRequests
 {
-    public const int RuleVersion = 2;
+    public const int RuleVersion = 3;
 
     /// <summary>The longest a precise result or a receipt is joined after its request.</summary>
     public const long JoinWindowNanoseconds = 1_000_000_000;
@@ -30,7 +31,7 @@ public sealed class AccessibilityRequests
     /// <summary>The longest a hit test record follows the one before at the same point, within one request.</summary>
     public const long RequestGapNanoseconds = 20_000_000;
 
-    /// <summary>The longest an action follows the key it is linked with.</summary>
+    /// <summary>The longest an action follows the key or click it is linked with.</summary>
     public const long KeyWindowNanoseconds = 500_000_000;
 
     /// <summary>Actions sent within this of one another are one step.</summary>
@@ -60,7 +61,7 @@ public sealed class AccessibilityRequests
 
     private readonly Dictionary<string, AccessibilityRequestOutcome> _outcomes = new(StringComparer.Ordinal);
 
-    private readonly Dictionary<string, string> _afterKeys = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _sentAfter = new(StringComparer.Ordinal);
 
     private readonly List<Request> _requests = [];
 
@@ -78,7 +79,9 @@ public sealed class AccessibilityRequests
 
     private sealed record Item(string EventId, long Time, string EventType, JsonElement Payload);
 
-    private sealed record Key(string EventId, long Time, int VirtualKey);
+    // A key pressed, or a mouse button released: what an action is linked
+    // with. A click has its words, such as "a left click at 1095, 732".
+    private sealed record Key(string EventId, long Time, int VirtualKey, string? Click = null);
 
     // One request: its hit test records, in order, the precise results joined
     // with it, and the time of the next request, when there is one.
@@ -102,12 +105,14 @@ public sealed class AccessibilityRequests
     /// <summary>
     /// The outcomes of the request records. The key records, when given, are
     /// the keyboard hook's and raw input's records the key outcomes come
-    /// from; the kept commands are the keys NVDA kept, with its commands.
+    /// from; the kept commands are the keys NVDA kept, with its commands; the
+    /// mouse records, the mouse hook's and raw input's records.
     /// </summary>
     public AccessibilityRequests(
         IEnumerable<KeyEvidenceRecord> records,
         IEnumerable<KeyEvidenceRecord>? keyRecords = null,
-        IReadOnlyList<KeptCommand>? keptCommands = null)
+        IReadOnlyList<KeptCommand>? keptCommands = null,
+        IEnumerable<KeyEvidenceRecord>? mouseRecords = null)
     {
         ArgumentNullException.ThrowIfNull(records);
         var items = records
@@ -125,6 +130,13 @@ public sealed class AccessibilityRequests
                 ReadInt64(record.Payload, "virtualKey") is not null)
             .OrderBy(record => record.MonotonicNanoseconds)
             .Select(record => new Key(record.EventId, record.MonotonicNanoseconds, (int)ReadInt64(record.Payload, "virtualKey")!.Value))
+            .Concat((mouseRecords ?? [])
+                .Where(record => record.Channel == MouseHookRecords.Channel &&
+                    record.EventType == MouseHookRecords.EventType &&
+                    record.Payload.ValueKind == JsonValueKind.Object &&
+                    ReadString(record.Payload, "kind") == MouseHookRecords.ButtonUpKind)
+                .Select(record => new Key(record.EventId, record.MonotonicNanoseconds, 0, ClickText(record.Payload))))
+            .OrderBy(key => key.Time)
             .ToList();
         var kept = (keptCommands ?? []).GroupBy(command => command.Time).ToDictionary(group => group.Key, group => group.First());
 
@@ -186,11 +198,12 @@ public sealed class AccessibilityRequests
     public AccessibilityRequestOutcome? Of(string eventId) => _outcomes.GetValueOrDefault(eventId);
 
     /// <summary>
-    /// For a key record, what was sent to the page after it: a line for the
-    /// key's Selected event values; null for a key no action followed and
-    /// NVDA did not keep, or a recording without request records.
+    /// For a key record or a mouse button's release, what was sent to the
+    /// page after it: a line for its Selected event values; null for a key no
+    /// action followed and NVDA did not keep, a click no action followed, or
+    /// a recording without request records.
     /// </summary>
-    public string? AfterKey(string eventId) => _afterKeys.GetValueOrDefault(eventId);
+    public string? SentAfter(string eventId) => _sentAfter.GetValueOrDefault(eventId);
 
     /// <summary>
     /// The Under the pointer (Chromium) row at a time, in the Screen reader
@@ -494,17 +507,32 @@ public sealed class AccessibilityRequests
             details.Add($"Sent with it, as one step: {string.Join("; ", with)}.");
         }
 
-        details.Add(KeyBefore(keys, item.Time) is { } key
-            ? $"After the key {KeyboardHookRecords.KeyName(key.VirtualKey)}, {Milliseconds(item.Time - key.Time)} earlier" +
-              (kept.GetValueOrDefault(key.Time) is { } command
-                  ? $", which NVDA kept as {string.Join(" or ", command.Names)} ({command.Gesture}), inferred."
-                  : ".")
-            : $"No key was pressed in the {Milliseconds(KeyWindowNanoseconds)} before it.");
+        details.Add(KeyBefore(keys, item.Time) is not { } key
+            ? $"No key was pressed and no mouse button released in the {Milliseconds(KeyWindowNanoseconds)} before it."
+            : key.Click is { } click
+                ? $"After {click}, the button released {Milliseconds(item.Time - key.Time)} earlier."
+                : $"After the key {KeyboardHookRecords.KeyName(key.VirtualKey)}, {Milliseconds(item.Time - key.Time)} earlier" +
+                  (kept.GetValueOrDefault(key.Time) is { } command
+                      ? $", which NVDA kept as {string.Join(" or ", command.Names)} ({command.Gesture}), inferred."
+                      : "."));
         details.Add(AnyProgram);
         return new AccessibilityRequestOutcome($"Asked the page to {ActionText(action, target)}", details);
     }
 
-    // The latest key pressed at or before a time, within the key window.
+    // A mouse button's release in words: the button, the point, and whether
+    // a program injected it, as head pointer and eye tracking software can.
+    private static string ClickText(JsonElement payload)
+    {
+        var button = ReadString(payload, "button") ?? "mouse";
+        var point = ReadInt64(payload, "x") is { } x && ReadInt64(payload, "y") is { } y
+            ? string.Create(CultureInfo.InvariantCulture, $" at {x}, {y}")
+            : string.Empty;
+        var injected = ReadBoolean(payload, "injected") ? ", injected by a program" : string.Empty;
+        return $"a {button} click{point}{injected}";
+    }
+
+    // The latest key pressed or mouse button released at or before a time,
+    // within the key window.
     private static Key? KeyBefore(List<Key> keys, long time)
     {
         for (var index = keys.Count - 1; index >= 0; index--)
@@ -533,9 +561,9 @@ public sealed class AccessibilityRequests
         return ActionText(action, target);
     }
 
-    // For each key, the actions sent after it and linked with it: those whose
-    // latest key, within the key window, it is. A key NVDA kept that no
-    // action followed says so.
+    // For each key and click, the actions sent after it and linked with it:
+    // those whose latest key or click, within the key window, it is. A key
+    // NVDA kept that no action followed says so.
     private void LinkKeys(List<Item> items, List<Key> keys, Dictionary<long, KeptCommand> kept)
     {
         if (!Recorded)
@@ -561,11 +589,11 @@ public sealed class AccessibilityRequests
         {
             if (linked.TryGetValue(key, out var sent))
             {
-                _afterKeys[key.EventId] = $"Sent to the page after it: {string.Join("; ", sent)}.";
+                _sentAfter[key.EventId] = $"Sent to the page after it: {string.Join("; ", sent)}.";
             }
-            else if (kept.ContainsKey(key.Time))
+            else if (key.Click is null && kept.ContainsKey(key.Time))
             {
-                _afterKeys[key.EventId] = $"Nothing was sent to the page in the {Milliseconds(KeyWindowNanoseconds)} after it.";
+                _sentAfter[key.EventId] = $"Nothing was sent to the page in the {Milliseconds(KeyWindowNanoseconds)} after it.";
             }
         }
     }

@@ -342,16 +342,56 @@ public sealed class AccessibilityRequestTests
             "Sent to the page after it: scroll heading \"Contact us\" (node 652) into view; " +
             "clear Chromium's accessibility focus from link \"Donate\" (node 700); " +
             "move Chromium's accessibility focus, its note of the assistive technology's position, to heading \"Contact us\" (node 652).",
-            requests.AfterKey("k1"));
+            requests.SentAfter("k1"));
 
         // A key NVDA kept that no action followed says so; one it did not
         // keep says nothing. An injected key is not one pressed.
-        Assert.Equal("Nothing was sent to the page in the 500 ms after it.", requests.AfterKey("k2"));
-        Assert.Null(requests.AfterKey("k4"));
-        Assert.Contains("No key was pressed in the 500 ms before it.", requests.Of("s4")!.Details);
+        Assert.Equal("Nothing was sent to the page in the 500 ms after it.", requests.SentAfter("k2"));
+        Assert.Null(requests.SentAfter("k4"));
+        Assert.Contains("No key was pressed and no mouse button released in the 500 ms before it.", requests.Of("s4")!.Details);
         Assert.Contains(requests.Of("s5")!.Details, line => line.StartsWith("No key was pressed", StringComparison.Ordinal));
-        Assert.Null(requests.AfterKey("k3"));
-        Assert.Null(AccessibilityRequests.Empty.AfterKey("k1"));
+        Assert.Null(requests.SentAfter("k3"));
+        Assert.Null(AccessibilityRequests.Empty.SentAfter("k1"));
+    }
+
+    private static KeyEvidenceRecord Mouse(string id, long time, string kind, int x, int y, bool injected = false)
+    {
+        using var document = JsonDocument.Parse(J(
+            $"{{'kind':'{kind}','button':'left','x':{x},'y':{y},'injected':{(injected ? "true" : "false")}}}"));
+        return new KeyEvidenceRecord(id, time, MouseHookRecords.Channel, MouseHookRecords.EventType, document.RootElement.Clone());
+    }
+
+    [Fact]
+    public void AnActionIsLinkedWithTheClickBeforeIt()
+    {
+        // NVDA's Elements List used with the mouse: "Move to" clicked, then
+        // the scroll. A click a program injected, as head pointer and eye
+        // tracking software can, says so. A key after a click is the later.
+        var requests = new AccessibilityRequests(
+            [
+                Record("s1", Second + 170 * Millisecond, BrowserEvidenceEventTypes.AccessibilityActionSent, Sent("scrollToMakeVisible", 652, Heading)),
+                Record("s2", 3 * Second + 40 * Millisecond, BrowserEvidenceEventTypes.AccessibilityActionSent, Sent("doDefault", 700, Link)),
+                Record("s3", 5 * Second + 30 * Millisecond, BrowserEvidenceEventTypes.AccessibilityActionSent, Sent("focus", 700, Link))
+            ],
+            [KeyDown("k1", 5 * Second, 0x09)],
+            [],
+            [
+                Mouse("m1", Second - 180 * Millisecond, "button-down", 1095, 732),
+                Mouse("m2", Second, "button-up", 1095, 732),
+                Mouse("m3", 3 * Second, "button-up", 500, 340, injected: true),
+                Mouse("m4", 4 * Second + 900 * Millisecond, "button-up", 10, 10),
+                Mouse("m5", 7 * Second, "button-up", 10, 10)
+            ]);
+
+        Assert.Contains("After a left click at 1095, 732, the button released 170 ms earlier.", requests.Of("s1")!.Details);
+        Assert.Equal("Sent to the page after it: scroll heading \"Contact us\" (node 652) into view.", requests.SentAfter("m2"));
+        Assert.Null(requests.SentAfter("m1"));
+        Assert.Contains(
+            "After a left click at 500, 340, injected by a program, the button released 40 ms earlier.",
+            requests.Of("s2")!.Details);
+        Assert.Contains("After the key Tab, 30 ms earlier.", requests.Of("s3")!.Details);
+        Assert.Null(requests.SentAfter("m4"));
+        Assert.Null(requests.SentAfter("m5"));
     }
 
     [Fact]

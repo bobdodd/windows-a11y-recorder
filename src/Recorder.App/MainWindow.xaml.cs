@@ -578,8 +578,13 @@ public partial class MainWindow : Window
         // (screen-reader-activity.md, "The mouse hook").
         if (archive.Mouse.Of(item.EventId) is { } mouse)
         {
+            // What was sent to the page after a click (accessibility-requests.md,
+            // "Actions, keys, and clicks"), after the mouse outcome.
+            var afterClick = archive.AccessibilityRequests.SentAfter(item.EventId) is { } sentAfterClick
+                ? $"{sentAfterClick} (accessibility requests, {archive.AccessibilityRequests.Rule}){Environment.NewLine}"
+                : string.Empty;
             json = $"Mouse outcome ({archive.Mouse.Rule}): {mouse.Text}{Environment.NewLine}" +
-                string.Join(Environment.NewLine, mouse.Details) + Environment.NewLine + Environment.NewLine + json;
+                string.Join(Environment.NewLine, mouse.Details) + Environment.NewLine + afterClick + Environment.NewLine + json;
         }
 
         // An accessibility request record's outcome, before the record
@@ -591,8 +596,8 @@ public partial class MainWindow : Window
         }
 
         // What was sent to the page after a key (accessibility-requests.md,
-        // "Actions and keys"), after the key's outcome.
-        var afterKey = archive.AccessibilityRequests.AfterKey(item.EventId) is { } sent
+        // "Actions, keys, and clicks"), after the key's outcome.
+        var afterKey = archive.Mouse.Of(item.EventId) is null && archive.AccessibilityRequests.SentAfter(item.EventId) is { } sent
             ? $"{sent} (accessibility requests, {archive.AccessibilityRequests.Rule}){Environment.NewLine}"
             : string.Empty;
         return archive.KeyDispositions.Of(item.EventId) is { } outcome

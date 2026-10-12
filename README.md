@@ -449,8 +449,8 @@ scrolling an object into view, focusing it, or activating it, as the
 browser sent it and the page received it. The event list names each
 request, and Selected event values says what was given and found, or what
 was asked. Hit tests at one point in quick succession are one request; an
-action is linked with the key pressed before it, and a key with what was
-sent to the page after it. The Properties panel's Under the pointer
+action is linked with the key pressed or the mouse button released before
+it, and a key or click with what was sent to the page after it. The Properties panel's Under the pointer
 (Chromium) row gives the object the latest request was given. Chromium
 cannot tell which program asked. See
 [accessibility requests](docs/architecture/accessibility-requests.md).
