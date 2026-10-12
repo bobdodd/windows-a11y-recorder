@@ -78,6 +78,16 @@ public sealed class SessionTimelineControl : FrameworkElement
     // dialog").
     private static readonly Brush NvdaWindowMarkBrush = Freeze("#E4F0E1");
 
+    // The reading position, inferred (screen-reader-activity.md, "The
+    // reading position (step 4)"), in a third strip under the window strip:
+    // a known object solid purple with its role and name where they fit, an
+    // uncertain one purple stripes with "uncertain", and where it is unknown,
+    // empty. Each step starts a span a pixel after the last, so moves show.
+    // White on #6A4C93 is about 7:1. Agreed with the owner on 2026-10-12.
+    private const double ReadingStripHeight = 16;
+    private static readonly Brush ReadingKnownBrush = Freeze("#6A4C93");
+    private static readonly Brush ReadingUncertainBrush = CreateStripeBrush("#6A4C93", new Point(0, 0), new Point(8, 8), 1.5);
+
     private readonly DrawingVisual _eventLayer = new();
     private readonly DrawingVisual _overlayLayer = new();
     private readonly VisualCollection _layers;
@@ -103,6 +113,7 @@ public sealed class SessionTimelineControl : FrameworkElement
     private IReadOnlyList<Recorder.Session.UnrecordablePeriod> _unrecordable = [];
     private IReadOnlyList<Recorder.Session.ScreenReaderModeSpan> _modeSpans = [];
     private IReadOnlyList<Recorder.Session.ScreenReaderWindowSpan> _windowSpans = [];
+    private IReadOnlyList<Recorder.Session.ReadingPositionSpan> _readingSpans = [];
     private List<SessionTimelineEvent> _windowEvents = [];
 
     // Whether the keys step through the window strip's events rather than a
@@ -135,7 +146,11 @@ public sealed class SessionTimelineControl : FrameworkElement
     // The strips' heights: each none when the recording has no spans of it.
     private double ModeHeight => _modeSpans.Count > 0 ? ModeStripHeight : 0;
 
-    private double StripHeight => ModeHeight + (_windowSpans.Count > 0 ? WindowStripHeight : 0);
+    private double WindowHeight => _windowSpans.Count > 0 ? WindowStripHeight : 0;
+
+    private double ReadingHeight => _readingSpans.Count > 0 ? ReadingStripHeight : 0;
+
+    private double StripHeight => ModeHeight + WindowHeight + ReadingHeight;
 
     private double LaneHeight => Math.Max(3, (ActualHeight - StripHeight) / LaneCount);
 
@@ -181,6 +196,7 @@ public sealed class SessionTimelineControl : FrameworkElement
         _positionNanoseconds = 0;
         _unrecordable = [];
         _modeSpans = [];
+        _readingSpans = [];
         RebuildShownChannels();
         SelectEvent(null);
         RedrawAll();
@@ -207,6 +223,18 @@ public sealed class SessionTimelineControl : FrameworkElement
     {
         ArgumentNullException.ThrowIfNull(spans);
         _modeSpans = spans;
+        RedrawAll();
+    }
+
+    /// <summary>
+    /// The spans of the inferred reading position, drawn as a strip under the
+    /// window strip. The properties panel's Reading position (inferred) row
+    /// gives the object and its basis in text.
+    /// </summary>
+    public void SetReadingPositionSpans(IReadOnlyList<Recorder.Session.ReadingPositionSpan> spans)
+    {
+        ArgumentNullException.ThrowIfNull(spans);
+        _readingSpans = spans;
         RedrawAll();
     }
 
@@ -283,7 +311,7 @@ public sealed class SessionTimelineControl : FrameworkElement
                 _viewportDurationNanoseconds);
         var laneHeight = LaneHeight;
         var stripTop = StripTop(laneHeight);
-        if (StripHeight > 0 && point.Y >= stripTop + ModeHeight && point.Y < stripTop + StripHeight)
+        if (WindowHeight > 0 && point.Y >= stripTop + ModeHeight && point.Y < stripTop + ModeHeight + WindowHeight)
         {
             // The window strip: the nearest event of the window clicked, or
             // the playhead there where no window was in front.
@@ -690,6 +718,41 @@ public sealed class SessionTimelineControl : FrameworkElement
                     drawingContext.DrawRectangle(
                         NvdaWindowMarkBrush, null, new Rect(Math.Floor(ToX(item.MonotonicNanoseconds)), band.Bottom - 4, 1.5, 4));
                 }
+            }
+        }
+
+        var readingTop = windowTop + WindowHeight;
+        foreach (var span in _readingSpans)
+        {
+            if (span.End < _viewportStartNanoseconds || span.Start > viewportEnd)
+            {
+                continue;
+            }
+
+            var left = Math.Max(0, ToX(Math.Max(span.Start, _viewportStartNanoseconds)));
+            var right = Math.Min(width, ToX(Math.Min(span.End, viewportEnd)));
+            var band = new Rect(left, readingTop + 1, Math.Max(2, right - left - 1), ReadingStripHeight - 2);
+            var uncertain = span.Kind == Recorder.Session.ReadingPositionKind.Uncertain;
+            drawingContext.DrawRectangle(uncertain ? ReadingUncertainBrush : ReadingKnownBrush, null, band);
+            var text = new FormattedText(
+                uncertain ? "uncertain" : span.Label,
+                System.Globalization.CultureInfo.CurrentUICulture,
+                FlowDirection.LeftToRight,
+                new Typeface("Segoe UI"),
+                11,
+                ModeLightTextBrush,
+                pixelsPerDip);
+            if (text.Width + 8 <= band.Width)
+            {
+                var origin = new Point(band.Left + 4, band.Top + (band.Height - text.Height) / 2);
+                if (uncertain)
+                {
+                    // The stripes would cross the word: a backing behind it.
+                    drawingContext.DrawRectangle(
+                        ReadingKnownBrush, null, new Rect(origin.X - 2, band.Top + 1, text.Width + 4, band.Height - 2));
+                }
+
+                drawingContext.DrawText(text, origin);
             }
         }
 

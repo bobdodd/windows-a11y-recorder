@@ -67,6 +67,9 @@ public sealed record SessionPlaybackArchive(
     /// <summary>Protocol 0.60's accessibility requests and their outcomes.</summary>
     public AccessibilityRequests AccessibilityRequests { get; init; } = AccessibilityRequests.Empty;
 
+    /// <summary>The screen reader's reading position, inferred from the requests, focus, and commands (step 4).</summary>
+    public ReadingPositionTimeline ReadingPosition { get; init; } = ReadingPositionTimeline.Empty;
+
     /// <summary>An event's description, ending with its key outcome where it has one.</summary>
     public string Describe(SessionTimelineEvent item)
     {

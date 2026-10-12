@@ -60,7 +60,10 @@ public sealed record PlaybackIndex
     // (browser.accessibility, accessibility-checkpoint-node) whole too, for
     // the text an unnamed object holds and the object it is in, in the Under
     // the pointer (Chromium) row.
-    public const int CurrentVersion = 18;
+    // Version 19 keeps the page's focus records (browser.interaction,
+    // focus-changed) whole, for the reading position
+    // (ReadingPositionTimeline).
+    public const int CurrentVersion = 19;
 
     public required int Version { get; init; }
 
@@ -304,6 +307,11 @@ public sealed class PlaybackIndexBuilder
             Keep(eventKey, record);
         }
 
+        if (ReadingPositionTimeline.IsFocusEvidence(channel, record.EventType))
+        {
+            Keep(eventKey, record);
+        }
+
         AddFrameDocument(channel, record.EventType, time, payload);
 
         CollectPresentation(eventKey, record);
@@ -412,7 +420,8 @@ public sealed class PlaybackIndexBuilder
              KeyDispositions.IsKeyEvidence(record.Channel, record.EventType, record.Payload) ||
              MouseActivity.IsMouseEvidence(record.Channel, record.EventType) ||
              AccessibilityRequests.IsRequestEvidence(record.Channel, record.EventType) ||
-             AccessibilityRequests.IsTreeEvidence(record.Channel, record.EventType)) &&
+             AccessibilityRequests.IsTreeEvidence(record.Channel, record.EventType) ||
+             ReadingPositionTimeline.IsFocusEvidence(record.Channel, record.EventType)) &&
             record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()
                 : WindowSnapshots.IsSnapshot(record.Channel, record.EventType)

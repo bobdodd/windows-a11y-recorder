@@ -455,6 +455,14 @@ it, and a key or click with what was sent to the page after it. The Properties p
 cannot tell which program asked. See
 [accessibility requests](docs/architecture/accessibility-requests.md).
 
+From these requests, the page's focus, and the commands NVDA kept, the
+player infers the screen reader's reading position: the object NVDA's
+browse mode caret was last on, or uncertain or unknown where the recording
+does not show it. It is a Properties row, "Reading position (inferred)", a
+strip on the timeline, and a basis in Selected event values. See
+[screen reader activity](docs/architecture/screen-reader-activity.md), "The
+reading position (step 4)".
+
 Protocol 0.59 records the browser's theme, its color, color style,
 grayscale setting, and any installed theme, with the light, dark, or
 device mode already recorded, in the Properties panel and on the

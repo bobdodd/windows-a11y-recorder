@@ -83,7 +83,8 @@ public static class PropertyChangeSteps
         ScreenReaderModeTimeline? screenReaderMode = null,
         ScreenReaderWindowTimeline? screenReaderWindows = null,
         MouseActivity? mouse = null,
-        AccessibilityRequests? accessibilityRequests = null)
+        AccessibilityRequests? accessibilityRequests = null,
+        ReadingPositionTimeline? readingPosition = null)
     {
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(settings);
@@ -92,6 +93,11 @@ public static class PropertyChangeSteps
             row.Key.StartsWith(BrowserPreferenceTimeline.PageKeyPrefix, StringComparison.Ordinal))
         {
             return (browser ?? BrowserPreferenceTimeline.Empty).ChangeTimesOf(row.Key);
+        }
+
+        if (row.Key == ReadingPositionTimeline.Key)
+        {
+            return (readingPosition ?? ReadingPositionTimeline.Empty).ChangeTimesOf(row.Key);
         }
 
         if (row.Key == AccessibilityRequests.PointerKey)

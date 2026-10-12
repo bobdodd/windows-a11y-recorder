@@ -112,6 +112,8 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<KeyEvidenceRecord> _mouseEvidence = [];
     private readonly List<KeyEvidenceRecord> _accessibilityRequests = [];
     private readonly List<BrowserPageCommit> _pageCommits = [];
+    private readonly List<(string EventId, long Time, JsonElement Payload)> _pageFocus = [];
+    private readonly HashSet<string> _pageDocuments = new(StringComparer.Ordinal);
     private readonly List<ForegroundWindow> _foreground = [];
     private readonly List<FocusedElement> _focus = [];
     private readonly List<WindowSnapshot> _windowSnapshots = [];
@@ -359,6 +361,25 @@ public sealed class SessionPlaybackArchiveBuilder
             _pageCommits.Add(commit);
         }
 
+        // The documents of pages, main frames' and frames', not the
+        // browser's own interface, for the reading position's focus changes.
+        if (timelineEvent.Channel == BrowserEvidenceChannels.Navigation &&
+            timelineEvent.EventType == BrowserEvidenceEventTypes.NavigationCompleted &&
+            payload.ValueKind == JsonValueKind.Object &&
+            payload.TryGetProperty("committed", out var pageCommitted) && pageCommitted.ValueKind == JsonValueKind.True &&
+            ReadingPositionTimeline.IsPageUrl(ReadString(payload, "url")) &&
+            payload.TryGetProperty("context", out var pageContext) &&
+            ReadString(pageContext, "documentToken") is { } pageToken)
+        {
+            _pageDocuments.Add(pageToken);
+        }
+
+        if (payload.ValueKind == JsonValueKind.Object &&
+            ReadingPositionTimeline.IsFocusEvidence(timelineEvent.Channel, timelineEvent.EventType))
+        {
+            _pageFocus.Add((timelineEvent.EventId, timestamp, payload.Clone()));
+        }
+
         if (timelineEvent.Channel.StartsWith("audio.", StringComparison.Ordinal) &&
             timelineEvent.EventType == "audio-stream-started" &&
             payload.ValueKind == JsonValueKind.Object)
@@ -423,6 +444,9 @@ public sealed class SessionPlaybackArchiveBuilder
                 assistiveTechnology.BrowserProcessName,
                 _pageCommits.Select(commit => commit.MonotonicNanoseconds),
                 assistiveTechnology.ScreenReaderRuns(AssistiveTechnologyRecords.Nvda.Product));
+        var accessibilityRequests = _accessibilityRequests.Count == 0
+            ? AccessibilityRequests.Empty
+            : new AccessibilityRequests(_accessibilityRequests, _keyEvidence, keyDispositions.KeptCommands, _mouseEvidence);
         return new SessionPlaybackArchive(
             _root,
             manifest,
@@ -454,9 +478,19 @@ public sealed class SessionPlaybackArchiveBuilder
             Mouse = _mouseEvidence.Any(record => record.Channel == MouseHookRecords.Channel)
                 ? new MouseActivity(_mouseEvidence, assistiveTechnology)
                 : MouseActivity.Empty,
-            AccessibilityRequests = _accessibilityRequests.Count == 0
-                ? AccessibilityRequests.Empty
-                : new AccessibilityRequests(_accessibilityRequests, _keyEvidence, keyDispositions.KeptCommands, _mouseEvidence)
+            AccessibilityRequests = accessibilityRequests,
+            ReadingPosition = accessibilityRequests.Actions.Count == 0
+                ? ReadingPositionTimeline.Empty
+                : new ReadingPositionTimeline(
+                    accessibilityRequests,
+                    keyDispositions.KeptCommands,
+                    _foreground,
+                    assistiveTechnology.BrowserProcessName,
+                    _pageFocus
+                        .Select(focus => ReadingPositionTimeline.FocusOf(focus.EventId, focus.Time, focus.Payload, _pageDocuments))
+                        .OfType<PageFocusChange>(),
+                    _pageCommits.Where(commit => ReadingPositionTimeline.IsPageUrl(commit.Url)).Select(commit => commit.MonotonicNanoseconds),
+                    duration)
         };
     }
 

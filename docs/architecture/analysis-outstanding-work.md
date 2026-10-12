@@ -94,6 +94,10 @@ Designed in [screen reader activity](screen-reader-activity.md), agreed
   (2c); a low-level mouse hook, for NVDA's speaking of the content under
   the pointer; then the test of NVDA's requests to Chromium, and the
   reading position.
+- Built 2026-10-12, not yet tested on the target machine: step 4a, the
+  reading position (a Properties row, a timeline strip, and the basis in
+  Selected event values), as in its "4a as built". Then 4b, the list of
+  steps, and 4c, the tree view.
 - To settle: the items in its "Questions to settle".
 - To test: as in its "Required tests".
 

@@ -1171,8 +1171,10 @@ The rules:
 1. A scroll request from NVDA (`scrollToMakeVisible`) moves the reading
    position to its object. The basis is the request, with the key and its
    command, or the click, it is linked with.
-2. When the page's focus moves, in focus mode or after a focus request,
-   the reading position moves to the focused object.
+2. When the page's focus moves, in browse mode or focus mode or after a
+   focus request, the reading position moves to the focused object. The
+   target run showed the caret follows the focus in browse mode too (see
+   below).
 3. A scroll request on the object already at the reading position keeps
    it there; where within it, such as the line of a paragraph, is said to
    be unknown.
@@ -1310,6 +1312,70 @@ Test runs on the target machine from now on cover one behaviour each, in
 at most five steps, with what to listen for, as the owner asked: "You are
 creating too complex a test script. I can't remember it all and I lose my
 place trying to follow. That reduces my ability to observe."
+
+### 4a as built
+
+Built on 2026-10-12, rule version 1 (`ReadingPositionTimeline` in
+`Recorder.Session`, key `screen-reader.reading-position`). It is inferred at
+playback from:
+
+- the actions sent to the page (`scrollToMakeVisible` and `focus`), with
+  the key or click each is linked with, as Selected event values gives them
+  ([accessibility requests](accessibility-requests.md), "Actions, keys, and
+  clicks");
+- the keys NVDA kept, with their commands (key disposition);
+- the windows brought to the front (`window.foreground`), against the
+  browser's process;
+- the page's focus records (`browser.interaction`, `focus-changed`, outcome
+  `focused`) in page documents, whose DOM node is matched to an object by
+  the accessibility checkpoints' `domNodeId`;
+- the pages loaded in the tab's main frame, other than the browser's own
+  pages (`chrome:` and the like).
+
+Decisions made in building it:
+
+- A kept key whose command sent a request or focus makes no step of its
+  own; the request does, with the key in its basis.
+- The navigation commands of rule 4 are those named "next ...",
+  "previous ...", or "move ...", and start of line, end of line, top of
+  document, bottom of document, find next, and find previous. The Elements
+  List, Find (which opens a window), and the toggles are not.
+- Rule 4 needs a position to mark uncertain: a move that sends nothing
+  while the position is unknown leaves it unknown.
+- A page focus change to the object already at the reading position makes
+  no step, as after a focus request. One to a DOM node the checkpoints do
+  not name makes the position unknown, saying so.
+- A second say all, or a second selection command, while the position is
+  already unknown by the same rule makes no step, as it changes nothing.
+- At one time, a page load comes first, then a key, then a request, then a
+  focus change.
+- `setAccessibilityFocus`, `clearAccessibilityFocus`, and `doDefault` are
+  not used: they follow a move or act on the object, and do not move the
+  caret.
+
+In the player:
+
+- The Properties row "Reading position (inferred)", in the Screen reader
+  group, gives the object as the Under the pointer (Chromium) row does, and
+  "where within it is unknown", "focused", or why it is uncertain or
+  unknown. Its change buttons and count step through every step.
+- A third strip on the timeline, under NVDA's windows: a known object is
+  solid purple (#6A4C93) with its role and name or the start of its text
+  where they fit, an uncertain one purple stripes with the word
+  "uncertain", and where the position is unknown, the strip is empty. White
+  on #6A4C93 is 6.85 to 1. Clicking the strip moves the playhead there.
+- Selected event values starts, for a record that moved the position or
+  the key or click linked with it, with "Reading position after it",
+  the rule, and the basis.
+
+The playback index is at version 19: it keeps the page's focus records
+whole.
+
+Over the target run of 2026-10-12, the rules give 48 steps: 26 by rule 1,
+6 by rule 2, 9 by rule 3, 1 by rule 4 (Find next with no match), 1 by
+rule 5, 1 by rule 6, 1 by rule 8, and 3 by rule 9. The Tabs give the focus
+steps on Home, Section two, and Far down, and after focus mode, Down moves
+from the "Show message" button to the "Read more about the test" link.
 
 ## The screen reader's windows
 

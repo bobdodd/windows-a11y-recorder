@@ -600,11 +600,17 @@ public partial class MainWindow : Window
         var afterKey = archive.Mouse.Of(item.EventId) is null && archive.AccessibilityRequests.SentAfter(item.EventId) is { } sent
             ? $"{sent} (accessibility requests, {archive.AccessibilityRequests.Rule}){Environment.NewLine}"
             : string.Empty;
-        return archive.KeyDispositions.Of(item.EventId) is { } outcome
+        // The reading position after a record that moved it, or the key or
+        // click its request is linked with (screen-reader-activity.md, "The
+        // reading position (step 4)"), first.
+        var reading = archive.ReadingPosition.Of(item.EventId) is { } position
+            ? position + Environment.NewLine + Environment.NewLine
+            : string.Empty;
+        return reading + (archive.KeyDispositions.Of(item.EventId) is { } outcome
             ? $"Key outcome ({archive.KeyDispositions.Rule}): {outcome.Text}{Environment.NewLine}" +
               string.Join(Environment.NewLine, outcome.Details) + Environment.NewLine +
               afterKey + Environment.NewLine + json
-            : afterKey.Length > 0 ? afterKey + Environment.NewLine + json : json;
+            : afterKey.Length > 0 ? afterKey + Environment.NewLine + json : json);
     }
 
     private void BrowserNavigationFilter_Click(object sender, RoutedEventArgs e) =>
@@ -835,6 +841,7 @@ public partial class MainWindow : Window
             TimelineControl.SetUnrecordablePeriods(_playbackArchive.InputRecordability.Unrecordable);
             TimelineControl.SetScreenReaderModeSpans(_playbackArchive.ScreenReaderMode.Spans);
             TimelineControl.SetScreenReaderWindowSpans(_playbackArchive.ScreenReaderWindows.Spans);
+            TimelineControl.SetReadingPositionSpans(_playbackArchive.ReadingPosition.Spans);
             ApplyBrowserNavigationFilter();
             BrowserCorrelationTextBox.Text =
                 _playbackArchive.BrowserNavigations.Count == 0

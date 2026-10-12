@@ -8,6 +8,27 @@ namespace Recorder.Session;
 public sealed record AccessibilityRequestOutcome(string Text, IReadOnlyList<string> Details);
 
 /// <summary>
+/// An action sent to a page: its record, time, action, and target, with the
+/// key pressed or the mouse button released in the KeyWindowNanoseconds
+/// before it, when there is one, and the command of a kept key.
+/// </summary>
+public sealed record RequestedAction(
+    string EventId,
+    long Time,
+    string Action,
+    string? TreeId,
+    long? NodeId,
+    string Role,
+    string Name,
+    string? LinkEventId,
+    long? LinkTime,
+    string? Click,
+    KeptCommand? Command);
+
+/// <summary>An object of a page's accessibility tree: its tree, node, role, and name.</summary>
+public sealed record TreeObject(string TreeId, long NodeId, string Role, string Name);
+
+/// <summary>
 /// The requests an assistive technology made of a page through the platform
 /// accessibility API, and how Chromium answered them, from protocol 0.60's
 /// records on the <c>browser.accessibility</c> channel: each record's
@@ -81,6 +102,16 @@ public sealed class AccessibilityRequests
     // The document token of each tree, from the renderer's records, which
     // name both.
     private readonly Dictionary<string, string> _documents = new(StringComparer.Ordinal);
+
+    // The tree of each document token, the reverse of _documents.
+    private readonly Dictionary<string, string> _treesOfDocuments = new(StringComparer.Ordinal);
+
+    // The object of each DOM node, by document token and DOM node, from the
+    // checkpoints' nodes: its versions in time order.
+    private readonly Dictionary<(string Token, long DomNode), List<(long Time, long Node)>> _domNodes = [];
+
+    private readonly List<RequestedAction> _actions = [];
+    private readonly Dictionary<long, string> _keyEvents = [];
 
     private sealed record TreeNode(long Time, string Role, string Name, long[] Children);
 
@@ -228,6 +259,70 @@ public sealed class AccessibilityRequests
     /// </summary>
     public string? SentAfter(string eventId) => _sentAfter.GetValueOrDefault(eventId);
 
+    /// <summary>The actions sent to the page, in time order, each with the key or click before it.</summary>
+    public IReadOnlyList<RequestedAction> Actions => _actions;
+
+    /// <summary>The record of the key pressed at a time, which a kept command names by its time.</summary>
+    public string? KeyEventAt(long time) => _keyEvents.GetValueOrDefault(time);
+
+    /// <summary>
+    /// An object as the Under the pointer (Chromium) row gives it: with no
+    /// name, also the text it holds and the object it is in, from the tree
+    /// as Chromium last serialized it before the time.
+    /// </summary>
+    public string DescribeObject(TreeObject item, long time)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        return DescribeInTree(new Node(item.TreeId, item.NodeId, item.Role, item.Name, "unrecorded", null), time);
+    }
+
+    /// <summary>A short label of an object, for a band: its role and name, or the start of the text it holds.</summary>
+    public string LabelOf(TreeObject item, long time)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if (item.Name.Length > 0)
+        {
+            return $"{item.Role} \"{item.Name}\"";
+        }
+
+        if (_documents.TryGetValue(item.TreeId, out var token) && TextWithin(token, item.NodeId, time) is { Length: > 0 } text)
+        {
+            return $"{item.Role} \"{(text.Length > 30 ? text[..30].TrimEnd() + "…" : text)}\"";
+        }
+
+        return item.Role;
+    }
+
+    /// <summary>
+    /// The object of a DOM node of a document, as the checkpoints last gave it
+    /// before the time; null when the checkpoints do not name it.
+    /// </summary>
+    public TreeObject? ObjectOfDomNode(string documentToken, long domNode, long time)
+    {
+        ArgumentNullException.ThrowIfNull(documentToken);
+        if (!_domNodes.TryGetValue((documentToken, domNode), out var objects) ||
+            !_treesOfDocuments.TryGetValue(documentToken, out var treeId))
+        {
+            return null;
+        }
+
+        long? id = null;
+        foreach (var (at, node) in objects)
+        {
+            if (at > time)
+            {
+                break;
+            }
+
+            id = node;
+        }
+
+        id ??= objects[0].Node;
+        return NodeAt(documentToken, id.Value, time) is { } found
+            ? new TreeObject(treeId, id.Value, found.Role, found.Name)
+            : null;
+    }
+
     /// <summary>
     /// The Under the pointer (Chromium) row at a time, in the Screen reader
     /// group: the object the latest request at or before it was given, and
@@ -305,6 +400,7 @@ public sealed class AccessibilityRequests
                 ReadString(payload, "treeId") is { } treeId)
             {
                 _documents.TryAdd(treeId, token);
+                _treesOfDocuments.TryAdd(token, treeId);
                 continue;
             }
 
@@ -333,6 +429,16 @@ public sealed class AccessibilityRequests
 
             versions.Add(new TreeNode(
                 record.MonotonicNanoseconds, ReadString(payload, "roleName") ?? "object", ReadString(payload, "name") ?? string.Empty, children));
+            if (ReadInt64(payload, "domNodeId") is { } domNode)
+            {
+                if (!_domNodes.TryGetValue((token, domNode), out var objects))
+                {
+                    _domNodes[(token, domNode)] = objects = [];
+                }
+
+                objects.Add((record.MonotonicNanoseconds, id));
+            }
+
             foreach (var child in children)
             {
                 if (!_parents.TryGetValue((token, child), out var parents))
@@ -766,9 +872,32 @@ public sealed class AccessibilityRequests
             return;
         }
 
+        foreach (var key in keys.Where(key => key.Click is null))
+        {
+            _keyEvents.TryAdd(key.Time, key.EventId);
+        }
+
         var linked = new Dictionary<Key, List<string>>();
         foreach (var item in items.Where(item => item.EventType == BrowserEvidenceEventTypes.AccessibilityActionSent))
         {
+            if (ReadString(item.Payload, "action") is { } action)
+            {
+                var target = NodeOf(item.Payload, "target");
+                var before = KeyBefore(keys, item.Time);
+                _actions.Add(new RequestedAction(
+                    item.EventId,
+                    item.Time,
+                    action,
+                    target?.TreeId ?? ReadString(item.Payload, "treeId"),
+                    target?.NodeId ?? ReadInt64(item.Payload, "targetNodeId"),
+                    target?.Role ?? "object",
+                    target?.Name ?? string.Empty,
+                    before?.EventId,
+                    before?.Time,
+                    before?.Click,
+                    before is { Click: null } pressed ? kept.GetValueOrDefault(pressed.Time) : null));
+            }
+
             if (KeyBefore(keys, item.Time) is { } key && SentText(item) is { } text)
             {
                 if (!linked.TryGetValue(key, out var list))
