@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.59"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.59"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.60"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.60"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -7647,6 +7647,286 @@ class CompositorRecordIntegrationTests(unittest.TestCase):
                 self.assertIn(
                     f'SendBlinkEvidence("browser.compositor", "{event_type}",', source
                 )
+
+
+# Protocol 0.60: excerpts of the Chromium 156.0.8065.0 functions the
+# accessibility request hooks patch, with their anchors as they are there.
+ACCESSIBILITY_REQUEST_RENDERER_SOURCE = """\
+#include "content/renderer/accessibility/render_accessibility_impl.h"
+
+void RenderAccessibilityImpl::HitTest(
+    const gfx::Point& point,
+    ax::mojom::Event event_to_fire,
+    int request_id,
+    blink::mojom::RenderAccessibility::HitTestCallback callback) {
+  const WebDocument& document = GetMainDocument();
+  WebAXObject ax_object;
+  auto root_obj = WebAXObject::FromWebDocument(document);
+  ax_object = root_obj.HitTest(point);
+
+  // Return if no attached accessibility object was found for the main document.
+  if (ax_object.IsDetached()) {
+    std::move(callback).Run(/*hit_test_response=*/nullptr);
+    return;
+  }
+
+  ui::AXNodeData data;
+  ax_object.Serialize(&data, ax_context_->GetAXMode());
+  std::optional<ui::AXTreeID> child_tree_id = data.GetChildTreeID();
+  gfx::Point transformed_point = point;
+  if (child_tree_id) {
+  }
+}
+
+void RenderAccessibilityImpl::PerformAction(const ui::AXActionData& data) {
+  if (!ax_context_) {
+    return;
+  }
+  // Update layout and AX first before attempting to perform the action.
+  ax_context_->UpdateAXForAllDocuments();
+
+  WebDocument document = GetMainDocument();
+  if (document.IsNull()) {
+    return;
+  }
+
+  // Schedule the next serialization to come immediately after the action is
+  // complete, even if the document is still loading.
+  ScheduleImmediateAXUpdate();
+}
+
+bool RenderAccessibilityImpl::SendAccessibilitySerialization() {
+  ax_annotators_manager_->AddDebuggingAttributes(updates_and_events.updates);
+  return true;
+}
+"""
+ACCESSIBILITY_REQUEST_MANAGER_SOURCE = """\
+#include "ui/accessibility/platform/browser_accessibility_manager.h"
+
+#include <stddef.h>
+
+namespace ui {
+
+BrowserAccessibility* BrowserAccessibilityManager::CachingAsyncHitTest(
+    const gfx::Point& physical_pixel_point) const {
+  gfx::Point blink_screen_point = physical_pixel_point;
+  if (delegate_) {
+    HitTest(frame_point, /*request_id=*/0);
+    if (last_hover_bounds_.Contains(blink_screen_point)) {
+      BrowserAccessibilityManager* manager =
+          BrowserAccessibilityManager::FromID(last_hover_ax_tree_id_);
+      if (manager) {
+        BrowserAccessibility* node = manager->GetFromID(last_hover_node_id_);
+        if (node)
+          return node;
+      }
+    }
+  }
+
+  return ApproximateHitTest(blink_screen_point);
+}
+
+void BrowserAccessibilityManager::CacheHitTestResult(
+    BrowserAccessibility* hit_test_result) const {
+  hit_test_result = hit_test_result->PlatformGetLowestPlatformAncestor();
+
+  last_hover_ax_tree_id_ = hit_test_result->manager()->GetTreeID();
+  last_hover_node_id_ = hit_test_result->GetId();
+  last_hover_bounds_ = hit_test_result->GetClippedScreenBoundsRect();
+}
+
+}  // namespace ui
+"""
+ACCESSIBILITY_REQUEST_PLATFORM_BUILD = """\
+source_set("ax_platform_node_delegate") {
+  deps = [
+    "//base",
+  ]
+}
+
+component("platform") {
+  output_name = "accessibility_platform"
+
+  deps = [
+    "//third_party/abseil-cpp:absl",
+  ]
+
+  public_deps = [
+    "//ui/display",
+  ]
+}
+"""
+ACCESSIBILITY_REQUEST_FRAME_HOST_SOURCE = """\
+#include "content/browser/renderer_host/render_frame_host_impl.h"
+
+#include <algorithm>
+
+namespace content {
+
+void RenderFrameHostImpl::AccessibilityPerformAction(
+    const ui::AXActionData& action_data) {
+  if (action_data.action == ax::mojom::Action::kFocus) {
+  }
+
+  render_accessibility_->PerformAction(action_data);
+}
+
+bool RenderFrameHostImpl::AccessibilityViewHasFocus() {
+  return false;
+}
+
+}  // namespace content
+"""
+
+
+class AccessibilityRequestIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        header = (
+            MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h"
+        ).read_text(encoding="utf-8")
+        self.signatures = INTEGRATE.parse_bridge_signatures(header)
+
+    def assert_calls_match_bridge(self, text):
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "patched", text, self.signatures
+            ),
+        )
+
+    def patch_twice(self, name, content, *patches):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(content, encoding="utf-8")
+            for patch in patches:
+                patch(path)
+            first = path.read_text(encoding="utf-8")
+            for patch in patches:
+                patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def test_bridge_declares_the_request_entry_points(self):
+        for name, count in (
+            ("RecordBrowserAccessibilityHitTest", 6),
+            ("RecordBrowserAccessibilityHitTestResult", 1),
+            ("RecordBrowserAccessibilityActionSent", 7),
+            ("RecordRendererAccessibilityActionReceived", 6),
+            ("RecordRendererAccessibilityHitTest", 7),
+        ):
+            self.assertEqual(count, self.signatures.get(name), name)
+        protocol = (
+            MODULE_PATH.parent / "recorder_bridge" / "recorder_protocol.h"
+        ).read_text(encoding="utf-8")
+        self.assertIn('kProtocolVersion[] = "0.60"', protocol)
+
+    def test_patches_renderer_actions_and_hit_tests_idempotently(self):
+        text = self.patch_twice(
+            "render_accessibility_impl.cc",
+            ACCESSIBILITY_REQUEST_RENDERER_SOURCE,
+            INTEGRATE.patch_content_renderer_accessibility,
+            INTEGRATE.patch_content_renderer_accessibility_requests,
+        )
+        self.assertEqual(
+            1, text.count("RecordRendererAccessibilityActionReceived(")
+        )
+        self.assertEqual(2, text.count("RecordRendererAccessibilityHitTest("))
+        # The action is recorded once the document is known, before it is
+        # performed.
+        self.assertLess(
+            text.index("RecordRendererAccessibilityActionReceived("),
+            text.index("ScheduleImmediateAXUpdate();"),
+        )
+        self.assertLess(
+            text.index("document.IsNull()"),
+            text.index("RecordRendererAccessibilityActionReceived("),
+        )
+        # A detached result is recorded before the reply.
+        detached = text.index("if (ax_object.IsDetached()) {")
+        self.assertLess(
+            text.index("RecordRendererAccessibilityHitTest(", detached),
+            text.index("std::move(callback).Run(", detached),
+        )
+        self.assertIn("child_tree_id.has_value()", text)
+        self.assertIn(INTEGRATE.CONTENT_RENDERER_AX_ENUM_INCLUDE, text)
+        self.assert_calls_match_bridge(text)
+
+    def test_patches_browser_hit_tests_idempotently(self):
+        text = self.patch_twice(
+            "browser_accessibility_manager.cc",
+            ACCESSIBILITY_REQUEST_MANAGER_SOURCE,
+            INTEGRATE.patch_ui_accessibility_hit_test,
+        )
+        self.assertIn(INTEGRATE.BRIDGE_INCLUDE, text)
+        self.assertIn(INTEGRATE.UI_ACCESSIBILITY_ENUM_INCLUDE, text)
+        self.assertLess(
+            text.index(INTEGRATE.UI_ACCESSIBILITY_HIT_TEST_HELPER_MARKER),
+            text.index("BrowserAccessibilityManager::CachingAsyncHitTest("),
+        )
+        self.assertIn('"last-precise-result"', text)
+        self.assertIn('"cached-tree-guess"', text)
+        self.assertNotIn("return ApproximateHitTest(", text)
+        self.assertIn("return recorder_guess;", text)
+        self.assertEqual(
+            1, text.count("RecordBrowserAccessibilityHitTestResult(")
+        )
+        # The kept result is recorded after Chromium has kept it.
+        self.assertLess(
+            text.index("last_hover_bounds_ = hit_test_result"),
+            text.index("RecordBrowserAccessibilityHitTestResult("),
+        )
+        self.assert_calls_match_bridge(text)
+
+    def test_links_only_the_platform_component_to_the_bridge(self):
+        text = self.patch_twice(
+            "BUILD.gn",
+            ACCESSIBILITY_REQUEST_PLATFORM_BUILD,
+            INTEGRATE.patch_ui_accessibility_platform_build,
+        )
+        self.assertEqual(1, text.count(INTEGRATE.BRIDGE_DEP))
+        self.assertGreater(
+            text.index(INTEGRATE.BRIDGE_DEP),
+            text.index('component("platform") {'),
+        )
+        self.assertLess(
+            text.index(INTEGRATE.BRIDGE_DEP), text.index("  public_deps = [")
+        )
+
+    def test_patches_the_action_sent_to_the_page_idempotently(self):
+        text = self.patch_twice(
+            "render_frame_host_impl.cc",
+            ACCESSIBILITY_REQUEST_FRAME_HOST_SOURCE,
+            INTEGRATE.patch_content_accessibility_action_sent,
+        )
+        for include in (
+            INTEGRATE.CONTENT_NAVIGATION_INCLUDE,
+            INTEGRATE.UI_ACCESSIBILITY_ENUM_INCLUDE,
+            INTEGRATE.UI_BROWSER_ACCESSIBILITY_INCLUDE,
+        ):
+            self.assertEqual(1, text.count(include + "\n"), include)
+        self.assertEqual(1, text.count("RecordBrowserAccessibilityActionSent("))
+        self.assertEqual(
+            1, text.count("render_accessibility_->PerformAction(action_data);")
+        )
+        self.assertLess(
+            text.index("RecordBrowserAccessibilityActionSent("),
+            text.index("render_accessibility_->PerformAction(action_data);"),
+        )
+        self.assert_calls_match_bridge(text)
+
+    def test_main_patches_renderer_requests_after_the_serialization(self):
+        source = MODULE_PATH.read_text(encoding="utf-8")
+        main = source[source.index("def main() -> int:"):]
+        self.assertLess(
+            main.index("patch_content_renderer_accessibility("),
+            main.index("patch_content_renderer_accessibility_requests("),
+        )
+        for name in (
+            "patch_ui_accessibility_hit_test(",
+            "patch_ui_accessibility_platform_build(",
+            "patch_content_accessibility_action_sent(",
+        ):
+            self.assertIn(name, main)
 
 
 if __name__ == "__main__":

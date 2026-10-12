@@ -582,6 +582,14 @@ public partial class MainWindow : Window
                 string.Join(Environment.NewLine, mouse.Details) + Environment.NewLine + Environment.NewLine + json;
         }
 
+        // An accessibility request record's outcome, before the record
+        // (accessibility-requests.md, "The player").
+        if (archive.AccessibilityRequests.Of(item.EventId) is { } request)
+        {
+            json = $"Accessibility request ({archive.AccessibilityRequests.Rule}): {request.Text}{Environment.NewLine}" +
+                string.Join(Environment.NewLine, request.Details) + Environment.NewLine + Environment.NewLine + json;
+        }
+
         return archive.KeyDispositions.Of(item.EventId) is { } outcome
             ? $"Key outcome ({archive.KeyDispositions.Rule}): {outcome.Text}{Environment.NewLine}" +
               string.Join(Environment.NewLine, outcome.Details) +

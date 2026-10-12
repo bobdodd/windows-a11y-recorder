@@ -8340,4 +8340,215 @@ void RecordBrowserZoomLevelChanged(std::string mode,
                     std::move(payload));
 }
 
+// Protocol 0.60: accessibility requests. See
+// docs/architecture/accessibility-requests.md.
+namespace {
+
+base::DictValue AccessibilityRequestNodeValue(
+    const AccessibilityRequestNode& node) {
+  base::DictValue value;
+  value.Set("treeId", node.tree_id);
+  value.Set("nodeId", node.node_id);
+  value.Set("role", node.role);
+  value.Set("name", node.name);
+  value.Set("bounds", PagePopupRectValue(node.bounds));
+  return value;
+}
+
+base::Value OptionalAccessibilityRequestNodeValue(
+    const AccessibilityRequestNode& node) {
+  if (!node.present) {
+    return base::Value();
+  }
+  return base::Value(AccessibilityRequestNodeValue(node));
+}
+
+base::DictValue AccessibilityPointValue(int x, int y) {
+  base::DictValue value;
+  value.Set("x", x);
+  value.Set("y", y);
+  return value;
+}
+
+// ax::mojom::ScrollAlignment in ui/accessibility/ax_enums.mojom.
+std::string AccessibilityScrollAlignmentName(int alignment) {
+  switch (alignment) {
+    case 0:
+      return "none";
+    case 1:
+      return "center";
+    case 2:
+      return "top";
+    case 3:
+      return "bottom";
+    case 4:
+      return "left";
+    case 5:
+      return "right";
+    case 6:
+      return "closest-edge";
+  }
+  return "unknown-" + base::NumberToString(alignment);
+}
+
+// ax::mojom::ScrollBehavior in ui/accessibility/ax_enums.mojom.
+std::string AccessibilityScrollBehaviorName(int behavior) {
+  switch (behavior) {
+    case 0:
+      return "none";
+    case 1:
+      return "do-not-scroll-if-visible";
+    case 2:
+      return "scroll-if-visible";
+  }
+  return "unknown-" + base::NumberToString(behavior);
+}
+
+// ui::kInvalidAXNodeID is 0; generated node ids may be negative.
+base::Value OptionalAccessibilityNodeId(int node_id) {
+  if (node_id == 0) {
+    return base::Value();
+  }
+  return base::Value(node_id);
+}
+
+}  // namespace
+
+void RecordBrowserAccessibilityHitTest(std::string root_tree_id,
+                                       int point_x,
+                                       int point_y,
+                                       std::string basis,
+                                       bool precise_requested,
+                                       AccessibilityRequestNode answer) {
+  A11Y_RECORDER_COST("RecordBrowserAccessibilityHitTest");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client ||
+      !IsOneOf(basis, {"last-precise-result", "cached-tree-guess"})) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("rootTreeId", std::move(root_tree_id));
+  payload.Set("point", AccessibilityPointValue(point_x, point_y));
+  payload.Set("basis", std::move(basis));
+  payload.Set("preciseRequested", precise_requested);
+  payload.Set("answer", OptionalAccessibilityRequestNodeValue(answer));
+  SendBlinkEvidence("browser.accessibility", "accessibility-hit-test",
+                    std::move(payload));
+}
+
+void RecordBrowserAccessibilityHitTestResult(AccessibilityRequestNode result) {
+  A11Y_RECORDER_COST("RecordBrowserAccessibilityHitTestResult");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || !result.present) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("result", AccessibilityRequestNodeValue(result));
+  SendBlinkEvidence("browser.accessibility", "accessibility-hit-test-result",
+                    std::move(payload));
+}
+
+void RecordBrowserAccessibilityActionSent(int page_frame_tree_node_id,
+                                          int frame_tree_node_id,
+                                          std::string document_token,
+                                          std::string tree_id,
+                                          std::string action,
+                                          AccessibilityRequestNode target,
+                                          AccessibilityActionDetails details) {
+  A11Y_RECORDER_COST("RecordBrowserAccessibilityActionSent");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || action.empty()) {
+    return;
+  }
+  base::DictValue context =
+      CreateContext(*client, 0, std::move(document_token));
+  context.Set("pageId",
+              "frame-" + base::NumberToString(page_frame_tree_node_id));
+  context.Set("frameId", "frame-" + base::NumberToString(frame_tree_node_id));
+  base::DictValue payload;
+  payload.Set("context", std::move(context));
+  payload.Set("treeId", std::move(tree_id));
+  payload.Set("action", std::move(action));
+  payload.Set("targetNodeId", OptionalAccessibilityNodeId(target.node_id));
+  payload.Set("target", OptionalAccessibilityRequestNodeValue(target));
+  if (details.has_target_rect) {
+    payload.Set("targetRect", PagePopupRectValue(details.target_rect));
+  } else {
+    payload.Set("targetRect", base::Value());
+  }
+  if (details.has_target_point) {
+    payload.Set("targetPoint", AccessibilityPointValue(details.target_point_x,
+                                                       details.target_point_y));
+  } else {
+    payload.Set("targetPoint", base::Value());
+  }
+  payload.Set("horizontalScrollAlignment",
+              AccessibilityScrollAlignmentName(
+                  details.horizontal_scroll_alignment));
+  payload.Set("verticalScrollAlignment",
+              AccessibilityScrollAlignmentName(
+                  details.vertical_scroll_alignment));
+  payload.Set("scrollBehavior",
+              AccessibilityScrollBehaviorName(details.scroll_behavior));
+  if (details.has_selection) {
+    base::DictValue selection;
+    selection.Set("anchorNodeId", details.anchor_node_id);
+    selection.Set("anchorOffset", details.anchor_offset);
+    selection.Set("focusNodeId", details.focus_node_id);
+    selection.Set("focusOffset", details.focus_offset);
+    payload.Set("selection", std::move(selection));
+  } else {
+    payload.Set("selection", base::Value());
+  }
+  SendBlinkEvidence("browser.accessibility", "accessibility-action-sent",
+                    std::move(payload));
+}
+
+void RecordRendererAccessibilityActionReceived(std::string document_token,
+                                               std::string tree_id,
+                                               std::string action,
+                                               int target_node_id,
+                                               int anchor_node_id,
+                                               int focus_node_id) {
+  A11Y_RECORDER_COST("RecordRendererAccessibilityActionReceived");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || action.empty()) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0, std::move(document_token)));
+  payload.Set("treeId", std::move(tree_id));
+  payload.Set("action", std::move(action));
+  payload.Set("targetNodeId", OptionalAccessibilityNodeId(target_node_id));
+  payload.Set("anchorNodeId", OptionalAccessibilityNodeId(anchor_node_id));
+  payload.Set("focusNodeId", OptionalAccessibilityNodeId(focus_node_id));
+  SendBlinkEvidence("browser.accessibility", "accessibility-action-received",
+                    std::move(payload));
+}
+
+void RecordRendererAccessibilityHitTest(std::string document_token,
+                                        std::string tree_id,
+                                        int point_x,
+                                        int point_y,
+                                        int node_id,
+                                        bool child_tree,
+                                        std::string event_to_fire) {
+  A11Y_RECORDER_COST("RecordRendererAccessibilityHitTest");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0, std::move(document_token)));
+  payload.Set("treeId", std::move(tree_id));
+  payload.Set("point", AccessibilityPointValue(point_x, point_y));
+  payload.Set("nodeId", OptionalAccessibilityNodeId(node_id));
+  payload.Set("childTree", child_tree);
+  payload.Set("eventToFire", std::move(event_to_fire));
+  SendBlinkEvidence("browser.accessibility",
+                    "accessibility-hit-test-computed", std::move(payload));
+}
+
 }  // namespace a11y_recorder

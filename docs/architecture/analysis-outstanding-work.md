@@ -186,6 +186,14 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   [accessibility preferences](accessibility-preferences.md)). To build in
   the owner's checkout and check on the target machine with a recording
   in which the theme is changed.
+- Accessibility requests at protocol 0.60 (step 3 of the NVDA work): hit
+  tests with the object given at once and the page's precise result, and
+  actions as sent and received, in the event list and Selected event
+  values: agreed and built 2026-10-12
+  ([accessibility requests](accessibility-requests.md)). To build in the
+  owner's checkout, run `tests/AccessibilityRequestProbe` on the target
+  machine, and record an NVDA session on the test page and cnib.ca. The
+  fuller player view waits for that run.
 - Left open by the owner's decision 2026-10-08, to start stage 2 first:
   the Magnifier change records on a real Magnifier recording
   (`scripts/Test-MagnifierChanges.ps1`); applying a Windows color filter

@@ -53,7 +53,10 @@ public sealed record PlaybackIndex
     // Version 16 keeps the mouse hook's records (input.mouse-hook) and raw
     // input's mouse records (input.mouse, raw-mouse) whole, for the mouse
     // outcomes and the Pointer row (MouseActivity).
-    public const int CurrentVersion = 16;
+    // Version 17 keeps protocol 0.60's accessibility request records
+    // (browser.accessibility) whole, for their outcomes
+    // (AccessibilityRequests).
+    public const int CurrentVersion = 17;
 
     public required int Version { get; init; }
 
@@ -267,7 +270,8 @@ public sealed class PlaybackIndexBuilder
             (channel == "window.foreground" && record.EventType == "foreground-window") ||
             (channel == "accessibility.uia.events" && record.EventType == "focus-changed") ||
             WindowSnapshots.IsSnapshot(channel, record.EventType) ||
-            MouseActivity.IsMouseEvidence(channel, record.EventType))
+            MouseActivity.IsMouseEvidence(channel, record.EventType) ||
+            AccessibilityRequests.IsRequestEvidence(channel, record.EventType))
         {
             Keep(eventKey, record);
             return;
@@ -401,7 +405,8 @@ public sealed class PlaybackIndexBuilder
              (record.Channel == "window.foreground" && record.EventType == "foreground-window") ||
              (record.Channel == "accessibility.uia.events" && record.EventType == "focus-changed") ||
              KeyDispositions.IsKeyEvidence(record.Channel, record.EventType, record.Payload) ||
-             MouseActivity.IsMouseEvidence(record.Channel, record.EventType)) &&
+             MouseActivity.IsMouseEvidence(record.Channel, record.EventType) ||
+             AccessibilityRequests.IsRequestEvidence(record.Channel, record.EventType)) &&
             record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()
                 : WindowSnapshots.IsSnapshot(record.Channel, record.EventType)

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Recorder.Collectors.Browser/Recorder.Collectors.Browser.csproj" />
+    <ProjectReference Include="../../src/Recorder.Session/Recorder.Session.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The native UI Automation client, as Recorder.Collectors.Automation
+         uses it. -->
+    <PackageReference Include="Interop.UIAutomationClient" Version="10.19041.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../fixtures/accessibility-requests/*.html" LinkBase="fixture" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

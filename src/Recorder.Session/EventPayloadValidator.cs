@@ -196,6 +196,22 @@ internal static class EventPayloadValidator
                     payload,
                     issues);
                 break;
+            // Protocol 0.60: accessibility requests.
+            case ("browser.accessibility", "accessibility-hit-test"):
+                ValidateBrowserAccessibilityHitTest(payload, issues);
+                break;
+            case ("browser.accessibility", "accessibility-hit-test-result"):
+                ValidateBrowserAccessibilityHitTestResult(payload, issues);
+                break;
+            case ("browser.accessibility", "accessibility-action-sent"):
+                ValidateBrowserAccessibilityActionSent(payload, issues);
+                break;
+            case ("browser.accessibility", "accessibility-action-received"):
+                ValidateBrowserAccessibilityActionReceived(payload, issues);
+                break;
+            case ("browser.accessibility", "accessibility-hit-test-computed"):
+                ValidateBrowserAccessibilityHitTestComputed(payload, issues);
+                break;
             case (
                 "browser.accessibility",
                 "accessibility-checkpoint-completed"):
@@ -2462,6 +2478,228 @@ internal static class EventPayloadValidator
             issues);
         ValidateBrowserContextProperty(payload, issues);
         ValidateRendererTokenContext(payload, issues);
+    }
+
+    // Protocol 0.60: accessibility requests. See
+    // docs/architecture/accessibility-requests.md.
+    private static readonly PropertyRule[] AccessibilityPointRules =
+    [
+        RequiredInteger("x"),
+        RequiredInteger("y")
+    ];
+
+    private static readonly PropertyRule[] AccessibilityRequestNodeRules =
+    [
+        RequiredString("treeId"),
+        RequiredInteger("nodeId"),
+        RequiredString("role"),
+        RequiredText("name"),
+        RequiredObject("bounds")
+    ];
+
+    private static void ValidateAccessibilityRequestObject(
+        JsonElement payload,
+        string name,
+        PropertyRule[] rules,
+        ICollection<EventValidationIssue> issues)
+    {
+        if (!payload.TryGetProperty(name, out var value) ||
+            value.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+        ValidateShape(value, rules, issues, $"#/payload/{name}");
+        if (ReferenceEquals(rules, AccessibilityRequestNodeRules))
+        {
+            if (value.TryGetProperty("nodeId", out var id) &&
+                id.ValueKind == JsonValueKind.Number &&
+                id.TryGetInt32(out var nodeId) && nodeId == 0)
+            {
+                AddError(
+                    issues,
+                    "browser-accessibility-request-node-invalid",
+                    $"#/payload/{name}/nodeId",
+                    "A recorded node has an accessibility node id other than 0, which names no node.");
+            }
+            if (value.TryGetProperty("bounds", out var bounds) &&
+                bounds.ValueKind == JsonValueKind.Object)
+            {
+                ValidateShape(bounds, PagePopupRectRules, issues, $"#/payload/{name}/bounds");
+            }
+        }
+    }
+
+    private static void ValidateBrowserAccessibilityHitTest(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("rootTreeId"),
+                RequiredObject("point"),
+                RequiredEnum("basis", [.. Recorder.Contracts.BrowserAccessibilityRequests.HitTestBases]),
+                RequiredBoolean("preciseRequested"),
+                NullableObject("answer")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(
+            payload,
+            false,
+            issues,
+            "browser-accessibility-request-context-invalid",
+            "A browser-process accessibility request record");
+        ValidateAccessibilityRequestObject(payload, "point", AccessibilityPointRules, issues);
+        ValidateAccessibilityRequestObject(payload, "answer", AccessibilityRequestNodeRules, issues);
+        if (ReadString(payload, "basis") == Recorder.Contracts.BrowserAccessibilityRequests.LastPreciseResult &&
+            payload.TryGetProperty("answer", out var answer) &&
+            answer.ValueKind != JsonValueKind.Object)
+        {
+            AddError(
+                issues,
+                "browser-accessibility-hit-test-answer-missing",
+                "#/payload/answer",
+                "A hit test answered with the page's last precise result names that result.");
+        }
+        if (ReadString(payload, "basis") == Recorder.Contracts.BrowserAccessibilityRequests.LastPreciseResult &&
+            payload.TryGetProperty("preciseRequested", out var requested) &&
+            requested.ValueKind == JsonValueKind.False)
+        {
+            AddError(
+                issues,
+                "browser-accessibility-hit-test-precise-inconsistent",
+                "#/payload/preciseRequested",
+                "Chromium uses the page's last precise result only when it also asks the page for a new one.");
+        }
+    }
+
+    private static void ValidateBrowserAccessibilityHitTestResult(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredObject("result")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(
+            payload,
+            false,
+            issues,
+            "browser-accessibility-request-context-invalid",
+            "A browser-process accessibility request record");
+        ValidateAccessibilityRequestObject(payload, "result", AccessibilityRequestNodeRules, issues);
+    }
+
+    private static void ValidateBrowserAccessibilityActionSent(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("treeId"),
+                RequiredString("action"),
+                NullableInteger("targetNodeId"),
+                NullableObject("target"),
+                NullableObject("targetRect"),
+                NullableObject("targetPoint"),
+                RequiredEnum("horizontalScrollAlignment", [.. Recorder.Contracts.BrowserAccessibilityRequests.ScrollAlignments]),
+                RequiredEnum("verticalScrollAlignment", [.. Recorder.Contracts.BrowserAccessibilityRequests.ScrollAlignments]),
+                RequiredEnum("scrollBehavior", [.. Recorder.Contracts.BrowserAccessibilityRequests.ScrollBehaviors]),
+                NullableObject("selection")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(
+            payload,
+            true,
+            issues,
+            "browser-accessibility-request-context-invalid",
+            "A browser-process accessibility request record");
+        ValidateAccessibilityRequestObject(payload, "target", AccessibilityRequestNodeRules, issues);
+        ValidatePagePopupRect(payload, "targetRect", issues);
+        ValidateAccessibilityRequestObject(payload, "targetPoint", AccessibilityPointRules, issues);
+        ValidateAccessibilityRequestObject(
+            payload,
+            "selection",
+            [
+                RequiredInteger("anchorNodeId"),
+                RequiredInteger("anchorOffset"),
+                RequiredInteger("focusNodeId"),
+                RequiredInteger("focusOffset")
+            ],
+            issues);
+        if (payload.TryGetProperty("target", out var target) &&
+            target.ValueKind == JsonValueKind.Object &&
+            (!payload.TryGetProperty("targetNodeId", out var targetId) ||
+             targetId.ValueKind != JsonValueKind.Number ||
+             !target.TryGetProperty("nodeId", out var nodeId) ||
+             nodeId.ValueKind != JsonValueKind.Number ||
+             targetId.GetInt64() != nodeId.GetInt64()))
+        {
+            AddError(
+                issues,
+                "browser-accessibility-action-target-inconsistent",
+                "#/payload/target",
+                "An action's recorded target is the node its target id names.");
+        }
+    }
+
+    private static void ValidateBrowserAccessibilityActionReceived(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("treeId"),
+                RequiredString("action"),
+                NullableInteger("targetNodeId"),
+                NullableInteger("anchorNodeId"),
+                NullableInteger("focusNodeId")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererTokenContext(payload, issues);
+    }
+
+    private static void ValidateBrowserAccessibilityHitTestComputed(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("treeId"),
+                RequiredObject("point"),
+                NullableInteger("nodeId"),
+                RequiredBoolean("childTree"),
+                RequiredString("eventToFire")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererTokenContext(payload, issues);
+        ValidateAccessibilityRequestObject(payload, "point", AccessibilityPointRules, issues);
+        if (payload.TryGetProperty("nodeId", out var node) &&
+            node.ValueKind == JsonValueKind.Null &&
+            payload.TryGetProperty("childTree", out var child) &&
+            child.ValueKind == JsonValueKind.True)
+        {
+            AddError(
+                issues,
+                "browser-accessibility-hit-test-child-without-node",
+                "#/payload/childTree",
+                "A hit test continues in a child frame or tree only from the node that holds it.");
+        }
     }
 
     private static void ValidateBrowserAccessibilityCheckpointCompleted(
@@ -8183,8 +8421,9 @@ internal static class EventPayloadValidator
                 issues,
                 "browser-accessibility-context-invalid",
                 "#/payload/context",
-                "Accessibility checkpoint evidence must identify a renderer " +
-                    "and the Chromium document token it serialized.");
+                "Renderer accessibility evidence must identify a renderer " +
+                    "and the Chromium document token it serialized or " +
+                    "received a request for.");
         }
     }
 

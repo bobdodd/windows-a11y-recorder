@@ -1219,7 +1219,17 @@ map's colors that differ from the map last sent to the view. Agreed with
 the owner on 2026-10-10 ("The browser theme" in
 [accessibility preferences](accessibility-preferences.md)).
 
-Live 0.59 connections require an exact protocol-version match.
+Protocol version 0.60 adds five records to `browser.accessibility`, the
+requests an assistive technology makes of the page and how Chromium
+answers them: `accessibility-hit-test` and `accessibility-hit-test-result`
+from `BrowserAccessibilityManager` in the browser process,
+`accessibility-action-sent` from `RenderFrameHostImpl`, and
+`accessibility-action-received` and `accessibility-hit-test-computed` from
+`RenderAccessibilityImpl` in the renderer. The `ui/accessibility/platform`
+component now depends on the bridge. Agreed with the owner on 2026-10-12
+([accessibility requests](accessibility-requests.md)).
+
+Live 0.60 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

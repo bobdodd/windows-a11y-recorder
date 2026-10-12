@@ -97,6 +97,14 @@ internal static class EvidenceSamples
     private static readonly string AxContext =
         J("{'browserInstanceId':'browser-1','processId':4100,'processType':'renderer','profileId':null,'browserContextId':'context-1','pageId':'page-1','frameId':'frame-1','documentId':null,'executionWorldId':null,'documentToken':'TOKEN-1'}");
 
+    // Protocol 0.60: the browser process's context, and with the page and
+    // frame an action is sent to.
+    private static readonly string AxBrowserContext =
+        J("{'browserInstanceId':'browser-1','processId':4000,'processType':'browser','profileId':null,'browserContextId':null,'pageId':null,'frameId':null,'documentId':null,'executionWorldId':null,'documentToken':null}");
+
+    private static readonly string AxBrowserFrameContext =
+        J("{'browserInstanceId':'browser-1','processId':4000,'processType':'browser','profileId':null,'browserContextId':null,'pageId':'frame-1','frameId':'frame-1','documentId':null,'executionWorldId':null,'documentToken':'TOKEN-1'}");
+
     private static readonly string World =
         J("{'kind':'isolated','blinkWorldId':1,'name':'extension','stableId':null}");
 
@@ -499,6 +507,34 @@ internal static class EvidenceSamples
             J("{'context':") + AxContext + J(",'checkpointId':'accessibility-checkpoint-1','nodeIndex':1,'accessibilityNodeId':-7,'parentAccessibilityNodeId':1,'domNodeId':42,'role':9,'roleName':'button','name':'Save','description':'Saves the form','serializedProperties':'{\\'hasPopup\\':false}','focused':true}")),
         ("browser.accessibility", "accessibility-checkpoint-completed",
             J("{'context':") + AxContext + J(",'checkpointId':'accessibility-checkpoint-1','reason':'renderer-serialization','nodeCount':2,'truncated':false,'maximumNodes':5000,'updateCount':3,'eventCount':7}")),
+        // Added with 0031_accessibility_requests.sql (protocol 0.60): a hit
+        // test answered with the page's last precise result and one with a
+        // guess that found nothing; the page's precise result; a scroll into
+        // view sent and received; a selection whose target the browser's
+        // copy of the tree did not hold; the renderer's hit tests, one found
+        // and one continuing in a child frame.
+        ("browser.accessibility", "accessibility-hit-test",
+            J("{'context':") + AxBrowserContext + J(",'rootTreeId':'TREE-1','point':{'x':512,'y':300},'basis':'last-precise-result','preciseRequested':true,'answer':{'treeId':'TREE-1','nodeId':652,'role':'heading','name':'Contact us','bounds':{'x':480,'y':290,'width':240,'height':32}}}")),
+        ("browser.accessibility", "accessibility-hit-test",
+            J("{'context':") + AxBrowserContext + J(",'rootTreeId':'TREE-1','point':{'x':-5,'y':12},'basis':'cached-tree-guess','preciseRequested':false,'answer':null}")),
+        ("browser.accessibility", "accessibility-hit-test-result",
+            J("{'context':") + AxBrowserContext + J(",'result':{'treeId':'TREE-2','nodeId':-7,'role':'button','name':'','bounds':{'x':10,'y':20,'width':0,'height':0}}}")),
+        ("browser.accessibility", "accessibility-action-sent",
+            J("{'context':") + AxBrowserFrameContext + J(",'treeId':'TREE-1','action':'scrollToMakeVisible','targetNodeId':652,'target':{'treeId':'TREE-1','nodeId':652,'role':'heading','name':'Contact us','bounds':{'x':480,'y':290,'width':240,'height':32}},'targetRect':{'x':0,'y':0,'width':0,'height':0},'targetPoint':null,'horizontalScrollAlignment':'closest-edge','verticalScrollAlignment':'closest-edge','scrollBehavior':'do-not-scroll-if-visible','selection':null}")),
+        ("browser.accessibility", "accessibility-action-sent",
+            J("{'context':") + AxBrowserFrameContext + J(",'treeId':'TREE-1','action':'setSelection','targetNodeId':null,'target':null,'targetRect':null,'targetPoint':null,'horizontalScrollAlignment':'none','verticalScrollAlignment':'none','scrollBehavior':'none','selection':{'anchorNodeId':652,'anchorOffset':0,'focusNodeId':653,'focusOffset':4}}")),
+        ("browser.accessibility", "accessibility-action-sent",
+            J("{'context':") + AxBrowserFrameContext + J(",'treeId':'TREE-1','action':'setScrollOffset','targetNodeId':1,'target':null,'targetRect':null,'targetPoint':{'x':0,'y':1400},'horizontalScrollAlignment':'none','verticalScrollAlignment':'none','scrollBehavior':'none','selection':null}")),
+        ("browser.accessibility", "accessibility-action-received",
+            J("{'context':") + AxContext + J(",'treeId':'TREE-1','action':'scrollToMakeVisible','targetNodeId':652,'anchorNodeId':null,'focusNodeId':null}")),
+        ("browser.accessibility", "accessibility-action-received",
+            J("{'context':") + AxContext + J(",'treeId':'TREE-1','action':'setSelection','targetNodeId':null,'anchorNodeId':652,'focusNodeId':653}")),
+        ("browser.accessibility", "accessibility-hit-test-computed",
+            J("{'context':") + AxContext + J(",'treeId':'TREE-1','point':{'x':500,'y':180},'nodeId':652,'childTree':false,'eventToFire':'hover'}")),
+        ("browser.accessibility", "accessibility-hit-test-computed",
+            J("{'context':") + AxContext + J(",'treeId':'TREE-1','point':{'x':20,'y':900},'nodeId':null,'childTree':false,'eventToFire':'hover'}")),
+        ("browser.accessibility", "accessibility-hit-test-computed",
+            J("{'context':") + AxContext + J(",'treeId':'TREE-1','point':{'x':40,'y':640},'nodeId':88,'childTree':true,'eventToFire':'hover'}")),
         ("browser.dom", "dom-checkpoint-started",
             J("{'context':") + Context + J(",'checkpointId':'dom-checkpoint-1','reason':'finished-parsing','walkReason':'first','maximumNodes':10000}")),
         ("browser.dom", "dom-checkpoint-started",

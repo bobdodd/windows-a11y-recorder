@@ -442,6 +442,15 @@ scroll bars, and system colors follow the participant's. The evidence
 panel lists each value with the time of its record. See "Stage 3" in
 [accessibility preferences](docs/architecture/accessibility-preferences.md).
 
+Protocol 0.60 records what an assistive technology asks of a web page and
+how Chromium answers: each hit test at a point, with the object given at
+once and the page's precise result that follows, and each action, such as
+scrolling an object into view, focusing it, or activating it, as the
+browser sent it and the page received it. The event list names each
+request, and Selected event values says what was given and found, or what
+was asked. Chromium cannot tell which program asked. See
+[accessibility requests](docs/architecture/accessibility-requests.md).
+
 Protocol 0.59 records the browser's theme, its color, color style,
 grayscale setting, and any installed theme, with the light, dark, or
 device mode already recorded, in the Properties panel and on the

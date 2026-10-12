@@ -4383,6 +4383,334 @@ def patch_content_renderer_accessibility(path: Path) -> None:
     write_patched(path, text)
 
 
+# Protocol 0.60: the requests an assistive technology makes of a page through
+# the platform accessibility API, and how Chromium answers them. See
+# docs/architecture/accessibility-requests.md. Hit tests are recorded where the
+# browser process answers them at once and where it keeps the page's precise
+# result; actions where the browser process sends them to the page, the one
+# point every action passes whichever platform API asked; and both again as
+# the renderer receives and computes them.
+UI_ACCESSIBILITY_ENUM_INCLUDE = '#include "ui/accessibility/ax_enum_util.h"'
+UI_BROWSER_ACCESSIBILITY_INCLUDE = (
+    '#include "ui/accessibility/platform/browser_accessibility.h"'
+)
+UI_ACCESSIBILITY_MANAGER_OWN_INCLUDE = (
+    '#include "ui/accessibility/platform/browser_accessibility_manager.h"'
+)
+UI_ACCESSIBILITY_PLATFORM_TARGET = 'component("platform") {'
+UI_ACCESSIBILITY_HIT_TEST_HELPER_ANCHOR = (
+    "BrowserAccessibility* BrowserAccessibilityManager::CachingAsyncHitTest(\n"
+)
+UI_ACCESSIBILITY_HIT_TEST_HELPER_MARKER = (
+    "a11y_recorder::AccessibilityRequestNode RecorderAccessibilityRequestNode("
+)
+UI_ACCESSIBILITY_HIT_TEST_HELPER = """\
+namespace {
+
+// Windows A11y Recorder, protocol 0.60: a node of this process's copy of a
+// tree as a hit test record names it. See
+// docs/architecture/accessibility-requests.md.
+a11y_recorder::AccessibilityRequestNode RecorderAccessibilityRequestNode(
+    BrowserAccessibility* recorder_node) {
+  a11y_recorder::AccessibilityRequestNode recorder_value;
+  if (!recorder_node || !recorder_node->manager()) {
+    return recorder_value;
+  }
+  recorder_value.present = true;
+  recorder_value.tree_id = recorder_node->manager()->GetTreeID().ToString();
+  recorder_value.node_id = recorder_node->GetId();
+  recorder_value.role = ui::ToString(recorder_node->GetRole());
+  recorder_value.name =
+      recorder_node->GetStringAttribute(ax::mojom::StringAttribute::kName);
+  const gfx::Rect recorder_bounds =
+      recorder_node->GetClippedScreenBoundsRect();
+  recorder_value.bounds.x = recorder_bounds.x();
+  recorder_value.bounds.y = recorder_bounds.y();
+  recorder_value.bounds.width = recorder_bounds.width();
+  recorder_value.bounds.height = recorder_bounds.height();
+  return recorder_value;
+}
+
+}  // namespace
+
+"""
+UI_ACCESSIBILITY_HIT_TEST_LAST_RESULT_ANCHOR = """\
+        if (node)
+          return node;
+"""
+UI_ACCESSIBILITY_HIT_TEST_LAST_RESULT_HOOK = """\
+        if (node) {
+          // Windows A11y Recorder, protocol 0.60: answered with the page's
+          // last precise result, whose bounds hold the point.
+          a11y_recorder::RecordBrowserAccessibilityHitTest(
+              GetTreeID().ToString(), physical_pixel_point.x(),
+              physical_pixel_point.y(), "last-precise-result",
+              /*precise_requested=*/true,
+              RecorderAccessibilityRequestNode(node));
+          return node;
+        }
+"""
+UI_ACCESSIBILITY_HIT_TEST_GUESS_ANCHOR = """\
+  return ApproximateHitTest(blink_screen_point);
+}
+"""
+UI_ACCESSIBILITY_HIT_TEST_GUESS_HOOK = """\
+  // Windows A11y Recorder, protocol 0.60: answered with a search of this
+  // process's copy of the tree by bounds.
+  auto* recorder_guess = ApproximateHitTest(blink_screen_point);
+  a11y_recorder::RecordBrowserAccessibilityHitTest(
+      GetTreeID().ToString(), physical_pixel_point.x(),
+      physical_pixel_point.y(), "cached-tree-guess",
+      /*precise_requested=*/!!delegate_,
+      RecorderAccessibilityRequestNode(recorder_guess));
+  return recorder_guess;
+}
+"""
+UI_ACCESSIBILITY_HIT_TEST_RESULT_ANCHOR = (
+    "  last_hover_bounds_ = hit_test_result->GetClippedScreenBoundsRect();\n"
+)
+UI_ACCESSIBILITY_HIT_TEST_RESULT_HOOK = (
+    UI_ACCESSIBILITY_HIT_TEST_RESULT_ANCHOR
+    + """\
+  // Windows A11y Recorder, protocol 0.60: the page's precise result, kept for
+  // the next hit test.
+  a11y_recorder::RecordBrowserAccessibilityHitTestResult(
+      RecorderAccessibilityRequestNode(hit_test_result));
+"""
+)
+CONTENT_ACCESSIBILITY_ACTION_SENT_ANCHOR = """\
+  render_accessibility_->PerformAction(action_data);
+}
+"""
+CONTENT_ACCESSIBILITY_ACTION_SENT_HOOK = """\
+  // Windows A11y Recorder, protocol 0.60: the action as it is sent to the
+  // page. See docs/architecture/accessibility-requests.md.
+  {
+    a11y_recorder::AccessibilityRequestNode recorder_target;
+    recorder_target.node_id = action_data.target_node_id;
+    ui::BrowserAccessibility* recorder_node =
+        browser_accessibility_manager_
+            ? browser_accessibility_manager_->GetFromID(
+                  action_data.target_node_id)
+            : nullptr;
+    if (recorder_node && recorder_node->manager()) {
+      recorder_target.present = true;
+      recorder_target.tree_id =
+          recorder_node->manager()->GetTreeID().ToString();
+      recorder_target.role = ui::ToString(recorder_node->GetRole());
+      recorder_target.name = recorder_node->GetStringAttribute(
+          ax::mojom::StringAttribute::kName);
+      const gfx::Rect recorder_bounds =
+          recorder_node->GetClippedScreenBoundsRect();
+      recorder_target.bounds.x = recorder_bounds.x();
+      recorder_target.bounds.y = recorder_bounds.y();
+      recorder_target.bounds.width = recorder_bounds.width();
+      recorder_target.bounds.height = recorder_bounds.height();
+    }
+    a11y_recorder::AccessibilityActionDetails recorder_details;
+    switch (action_data.action) {
+      case ax::mojom::Action::kScrollToMakeVisible:
+        recorder_details.has_target_rect = true;
+        recorder_details.target_rect.x = action_data.target_rect.x();
+        recorder_details.target_rect.y = action_data.target_rect.y();
+        recorder_details.target_rect.width = action_data.target_rect.width();
+        recorder_details.target_rect.height =
+            action_data.target_rect.height();
+        break;
+      case ax::mojom::Action::kScrollToPoint:
+      case ax::mojom::Action::kSetScrollOffset:
+        recorder_details.has_target_point = true;
+        recorder_details.target_point_x = action_data.target_point.x();
+        recorder_details.target_point_y = action_data.target_point.y();
+        break;
+      case ax::mojom::Action::kSetSelection:
+        recorder_details.has_selection = true;
+        recorder_details.anchor_node_id = action_data.anchor_node_id;
+        recorder_details.anchor_offset = action_data.anchor_offset;
+        recorder_details.focus_node_id = action_data.focus_node_id;
+        recorder_details.focus_offset = action_data.focus_offset;
+        break;
+      default:
+        break;
+    }
+    recorder_details.horizontal_scroll_alignment =
+        static_cast<int>(action_data.horizontal_scroll_alignment);
+    recorder_details.vertical_scroll_alignment =
+        static_cast<int>(action_data.vertical_scroll_alignment);
+    recorder_details.scroll_behavior =
+        static_cast<int>(action_data.scroll_behavior);
+    a11y_recorder::RecordBrowserAccessibilityActionSent(
+        GetMainFrame()->GetFrameTreeNodeId().GetUnsafeValue(),
+        GetFrameTreeNodeId().GetUnsafeValue(), GetDocumentToken().ToString(),
+        GetAXTreeID().ToString(), ui::ToString(action_data.action),
+        std::move(recorder_target), recorder_details);
+  }
+  render_accessibility_->PerformAction(action_data);
+}
+"""
+CONTENT_RENDERER_ACTION_RECEIVED_ANCHOR = """\
+  WebDocument document = GetMainDocument();
+  if (document.IsNull()) {
+    return;
+  }
+
+  // Schedule the next serialization to come immediately after the action is
+"""
+CONTENT_RENDERER_ACTION_RECEIVED_HOOK = """\
+  WebDocument document = GetMainDocument();
+  if (document.IsNull()) {
+    return;
+  }
+
+  // Windows A11y Recorder, protocol 0.60: the action as the renderer receives
+  // it. See docs/architecture/accessibility-requests.md.
+  a11y_recorder::RecordRendererAccessibilityActionReceived(
+      document.Token().ToString(),
+      render_frame_->GetWebFrame()->GetAXTreeID().ToString(),
+      ui::ToString(data.action), data.target_node_id,
+      data.action == ax::mojom::Action::kSetSelection ? data.anchor_node_id
+                                                       : 0,
+      data.action == ax::mojom::Action::kSetSelection ? data.focus_node_id
+                                                       : 0);
+
+  // Schedule the next serialization to come immediately after the action is
+"""
+CONTENT_RENDERER_HIT_TEST_DETACHED_ANCHOR = """\
+  if (ax_object.IsDetached()) {
+    std::move(callback).Run(/*hit_test_response=*/nullptr);
+"""
+CONTENT_RENDERER_HIT_TEST_DETACHED_HOOK = """\
+  if (ax_object.IsDetached()) {
+    // Windows A11y Recorder, protocol 0.60: no attached object at the point.
+    a11y_recorder::RecordRendererAccessibilityHitTest(
+        document.Token().ToString(),
+        render_frame_->GetWebFrame()->GetAXTreeID().ToString(), point.x(),
+        point.y(), 0, /*child_tree=*/false, ui::ToString(event_to_fire));
+    std::move(callback).Run(/*hit_test_response=*/nullptr);
+"""
+CONTENT_RENDERER_HIT_TEST_FOUND_ANCHOR = """\
+  gfx::Point transformed_point = point;
+"""
+CONTENT_RENDERER_HIT_TEST_FOUND_HOOK = """\
+  gfx::Point transformed_point = point;
+  // Windows A11y Recorder, protocol 0.60: the object the page's hit test
+  // found, and whether the hit test continues in a child frame or tree.
+  a11y_recorder::RecordRendererAccessibilityHitTest(
+      document.Token().ToString(),
+      render_frame_->GetWebFrame()->GetAXTreeID().ToString(), point.x(),
+      point.y(), ax_object.AxID(), child_tree_id.has_value(),
+      ui::ToString(event_to_fire));
+"""
+
+
+def patch_ui_accessibility_hit_test(path: Path) -> None:
+    """Protocol 0.60: records hit tests in BrowserAccessibilityManager."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        UI_ACCESSIBILITY_MANAGER_OWN_INCLUDE,
+        (BRIDGE_INCLUDE, UI_ACCESSIBILITY_ENUM_INCLUDE),
+        path,
+    )
+    text = insert_before_once(
+        text,
+        UI_ACCESSIBILITY_HIT_TEST_HELPER_ANCHOR,
+        UI_ACCESSIBILITY_HIT_TEST_HELPER,
+        UI_ACCESSIBILITY_HIT_TEST_HELPER_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        UI_ACCESSIBILITY_HIT_TEST_LAST_RESULT_ANCHOR,
+        UI_ACCESSIBILITY_HIT_TEST_LAST_RESULT_HOOK,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        UI_ACCESSIBILITY_HIT_TEST_GUESS_ANCHOR,
+        UI_ACCESSIBILITY_HIT_TEST_GUESS_HOOK,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        UI_ACCESSIBILITY_HIT_TEST_RESULT_ANCHOR,
+        UI_ACCESSIBILITY_HIT_TEST_RESULT_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_ui_accessibility_platform_build(path: Path) -> None:
+    """Protocol 0.60: links the accessibility platform to the bridge."""
+    text = read_source(path)
+    target_index = text.find(UI_ACCESSIBILITY_PLATFORM_TARGET)
+    if target_index < 0:
+        raise RuntimeError(f"{path}: accessibility platform target not found")
+    target_end = text.find("\n}\n", target_index)
+    if BRIDGE_DEP in text[target_index:target_end]:
+        return
+    opening = "  deps = [\n"
+    deps = text.find(opening, target_index)
+    if deps < 0 or (target_end >= 0 and deps > target_end):
+        raise RuntimeError(
+            f"{path}: accessibility platform deps list not found"
+        )
+    text = (
+        text[:deps]
+        + opening
+        + f"    {BRIDGE_DEP}\n"
+        + text[deps + len(opening):]
+    )
+    write_patched(path, text)
+
+
+def patch_content_accessibility_action_sent(path: Path) -> None:
+    """Protocol 0.60: records actions RenderFrameHostImpl sends the page."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "content/browser/renderer_host/render_frame_host_impl.h"',
+        (
+            CONTENT_NAVIGATION_INCLUDE,
+            UI_ACCESSIBILITY_ENUM_INCLUDE,
+            UI_BROWSER_ACCESSIBILITY_INCLUDE,
+        ),
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        CONTENT_ACCESSIBILITY_ACTION_SENT_ANCHOR,
+        CONTENT_ACCESSIBILITY_ACTION_SENT_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_content_renderer_accessibility_requests(path: Path) -> None:
+    """Protocol 0.60: records actions and hit tests in the renderer.
+
+    Runs after patch_content_renderer_accessibility, which adds the bridge and
+    enum includes this needs.
+    """
+    text = read_source(path)
+    for anchor, hook in (
+        (
+            CONTENT_RENDERER_ACTION_RECEIVED_ANCHOR,
+            CONTENT_RENDERER_ACTION_RECEIVED_HOOK,
+        ),
+        (
+            CONTENT_RENDERER_HIT_TEST_DETACHED_ANCHOR,
+            CONTENT_RENDERER_HIT_TEST_DETACHED_HOOK,
+        ),
+        (
+            CONTENT_RENDERER_HIT_TEST_FOUND_ANCHOR,
+            CONTENT_RENDERER_HIT_TEST_FOUND_HOOK,
+        ),
+    ):
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
 def patch_content_renderer_build(path: Path) -> None:
     text = read_source(path)
     if CONTENT_RENDERER_DEP in text:
@@ -20944,6 +21272,29 @@ def main() -> int:
     )
     patch_content_renderer_build(
         source / "content" / "renderer" / "BUILD.gn"
+    )
+    # Protocol 0.60: accessibility requests. See
+    # docs/architecture/accessibility-requests.md.
+    patch_content_renderer_accessibility_requests(
+        source
+        / "content"
+        / "renderer"
+        / "accessibility"
+        / "render_accessibility_impl.cc"
+    )
+    ui_accessibility_platform = source / "ui" / "accessibility" / "platform"
+    patch_ui_accessibility_hit_test(
+        ui_accessibility_platform / "browser_accessibility_manager.cc"
+    )
+    patch_ui_accessibility_platform_build(
+        ui_accessibility_platform / "BUILD.gn"
+    )
+    patch_content_accessibility_action_sent(
+        source
+        / "content"
+        / "browser"
+        / "renderer_host"
+        / "render_frame_host_impl.cc"
     )
     patch_web_contents_navigation(
         source

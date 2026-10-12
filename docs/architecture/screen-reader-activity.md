@@ -477,7 +477,8 @@ says so.
 
 ### Limits
 
-- What was under the pointer is not recorded; that is step 3.
+- What was under the pointer is not recorded here; step 3 records the
+  browser's hit tests ([accessibility requests](accessibility-requests.md)).
 - The left and right buttons are matched as one for the loss check.
 - NVDA's settings are read at its start; a change while it runs is not
   seen.

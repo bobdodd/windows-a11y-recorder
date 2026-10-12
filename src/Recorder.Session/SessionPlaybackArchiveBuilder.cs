@@ -110,6 +110,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<InputRecordabilityRecord> _inputRecordability = [];
     private readonly List<KeyEvidenceRecord> _keyEvidence = [];
     private readonly List<KeyEvidenceRecord> _mouseEvidence = [];
+    private readonly List<KeyEvidenceRecord> _accessibilityRequests = [];
     private readonly List<BrowserPageCommit> _pageCommits = [];
     private readonly List<ForegroundWindow> _foreground = [];
     private readonly List<FocusedElement> _focus = [];
@@ -307,6 +308,13 @@ public sealed class SessionPlaybackArchiveBuilder
                 timelineEvent.EventId, timestamp, timelineEvent.Channel, timelineEvent.EventType, payload.Clone()));
         }
 
+        if (payload.ValueKind == JsonValueKind.Object &&
+            AccessibilityRequests.IsRequestEvidence(timelineEvent.Channel, timelineEvent.EventType))
+        {
+            _accessibilityRequests.Add(new KeyEvidenceRecord(
+                timelineEvent.EventId, timestamp, timelineEvent.Channel, timelineEvent.EventType, payload.Clone()));
+        }
+
         if (timelineEvent.Channel == "window.foreground" &&
             timelineEvent.EventType == "foreground-window" &&
             payload.ValueKind == JsonValueKind.Object)
@@ -444,7 +452,10 @@ public sealed class SessionPlaybackArchiveBuilder
                 : ScreenReaderWindowTimeline.Empty,
             Mouse = _mouseEvidence.Any(record => record.Channel == MouseHookRecords.Channel)
                 ? new MouseActivity(_mouseEvidence, assistiveTechnology)
-                : MouseActivity.Empty
+                : MouseActivity.Empty,
+            AccessibilityRequests = _accessibilityRequests.Count == 0
+                ? AccessibilityRequests.Empty
+                : new AccessibilityRequests(_accessibilityRequests)
         };
     }
 
@@ -708,6 +719,11 @@ public sealed class SessionPlaybackArchiveBuilder
         if (channel == KeyboardHookRecords.Channel)
         {
             return KeyboardHookSummary(eventType, payload);
+        }
+
+        if (AccessibilityRequests.IsRequestEvidence(channel, eventType))
+        {
+            return AccessibilityRequestSummary(eventType, payload);
         }
 
         if (channel == MouseHookRecords.Channel)
@@ -1008,6 +1024,63 @@ public sealed class SessionPlaybackArchiveBuilder
             default:
                 return JoinSummary(eventType, product);
         }
+    }
+
+    // Protocol 0.60: an accessibility request record's summary, as
+    // docs/architecture/accessibility-requests.md describes.
+    private static string AccessibilityRequestSummary(string eventType, JsonElement payload)
+    {
+        static string? NodeText(JsonElement payload, string name)
+        {
+            if (!payload.TryGetProperty(name, out var node) || node.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var role = ReadString(node, "role") ?? "object";
+            var label = ReadString(node, "name");
+            return string.IsNullOrEmpty(label) ? role : $"{role} \"{label}\"";
+        }
+
+        static string? PointText(JsonElement payload) =>
+            payload.TryGetProperty("point", out var point) && point.ValueKind == JsonValueKind.Object &&
+            point.TryGetProperty("x", out var x) && x.ValueKind == JsonValueKind.Number &&
+            point.TryGetProperty("y", out var y) && y.ValueKind == JsonValueKind.Number
+                ? $"at {x.GetRawText()}, {y.GetRawText()}"
+                : null;
+
+        static string? NodeIdText(JsonElement payload, string name) =>
+            payload.TryGetProperty(name, out var id) && id.ValueKind == JsonValueKind.Number
+                ? "node " + id.GetRawText()
+                : null;
+
+        return eventType switch
+        {
+            BrowserEvidenceEventTypes.AccessibilityHitTest => JoinSummary(
+                eventType,
+                PointText(payload),
+                NodeText(payload, "answer") ?? "no object",
+                ReadString(payload, "basis") == BrowserAccessibilityRequests.LastPreciseResult
+                    ? "last precise result"
+                    : "guess from the tree"),
+            BrowserEvidenceEventTypes.AccessibilityHitTestResult => JoinSummary(eventType, NodeText(payload, "result")),
+            BrowserEvidenceEventTypes.AccessibilityActionSent => JoinSummary(
+                eventType,
+                ReadString(payload, "action"),
+                NodeText(payload, "target") ?? NodeIdText(payload, "targetNodeId")),
+            BrowserEvidenceEventTypes.AccessibilityActionReceived => JoinSummary(
+                eventType,
+                ReadString(payload, "action"),
+                NodeIdText(payload, "targetNodeId")),
+            BrowserEvidenceEventTypes.AccessibilityHitTestComputed => JoinSummary(
+                eventType,
+                PointText(payload),
+                NodeIdText(payload, "nodeId") ?? "no object",
+                payload.TryGetProperty("childTree", out var child) && child.ValueKind == JsonValueKind.True
+                    ? "continues in a child frame or tree"
+                    : null),
+            _ => eventType
+        };
     }
 
     private static string JoinSummary(string fallback, params string?[] values)

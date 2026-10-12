@@ -2616,6 +2616,104 @@ void RecordBrowserColorMapsSent(int page_frame_tree_node_id,
                                 std::string point,
                                 base::DictValue maps);
 
+// Protocol 0.60: the requests an assistive technology makes of a page through
+// the platform accessibility API, and how Chromium answers them. See
+// docs/architecture/accessibility-requests.md.
+//
+// A node of the browser process's copy of an accessibility tree: the tree's
+// AXTreeID, the node's id in that tree, Chromium's role token from
+// ui::ToString, its accessible name, and its clipped bounds on the screen in
+// physical pixels. A request with no node passes present = false.
+struct AccessibilityRequestNode {
+  bool present = false;
+  std::string tree_id;
+  int node_id = 0;
+  std::string role;
+  std::string name;
+  PagePopupRect bounds;
+};
+
+// The details of an action that only some actions carry. A scroll alignment
+// and a scroll behavior are their ax::mojom ordinals, which the mojom marks
+// stable; the bridge records their names. An absent rectangle, point, or
+// selection end passes its has_ flag false.
+struct AccessibilityActionDetails {
+  bool has_target_rect = false;
+  PagePopupRect target_rect;
+  bool has_target_point = false;
+  int target_point_x = 0;
+  int target_point_y = 0;
+  int horizontal_scroll_alignment = 0;
+  int vertical_scroll_alignment = 0;
+  int scroll_behavior = 0;
+  bool has_selection = false;
+  int anchor_node_id = 0;
+  int anchor_offset = 0;
+  int focus_node_id = 0;
+  int focus_offset = 0;
+};
+
+// Records a hit test asked of the browser process through the platform
+// accessibility API, as for MSAA's accHitTest or UI Automation's
+// ElementProviderFromPoint, and the object it answered with at once. The
+// point is on the screen in physical pixels. The basis is
+// "last-precise-result" when the point lay within the result of the page's
+// last precise hit test, and "cached-tree-guess" when Chromium searched its
+// own copy of the tree by bounds. Precise requested is whether the page was
+// also asked for a precise hit test, whose result is recorded by
+// RecordBrowserAccessibilityHitTestResult when it arrives.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserAccessibilityHitTest(std::string root_tree_id,
+                                       int point_x,
+                                       int point_y,
+                                       std::string basis,
+                                       bool precise_requested,
+                                       AccessibilityRequestNode answer);
+
+// Records the result of the page's precise hit test as the browser process
+// keeps it for the next hit test: the lowest platform ancestor of the node
+// the page found.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserAccessibilityHitTestResult(AccessibilityRequestNode result);
+
+// Records an accessibility action as the browser process sends it to the
+// page: Chromium's action token from ui::ToString, its target, and the frame
+// whose renderer receives it. Every action passes this point, whichever
+// platform API asked for it.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserAccessibilityActionSent(int page_frame_tree_node_id,
+                                          int frame_tree_node_id,
+                                          std::string document_token,
+                                          std::string tree_id,
+                                          std::string action,
+                                          AccessibilityRequestNode target,
+                                          AccessibilityActionDetails details);
+
+// Records an accessibility action as the renderer receives it, before it is
+// performed. Node ids are those of the renderer's tree, which the browser's
+// copy and the accessibility checkpoints share; 0 is no node.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordRendererAccessibilityActionReceived(std::string document_token,
+                                               std::string tree_id,
+                                               std::string action,
+                                               int target_node_id,
+                                               int anchor_node_id,
+                                               int focus_node_id);
+
+// Records a precise hit test as the renderer computes it. The point is in the
+// frame's coordinates. A node id of 0 is no attached object; child tree is
+// whether the node found holds a child frame or tree, in which case the
+// browser continues the hit test there. The event to fire is Chromium's event
+// token, "none" when no event is fired.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordRendererAccessibilityHitTest(std::string document_token,
+                                        std::string tree_id,
+                                        int point_x,
+                                        int point_y,
+                                        int node_id,
+                                        bool child_tree,
+                                        std::string event_to_fire);
+
 }  // namespace a11y_recorder
 
 #endif  // WINDOWS_A11Y_RECORDER_CHROMIUM_RECORDER_BRIDGE_BROWSER_BRIDGE_H_

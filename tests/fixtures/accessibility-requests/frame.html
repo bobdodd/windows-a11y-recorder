@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Same-site frame</title>
+<style>
+  body { margin: 12px; font: 18px/1.5 system-ui, sans-serif; }
+  button { font-size: 18px; padding: 8px 16px; }
+</style>
+</head>
+<body>
+<h2>Inside the frame</h2>
+<p><button id="frame-button">Frame button</button></p>
+<p id="frame-status" role="status"></p>
+<script>
+  document.getElementById("frame-button").addEventListener("click", () => {
+    document.getElementById("frame-status").textContent = "Frame button activated";
+  });
+</script>
+</body>
+</html>

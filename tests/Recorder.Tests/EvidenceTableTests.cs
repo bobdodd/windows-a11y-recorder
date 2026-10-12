@@ -181,12 +181,13 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         var (sessionKey, recordingId) = await CreateRecordingAsync();
 
         // One window with a process and one without, one monitor, two UI
-        // Automation elements, nine browser contexts (the ninth that of the
-        // browser preference samples, protocol 0.56), two audio paths and
+        // Automation elements, ten browser contexts (the ninth that of the
+        // browser preference samples, protocol 0.56, and the tenth that of
+        // an accessibility action sent, protocol 0.60), two audio paths and
         // two navigation URLs, three foreground windows, eight event
         // targets, two script locations, one world and two scopes.
         await WriteAsync(sessionKey, recordingId, SampleEvents(sessionKey));
-        long[] once = [2, 1, 2, 9, 4, 3, 8, 2, 1, 2];
+        long[] once = [2, 1, 2, 10, 4, 3, 8, 2, 1, 2];
         Assert.Equal(once, await IdentityCountsAsync(recordingId));
 
         // A resumed recording has a new writer, which does not look up the
@@ -887,7 +888,9 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         // 0030 added the tables of the mouse hook records.
         record.Channel != "input.mouse-hook" &&
         // 0028 added the tables of the input recordability records.
-        !Recorder.Contracts.InputRecordabilityRecords.EventTypes.Contains(record.EventType);
+        !Recorder.Contracts.InputRecordabilityRecords.EventTypes.Contains(record.EventType) &&
+        // 0031 added the tables of the accessibility request records.
+        !Recorder.Session.AccessibilityRequests.IsRequestEvidence(record.Channel, record.EventType);
 
     private static List<string> Sorted(List<string> rows)
     {

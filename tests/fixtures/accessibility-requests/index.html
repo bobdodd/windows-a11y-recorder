@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Accessibility requests test page</title>
+<style>
+  /* A sticky header over the content, so that a point in the header has
+     content under it: Chromium's guess from its own tree, by bounds, can
+     differ from the page's precise hit test there
+     (docs/architecture/accessibility-requests.md). */
+  body { margin: 0; font: 18px/1.5 system-ui, sans-serif; }
+  header { position: sticky; top: 0; z-index: 10; height: 80px; background: #003366; color: #fff;
+           display: flex; align-items: center; gap: 24px; padding: 0 24px; }
+  header a { color: #fff; }
+  main { padding: 0 24px; }
+  section { min-height: 110vh; border-bottom: 1px solid #ccc; }
+  aside { padding: 12px 24px; background: #eef; }
+  footer { padding: 24px; background: #333; color: #fff; }
+  iframe { width: 600px; height: 220px; border: 2px solid #666; }
+  button { font-size: 18px; padding: 8px 16px; }
+</style>
+</head>
+<body>
+<header>
+  <strong>Test site</strong>
+  <nav aria-label="Main">
+    <a href="#top">Home</a>
+    <a href="#section-two">Section two</a>
+    <a href="#far-down">Far down</a>
+  </nav>
+</header>
+<main id="top">
+  <h1>Accessibility requests test page</h1>
+  <section>
+    <h2 id="section-one">Section one</h2>
+    <p>This page is for testing what an assistive technology asks of the browser: hit tests at a point,
+      scrolling an object into view, focusing it, and activating it.</p>
+    <p><button id="show">Show message</button></p>
+    <p id="status" role="status"></p>
+    <p><a href="#section-two" id="more">Read more about the test</a></p>
+  </section>
+  <section>
+    <h2 id="section-two">Section two</h2>
+    <p>A same-site frame, whose document has a tree of its own.</p>
+    <iframe src="frame.html" title="Same-site frame"></iframe>
+  </section>
+  <section>
+    <h2 id="section-three">Section three</h2>
+    <p>Content that scrolls under the sticky header.</p>
+  </section>
+  <section>
+    <h2 id="section-four">Section four</h2>
+    <p>A heading to scroll into view through UI Automation.</p>
+  </section>
+  <section>
+    <h2 id="far-down">Far down the page</h2>
+    <p>A heading to scroll into view through IAccessible2.</p>
+  </section>
+</main>
+<aside aria-label="Notes">
+  <p>A complementary landmark.</p>
+</aside>
+<footer>
+  <p>The end of the test page.</p>
+</footer>
+<script>
+  document.getElementById("show").addEventListener("click", () => {
+    document.getElementById("status").textContent = "Button activated";
+  });
+</script>
+</body>
+</html>

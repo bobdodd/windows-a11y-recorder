@@ -734,6 +734,61 @@ internal static class EvidenceCatalog
         Int("updateCount"),
         Int("eventCount"));
 
+    // Added by 0031_accessibility_requests.sql (protocol 0.60): the requests
+    // an assistive technology makes of a page through the platform
+    // accessibility API, and how Chromium answers them. See
+    // docs/architecture/accessibility-requests.md.
+    public static readonly EvidenceTable AccessibilityHitTests = Evidence(
+        "browser_accessibility_hit_tests",
+        Context(),
+        Text("rootTreeId"),
+        AccessibilityPoint("point", R),
+        Name("basis"),
+        Bool("preciseRequested"),
+        AccessibilityRequestNode("answer", N));
+
+    public static readonly EvidenceTable AccessibilityHitTestResults = Evidence(
+        "browser_accessibility_hit_test_results",
+        Context(),
+        AccessibilityRequestNode("result", R));
+
+    public static readonly EvidenceTable AccessibilityActionsSent = Evidence(
+        "browser_accessibility_actions_sent",
+        Context(),
+        Text("treeId"),
+        Name("action"),
+        BigInt("targetNodeId", N),
+        // The target's columns are prefixed target_node_, apart from the
+        // target id's target_node_id.
+        AccessibilityRequestNode("target", N, "target_node"),
+        IntegerRectangle("targetRect", N),
+        AccessibilityPoint("targetPoint", N),
+        Name("horizontalScrollAlignment"),
+        Name("verticalScrollAlignment"),
+        Name("scrollBehavior"),
+        new InlineField(
+            "selection",
+            N,
+            [BigInt("anchorNodeId"), Int("anchorOffset"), BigInt("focusNodeId"), Int("focusOffset")]));
+
+    public static readonly EvidenceTable AccessibilityActionsReceived = Evidence(
+        "browser_accessibility_actions_received",
+        Context(),
+        Text("treeId"),
+        Name("action"),
+        BigInt("targetNodeId", N),
+        BigInt("anchorNodeId", N),
+        BigInt("focusNodeId", N));
+
+    public static readonly EvidenceTable AccessibilityHitTestsComputed = Evidence(
+        "browser_accessibility_hit_tests_computed",
+        Context(),
+        Text("treeId"),
+        AccessibilityPoint("point", R),
+        BigInt("nodeId", N),
+        Bool("childTree"),
+        Name("eventToFire"));
+
     public static readonly EvidenceTable DomCheckpointStarts = Evidence(
         "browser_dom_checkpoint_starts",
         new IdentityField("context", R, BrowserContexts),
@@ -1530,7 +1585,12 @@ internal static class EvidenceCatalog
         (27, "keyboard_hook", [KeyboardHookKeys, KeyboardHookInstallations]),
         (28, "input_recordability", [RecorderIntegrities, ForegroundIntegrities, InputDesktops]),
         (29, "assistive_technology_settings", [AssistiveTechnologySettings]),
-        (30, "mouse_hook", [MouseHookEvents, MouseHookInstallations])
+        (30, "mouse_hook", [MouseHookEvents, MouseHookInstallations]),
+        (31, "accessibility_requests",
+        [
+            AccessibilityHitTests, AccessibilityHitTestResults, AccessibilityActionsSent,
+            AccessibilityActionsReceived, AccessibilityHitTestsComputed
+        ])
     ];
 
     /// <summary>
@@ -1585,6 +1645,11 @@ internal static class EvidenceCatalog
             [("browser.accessibility", "accessibility-checkpoint-started")] = AccessibilityCheckpointStarts,
             [("browser.accessibility", "accessibility-checkpoint-node")] = AccessibilityCheckpointNodes,
             [("browser.accessibility", "accessibility-checkpoint-completed")] = AccessibilityCheckpointCompletions,
+            [("browser.accessibility", "accessibility-hit-test")] = AccessibilityHitTests,
+            [("browser.accessibility", "accessibility-hit-test-result")] = AccessibilityHitTestResults,
+            [("browser.accessibility", "accessibility-action-sent")] = AccessibilityActionsSent,
+            [("browser.accessibility", "accessibility-action-received")] = AccessibilityActionsReceived,
+            [("browser.accessibility", "accessibility-hit-test-computed")] = AccessibilityHitTestsComputed,
             [("browser.dom", "dom-checkpoint-started")] = DomCheckpointStarts,
             [("browser.dom", "dom-checkpoint-node")] = DomCheckpointNodes,
             [("browser.dom", "dom-checkpoint-node-attribute")] = DomCheckpointAttributes,
@@ -1928,6 +1993,16 @@ internal static class EvidenceCatalog
 
     private static Field IntegerRectangle(string json, Presence presence) =>
         new InlineField(json, presence, [Int("x"), Int("y"), Int("width"), Int("height")]);
+
+    private static Field AccessibilityPoint(string json, Presence presence) =>
+        new InlineField(json, presence, [Int("x"), Int("y")]);
+
+    private static Field AccessibilityRequestNode(string json, Presence presence, string? column = null) =>
+        new InlineField(
+            json,
+            presence,
+            [Text("treeId"), BigInt("nodeId"), Name("role"), Text("name"), IntegerRectangle("bounds", R)],
+            column);
 
     private static Field NumberRectangle(string json, Presence presence) =>
         new InlineField(json, presence, [Double("x"), Double("y"), Double("width"), Double("height")]);

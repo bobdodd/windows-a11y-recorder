@@ -168,6 +168,21 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.AccessibilityCheckpointNode) =>
                 payload.Deserialize<BrowserAccessibilityCheckpointNodePayload>(JsonOptions) as object,
             (BrowserEvidenceChannels.Accessibility,
+                BrowserEvidenceEventTypes.AccessibilityHitTest) =>
+                payload.Deserialize<BrowserAccessibilityHitTestPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Accessibility,
+                BrowserEvidenceEventTypes.AccessibilityHitTestResult) =>
+                payload.Deserialize<BrowserAccessibilityHitTestResultPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Accessibility,
+                BrowserEvidenceEventTypes.AccessibilityActionSent) =>
+                payload.Deserialize<BrowserAccessibilityActionSentPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Accessibility,
+                BrowserEvidenceEventTypes.AccessibilityActionReceived) =>
+                payload.Deserialize<BrowserAccessibilityActionReceivedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Accessibility,
+                BrowserEvidenceEventTypes.AccessibilityHitTestComputed) =>
+                payload.Deserialize<BrowserAccessibilityHitTestComputedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Accessibility,
                 BrowserEvidenceEventTypes.AccessibilityCheckpointCompleted) =>
                 payload.Deserialize<BrowserAccessibilityCheckpointCompletedPayload>(JsonOptions) as object,
             (BrowserEvidenceChannels.Cookie,

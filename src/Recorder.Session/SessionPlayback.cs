@@ -64,6 +64,9 @@ public sealed record SessionPlaybackArchive(
     /// </summary>
     public MouseActivity Mouse { get; init; } = MouseActivity.Empty;
 
+    /// <summary>Protocol 0.60's accessibility requests and their outcomes.</summary>
+    public AccessibilityRequests AccessibilityRequests { get; init; } = AccessibilityRequests.Empty;
+
     /// <summary>An event's description, ending with its key outcome where it has one.</summary>
     public string Describe(SessionTimelineEvent item)
     {

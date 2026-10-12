@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.59";
+    public const string CurrentVersion = "0.60";
 }
 
 public static class BrowserEvidenceChannels
@@ -77,6 +77,16 @@ public static class BrowserEvidenceEventTypes
         "accessibility-checkpoint-node";
     public const string AccessibilityCheckpointCompleted =
         "accessibility-checkpoint-completed";
+    // Protocol 0.60: accessibility requests. See
+    // docs/architecture/accessibility-requests.md.
+    public const string AccessibilityHitTest = "accessibility-hit-test";
+    public const string AccessibilityHitTestResult =
+        "accessibility-hit-test-result";
+    public const string AccessibilityActionSent = "accessibility-action-sent";
+    public const string AccessibilityActionReceived =
+        "accessibility-action-received";
+    public const string AccessibilityHitTestComputed =
+        "accessibility-hit-test-computed";
     public const string DocumentCookieRead = "document-cookie-read";
     public const string DocumentCookieWrite = "document-cookie-write";
     public const string CookieStoreRequest = "cookie-store-request";
@@ -706,6 +716,103 @@ public sealed record BrowserAccessibilityCheckpointCompletedPayload(
     int MaximumNodes,
     int UpdateCount,
     int EventCount);
+
+// Protocol 0.60: the requests an assistive technology makes of a page through
+// the platform accessibility API, and how Chromium answers them. See
+// docs/architecture/accessibility-requests.md.
+public static class BrowserAccessibilityRequests
+{
+    // How the browser process answered a hit test at once: with the page's
+    // last precise result, whose bounds held the point, or with a search of
+    // its own copy of the tree by bounds.
+    public const string LastPreciseResult = "last-precise-result";
+    public const string CachedTreeGuess = "cached-tree-guess";
+
+    public static readonly IReadOnlyList<string> HitTestBases =
+        [LastPreciseResult, CachedTreeGuess];
+
+    // ax::mojom::ScrollAlignment and ax::mojom::ScrollBehavior, by the names
+    // the bridge records.
+    public static readonly IReadOnlyList<string> ScrollAlignments =
+        ["none", "center", "top", "bottom", "left", "right", "closest-edge"];
+
+    public static readonly IReadOnlyList<string> ScrollBehaviors =
+        ["none", "do-not-scroll-if-visible", "scroll-if-visible"];
+}
+
+public sealed record BrowserAccessibilityPoint(int X, int Y);
+
+// A node of the browser process's copy of an accessibility tree: its tree,
+// its id there, Chromium's role token, its accessible name, and its clipped
+// bounds on the screen in physical pixels.
+public sealed record BrowserAccessibilityRequestNode(
+    string TreeId,
+    int NodeId,
+    string Role,
+    string Name,
+    BrowserPagePopupRect Bounds);
+
+// A hit test asked of the browser process, at a point on the screen in
+// physical pixels, and the object it answered with at once; null when it
+// found none.
+public sealed record BrowserAccessibilityHitTestPayload(
+    BrowserContext Context,
+    string RootTreeId,
+    BrowserAccessibilityPoint Point,
+    string Basis,
+    bool PreciseRequested,
+    BrowserAccessibilityRequestNode? Answer);
+
+// The page's precise hit test result as the browser process keeps it for the
+// next hit test.
+public sealed record BrowserAccessibilityHitTestResultPayload(
+    BrowserContext Context,
+    BrowserAccessibilityRequestNode Result);
+
+public sealed record BrowserAccessibilitySelection(
+    int AnchorNodeId,
+    int AnchorOffset,
+    int FocusNodeId,
+    int FocusOffset);
+
+// An accessibility action as the browser process sends it to the page. The
+// target is null when the browser's copy of the tree has no node with the
+// target id; the target rectangle is a scroll into view's, the target point a
+// scroll to a point's or a scroll offset's, and the selection a selection's.
+public sealed record BrowserAccessibilityActionSentPayload(
+    BrowserContext Context,
+    string TreeId,
+    string Action,
+    int? TargetNodeId,
+    BrowserAccessibilityRequestNode? Target,
+    BrowserPagePopupRect? TargetRect,
+    BrowserAccessibilityPoint? TargetPoint,
+    string HorizontalScrollAlignment,
+    string VerticalScrollAlignment,
+    string ScrollBehavior,
+    BrowserAccessibilitySelection? Selection);
+
+// An accessibility action as the renderer receives it, before it is
+// performed. The node ids are of the renderer's tree, which the accessibility
+// checkpoints share.
+public sealed record BrowserAccessibilityActionReceivedPayload(
+    BrowserContext Context,
+    string TreeId,
+    string Action,
+    int? TargetNodeId,
+    int? AnchorNodeId,
+    int? FocusNodeId);
+
+// A precise hit test as the renderer computes it, at a point in the frame's
+// coordinates. The node is null when no attached object was found; child tree
+// is whether the hit test continues in a child frame or tree.
+public sealed record BrowserAccessibilityHitTestComputedPayload(
+    BrowserContext Context,
+    string TreeId,
+    BrowserAccessibilityPoint Point,
+    int? NodeId,
+    bool ChildTree,
+    string EventToFire);
 
 // Cookie records carry cookie names and non-value attributes only. No cookie
 // payload has a field that could hold a cookie value, so a value cannot enter
