@@ -196,3 +196,44 @@ asked. The playback index keeps these records whole (version 17).
   - activating the button with Enter in browse mode;
   - the mouse moved slowly over the sticky header when the page is
     scrolled, over the frame, and over the content.
+
+## First run of the probe, 2026-10-12
+
+On the target machine, against Chromium rebuilt at 8f4e017: 27 of 32 checks
+passed. All five failures were the probe's own faults; the records were as
+designed, and every record passed the recorder's checks. 80 request records
+came from 7 requests.
+
+- **The precise result is the text inside a control.** For the button
+  "Show message", the link "Home", and the frame's button, Chromium's
+  precise hit test found the `staticText` inside it, of the same name, not
+  the button or link. The probe expected the control. On the next request
+  at the same point, Chromium gave that text from the page's last precise
+  result.
+- **Requests too close to the probe's mark.** The probe told its two
+  requests at a point apart at the exact time of the second. A browser
+  record's time is mapped from the browser's clock, and here fell up to
+  about 2 ms from the probe's, so records of the second request were
+  counted with the first.
+- **The sticky header, as expected.** With the page scrolled, a hit test on
+  the header's "Home" link was given, at once, the unnamed section of
+  content under the header, from Chromium's guess by bounds. The page's
+  precise result was the text "Home". The player says "not the object
+  given".
+- **One request, several records.** Recursing through `accHitTest`, as NVDA
+  does, made three hit test records at each point, each with its own
+  precise result. So the player said "other hit tests were asked before it
+  arrived" for most of them, as designed.
+- **Scrolling also moves Chromium's accessibility focus.** IAccessible2
+  `scrollTo` and UI Automation `ScrollIntoView` each sent
+  `scrollToMakeVisible`, centered and not scrolling if visible, with
+  `setAccessibilityFocus` on the same object. The second one also sent
+  `clearAccessibilityFocus` on the object before.
+- **Clocks of two processes.** One precise result, in the browser process,
+  was recorded 0.1 ms before the renderer hit test that produced it. So
+  the order of records from different processes within about a millisecond
+  is not reliable.
+
+The probe now tells its two requests apart halfway through the pause
+between them. It also accepts the control or its text as the precise
+result, and names the role found.

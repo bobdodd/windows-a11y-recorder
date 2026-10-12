@@ -170,29 +170,37 @@ public static class Program
 
         var first = Clock.GetElapsedNanoseconds();
         var reached = HitTestLikeNvda(root, point.X, point.Y);
+        var firstEnded = Clock.GetElapsedNanoseconds();
         Thread.Sleep(600);
         var second = Clock.GetElapsedNanoseconds();
         var reachedAgain = HitTestLikeNvda(root, point.X, point.Y);
         Thread.Sleep(600);
 
+        // The two requests are told apart halfway through the pause between
+        // them: a browser record's time is mapped from the browser's clock,
+        // which can be a millisecond or two from this process's (first run,
+        // 2026-10-12).
+        var split = firstEnded + (second - firstEnded) / 2;
         var asked = Since(BrowserEvidenceEventTypes.AccessibilityHitTest, first)
             .Where(record => Near(record.Payload, point)).ToList();
-        var firstAsked = asked.Where(record => record.MonotonicNanoseconds < second).ToList();
-        var againAsked = asked.Where(record => record.MonotonicNanoseconds >= second).ToList();
+        var firstAsked = asked.Where(record => record.MonotonicNanoseconds < split).ToList();
+        var againAsked = asked.Where(record => record.MonotonicNanoseconds >= split).ToList();
         Record(
             $"The {what}'s hit test at {point.X}, {point.Y} was recorded",
             firstAsked.Count > 0,
             $"{firstAsked.Count} hit test records; the probe reached {Describe(reached)}.");
 
+        // Chromium's precise result is the deepest object at the point: for
+        // a button or link, the text inside it, of the same name (first run,
+        // 2026-10-12).
         var result = Since(BrowserEvidenceEventTypes.AccessibilityHitTestResult, first)
             .FirstOrDefault(record => NodeName(record.Payload, "result") == name);
         Record(
-            $"The page's precise hit test found {role} \"{name}\"",
-            result is not null && NodeRole(result.Payload, "result") == role,
-            result is null
-                ? "Results: " + string.Join("; ", Since(BrowserEvidenceEventTypes.AccessibilityHitTestResult, first)
-                    .Select(record => $"{NodeRole(record.Payload, "result")} \"{NodeName(record.Payload, "result")}\""))
-                : "");
+            $"The page's precise hit test found {role} \"{name}\" or its text",
+            result is not null && NodeRole(result.Payload, "result") is { } found && (found == role || found == "staticText"),
+            "Results: " + string.Join("; ", Since(BrowserEvidenceEventTypes.AccessibilityHitTestResult, first)
+                .Where(record => record.MonotonicNanoseconds < split)
+                .Select(record => $"{NodeRole(record.Payload, "result")} \"{NodeName(record.Payload, "result")}\"")));
 
         var given = againAsked.Select(record =>
             $"{Text(record.Payload, "basis")}: {NodeRole(record.Payload, "answer")} \"{NodeName(record.Payload, "answer")}\"").ToList();
