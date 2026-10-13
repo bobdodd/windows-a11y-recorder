@@ -36,9 +36,14 @@ public partial class MainWindow
 
     private void DetailsTab_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        // A press on the tab's own button is a click of the button, not the
-        // start of a drag.
-        if (sender is not TabItem tab || IsWithinButton(e.OriginalSource as DependencyObject, tab))
+        // Only a press on the tab itself starts a drag: a press within its
+        // content also reaches the tab, by the logical tree, and released
+        // there, below the tab strip, it would tear the tab out (owner,
+        // 2026-10-13: "Clicking inside the tab causes it to tear off"). A
+        // press on the tab's own button is a click of the button.
+        if (sender is not TabItem tab ||
+            !IsWithinTab(e.OriginalSource as DependencyObject, tab) ||
+            IsWithinButton(e.OriginalSource as DependencyObject, tab))
         {
             return;
         }
@@ -242,6 +247,27 @@ public partial class MainWindow
             if (current is System.Windows.Controls.Primitives.ButtonBase)
             {
                 return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Whether an element is part of the tab itself, its header, rather than
+    // its content: the content's visual parents lead to the tab control's
+    // content area, not to the tab.
+    private static bool IsWithinTab(DependencyObject? element, TabItem tab)
+    {
+        for (var current = element; current is not null; current = ParentOf(current))
+        {
+            if (ReferenceEquals(current, tab))
+            {
+                return true;
+            }
+
+            if (ReferenceEquals(current, tab.Content))
+            {
+                return false;
             }
         }
 

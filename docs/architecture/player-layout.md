@@ -122,7 +122,10 @@ NVDA had to announce, added on 2026-10-12 (screen-reader-activity.md,
   tears it out: beyond that distance the pointer shows the move cursor,
   and the window opens where the mouse button is released, its title bar
   under the pointer and kept on the screen. Released back within that
-  distance, it is a click. As first built, the window opened as soon as
+  distance, it is a click. Only a press on the tab itself starts a drag:
+  as first built, a press within a tab's content did too, so a click in
+  the content, below the tab strip, tore the tab out; the owner found
+  this on 2026-10-13, and it was fixed the same day. As first built, the window opened as soon as
   the drag passed the distance; the owner asked on 2026-10-12 that it be
   placed where the button is released. The owner checked the button, the drag,
   and putting a tab back on the target machine the same day. The button is the way without dragging,
