@@ -1963,6 +1963,7 @@ internal static class EventPayloadValidator
                 OptionalNullableText("reportKeyboardShortcuts"),
                 OptionalNullableText("reportObjectDescriptions"),
                 OptionalNullableText("maxLineLength"),
+                OptionalNullableText("linesPerPage"),
                 OptionalNullableText("useScreenLayout"),
                 OptionalNullableText("autoSayAllOnPageLoad"),
                 OptionalNullableText("reportDetails"),

@@ -358,13 +358,11 @@ public sealed class ReadingPositionTimeline
             };
         }
 
-        if (action.Command is { } command && command.Names.Any(name => name is "next page" or "previous page"))
+        if (current is { Object: { } before } && before.TreeId == treeId && before.NodeId == nodeId)
         {
-            return new ReadingPositionStep(action.Time, action.EventId, ReadingPositionKind.Uncertain, 9, item,
-                $"{described}, uncertain: {string.Join(" or ", command.Names)} moves by NVDA's lines per page, and the request may name where the caret started",
-                label,
-                $"A request to scroll it into view{after}. NVDA moves Page Down and Page Up by its lines per page, 25 by default, " +
-                "but in the target run of 2026-10-12 both Page Downs sent a request on the paragraph the caret started on")
+            return new ReadingPositionStep(action.Time, action.EventId, ReadingPositionKind.SameObject, 3, item,
+                $"{described}; where within it is unknown", label,
+                $"A request to scroll it into view again{after}; the request names the whole object, not the line, word, or character")
             {
                 LinkEventId = action.LinkEventId,
                 Cause = CauseOf(action),
@@ -373,11 +371,13 @@ public sealed class ReadingPositionTimeline
             };
         }
 
-        if (current is { Object: { } before } && before.TreeId == treeId && before.NodeId == nodeId)
+        // Rule 9: Page Down and Page Up follow rule 1, as the target run of
+        // 2026-10-13 showed (screen-reader-activity.md, rule 9).
+        if (action.Command is { } command && command.Names.Any(name => name is "next page" or "previous page"))
         {
-            return new ReadingPositionStep(action.Time, action.EventId, ReadingPositionKind.SameObject, 3, item,
-                $"{described}; where within it is unknown", label,
-                $"A request to scroll it into view again{after}; the request names the whole object, not the line, word, or character")
+            return new ReadingPositionStep(action.Time, action.EventId, ReadingPositionKind.Known, 9, item, described, label,
+                $"A request to scroll it into view{after}. NVDA moves Page Down and Page Up by its lines per page, 25 by default; " +
+                "in the target run of 2026-10-13 each such request named where NVDA's caret went, the first object it read")
             {
                 LinkEventId = action.LinkEventId,
                 Cause = CauseOf(action),

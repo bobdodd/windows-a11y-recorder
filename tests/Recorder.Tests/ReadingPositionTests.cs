@@ -227,7 +227,7 @@ public sealed class ReadingPositionTests
     }
 
     [Fact]
-    public void PageDownFollowsItsRequestUncertain()
+    public void PageDownFollowsItsRequest()
     {
         var timeline = Timeline(
             [Sent("s1", Second + 20 * Millisecond, "scrollToMakeVisible", Heading, 652)],
@@ -235,8 +235,9 @@ public sealed class ReadingPositionTests
             [new KeptCommand(Second, "pageDown", ["next page"])]);
 
         var step = Assert.Single(timeline.Steps);
-        Assert.Equal((9, ReadingPositionKind.Uncertain), (step.Rule, step.Kind));
-        Assert.StartsWith("heading \"Contact us\" (node 652), uncertain: next page moves", step.Value, StringComparison.Ordinal);
+        Assert.Equal((9, ReadingPositionKind.Known), (step.Rule, step.Kind));
+        Assert.Equal("heading \"Contact us\" (node 652)", step.Value);
+        Assert.Contains("named where NVDA's caret went", step.Basis, StringComparison.Ordinal);
     }
 
     [Fact]

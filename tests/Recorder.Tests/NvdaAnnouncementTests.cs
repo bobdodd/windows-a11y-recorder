@@ -76,11 +76,11 @@ public sealed class NvdaAnnouncementTests
     // NVDA from the start, with its settings record; reporting holds the
     // reporting settings written, or is null for a record made before they
     // were recorded.
-    private static AssistiveTechnologyTimeline Nvda(Dictionary<string, string>? reporting)
+    private static AssistiveTechnologyTimeline Nvda(Dictionary<string, string>? reporting, string? without = null)
     {
         var members = reporting is null
             ? string.Empty
-            : string.Concat(NvdaSettings.ReportingSettings.Select(setting =>
+            : string.Concat(NvdaSettings.ReportingSettings.Where(setting => setting.Key != without).Select(setting =>
                 $",'{setting.Key}':{(reporting.TryGetValue(setting.Key, out var value) ? $"'{value}'" : "null")}"));
         return new AssistiveTechnologyTimeline(
         [
@@ -207,6 +207,60 @@ public sealed class NvdaAnnouncementTests
         Assert.Equal("main landmark  " + Long, announced[0].Text);
         Assert.Equal(NvdaAnnouncementKind.Uncertain, announced[0].Kind);
         Assert.Contains(announced[0].Basis, note => note.Contains("splits it into 3 parts; which it read is not known", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void PageDownAndUpMoveNvdasLinesPerPageFromItsCaret()
+    {
+        var announced = Announce(
+        [
+            Step(2 * Second, 12, "heading", "Welcome", "next heading"),
+            Step(3 * Second, 41, "staticText", Long, "next page"),
+            Step(4 * Second, 20, "staticText", "Two", "next page"),
+            Step(5 * Second, 41, "staticText", Long, "previous page"),
+            Step(6 * Second, 12, "heading", "Welcome", "previous page")
+        ], Nvda(new Dictionary<string, string> { ["linesPerPage"] = "3" }), LongPage());
+
+        Assert.Equal(
+        [
+            // Three lines on: the long line's three parts.
+            "guide dog teams.",
+            // "Hello there.", "One", then "Two".
+            "list  with 2 items  Two",
+            "out of list  guide dog teams.",
+            // Three lines back: the long line's second and first parts, then
+            // the heading.
+            "heading  level 1  Welcome"
+        ], announced.Skip(1).Select(item => item.Text));
+        Assert.Equal(NvdaAnnouncementKind.Inferred, announced[1].Kind);
+        Assert.Contains(announced[1].Basis, note => note.Contains("moved by page 3 lines", StringComparison.Ordinal));
+        Assert.Contains(announced[2].Basis, note => note.Contains("linesPerPage 3", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void PageDownNearTheEndMovesAsManyLinesAsThereAre()
+    {
+        var announced = Announce(
+        [
+            Step(2 * Second, 20, "staticText", "Two", "next line"),
+            Step(3 * Second, 24, "staticText", "The end.", "next page")
+        ], page: Page(Node(22, "contentInfo", "", "<footer> aria_role=contentinfo", "23")));
+
+        // Chromium's role for the page's footer is contentInfo.
+        Assert.Equal("out of list  content info landmark  The end.", announced[1].Text);
+        Assert.Contains(announced[1].Basis, note => note.Contains("moved by page 1 lines from where its caret was, as many as there were of its 25", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ARecordingWithoutTheLinesPerPageAssumesTwentyFiveAndSaysSo()
+    {
+        var announced = Announce(
+            [Step(2 * Second, 12, "heading", "Welcome", "next heading"), Step(3 * Second, 24, "staticText", "The end.", "next page")],
+            Nvda([], without: "linesPerPage"));
+
+        Assert.Equal(NvdaAnnouncementKind.Uncertain, announced[1].Kind);
+        Assert.Contains(announced[1].Basis, note => note.Contains("lines per page was not recorded", StringComparison.Ordinal) &&
+            note.Contains("default of 25 is assumed", StringComparison.Ordinal));
     }
 
     [Fact]

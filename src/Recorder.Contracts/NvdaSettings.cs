@@ -98,6 +98,7 @@ public static class NvdaSettings
         ("presentation", "reportKeyboardShortcuts", "true"),
         ("presentation", "reportObjectDescriptions", "true"),
         ("virtualBuffers", "maxLineLength", "100"),
+        ("virtualBuffers", "linesPerPage", "25"),
         ("virtualBuffers", "useScreenLayout", "true"),
         ("virtualBuffers", "autoSayAllOnPageLoad", "true"),
         ("annotations", "reportDetails", "true"),

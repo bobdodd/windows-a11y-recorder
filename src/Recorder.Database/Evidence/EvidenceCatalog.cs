@@ -388,6 +388,8 @@ internal static class EvidenceCatalog
         Text("reportKeyboardShortcuts", N),
         Text("reportObjectDescriptions", N),
         Text("maxLineLength", N),
+        // Added by 0033_nvda_lines_per_page.sql.
+        Text("linesPerPage", N),
         Text("useScreenLayout", N),
         Text("autoSayAllOnPageLoad", N),
         Text("reportDetails", N),

@@ -1327,6 +1327,10 @@ judgment, and agreed to the selection rule.
    is named "Social media links" by another element, and NVDA did not say
    the name.
 
+   Agreed with the owner on 2026-10-13: a Page Down or Page Up step is
+   known, the object its request names, by rule 9 (or rule 3 where it is
+   the same object as before), no longer uncertain.
+
 Test runs on the target machine from now on cover one behaviour each, in
 at most five steps, with what to check on screen, as the owner asked: "You are
 creating too complex a test script. I can't remember it all and I lose my
@@ -1523,6 +1527,8 @@ case it says "not modelled yet" or "unknown" and why, rather than guess.
   visited link, button, graphic, list, list item, landmark, and frame
   (reason QUICKNAV).
 - Down and Up Arrow, next and previous line (reason CARET, by line).
+- Page Down and Page Up, next and previous page (reason CARET, by line),
+  added on 2026-10-13.
 - Any other command, a page load, or a key passed to the page is "not
   modelled yet"; after one, what NVDA last read (its container stack) is
   not known, and the next step says so.
@@ -1574,7 +1580,7 @@ case it says "not modelled yet" or "unknown" and why, rather than guess.
 
 ### NVDA's reporting settings
 
-NVDA's settings record (`assistive-technology-settings`) gains 35
+NVDA's settings record (`assistive-technology-settings`) gains 36
 settings, each a member named by its key, as written in nvda.ini or null
 where NVDA's default applies, with their defaults from NVDA's
 configuration specification ([configSpec.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/config/configSpec.py)):
@@ -1582,7 +1588,8 @@ from `[documentFormatting]`, what is reported of links, link types,
 graphics, headings, lists, block quotes, groupings, landmarks, articles,
 frames, figures, clickables, and tables, and the formatting settings; from
 `[presentation]`, shortcut keys and descriptions; from `[virtualBuffers]`,
-the maximum line length, screen layout, and say all on page load; and from
+the maximum line length, lines per page (added on 2026-10-13, migration
+`0033_nvda_lines_per_page.sql`), screen layout, and say all on page load; and from
 `[annotations]`, details and ARIA descriptions. Migration
 `0032_nvda_reporting_settings.sql` adds their columns. Formatting reported
 (fonts, colour, emphasis, and the rest) is not modelled, so where one is
@@ -1632,9 +1639,11 @@ landmark  Home  same page  link"; quick navigation to the second heading,
 "Section one  heading  level 2"; and Down Arrow onto the frame's heading,
 "Same-site frame  frame  heading  level 2  Inside the frame".
 
-Unit tests: `NvdaAnnouncementTests`, 13 tests: focus, quick navigation,
+Unit tests: `NvdaAnnouncementTests`, 16 tests: focus, quick navigation,
 lines entering and leaving a list and landmarks, a long line read in its
-parts, a long line whose part is not known, the recorded settings, a
+parts, a long line whose part is not known, Page Down and Page Up by the
+lines per page, Page Down near the end, a recording without the lines per
+page, the recorded settings, a
 recording without them, a command not modelled, a role not modelled,
 NVDA's same page rule, and the settings record's validation.
 
@@ -1693,6 +1702,39 @@ Checked on the target machine on 2026-10-13 with the fix (7cda55c): in
 "NVDA had to announce", the two Down Arrows are separate rows, the first
 ending "raise awareness and" and the second starting "understanding of
 guide dogs" and ending "equal access for", as the Speech Viewer showed.
+
+### Page Down and Page Up, as built
+
+Agreed with the owner on 2026-10-13, after the Page Down test of rule 9.
+NVDA moves its caret by its lines per page, 25 by default, from the start
+of the line it is on, as many as there are, and reads the line it lands
+on (`script_moveByPage_forward` and `_caretMovementScriptHelper`,
+[cursorManager.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/cursorManager.py)). The model does the same
+from the caret it keeps, line by line as for Down Arrow, each part of a
+long line counting as a line, and the line it lands on must hold the
+reading position's object; where it does not, or the caret is not known,
+the object's line is used and marked uncertain. NVDA's lines per page is
+recorded with its settings; for a recording made before it was, 25 is
+assumed and each Page Down or Page Up says so.
+
+Also found in the test: Chromium's roles for a page's header and footer
+are banner and contentInfo, which the model did not cover, so a line in
+the page's footer was unknown. Both are now landmarks, as header and
+footer are.
+
+For recording 20261013-173155, the player's lines are then the Speech
+Viewer's for each key. The second and third Page Downs and the Page Up
+land, 25 lines from the caret, on the object each request names. The
+first Page Down, from the heading "Bright futures start here!", lands
+one line further on than NVDA did (on the heading "Blogs", not the link
+"Read more about Braille Practice Fall Sessions"): the model counts one
+line more than NVDA over that part of the page, and which line is not
+known, as the Speech Viewer shows only where each key landed. The
+cross-check catches it: the step shows the request's object's line,
+which is what NVDA read, marked uncertain. The third Page Down's line,
+which the Speech Viewer showed as two, the link and then "graphic  Follow
+us on youtube", is shown as one, with the same words, and marked
+uncertain, as why NVDA spoke it as two is not known.
 
 ## The screen reader's windows
 

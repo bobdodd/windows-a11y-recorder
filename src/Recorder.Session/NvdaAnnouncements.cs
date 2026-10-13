@@ -367,6 +367,20 @@ public sealed partial class NvdaAnnouncementTimeline
             }
 
             var read = open.Concat(range.OfType<Start>().Select(start => start.Field)).Select(field => field.Key).ToHashSet(StringComparer.Ordinal);
+            if (reason == Reason.Caret)
+            {
+                // Seen on the target machine on 2026-10-13 (Page Down onto a
+                // link holding only an image): the Speech Viewer showed the
+                // line as two, the link, then "graphic" and its name.
+                var fields = open.Concat(range.OfType<Start>().Select(start => start.Field)).ToList();
+                var link = fields.FindIndex(field => field.Role == Role.Link);
+                if (link >= 0 && range.OfType<Start>().Any(start => start.Field.Role == Role.Graphic) &&
+                    fields.FindLastIndex(field => field.Role == Role.Graphic) > link)
+                {
+                    uncertain.Add("the line holds a graphic within a link, which NVDA was seen to speak as a second sequence after the link, for a reason not known; the words are shown as one line");
+                }
+            }
+
             uncertain.AddRange(renderer.Uncertain.Where(note => read.Contains(note.Key)).Select(note => note.Note));
             if (_cache is null && reason != Reason.Focus && reason != Reason.QuickNav)
             {
@@ -408,7 +422,7 @@ public sealed partial class NvdaAnnouncementTimeline
                 return Reason.QuickNav;
             }
 
-            if (names.Any(name => name is "next line" or "previous line"))
+            if (names.Any(name => name is "next line" or "previous line" or "next page" or "previous page"))
             {
                 return Reason.Caret;
             }
@@ -561,30 +575,63 @@ public sealed partial class NvdaAnnouncementTimeline
             // (cursorManager.py, _caretMovementScriptHelper, by
             // textInfos.UNIT_LINE), where it holds the reading position's
             // object.
-            var next = !step.CommandNames.Contains("previous line");
+            var byPage = step.CommandNames.Any(name => name is "next page" or "previous page");
+            var next = !step.CommandNames.Any(name => name is "previous line" or "previous page");
+            var lines = byPage ? settings.LinesPerPage : 1;
+            var unit = byPage ? "page" : "line";
+            if (byPage && !settings.LinesPerPageRecorded)
+            {
+                uncertain.Add($"NVDA's lines per page was not recorded (the recording is from before it was), so its default of {settings.LinesPerPage.ToString(CultureInfo.InvariantCulture)} is assumed");
+            }
+
             var objectKey = path[^1];
             var caretWhy = _caretUnknown;
             if (_caret is { } was && PositionOf(commands, positions, was) is { } at)
             {
-                if (MoveByLine(commands, positions, at, next, settings.MaxLineLength) is { } moved)
+                // By page, NVDA moves its lines per page, or as many as there
+                // are (textInfos/offsets.py, move).
+                (int From, int To, int Start, int End, int Part, int Parts)? moved = null;
+                var count = 0;
+                for (var position = at; count < lines; count++)
                 {
-                    var (part, partFrom) = Part(commands, positions, moved.From, moved.To, moved.Start, moved.End);
+                    if (MoveByLine(commands, positions, position, next, settings.MaxLineLength) is not { } one)
+                    {
+                        break;
+                    }
+
+                    moved = one;
+                    position = one.Start;
+                }
+
+                if (byPage && moved is null)
+                {
+                    moved = MoveByLine(commands, positions, at, !next, settings.MaxLineLength) is { } back
+                        ? MoveByLine(commands, positions, back.Start, next, settings.MaxLineLength)
+                        : null;
+                }
+
+                if (moved is { } landed)
+                {
+                    var movedWhy = byPage
+                        ? $"NVDA moved by {unit} {count.ToString(CultureInfo.InvariantCulture)} lines from where its caret was{(count < lines ? $", as many as there were of its {lines.ToString(CultureInfo.InvariantCulture)} lines per page" : string.Empty)}, and read the line"
+                        : "NVDA moved by line from where its caret was and read the line";
+                    var (part, partFrom) = Part(commands, positions, landed.From, landed.To, landed.Start, landed.End);
                     var holds = part.Any(command => command is Text text && text.Key == objectKey || command is Start start && start.Field.Key == objectKey) ||
                         OpenAt(commands, partFrom).Any(field => field.Key == objectKey);
                     if (holds)
                     {
-                        var parts = moved.Parts > 1
-                            ? $", part {moved.Part.ToString(CultureInfo.InvariantCulture)} of {moved.Parts.ToString(CultureInfo.InvariantCulture)} of a line longer than NVDA's maximum line length of {settings.MaxLineLength.ToString(CultureInfo.InvariantCulture)}, split as NVDA splits it (vbufBase/storage.cpp, getLineOffsets)"
+                        var parts = landed.Parts > 1
+                            ? $", part {landed.Part.ToString(CultureInfo.InvariantCulture)} of {landed.Parts.ToString(CultureInfo.InvariantCulture)} of a line longer than NVDA's maximum line length of {settings.MaxLineLength.ToString(CultureInfo.InvariantCulture)}, split as NVDA splits it (vbufBase/storage.cpp, getLineOffsets)"
                             : string.Empty;
-                        return (part, partFrom, CaretAt(commands, positions, moved.Start),
-                            $"NVDA moved by line from where its caret was and read the line with {DescribeText(part)}{parts} (cursorManager.py, _caretMovementScriptHelper)");
+                        return (part, partFrom, CaretAt(commands, positions, landed.Start),
+                            $"{movedWhy} with {DescribeText(part)}{parts} (cursorManager.py, _caretMovementScriptHelper)");
                     }
 
-                    caretWhy = "the line after where NVDA's caret was does not hold the reading position's object";
+                    caretWhy = $"the line {(byPage ? $"{count.ToString(CultureInfo.InvariantCulture)} lines" : "after")} {(next ? "on" : "back")} from where NVDA's caret was does not hold the reading position's object";
                 }
                 else
                 {
-                    caretWhy = $"there is no {(next ? "next" : "previous")} line after where NVDA's caret was";
+                    caretWhy = $"there is no {(next ? "next" : "previous")} line from where NVDA's caret was";
                 }
             }
 
@@ -609,12 +656,18 @@ public sealed partial class NvdaAnnouncementTimeline
 
             var (from, to) = LineAt(commands, found);
             var whole = Whole(from, to);
+            if (byPage && commands.Select((command, index) => (command, index))
+                .Any(entry => entry.command is Text text && text.Key == objectKey && !string.IsNullOrWhiteSpace(text.Value) && (entry.index < from || entry.index > to)))
+            {
+                uncertain.Add($"the reading position's object has more than one line, and which NVDA moved to is not known, as {caretWhy}, so its first is shown");
+            }
+
             var lineBreaks = BreaksOf(commands, positions, from, to, settings.MaxLineLength);
             if (lineBreaks.Count > 2)
             {
                 var length = lineBreaks.Max - lineBreaks.Min;
                 uncertain.Add($"the line is {length.ToString(CultureInfo.InvariantCulture)} characters, more than NVDA's maximum line length of {settings.MaxLineLength.ToString(CultureInfo.InvariantCulture)}, so NVDA splits it into {(lineBreaks.Count - 1).ToString(CultureInfo.InvariantCulture)} parts; which it read is not known, as {caretWhy}, so the whole line is shown");
-                return (whole, from, null, $"NVDA moved by line and read part of the line with {DescribeText(whole)} (cursorManager.py, _caretMovementScriptHelper)");
+                return (whole, from, null, $"NVDA moved by {unit} and read part of the line with {DescribeText(whole)} (cursorManager.py, _caretMovementScriptHelper)");
             }
 
             if (_caret is not null)
@@ -623,7 +676,7 @@ public sealed partial class NvdaAnnouncementTimeline
             }
 
             return (whole, from, CaretAt(commands, positions, lineBreaks.Min),
-                $"NVDA moved by line and read the line with {DescribeText(whole)} (cursorManager.py, _caretMovementScriptHelper)");
+                $"NVDA moved by {unit} and read the line with {DescribeText(whole)} (cursorManager.py, _caretMovementScriptHelper)");
         }
 
         // The offset in the buffer's text of each command: where a text
@@ -940,6 +993,12 @@ public sealed partial class NvdaAnnouncementTimeline
 
         public int MaxLineLength { get; private set; } = 100;
 
+        // [virtualBuffers] linesPerPage: how many lines Page Down and Page
+        // Up move (cursorManager.py, script_moveByPage_forward).
+        public int LinesPerPage { get; private set; } = 25;
+
+        public bool LinesPerPageRecorded { get; private set; }
+
         public bool UseScreenLayout => Flag("useScreenLayout");
 
         public string Basis { get; private set; } = string.Empty;
@@ -986,6 +1045,18 @@ public sealed partial class NvdaAnnouncementTimeline
                 var value = why is null && record is { } item && item.TryGetProperty(key, out var member) && member.ValueKind == JsonValueKind.String
                     ? member.GetString()
                     : null;
+                if (key == "linesPerPage")
+                {
+                    settings.LinesPerPage = int.TryParse(value ?? defaultValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var lines) && lines > 0 ? lines : 25;
+                    settings.LinesPerPageRecorded = why is null && record is { } source && source.TryGetProperty(key, out _);
+                    if (value is not null && value != defaultValue)
+                    {
+                        written.Add($"{key} {value}");
+                    }
+
+                    continue;
+                }
+
                 if (key == "maxLineLength")
                 {
                     settings.MaxLineLength = int.TryParse(value ?? defaultValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var length) ? length : 100;
@@ -1154,7 +1225,9 @@ public sealed partial class NvdaAnnouncementTimeline
             {
                 "rootWebArea" => Role.Document,
                 "genericContainer" or "section" or "sectionWithoutName" or "sectionHeader" or "sectionFooter" => Role.Section,
-                "header" or "footer" or "navigation" or "main" or "complementary" or "search" =>
+                // Chromium's roles for a page's header and footer are banner
+                // and contentInfo (ax_enums.mojom); header and footer elsewhere.
+                "header" or "footer" or "banner" or "contentInfo" or "navigation" or "main" or "complementary" or "search" =>
                     landmark is null ? Role.Section : Role.Landmark,
                 "form" when landmark is not null => Role.Landmark,
                 "region" => Role.Region,
