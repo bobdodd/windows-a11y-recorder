@@ -1406,6 +1406,9 @@ keep their size.
 Over the target run of 2026-10-12, every one of the 48 steps has a record
 to select.
 
+Checked on the target machine on 2026-10-12 with the five-step test of
+selecting a step: the owner found it works functionally.
+
 ## The screen reader's windows
 
 UI Automation already records them. At playback, NVDA's windows in front

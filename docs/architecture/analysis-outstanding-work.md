@@ -97,8 +97,8 @@ Designed in [screen reader activity](screen-reader-activity.md), agreed
 - Built 2026-10-12 and checked on the target machine the same day: step
   4a, the reading position (a Properties row, a timeline strip, and the
   basis in Selected event values), as in its "4a as built". Built
-  2026-10-12, not yet tested on the target machine: 4b, the list of steps,
-  as in its "4b as built". Then 4c, the tree view.
+  and checked on the target machine 2026-10-12: 4b, the list of steps, as
+  in its "4b as built"; the owner found it works functionally. Then 4c, the tree view.
 - To settle: the items in its "Questions to settle".
 - To test: as in its "Required tests".
 
