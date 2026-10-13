@@ -1410,6 +1410,7 @@ keep their size.
   the system highlight colour. The first build used Windows' default white
   tab panel, which left the light text at a very low contrast, as the
   owner's screenshots of 2026-10-12 showed.
+  The owner checked the fix on the target machine the same day.
 
 Over the target run of 2026-10-12, every one of the 48 steps has a record
 to select.
