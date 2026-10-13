@@ -1308,6 +1308,25 @@ judgment, and agreed to the selection rule.
    on, so the request may not be where the caret went. A short test can
    settle it later.
 
+   Tested on the target machine on 2026-10-13, recording
+   20261013-173155, on cnib.ca/en with NVDA's Speech Viewer on, read from
+   the recording's screen frames: H, Page Down three times, then Page Up.
+   Each Page Down's request named a different object further down the
+   page, and each was the first object NVDA read after the key:
+
+   | Key | The request's object | The Speech Viewer |
+   |---|---|---|
+   | Page Down | link "Read more about Braille Practice Fall Sessions" | "link  Read more about Braille Practice Fall Sessions" |
+   | Page Down | link "Learn" | "list  with 8 items  link  Learn" |
+   | Page Down | image "Follow us on youtube", in a link | "out of list  content info landmark  navigation landmark  list  with 5 items  link", then "graphic  Follow us on youtube" |
+   | Page Up | link "Learn" | "out of list  main landmark  list  with 8 items  link  Learn" |
+
+   So the request names where the caret went. The third Page Down's two
+   lines both appeared within 0.2 s of the key, with the mouse still; why
+   NVDA spoke them as two sequences is not known. The navigation landmark
+   is named "Social media links" by another element, and NVDA did not say
+   the name.
+
 Test runs on the target machine from now on cover one behaviour each, in
 at most five steps, with what to check on screen, as the owner asked: "You are
 creating too complex a test script. I can't remember it all and I lose my
