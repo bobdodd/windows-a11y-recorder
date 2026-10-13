@@ -1618,9 +1618,26 @@ lines entering and leaving a list and landmarks, the recorded settings,
 a recording without them, a command not modelled, a role not modelled,
 NVDA's same page rule, and the settings record's validation.
 
-To check on the target machine: a new recording with NVDA's Speech Viewer
-on, comparing the player's text with the Speech Viewer's for the same
-steps.
+Checked on the target machine on 2026-10-13, with recording
+20261013-125012, made on a live site with NVDA's Speech Viewer on: three
+quick navigations by heading, two Down Arrows, and a Tab. The recording
+held NVDA's reporting settings, all at NVDA's defaults but say all on page
+load, which was off. The owner watched the Speech Viewer while navigating
+and found its content correct; no screenshot was taken, as one adds to the
+Speech Viewer's content. The player's lines for those steps were:
+
+- H: "main landmark  Bright futures start here!  heading  level 2"
+  (uncertain, as NVDA had read the page on its own on loading);
+- H: "News  heading  level 2";
+- H: "This September, help champion guide dog access  heading  level 3";
+- Down Arrow, twice: the paragraph's whole line of 200 characters, both
+  marked uncertain, as NVDA splits a line longer than its maximum line
+  length of 100 and which part it read is not modelled;
+- Tab: "Read more about This September, help champion guide dog access
+  link".
+
+Not shown by this check: where NVDA split the long line, which the model
+does not work out. Only one Tab is in the recording, at 25.73 s.
 
 ## The screen reader's windows
 
