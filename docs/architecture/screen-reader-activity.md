@@ -1418,6 +1418,55 @@ to select.
 Checked on the target machine on 2026-10-12 with the five-step test of
 selecting a step: the owner found it works functionally.
 
+### 4c, the tree view, as built
+
+Agreed with the owner on 2026-10-12 and built the same day, as a third tab,
+"Accessibility tree", beside the other two, which tears out as they do
+([player layout](player-layout.md), "Tabs that tear out").
+
+What the target run of 2026-10-12 showed of the checkpoints: Chromium sent
+the page's whole tree once, 79 objects at 2.98 s, then only the objects
+that changed, mostly one at a time; the frame's tree, 11 objects, was first
+sent at 204.77 s, when NVDA moved into the frame. The frame object is marked
+`has_child_tree`, but which tree is its own is not recorded. Each frame's
+navigation names its page (`context.pageId`), so a frame's document is tied
+to its page by that.
+
+- The tree is the page's, as Chromium last sent each object at or before
+  the playhead (`AccessibilityTreeTimeline` in `Recorder.Session`), in its
+  children's order. The browser's own pages are left out, as in the
+  reading position's rules. A note above the tree says removals are not
+  recorded, so an object may be shown after it was gone.
+- With one frame object and one frame document, the frame's tree is nested
+  under the frame object; before it was first sent, the frame object says
+  "its document's tree is not yet in the recording". With several, the
+  frame trees follow the page's, and each frame object says which is its
+  own is not recorded.
+- A child an object lists that no checkpoint has sent by the playhead is a
+  row saying so; objects no recorded version lists as a child are listed
+  after the page's tree, under a heading saying they may have been removed.
+- Each row is at least 44 pixels high: the role and name, or the start of
+  the text it holds, the node, and when its version was recorded, with
+  "reading position" and "under the pointer" in words where they apply; the
+  reading position's row also has a purple bar. An object with children
+  has a 44 by 44 pixel expand button.
+- When the tab is first shown for a recording, only the path to the
+  reading position is expanded, or the root when the position is unknown,
+  as the owner chose. The tree then updates as the playhead moves but never
+  scrolls, expands, or collapses by itself; "Show reading position" and
+  "Show under the pointer" expand the path to their object and scroll to
+  it.
+- Clicking an object, or Enter on it, selects its version's record, which
+  moves the playhead to when it was recorded, as the owner chose, and shows
+  the record in Selected event values.
+- Detail text #4A4945 is 9.0 to 1 on white and 7.0 to 1 on the selected
+  row's #E6E0F0; the reading position's bar, #6A4C93, is 6.9 to 1 on white.
+
+Found in building it: Chromium's inline text boxes have negative ids, such
+as `child_ids=-1000000032,-1000000033`, which the reading of child lists did
+not accept, so their parents seemed to list no children. Fixed for the tree
+and for the Under the pointer row's parents.
+
 ## The screen reader's windows
 
 UI Automation already records them. At playback, NVDA's windows in front

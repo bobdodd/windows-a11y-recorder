@@ -122,7 +122,8 @@ separate window for the tree. Only these three tabs for now.
   under the pointer and kept on the screen. Released back within that
   distance, it is a click. As first built, the window opened as soon as
   the drag passed the distance; the owner asked on 2026-10-12 that it be
-  placed where the button is released. The button is the way without dragging,
+  placed where the button is released. The owner checked the button, the drag,
+  and putting a tab back on the target machine the same day. The button is the way without dragging,
   as WCAG 2.5.7, Dragging Movements, asks: "All functionality that uses a
   dragging movement for operation can be achieved by a single pointer
   without dragging"

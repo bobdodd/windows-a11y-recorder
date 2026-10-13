@@ -319,6 +319,9 @@ public sealed class WindowsPreferenceTimeline
     }
 
     // A recording time as the player's clock shows it.
+    /// <summary>A time as the player's clock gives it, such as 00:06:58.299.</summary>
+    public static string ClockOf(long nanoseconds) => Clock(nanoseconds);
+
     internal static string Clock(long nanoseconds)
     {
         var value = TimeSpan.FromTicks(Math.Max(0, nanoseconds) / 100);

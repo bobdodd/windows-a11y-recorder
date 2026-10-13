@@ -1056,6 +1056,138 @@
               </ListBox>
             </Grid>
           </TabItem>
+          <TabItem x:Name="AccessibilityTreeTab"
+                   AutomationProperties.Name="Accessibility tree"
+                   PreviewMouseLeftButtonDown="DetailsTab_PreviewMouseLeftButtonDown"
+                   PreviewMouseMove="DetailsTab_PreviewMouseMove"
+                   PreviewMouseLeftButtonUp="DetailsTab_PreviewMouseLeftButtonUp"
+                   LostMouseCapture="DetailsTab_LostMouseCapture">
+            <TabItem.Header>
+              <StackPanel Orientation="Horizontal">
+                <TextBlock VerticalAlignment="Center" Text="Accessibility tree" />
+                <Button Style="{StaticResource TearOutButton}"
+                        Tag="{Binding ElementName=AccessibilityTreeTab}"
+                        Click="TearOutButton_Click"
+                        AutomationProperties.Name="Open Accessibility tree in its own window" />
+              </StackPanel>
+            </TabItem.Header>
+            <!-- The page's accessibility tree at the playhead
+                 (screen-reader-activity.md, "4c, the tree view"): read only,
+                 each row at least 44 pixels high with a 44 by 44 pixel
+                 expand button. It never scrolls, expands, or collapses by
+                 itself; the two buttons do. -->
+            <Grid Margin="8">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+              </Grid.RowDefinitions>
+              <WrapPanel Grid.Row="0" Margin="0,0,0,6">
+                <Button x:Name="ShowReadingPositionButton"
+                        MinHeight="44"
+                        MinWidth="44"
+                        Margin="0,0,8,0"
+                        Padding="12,0"
+                        Content="Show reading position"
+                        Click="ShowReadingPositionButton_Click"
+                        AutomationProperties.HelpText="Expands the tree down to the reading position at the playhead, and scrolls to it." />
+                <Button x:Name="ShowUnderPointerButton"
+                        MinHeight="44"
+                        MinWidth="44"
+                        Padding="12,0"
+                        Content="Show under the pointer"
+                        Click="ShowUnderPointerButton_Click"
+                        AutomationProperties.HelpText="Expands the tree down to the object under the pointer at the playhead, and scrolls to it." />
+              </WrapPanel>
+              <TextBlock x:Name="AccessibilityTreeStatusTextBlock"
+                         Grid.Row="1"
+                         Margin="0,0,0,6"
+                         TextWrapping="Wrap"
+                         Text="Open a recording with accessibility checkpoints to see the page's tree." />
+              <TreeView x:Name="AccessibilityTreeView"
+                        Grid.Row="2"
+                        MinHeight="70"
+                        ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                        AutomationProperties.Name="Accessibility tree at the playhead"
+                        AutomationProperties.HelpText="Click an object, or press Enter on it, to move the playhead to when its version was recorded and show its record in Selected event values.">
+                <TreeView.ItemContainerStyle>
+                  <Style TargetType="TreeViewItem">
+                    <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                    <Setter Property="AutomationProperties.Name" Value="{Binding Spoken}" />
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <EventSetter Event="MouseLeftButtonUp" Handler="TreeRow_MouseLeftButtonUp" />
+                    <EventSetter Event="KeyDown" Handler="TreeRow_KeyDown" />
+                    <Setter Property="Template">
+                      <Setter.Value>
+                        <ControlTemplate TargetType="TreeViewItem">
+                          <StackPanel>
+                            <Border x:Name="RowBorder"
+                                    MinHeight="44"
+                                    Background="Transparent"
+                                    BorderBrush="Transparent"
+                                    BorderThickness="3,0,0,0">
+                              <DockPanel>
+                                <ToggleButton x:Name="Expander"
+                                              DockPanel.Dock="Left"
+                                              Width="44"
+                                              Height="44"
+                                              Focusable="False"
+                                              FontFamily="Segoe MDL2 Assets"
+                                              FontSize="12"
+                                              Content="&#xE76C;"
+                                              IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}"
+                                              AutomationProperties.Name="{Binding ExpandName}" />
+                                <ContentPresenter ContentSource="Header"
+                                                  Margin="6,4"
+                                                  VerticalAlignment="Center" />
+                              </DockPanel>
+                            </Border>
+                            <ItemsPresenter x:Name="ItemsHost" Margin="22,0,0,0" />
+                          </StackPanel>
+                          <ControlTemplate.Triggers>
+                            <Trigger Property="IsExpanded" Value="False">
+                              <Setter TargetName="ItemsHost" Property="Visibility" Value="Collapsed" />
+                            </Trigger>
+                            <Trigger Property="IsExpanded" Value="True">
+                              <Setter TargetName="Expander" Property="Content" Value="&#xE70D;" />
+                            </Trigger>
+                            <Trigger Property="HasItems" Value="False">
+                              <Setter TargetName="Expander" Property="Visibility" Value="Hidden" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                              <Setter TargetName="RowBorder" Property="Background" Value="#E6E0F0" />
+                            </Trigger>
+                            <DataTrigger Binding="{Binding IsReading}" Value="True">
+                              <Setter TargetName="RowBorder" Property="BorderBrush" Value="#6A4C93" />
+                            </DataTrigger>
+                          </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                      </Setter.Value>
+                    </Setter>
+                  </Style>
+                </TreeView.ItemContainerStyle>
+                <TreeView.ItemTemplate>
+                  <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                    <StackPanel>
+                      <TextBlock Text="{Binding Label}" TextWrapping="Wrap" />
+                      <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" Foreground="#4A4945" />
+                      <TextBlock Text="{Binding Markers}" TextWrapping="Wrap" FontWeight="SemiBold">
+                        <TextBlock.Style>
+                          <Style TargetType="TextBlock">
+                            <Style.Triggers>
+                              <DataTrigger Binding="{Binding Markers}" Value="">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                              </DataTrigger>
+                            </Style.Triggers>
+                          </Style>
+                        </TextBlock.Style>
+                      </TextBlock>
+                    </StackPanel>
+                  </HierarchicalDataTemplate>
+                </TreeView.ItemTemplate>
+              </TreeView>
+            </Grid>
+          </TabItem>
         </TabControl>
         <GridSplitter Grid.Column="1"
                       Width="8"

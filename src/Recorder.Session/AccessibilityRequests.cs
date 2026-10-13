@@ -117,10 +117,23 @@ public sealed class AccessibilityRequests
     private readonly List<RequestedAction> _actions = [];
     private readonly Dictionary<long, string> _keyEvents = [];
 
-    private sealed record TreeNode(long Time, string Role, string Name, long[] Children);
+    // A version of an object, as a checkpoint serialized it: its time, role,
+    // name, children, its record, and whether it hosts a tree of its own,
+    // as a frame does (has_child_tree).
+    internal sealed record TreeNode(long Time, string Role, string Name, long[] Children)
+    {
+        public string? EventId { get; init; }
+
+        public bool HasChildTree { get; init; }
+    }
 
     private static readonly System.Text.RegularExpressions.Regex ChildIds =
-        new(@"(?:^|\s)child_ids=([0-9,]+)", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        // Chromium's inline text boxes have negative ids, such as
+        // child_ids=-1000000032,-1000000033 (target run, 2026-10-12).
+        new(@"(?:^|\s)child_ids=(-?[0-9]+(?:,-?[0-9]+)*)", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    private static readonly System.Text.RegularExpressions.Regex HasChildTree =
+        new(@"(?:^|\s)has_child_tree(?:\s|$)", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>The most characters of an unnamed object's text the row gives.</summary>
     public const int HeldTextCharacters = 60;
@@ -417,8 +430,8 @@ public sealed class AccessibilityRequests
             var match = ChildIds.Match(ReadString(payload, "serializedProperties") ?? string.Empty);
             var children = match.Success
                 ? match.Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                    .Select(value => long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var child) ? child : -1)
-                    .Where(child => child >= 0)
+                    .Select(value => long.TryParse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var child) ? (long?)child : null)
+                    .OfType<long>()
                     .ToArray()
                 : [];
             if (!_trees.TryGetValue(token, out var tree))
@@ -431,8 +444,13 @@ public sealed class AccessibilityRequests
                 tree[id] = versions = [];
             }
 
+            var serialized = ReadString(payload, "serializedProperties") ?? string.Empty;
             versions.Add(new TreeNode(
-                record.MonotonicNanoseconds, ReadString(payload, "roleName") ?? "object", ReadString(payload, "name") ?? string.Empty, children));
+                record.MonotonicNanoseconds, ReadString(payload, "roleName") ?? "object", ReadString(payload, "name") ?? string.Empty, children)
+            {
+                EventId = record.EventId,
+                HasChildTree = HasChildTree.IsMatch(serialized)
+            });
             if (ReadInt64(payload, "domNodeId") is { } domNode)
             {
                 if (!_domNodes.TryGetValue((token, domNode), out var objects))
@@ -454,6 +472,29 @@ public sealed class AccessibilityRequests
             }
         }
     }
+
+    // The checkpoints' objects: each document's, by object, in time order.
+    internal IReadOnlyDictionary<string, Dictionary<long, List<TreeNode>>> Trees => _trees;
+
+    /// <summary>The document of a tree, by the records that name both; null when none does.</summary>
+    public string? DocumentOfTree(string treeId) => _documents.GetValueOrDefault(treeId);
+
+    /// <summary>The object the latest hit test at or before a time was given; null before the first, or with none given.</summary>
+    public TreeObject? PointerObjectAt(long time)
+    {
+        var index = _requestTimes.BinarySearch(time);
+        if (index < 0)
+        {
+            index = ~index - 1;
+        }
+
+        return index >= 0 && _requests[index].Given is { } node
+            ? new TreeObject(node.TreeId, node.NodeId, node.Role, node.Name)
+            : null;
+    }
+
+    // The text an object of a document holds, for the tree view's labels.
+    internal string TextOf(string token, long id, long time) => TextWithin(token, id, time);
 
     private TreeNode? NodeAt(string token, long id, long time)
     {

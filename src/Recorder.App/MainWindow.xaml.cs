@@ -843,6 +843,7 @@ public partial class MainWindow : Window
             TimelineControl.SetScreenReaderWindowSpans(_playbackArchive.ScreenReaderWindows.Spans);
             TimelineControl.SetReadingPositionSpans(_playbackArchive.ReadingPosition.Spans);
             BindReadingSteps();
+            BindAccessibilityTree();
             ApplyBrowserNavigationFilter();
             BrowserCorrelationTextBox.Text =
                 _playbackArchive.BrowserNavigations.Count == 0
@@ -896,6 +897,7 @@ public partial class MainWindow : Window
             ApplyLayout();
             DisplayPropertiesAt(0);
             BindReadingSteps();
+            BindAccessibilityTree();
             busy.Dispose();
             MessageBox.Show(
                 this,
@@ -1060,6 +1062,7 @@ public partial class MainWindow : Window
         DisplayFrameAt(positionNanoseconds);
         DisplayPropertiesAt(positionNanoseconds);
         DisplayReadingStepAt(positionNanoseconds);
+        DisplayAccessibilityTreeAt(positionNanoseconds);
         DisplayNearestEvent(positionNanoseconds);
         DisplayBrowserCorrelationAt(positionNanoseconds);
     }

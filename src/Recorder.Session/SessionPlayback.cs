@@ -70,6 +70,17 @@ public sealed record SessionPlaybackArchive(
     /// <summary>The screen reader's reading position, inferred from the requests, focus, and commands (step 4).</summary>
     public ReadingPositionTimeline ReadingPosition { get; init; } = ReadingPositionTimeline.Empty;
 
+    /// <summary>The page's accessibility tree at any time, from the checkpoints (step 4c).</summary>
+    public AccessibilityTreeTimeline AccessibilityTree { get; init; } = AccessibilityTreeTimeline.Empty;
+
+    /// <summary>
+    /// The timeline events of the records the reading position and the tree
+    /// view can select, by record: keys, actions sent, page focus, page
+    /// loads, and the checkpoints' objects.
+    /// </summary>
+    public IReadOnlyDictionary<string, SessionTimelineEvent> TimelineEvents { get; init; } =
+        new Dictionary<string, SessionTimelineEvent>(StringComparer.Ordinal);
+
     /// <summary>An event's description, ending with its key outcome where it has one.</summary>
     public string Describe(SessionTimelineEvent item)
     {

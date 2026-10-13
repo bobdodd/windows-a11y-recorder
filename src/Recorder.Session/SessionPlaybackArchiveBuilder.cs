@@ -115,6 +115,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<(string EventId, long Time, JsonElement Payload)> _pageFocus = [];
     private readonly HashSet<string> _pageDocuments = new(StringComparer.Ordinal);
     private readonly List<PageLoad> _pageLoads = [];
+    private readonly List<PageDocument> _treeDocuments = [];
 
     // The timeline events of the records a reading position step can rest
     // on, so the list of steps can select them.
@@ -322,7 +323,7 @@ public sealed class SessionPlaybackArchiveBuilder
         {
             _accessibilityRequests.Add(new KeyEvidenceRecord(
                 timelineEvent.EventId, timestamp, timelineEvent.Channel, timelineEvent.EventType, payload.Clone()));
-            if (timelineEvent.EventType == BrowserEvidenceEventTypes.AccessibilityActionSent)
+            if (timelineEvent.EventType is BrowserEvidenceEventTypes.AccessibilityActionSent or BrowserEvidenceEventTypes.AccessibilityCheckpointNode)
             {
                 _stepEvents.TryAdd(timelineEvent.EventId, timelineEvent);
             }
@@ -387,6 +388,15 @@ public sealed class SessionPlaybackArchiveBuilder
             ReadString(pageContext, "documentToken") is { } pageToken)
         {
             _pageDocuments.Add(pageToken);
+
+            // The page's main frame and its frames, for the tree view.
+            var frameKind = ReadString(payload, "frameType");
+            var mainFrame = frameKind == "primary-main-frame" &&
+                payload.TryGetProperty("primaryPage", out var primaryPage) && primaryPage.ValueKind == JsonValueKind.True;
+            if ((mainFrame || frameKind == "subframe") && ReadString(pageContext, "pageId") is { } pageId)
+            {
+                _treeDocuments.Add(new PageDocument(timestamp, pageToken, pageId, mainFrame));
+            }
         }
 
         if (payload.ValueKind == JsonValueKind.Object &&
@@ -507,7 +517,11 @@ public sealed class SessionPlaybackArchiveBuilder
                         .OfType<PageFocusChange>(),
                     _pageLoads,
                     duration,
-                    _stepEvents)
+                    _stepEvents),
+            AccessibilityTree = accessibilityRequests.Trees.Count == 0
+                ? AccessibilityTreeTimeline.Empty
+                : new AccessibilityTreeTimeline(accessibilityRequests, _treeDocuments),
+            TimelineEvents = _stepEvents
         };
     }
 
