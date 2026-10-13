@@ -161,6 +161,54 @@ public sealed class NvdaAnnouncementTests
         Assert.Equal(NvdaAnnouncementKind.Uncertain, announced[5].Kind);
     }
 
+    private const string Long =
+        "Held every September, Guide Dog Access Awareness Month is a time to raise awareness and understanding of guide dogs, " +
+        "the rights of guide dog handlers, and to champion equal access for guide dog teams.";
+
+    // The page with a paragraph of 200 characters after the heading.
+    private static IEnumerable<KeyEvidenceRecord> LongPage() => Page(
+        Node(9, "main", "", "<main> aria_role=main", "12,40,14,16"),
+        Node(40, "paragraph", "", "<p>", "41"),
+        Node(41, "staticText", Long));
+
+    [Fact]
+    public void ALineLongerThanTheMaximumIsReadInPartsAsNvdaSplitsIt()
+    {
+        var announced = Announce(
+        [
+            Step(2 * Second, 12, "heading", "Welcome", "next heading"),
+            Step(3 * Second, 41, "staticText", Long, "next line"),
+            Step(4 * Second, 41, "staticText", Long, "next line"),
+            Step(5 * Second, 41, "staticText", Long, "next line"),
+            Step(6 * Second, 15, "staticText", "Hello there.", "next line"),
+            Step(7 * Second, 41, "staticText", Long, "previous line")
+        ], page: LongPage());
+
+        // storage.cpp, getLineOffsets: at 100 characters, back to the last
+        // word's start, as NVDA's Speech Viewer showed on 2026-10-13.
+        Assert.Equal(
+        [
+            "Held every September, Guide Dog Access Awareness Month is a time to raise awareness and",
+            "understanding of guide dogs, the rights of guide dog handlers, and to champion equal access for",
+            "guide dog teams.",
+            "Hello there.",
+            "guide dog teams."
+        ], announced.Skip(1).Select(item => item.Text));
+        Assert.All(announced.Skip(1), item => Assert.Equal(NvdaAnnouncementKind.Inferred, item.Kind));
+        Assert.Contains(announced[2].Basis, note => note.Contains("part 2 of 3", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void WhichPartOfALongLineWasReadIsNotKnownWhereTheCaretIsNot()
+    {
+        var announced = Announce([Step(3 * Second, 41, "staticText", Long, "next line")], page: LongPage());
+
+        // With nothing read before it, the landmark it is in is said first.
+        Assert.Equal("main landmark  " + Long, announced[0].Text);
+        Assert.Equal(NvdaAnnouncementKind.Uncertain, announced[0].Kind);
+        Assert.Contains(announced[0].Basis, note => note.Contains("splits it into 3 parts; which it read is not known", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void TheRecordedSettingsDecideWhatIsSaid()
     {

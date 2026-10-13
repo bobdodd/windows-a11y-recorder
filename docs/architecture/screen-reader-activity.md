@@ -1590,8 +1590,8 @@ line change if the owner prefers it.
   [ax_object.cc](https://raw.githubusercontent.com/chromium/chromium/main/third_party/blink/renderer/modules/accessibility/ax_object.cc)),
   where a name comes from another element whose visibility is not
   recorded, where an object has a description or a state the model does
-  not cover, where a line is longer than NVDA's maximum line length, or
-  where screen layout is off.
+  not cover, where a line is longer than NVDA's maximum line length and
+  where NVDA's caret was is not known, or where screen layout is off.
 - Reading position steps: each row has a second line, "NVDA had to
   announce (inferred): ...", or "(inferred, uncertain)", or "not modelled
   yet" or "unknown" with why.
@@ -1613,9 +1613,10 @@ landmark  Home  same page  link"; quick navigation to the second heading,
 "Section one  heading  level 2"; and Down Arrow onto the frame's heading,
 "Same-site frame  frame  heading  level 2  Inside the frame".
 
-Unit tests: `NvdaAnnouncementTests`, 11 tests: focus, quick navigation,
-lines entering and leaving a list and landmarks, the recorded settings,
-a recording without them, a command not modelled, a role not modelled,
+Unit tests: `NvdaAnnouncementTests`, 13 tests: focus, quick navigation,
+lines entering and leaving a list and landmarks, a long line read in its
+parts, a long line whose part is not known, the recorded settings, a
+recording without them, a command not modelled, a role not modelled,
 NVDA's same page rule, and the settings record's validation.
 
 Checked on the target machine on 2026-10-13, with recording
@@ -1623,21 +1624,51 @@ Checked on the target machine on 2026-10-13, with recording
 quick navigations by heading, two Down Arrows, and a Tab. The recording
 held NVDA's reporting settings, all at NVDA's defaults but say all on page
 load, which was off. The owner watched the Speech Viewer while navigating
-and found its content correct; no screenshot was taken, as one adds to the
-Speech Viewer's content. The player's lines for those steps were:
+and found its content correct, and pointed out that the Speech Viewer is
+in the recording's screen frames, at the right of the screen. Read from
+the frames taken before each key, the Speech Viewer showed:
 
-- H: "main landmark  Bright futures start here!  heading  level 2"
-  (uncertain, as NVDA had read the page on its own on loading);
+- H: "main landmark  Bright futures start here!  heading  level 2";
 - H: "News  heading  level 2";
 - H: "This September, help champion guide dog access  heading  level 3";
-- Down Arrow, twice: the paragraph's whole line of 200 characters, both
-  marked uncertain, as NVDA splits a line longer than its maximum line
-  length of 100 and which part it read is not modelled;
+- Down Arrow: "Held every September, Guide Dog Access Awareness Month is a time
+  to raise awareness and";
+- Down Arrow: "understanding of guide dogs, the rights of guide dog handlers,
+  and to champion equal access for";
 - Tab: "Read more about This September, help champion guide dog access
   link".
 
-Not shown by this check: where NVDA split the long line, which the model
-does not work out. Only one Tab is in the recording, at 25.73 s.
+The Speech Viewer's right edge was off the screen, so the end of each of
+the two long lines is hidden; where each wraps, and what is shown, agree
+with these. Only one Tab is in the recording, at 25.73 s.
+
+The model as first built agreed on the headings and the Tab, but read the
+paragraph's whole line of 200 characters at both Down Arrows, marked
+uncertain. NVDA splits a line longer than its maximum line length: each
+time the count reaches the maximum, it breaks at the last possible break
+at or before it, a node's start or end or a word's start, where one is
+within the maximum ([storage.cpp](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/nvdaHelper/vbufBase/storage.cpp),
+`getLineOffsets`). That splits the paragraph at 88 and 184 characters, as
+the Speech Viewer shows. Fixed on 2026-10-13:
+
+- The model splits lines as NVDA does, and keeps NVDA's browse mode caret
+  from step to step, as the object whose text it is in and the offset in
+  it: at the start of the item after focus or quick navigation, and at the
+  start of the line or part read after next or previous line. Next and
+  previous line move from it, to the next or previous part of the same
+  line or the first or last part of the next or previous line.
+- The line so found must hold the reading position's object; where it
+  does not, or where the caret is not known (after a page load or a step
+  not modelled), the reading position's line is used, and a line NVDA
+  would split is shown whole and marked uncertain, saying it is split and
+  which part was read is not known.
+- Quick navigation that reads a first line (a list, landmark, or frame)
+  reads its first part.
+
+With the fix, the player's lines for recording 20261013-125012 are those
+the Speech Viewer showed, the Down Arrows inferred, without uncertainty;
+for the target run of 2026-10-12, the one change is that its Down Arrow
+onto the page's opening paragraph reads the first of its two parts.
 
 ## The screen reader's windows
 

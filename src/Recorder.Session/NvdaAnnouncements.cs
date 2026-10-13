@@ -242,6 +242,11 @@ public sealed partial class NvdaAnnouncementTimeline
         // null where it is not known, with why.
         private List<Field>? _cache;
         private string _cacheUnknown = "nothing before it in the recording shows what NVDA last read";
+
+        // NVDA's browse mode caret, as the object whose text it is in and
+        // the offset in that text: null where it is not known, with why.
+        private (string Key, int Offset)? _caret;
+        private string _caretUnknown = "nothing before it in the recording shows where NVDA's caret was";
         private string? _pageToken;
 
         public NvdaAnnouncement Announce(ReadingPositionStep step)
@@ -253,6 +258,8 @@ public sealed partial class NvdaAnnouncementTimeline
                 _pageToken = snapshot.PageToken;
                 _cache = null;
                 _cacheUnknown = "a page was loaded, and NVDA read it on its own";
+                _caret = null;
+                _caretUnknown = "a page was loaded";
             }
 
             if (step.Cause == "a page was loaded")
@@ -325,8 +332,9 @@ public sealed partial class NvdaAnnouncementTimeline
             }
 
             var commands = renderer.Commands;
-            var (from, to, rangeWhy) = RangeOf(commands, path, reason.Value, step, settings, uncertain);
-            if (from < 0)
+            var positions = PositionsOf(commands);
+            var (range, from, caretAfter, rangeWhy) = RangeOf(commands, positions, path, reason.Value, step, settings, uncertain);
+            if (range is null)
             {
                 return Forget(step, NvdaAnnouncementKind.Unknown, rangeWhy,
                     rangeWhy[..1].ToUpperInvariant() + rangeWhy[1..],
@@ -334,7 +342,6 @@ public sealed partial class NvdaAnnouncementTimeline
             }
 
             basis.Add(rangeWhy);
-            var range = commands.Skip(from).Take(to - from + 1).ToList();
             if (range.OfType<Gap>().FirstOrDefault() is { } gap)
             {
                 return Forget(step, NvdaAnnouncementKind.Unknown, gap.Why,
@@ -372,6 +379,8 @@ public sealed partial class NvdaAnnouncementTimeline
 
             var (parts, stack) = Speech.Of(range, open, _cache ?? [], reason.Value, settings);
             _cache = stack;
+            _caret = caretAfter;
+            _caretUnknown = caretAfter is null ? $"where NVDA's caret was after {step.When} is not known" : _caretUnknown;
             var text = string.Join(Separator, parts);
             basis.Add($"NVDA's rules for {Speech.ReasonName(reason.Value)} (speech.py, getTextInfoSpeech)");
             basis.Add("click handlers are not recorded; an object with one that is not a link or button would add \"clickable\"");
@@ -385,6 +394,8 @@ public sealed partial class NvdaAnnouncementTimeline
         {
             _cache = null;
             _cacheUnknown = cacheWhy;
+            _caret = null;
+            _caretUnknown = cacheWhy;
             return new NvdaAnnouncement(step, kind, text, [basis]);
         }
 
@@ -462,10 +473,12 @@ public sealed partial class NvdaAnnouncementTimeline
             };
         }
 
-        // The commands NVDA read: the item's field for focus and quick
-        // navigation, or the line.
-        private static (int From, int To, string Why) RangeOf(
+        // The commands NVDA read, with the index in the buffer of the first
+        // (for the fields open there), and where its caret was left: the
+        // item's field for focus and quick navigation, or the line.
+        private (List<Command>? Range, int From, (string Key, int Offset)? Caret, string Why) RangeOf(
             List<Command> commands,
+            int[] positions,
             IReadOnlyList<string> path,
             Reason reason,
             ReadingPositionStep step,
@@ -491,6 +504,8 @@ public sealed partial class NvdaAnnouncementTimeline
                 return commands.Count - 1;
             }
 
+            List<Command> Whole(int from, int to) => [.. commands.Skip(from).Take(to - from + 1)];
+
             if (reason == Reason.Focus || reason == Reason.QuickNav)
             {
                 (Func<Field, bool> Is, string Name, bool ByLine)? item = reason == Reason.QuickNav
@@ -509,47 +524,32 @@ public sealed partial class NvdaAnnouncementTimeline
                         continue;
                     }
 
+                    // NVDA puts its caret at the start of the item.
+                    var caret = CaretAt(commands, positions, positions[start]);
                     var end = EndOf(start);
                     if (item is { ByLine: true })
                     {
                         var first = commands.FindIndex(start, end - start + 1, command => command is Text text && !string.IsNullOrWhiteSpace(text.Value));
-                        end = first < 0 ? end : Math.Min(end, LineAt(commands, first).To);
-                        return (start, end, $"NVDA moved by quick navigation ({item.Value.Name}) to {field.Label} and read its first line (browseMode.py, TextInfoQuickNavItem.report)");
+                        if (first >= 0)
+                        {
+                            // Its first line, or the first part of a line
+                            // longer than NVDA's maximum.
+                            var line = LineAt(commands, first);
+                            var breaks = BreaksOf(commands, positions, line.From, line.To, settings.MaxLineLength);
+                            var partEnd = breaks.GetViewBetween(positions[first] + 1, int.MaxValue).Min;
+                            var (part, partFrom) = Part(commands, positions, start, Math.Min(end, line.To), positions[start], partEnd);
+                            return (part, partFrom, caret, $"NVDA moved by quick navigation ({item.Value.Name}) to {field.Label} and read its first line (browseMode.py, TextInfoQuickNavItem.report)");
+                        }
                     }
 
                     return reason == Reason.Focus
-                        ? (start, end, $"The focus moved to {field.Label}; NVDA read it (browseMode.py, event_gainFocus)")
-                        : (start, end, $"NVDA moved by quick navigation ({item!.Value.Name}) to {field.Label} and read it (browseMode.py, TextInfoQuickNavItem.report)");
+                        ? (Whole(start, end), start, caret, $"The focus moved to {field.Label}; NVDA read it (browseMode.py, event_gainFocus)")
+                        : (Whole(start, end), start, caret, $"NVDA moved by quick navigation ({item!.Value.Name}) to {field.Label} and read it (browseMode.py, TextInfoQuickNavItem.report)");
                 }
 
-                return (-1, -1, reason == Reason.Focus
+                return (null, -1, null, reason == Reason.Focus
                     ? "the object focused is not in the recorded tree as NVDA's buffer would hold it"
                     : $"the object NVDA moved to is not a {item?.Name ?? "quick navigation item"} in the recorded tree");
-            }
-
-            // A line: the text of the object, or its first.
-            var at = -1;
-            for (var index = path.Count - 1; index >= 0 && at < 0; index--)
-            {
-                var key = path[index];
-                at = commands.FindIndex(command => command is Text text && text.Key == key && !string.IsNullOrWhiteSpace(text.Value));
-                if (at < 0 && StartOf(key) is var start and >= 0)
-                {
-                    var end = EndOf(start);
-                    at = commands.FindIndex(start, end - start + 1, command => command is Text text && !string.IsNullOrWhiteSpace(text.Value));
-                }
-            }
-
-            if (at < 0)
-            {
-                return (-1, -1, "the line NVDA moved to has no text in the recorded tree");
-            }
-
-            var (from, to) = LineAt(commands, at);
-            var length = commands.Skip(from).Take(to - from + 1).OfType<Text>().Sum(text => text.Value.Length);
-            if (length > settings.MaxLineLength)
-            {
-                uncertain.Add($"the line is {length.ToString(CultureInfo.InvariantCulture)} characters, more than NVDA's maximum line length of {settings.MaxLineLength.ToString(CultureInfo.InvariantCulture)}, so NVDA splits it and which part it read is not known");
             }
 
             if (!settings.UseScreenLayout)
@@ -557,7 +557,307 @@ public sealed partial class NvdaAnnouncementTimeline
                 uncertain.Add("screen layout is off, so NVDA puts each link and control on a line of its own, which the model does not do");
             }
 
-            return (from, to, $"NVDA moved by line and read the line with {DescribeText(commands, from, to)} (cursorManager.py, _caretMovementScriptHelper)");
+            // A line: from where NVDA's caret was, the next or previous line
+            // (cursorManager.py, _caretMovementScriptHelper, by
+            // textInfos.UNIT_LINE), where it holds the reading position's
+            // object.
+            var next = !step.CommandNames.Contains("previous line");
+            var objectKey = path[^1];
+            var caretWhy = _caretUnknown;
+            if (_caret is { } was && PositionOf(commands, positions, was) is { } at)
+            {
+                if (MoveByLine(commands, positions, at, next, settings.MaxLineLength) is { } moved)
+                {
+                    var (part, partFrom) = Part(commands, positions, moved.From, moved.To, moved.Start, moved.End);
+                    var holds = part.Any(command => command is Text text && text.Key == objectKey || command is Start start && start.Field.Key == objectKey) ||
+                        OpenAt(commands, partFrom).Any(field => field.Key == objectKey);
+                    if (holds)
+                    {
+                        var parts = moved.Parts > 1
+                            ? $", part {moved.Part.ToString(CultureInfo.InvariantCulture)} of {moved.Parts.ToString(CultureInfo.InvariantCulture)} of a line longer than NVDA's maximum line length of {settings.MaxLineLength.ToString(CultureInfo.InvariantCulture)}, split as NVDA splits it (vbufBase/storage.cpp, getLineOffsets)"
+                            : string.Empty;
+                        return (part, partFrom, CaretAt(commands, positions, moved.Start),
+                            $"NVDA moved by line from where its caret was and read the line with {DescribeText(part)}{parts} (cursorManager.py, _caretMovementScriptHelper)");
+                    }
+
+                    caretWhy = "the line after where NVDA's caret was does not hold the reading position's object";
+                }
+                else
+                {
+                    caretWhy = $"there is no {(next ? "next" : "previous")} line after where NVDA's caret was";
+                }
+            }
+
+            // Where the caret was is not known, or does not agree with the
+            // reading position: the reading position object's line.
+            var found = -1;
+            for (var index = path.Count - 1; index >= 0 && found < 0; index--)
+            {
+                var key = path[index];
+                found = commands.FindIndex(command => command is Text text && text.Key == key && !string.IsNullOrWhiteSpace(text.Value));
+                if (found < 0 && StartOf(key) is var start and >= 0)
+                {
+                    var end = EndOf(start);
+                    found = commands.FindIndex(start, end - start + 1, command => command is Text text && !string.IsNullOrWhiteSpace(text.Value));
+                }
+            }
+
+            if (found < 0)
+            {
+                return (null, -1, null, "the line NVDA moved to has no text in the recorded tree");
+            }
+
+            var (from, to) = LineAt(commands, found);
+            var whole = Whole(from, to);
+            var lineBreaks = BreaksOf(commands, positions, from, to, settings.MaxLineLength);
+            if (lineBreaks.Count > 2)
+            {
+                var length = lineBreaks.Max - lineBreaks.Min;
+                uncertain.Add($"the line is {length.ToString(CultureInfo.InvariantCulture)} characters, more than NVDA's maximum line length of {settings.MaxLineLength.ToString(CultureInfo.InvariantCulture)}, so NVDA splits it into {(lineBreaks.Count - 1).ToString(CultureInfo.InvariantCulture)} parts; which it read is not known, as {caretWhy}, so the whole line is shown");
+                return (whole, from, null, $"NVDA moved by line and read part of the line with {DescribeText(whole)} (cursorManager.py, _caretMovementScriptHelper)");
+            }
+
+            if (_caret is not null)
+            {
+                uncertain.Add($"{caretWhy}, so the line is the reading position's");
+            }
+
+            return (whole, from, CaretAt(commands, positions, lineBreaks.Min),
+                $"NVDA moved by line and read the line with {DescribeText(whole)} (cursorManager.py, _caretMovementScriptHelper)");
+        }
+
+        // The offset in the buffer's text of each command: where a text
+        // starts, or where a field starts or ends.
+        private static int[] PositionsOf(List<Command> commands)
+        {
+            var positions = new int[commands.Count];
+            var offset = 0;
+            for (var index = 0; index < commands.Count; index++)
+            {
+                positions[index] = offset;
+                if (commands[index] is Text text)
+                {
+                    offset += text.Value.Length;
+                }
+            }
+
+            return positions;
+        }
+
+        // Where a line ends: after its last command.
+        private static int EndOfLine(List<Command> commands, int[] positions, int to) =>
+            positions[to] + (commands[to] is Text text ? text.Value.Length : 0);
+
+        // Where NVDA splits a line longer than its maximum line length
+        // (vbufBase/storage.cpp, getLineOffsets): the line's start and end,
+        // and, each time the count reaches the maximum, the last possible
+        // break at or before it, a node's start or end or a word's start,
+        // where one is within the maximum, else there.
+        internal static SortedSet<int> BreaksOf(List<Command> commands, int[] positions, int from, int to, int maxLineLength)
+        {
+            var lineStart = positions[from];
+            var lineEnd = EndOfLine(commands, positions, to);
+            var real = new SortedSet<int> { lineStart, lineEnd };
+            if (maxLineLength <= 0)
+            {
+                return real;
+            }
+
+            var possible = new SortedSet<int>();
+            for (var index = from; index <= to; index++)
+            {
+                possible.Add(positions[index]);
+                if (commands[index] is Text text)
+                {
+                    possible.Add(positions[index] + text.Value.Length);
+                    for (var offset = 1; offset < text.Value.Length; offset++)
+                    {
+                        if (!char.IsWhiteSpace(text.Value[offset]) && char.IsWhiteSpace(text.Value[offset - 1]))
+                        {
+                            possible.Add(positions[index] + offset);
+                        }
+                    }
+                }
+            }
+
+            for (int offset = lineStart, count = 0; offset < lineEnd; ++offset, ++count)
+            {
+                if (count == maxLineLength)
+                {
+                    var before = possible.GetViewBetween(int.MinValue, offset);
+                    if (before.Count > 0 && before.Max > offset - maxLineLength)
+                    {
+                        offset = before.Max;
+                    }
+
+                    real.Add(offset);
+                    count = 0;
+                }
+            }
+
+            return real;
+        }
+
+        // The line, or line part, NVDA's caret moves to from an offset by
+        // next or previous line: the commands of its line, its offsets, and
+        // which part of how many it is; null where there is none.
+        private static (int From, int To, int Start, int End, int Part, int Parts)? MoveByLine(
+            List<Command> commands, int[] positions, int at, bool next, int maxLineLength)
+        {
+            var holding = commands.FindIndex(command => command is Text);
+            for (var index = 0; index < commands.Count; index++)
+            {
+                if (commands[index] is Text text && positions[index] <= at && at < positions[index] + text.Value.Length)
+                {
+                    holding = index;
+                    break;
+                }
+            }
+
+            if (holding < 0)
+            {
+                return null;
+            }
+
+            var (from, to) = LineAt(commands, holding);
+            var breaks = BreaksOf(commands, positions, from, to, maxLineLength);
+            var partStart = breaks.GetViewBetween(int.MinValue, at).Max;
+            var partEnd = breaks.GetViewBetween(at + 1, int.MaxValue).Min;
+            (int, int, int, int, int, int) PartOf(int lineFrom, int lineTo, SortedSet<int> lineBreaks, int start)
+            {
+                var list = lineBreaks.ToList();
+                var number = list.IndexOf(start);
+                return (lineFrom, lineTo, start, list[number + 1], number + 1, list.Count - 1);
+            }
+
+            if (next)
+            {
+                if (partEnd < breaks.Max)
+                {
+                    return PartOf(from, to, breaks, partEnd);
+                }
+
+                var following = commands.FindIndex(to + 1, command => command is Text text && text.Value.Length > 0);
+                if (following < 0)
+                {
+                    return null;
+                }
+
+                var line = LineAt(commands, following);
+                var lineBreaks = BreaksOf(commands, positions, line.From, line.To, maxLineLength);
+                return PartOf(line.From, line.To, lineBreaks, lineBreaks.Min);
+            }
+
+            if (partStart > breaks.Min)
+            {
+                return PartOf(from, to, breaks, breaks.GetViewBetween(int.MinValue, partStart - 1).Max);
+            }
+
+            var preceding = commands.FindLastIndex(from - 1 < 0 ? 0 : from - 1, command => command is Text text && text.Value.Length > 0);
+            if (from == 0 || preceding < 0)
+            {
+                return null;
+            }
+
+            var previous = LineAt(commands, preceding);
+            var previousBreaks = BreaksOf(commands, positions, previous.From, previous.To, maxLineLength);
+            return PartOf(previous.From, previous.To, previousBreaks, previousBreaks.GetViewBetween(int.MinValue, previousBreaks.Max - 1).Max);
+        }
+
+        // The commands of a line from one offset to another, a text cut
+        // where they fall within it, with the index of the first; a field
+        // ending is kept where it is open.
+        private static (List<Command> Part, int From) Part(List<Command> commands, int[] positions, int from, int to, int start, int end)
+        {
+            var part = new List<Command>();
+            var first = -1;
+            var open = new List<Field>();
+            for (var index = from; index <= to; index++)
+            {
+                var at = positions[index];
+                var command = commands[index];
+                if (first < 0)
+                {
+                    var begins = command switch
+                    {
+                        Text text => at < end && at + text.Value.Length > start,
+                        Start => at >= start && at < end,
+                        _ => false
+                    };
+                    if (!begins)
+                    {
+                        continue;
+                    }
+
+                    first = index;
+                    open = OpenAt(commands, index);
+                }
+
+                switch (command)
+                {
+                    case Text text when at < end && at + text.Value.Length > start:
+                        var cutStart = Math.Max(start, at) - at;
+                        var cutEnd = Math.Min(end, at + text.Value.Length) - at;
+                        part.Add(text with { Value = text.Value[cutStart..cutEnd] });
+                        break;
+                    case Start begin when at < end:
+                        part.Add(begin);
+                        open.Add(begin.Field);
+                        break;
+                    case End close when at <= end && open.Count > 0 && ReferenceEquals(open[^1], close.Field):
+                        part.Add(close);
+                        open.RemoveAt(open.Count - 1);
+                        break;
+                    case Break or Gap when at >= start && at < end:
+                        part.Add(command);
+                        break;
+                }
+            }
+
+            return (part, first < 0 ? from : first);
+        }
+
+        // The buffer offset of a caret, by its object's text.
+        private static int? PositionOf(List<Command> commands, int[] positions, (string Key, int Offset) caret)
+        {
+            var seen = 0;
+            for (var index = 0; index < commands.Count; index++)
+            {
+                if (commands[index] is Text text && text.Key == caret.Key)
+                {
+                    if (caret.Offset < seen + text.Value.Length)
+                    {
+                        return positions[index] + caret.Offset - seen;
+                    }
+
+                    seen += text.Value.Length;
+                }
+            }
+
+            return null;
+        }
+
+        // The caret at a buffer offset, by the text there or the first after.
+        private static (string Key, int Offset)? CaretAt(List<Command> commands, int[] positions, int at)
+        {
+            for (var index = 0; index < commands.Count; index++)
+            {
+                if (commands[index] is Text text && text.Value.Length > 0 && at < positions[index] + text.Value.Length)
+                {
+                    var offset = Math.Max(0, at - positions[index]);
+                    for (var before = 0; before < index; before++)
+                    {
+                        if (commands[before] is Text earlier && earlier.Key == text.Key)
+                        {
+                            offset += earlier.Value.Length;
+                        }
+                    }
+
+                    return (text.Key, offset);
+                }
+            }
+
+            return null;
         }
 
         // The line around a command: from after the block boundary before
@@ -579,9 +879,9 @@ public sealed partial class NvdaAnnouncementTimeline
             return (from, to);
         }
 
-        private static string DescribeText(List<Command> commands, int from, int to)
+        private static string DescribeText(List<Command> commands)
         {
-            var text = Collapse(string.Concat(commands.Skip(from).Take(to - from + 1).OfType<Text>().Select(item => item.Value)));
+            var text = Collapse(string.Concat(commands.OfType<Text>().Select(item => item.Value)));
             return text.Length > 40 ? $"\"{text[..40]}...\"" : $"\"{text}\"";
         }
 
