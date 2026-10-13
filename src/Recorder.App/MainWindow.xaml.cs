@@ -1748,6 +1748,7 @@ public partial class MainWindow : Window
         }
 
         SaveLayout();
+        CloseTornTabs();
         eventArgs.Cancel = true;
         if (_transitioning)
         {

@@ -49,6 +49,22 @@
       <Setter Property="Focusable" Value="False" />
       <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
     </Style>
+    <!-- A tab's button to open it in its own window: an icon, Windows'
+         "open in new window" glyph, with the full text as its name and tip,
+         as the owner asked (2026-10-12). A 44 by 44 pixel target, as the
+         change buttons, and the single-click way to tear a tab out, for
+         WCAG 2.5.7, as dragging the tab is the other way. -->
+    <Style x:Key="TearOutButton" TargetType="Button">
+      <Setter Property="Width" Value="44" />
+      <Setter Property="Height" Value="44" />
+      <Setter Property="MinHeight" Value="44" />
+      <Setter Property="Margin" Value="8,0,-6,0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+      <Setter Property="FontSize" Value="16" />
+      <Setter Property="Content" Value="&#xE8A7;" />
+      <Setter Property="ToolTip" Value="{Binding (AutomationProperties.Name), RelativeSource={RelativeSource Self}}" />
+    </Style>
     <Style x:Key="ColumnSplitter" TargetType="GridSplitter">
       <Setter Property="Width" Value="5" />
       <Setter Property="HorizontalAlignment" Value="Stretch" />
@@ -814,6 +830,16 @@
              nothing moves. Windows' default white
              tab panel left the light text at a low contrast (owner's
              screenshots, 2026-10-12). -->
+        <Border Grid.Column="0"
+                Background="{StaticResource PanelBackground}"
+                BorderBrush="{StaticResource PanelBorder}"
+                BorderThickness="1">
+          <TextBlock x:Name="AllTabsTornOutTextBlock"
+                     Margin="12"
+                     TextWrapping="Wrap"
+                     Visibility="Collapsed"
+                     Text="Each of these tabs is in its own window. Close a window to put its tab back here." />
+        </Border>
         <TabControl x:Name="DetailsTabControl"
                     Grid.Column="0"
                     Background="{StaticResource PanelBackground}"
@@ -868,7 +894,20 @@
               </Setter>
             </Style>
           </TabControl.Resources>
-          <TabItem x:Name="BrowserNavigationTab" Header="Browser navigation correlation">
+          <TabItem x:Name="BrowserNavigationTab"
+                   AutomationProperties.Name="Browser navigation correlation"
+                   PreviewMouseLeftButtonDown="DetailsTab_PreviewMouseLeftButtonDown"
+                   PreviewMouseMove="DetailsTab_PreviewMouseMove"
+                   PreviewMouseLeftButtonUp="DetailsTab_PreviewMouseLeftButtonUp">
+            <TabItem.Header>
+              <StackPanel Orientation="Horizontal">
+                <TextBlock VerticalAlignment="Center" Text="Browser navigation correlation" />
+                <Button Style="{StaticResource TearOutButton}"
+                        Tag="{Binding ElementName=BrowserNavigationTab}"
+                        Click="TearOutButton_Click"
+                        AutomationProperties.Name="Open Browser navigation correlation in its own window" />
+              </StackPanel>
+            </TabItem.Header>
           <Grid Margin="8">
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto" />
@@ -921,7 +960,20 @@
                      Text="Open a recording with browser evidence to inspect navigation correlation." />
           </Grid>
           </TabItem>
-          <TabItem x:Name="ReadingStepsTab" Header="Reading position steps">
+          <TabItem x:Name="ReadingStepsTab"
+                   AutomationProperties.Name="Reading position steps"
+                   PreviewMouseLeftButtonDown="DetailsTab_PreviewMouseLeftButtonDown"
+                   PreviewMouseMove="DetailsTab_PreviewMouseMove"
+                   PreviewMouseLeftButtonUp="DetailsTab_PreviewMouseLeftButtonUp">
+            <TabItem.Header>
+              <StackPanel Orientation="Horizontal">
+                <TextBlock VerticalAlignment="Center" Text="Reading position steps" />
+                <Button Style="{StaticResource TearOutButton}"
+                        Tag="{Binding ElementName=ReadingStepsTab}"
+                        Click="TearOutButton_Click"
+                        AutomationProperties.Name="Open Reading position steps in its own window" />
+              </StackPanel>
+            </TabItem.Header>
             <Grid Margin="8">
               <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />

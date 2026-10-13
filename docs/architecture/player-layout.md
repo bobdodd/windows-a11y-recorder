@@ -104,6 +104,33 @@ when built.
 - The splitter is reachable by keyboard and named, like the existing
   splitters.
 
+## Tabs that tear out
+
+Agreed with the owner on 2026-10-12, as the player is already busy: the
+tabs of the panel under the timeline (Browser navigation correlation,
+Reading position steps, and, with step 4c, Accessibility tree) tear out
+into windows of their own, as tabs do in web browsers, in place of a
+separate window for the tree. Only these three tabs for now.
+
+- Each tab has a button with Windows' "open in new window" icon (Segoe
+  MDL2 Assets, E8A7), whose name and tip give the full text, such as "Open
+  Accessibility tree in its own window", as the owner asked. It is 44 by 44
+  pixels, the size of the Properties change buttons.
+- Dragging a tab more than 40 pixels above or below the tab strip also
+  tears it out, at the pointer. The button is the way without dragging,
+  as WCAG 2.5.7, Dragging Movements, asks: "All functionality that uses a
+  dragging movement for operation can be achieved by a single pointer
+  without dragging"
+  ([W3C](https://www.w3.org/WAI/WCAG22/Understanding/dragging-movements.html)).
+- A torn out tab's window opens where its content was, at its size, takes
+  the player's dark panels and styles, and keeps its place for the rest of
+  the session. Closing it puts the tab back in its place in the panel and
+  selects it. The windows close with the player.
+- With every tab torn out, the panel says "Each of these tabs is in its
+  own window. Close a window to put its tab back here."
+- The player's keyboard commands, such as playback and zoom, work in the
+  player's window, not in a tab's own window.
+
 ## Required tests
 
 - Unit tests of reading and writing the layout file, including a missing,
