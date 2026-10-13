@@ -1109,7 +1109,7 @@
                         MinHeight="70"
                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                         AutomationProperties.Name="Accessibility tree at the playhead"
-                        AutomationProperties.HelpText="Click an object, or press Enter on it, to move the playhead to when its version was recorded and show its record in Selected event values.">
+                        AutomationProperties.HelpText="Click an object, or press Enter on it, to show its recorded version in Selected event values. The playhead does not move.">
                 <TreeView.ItemContainerStyle>
                   <Style TargetType="TreeViewItem">
                     <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />

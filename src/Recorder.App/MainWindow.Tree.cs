@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using Recorder.Session;
@@ -14,8 +16,10 @@ namespace Recorder.App;
 // never scrolls, expands, or collapses by itself: when first shown for a
 // recording only the path to the reading position is expanded (the root,
 // when it is unknown), and the two Show buttons expand the path to their
-// object and scroll to it. Clicking an object selects its version's
-// record, which moves the playhead to when it was recorded.
+// object and scroll to it. Clicking an object shows its version's record
+// in Selected event values without moving the playhead: the owner found
+// on 2026-10-12 that moving it, as first built, sent it back to 2.98 s for
+// most objects, whose only version is the page's first tree.
 public partial class MainWindow
 {
     private readonly ObservableCollection<TreeRowView> _treeRoots = [];
@@ -269,7 +273,7 @@ public partial class MainWindow
         }
 
         e.Handled = true;
-        GoToTreeRow(view);
+        ShowTreeRowRecord(view);
     }
 
     private void TreeRow_KeyDown(object sender, KeyEventArgs e)
@@ -277,27 +281,41 @@ public partial class MainWindow
         if (e.Key == Key.Enter && sender is TreeViewItem { DataContext: TreeRowView view, IsSelected: true })
         {
             e.Handled = true;
-            GoToTreeRow(view);
+            ShowTreeRowRecord(view);
         }
     }
 
-    // Selects the record of the object's version, which moves the playhead
-    // to when it was recorded.
-    private void GoToTreeRow(TreeRowView view)
+    // Shows the record of the object's version in Selected event values,
+    // leaving the playhead where it is.
+    private void ShowTreeRowRecord(TreeRowView view)
     {
-        if (_playbackArchive is null || view.EventId is not { } eventId)
+        if (_playbackArchive is not { } archive || view.EventId is not { } eventId ||
+            !archive.TimelineEvents.TryGetValue(eventId, out var item))
         {
             return;
         }
 
-        if (_playbackArchive.TimelineEvents.TryGetValue(eventId, out var item))
+        try
         {
-            TimelineControl.SelectTimelineEvent(item);
+            EventDetailsTextBox.Text = EventValues(archive, item);
         }
-        else if (view.RecordedAt is { } at)
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+                InvalidDataException or InvalidOperationException or System.Text.Json.JsonException)
         {
-            PausePlayback();
-            SeekTo(at, synchronizeAudio: false);
+            EventDetailsTextBox.Text =
+                $"The complete record for event {item.EventId} could not be read: {exception.Message}";
+        }
+
+        EventDetailsTextBox.CaretIndex = 0;
+        EventDetailsTextBox.ScrollToHome();
+        AutomationProperties.SetHelpText(
+            EventDetailsTextBox,
+            $"Selected {item.Channel}, {item.EventType}, {FormatTime(item.MonotonicNanoseconds)}");
+        if (!DetailsShown)
+        {
+            PlaybackStatusTextBlock.Text =
+                $"Selected {FormatTime(item.MonotonicNanoseconds)} | {item.Channel} | {item.EventType} | {archive.Describe(item)}";
         }
     }
 }

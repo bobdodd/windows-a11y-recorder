@@ -1456,9 +1456,13 @@ to its page by that.
   scrolls, expands, or collapses by itself; "Show reading position" and
   "Show under the pointer" expand the path to their object and scroll to
   it.
-- Clicking an object, or Enter on it, selects its version's record, which
-  moves the playhead to when it was recorded, as the owner chose, and shows
-  the record in Selected event values.
+- Clicking an object, or Enter on it, shows its version's record in
+  Selected event values and leaves the playhead where it is. As first
+  built, the click moved the playhead to when the version was recorded, as
+  the owner had chosen; on the target machine the owner found it sent the
+  playhead back to 00:00:02.98 for most objects, whose only version is the
+  page's first tree, so the owner chose on 2026-10-12 that it should not
+  move. The row's "recorded at" time says when the version was sent.
 - Detail text #4A4945 is 9.0 to 1 on white and 7.0 to 1 on the selected
   row's #E6E0F0; the reading position's bar, #6A4C93, is 6.9 to 1 on white.
 
