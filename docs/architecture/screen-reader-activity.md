@@ -1466,6 +1466,10 @@ to its page by that.
 - Detail text #4A4945 is 9.0 to 1 on white and 7.0 to 1 on the selected
   row's #E6E0F0; the reading position's bar, #6A4C93, is 6.9 to 1 on white.
 
+Checked on the target machine on 2026-10-12, with the run of that day:
+the tree, its frame, the path to the reading position, and a click
+showing a row's record without moving the playhead all worked.
+
 Found in building it: Chromium's inline text boxes have negative ids, such
 as `child_ids=-1000000032,-1000000033`, which the reading of child lists did
 not accept, so their parents seemed to list no children. Fixed for the tree
