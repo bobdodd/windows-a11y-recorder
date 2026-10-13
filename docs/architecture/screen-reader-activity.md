@@ -1402,6 +1402,14 @@ keep their size.
   itself, so rows do not move under a head pointer; "Show current step"
   scrolls to it. A line above the list says which step is at the playhead.
 - The tabs and the button are at least 44 by 44 pixels.
+- The tabs take the player's dark panels and light text, as its group
+  boxes do: text #CDCCCA on the panel's #1C1B19 is 10.7 to 1, and on an
+  unselected tab's #201F1D 10.3 to 1. The selected tab has a bar of
+  #B79CE6 along its top (7.3 to 1 against the panel) and bold text; each
+  tab's edge is #75736F (3.5 to 1 or more), and a focused tab's edge takes
+  the system highlight colour. The first build used Windows' default white
+  tab panel, which left the light text at a very low contrast, as the
+  owner's screenshots of 2026-10-12 showed.
 
 Over the target run of 2026-10-12, every one of the 48 steps has a record
 to select.

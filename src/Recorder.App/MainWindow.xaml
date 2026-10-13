@@ -804,14 +804,68 @@
              steps (screen-reader-activity.md, "4b, the list of steps").
              The tabs and each step are at least 44 pixels high, for a
              head pointer or eye tracking. -->
+        <!-- The tabs take the player's dark panels and light text, as the
+             group boxes do: #CDCCCA on #1C1B19 is 10.7 to 1, and on an
+             unselected tab's #201F1D 10.3 to 1. The selected tab has a bar
+             of #B79CE6 along its top, 7.3 to 1 against the panel, and bold
+             text, so it is not shown by colour alone. Each tab's edge is
+             #75736F, 3.5 to 1 or more against the panels; a focused tab's
+             edge takes the system highlight colour, at the same width, so
+             nothing moves. Windows' default white
+             tab panel left the light text at a low contrast (owner's
+             screenshots, 2026-10-12). -->
         <TabControl x:Name="DetailsTabControl"
                     Grid.Column="0"
+                    Background="{StaticResource PanelBackground}"
+                    BorderBrush="{StaticResource PanelBorder}"
+                    Foreground="#CDCCCA"
+                    Padding="0"
                     AutomationProperties.Name="Browser navigations and reading position steps">
           <TabControl.Resources>
             <Style TargetType="TabItem">
               <Setter Property="MinHeight" Value="44" />
               <Setter Property="MinWidth" Value="44" />
               <Setter Property="Padding" Value="12,4" />
+              <Setter Property="Foreground" Value="#CDCCCA" />
+              <Setter Property="Background" Value="#201F1D" />
+              <Setter Property="BorderBrush" Value="#75736F" />
+              <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+              <Setter Property="Template">
+                <Setter.Value>
+                  <ControlTemplate TargetType="TabItem">
+                    <Border x:Name="TabBorder"
+                            Margin="0,0,2,0"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="2,2,2,0">
+                      <Grid>
+                        <Border x:Name="SelectedBar"
+                                Height="3"
+                                VerticalAlignment="Top"
+                                Background="Transparent" />
+                        <ContentPresenter ContentSource="Header"
+                                          Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          RecognizesAccessKey="True" />
+                      </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                      <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="TabBorder" Property="Background" Value="#2A2926" />
+                      </Trigger>
+                      <Trigger Property="IsSelected" Value="True">
+                        <Setter TargetName="TabBorder" Property="Background" Value="{StaticResource PanelBackground}" />
+                        <Setter TargetName="SelectedBar" Property="Background" Value="#B79CE6" />
+                        <Setter Property="FontWeight" Value="SemiBold" />
+                      </Trigger>
+                      <Trigger Property="IsKeyboardFocused" Value="True">
+                        <Setter TargetName="TabBorder" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+                      </Trigger>
+                    </ControlTemplate.Triggers>
+                  </ControlTemplate>
+                </Setter.Value>
+              </Setter>
             </Style>
           </TabControl.Resources>
           <TabItem x:Name="BrowserNavigationTab" Header="Browser navigation correlation">
