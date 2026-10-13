@@ -4,6 +4,98 @@ This project uses semantic version numbers for product releases. Protocol and
 archive schema versions are compatibility contracts and advance independently
 from the product version.
 
+## 1.1.0 - 2026-10-13
+
+The recording work planned after 1.0.0 is complete. The recorder now
+records the accessibility settings of Windows and the browser, Windows
+Magnifier's view, NVDA and what it was asked to do, and every key and
+pointer move. The player shows what these records mean: what happened to
+each key, NVDA's mode, NVDA's own windows, where NVDA was reading, and what
+NVDA had to announce at each step. Analysis and reporting are the next
+phase.
+
+This is a source release. It does not include packaged application or
+Chromium binaries. The changes to Chromium are in `chromium/`, prepared and
+installed as in 1.0.0. The browser evidence protocol is version 0.60 (0.55
+in 1.0.0), and database migrations 0019 to 0033 add the new records to the
+catalog.
+
+### Included
+
+- Accessibility preferences: the Windows accessibility settings in force,
+  the browser's preferences as the page received them (protocol 0.56), and
+  the recorded values used in the page recreation (0.57), with each layout
+  change's viewport and device pixel ratio (0.58) and the browser theme
+  (0.59); see
+  [accessibility preferences](docs/architecture/accessibility-preferences.md).
+- Magnified view playback: Windows Magnifier's full screen transform and
+  color effect recorded with each desktop frame, and the participant's view
+  played back as they saw it; see
+  [magnified view playback](docs/architecture/magnified-view-playback.md).
+- The player layout: collapsible settings and details panels, a frame-only
+  view, a remembered layout, previous and next change buttons with a change
+  count on each Properties row, and tabs under the timeline that open in
+  windows of their own, all usable with the mouse alone; see
+  [player layout](docs/architecture/player-layout.md).
+- NVDA tracking: its processes, its module in the browser, and its periods
+  of sound; see
+  [assistive technology detection](docs/architecture/assistive-technology-detection.md).
+- Input: every key from the recorder's own low-level keyboard hook and
+  every mouse event from a low-level mouse hook, with marks where input
+  could not be recorded, and NVDA's keyboard and mouse settings.
+- Screen reader activity in the player: what happened to each key, NVDA's
+  commands named, NVDA's browse or focus mode, NVDA's own windows with their
+  whole UI Automation tree, and NVDA's mouse outcomes; see
+  [screen reader activity](docs/architecture/screen-reader-activity.md).
+- Chromium's accessibility requests: the requests made of a page and
+  Chromium's answers (protocol 0.60), linked with the keys and clicks that
+  caused them, and the object under the pointer; see
+  [accessibility requests](docs/architecture/accessibility-requests.md).
+- The reading position: where NVDA was reading at each step, as a
+  Properties row, a timeline strip, a list of steps, and the recorded
+  accessibility tree at the playhead.
+- What NVDA had to announce: at each step, the words NVDA's own rules give
+  for what it read, from NVDA 2026.2's speech rules and 36 of its recorded
+  reporting settings, including long lines read in parts and Page Down and
+  Page Up by its lines per page. This is inferred from NVDA's source, not a
+  transcript of its speech, and each step says how sure it is.
+
+### Validation
+
+- Each part was run on the target Windows machine with NVDA 2026.2, with
+  the results recorded in its design document, and in
+  [screen reader keys](docs/validation/screen-reader-keys-2026-10-07.md),
+  [keyboard hook](docs/validation/keyboard-hook-2026-10-10.md),
+  [NVDA tracking](docs/validation/nvda-tracking-2026-10-10.md),
+  [Magnifier capture](docs/validation/magnifier-capture-2026-10-07.md), and
+  [magnified playback](docs/validation/magnified-playback-2026-10-07.md).
+- What NVDA had to announce was compared with NVDA's Speech Viewer on
+  cnib.ca/en on 2026-10-13, for headings, Tab, Down Arrow, Page Down, and
+  Page Up.
+- The repository's Windows CI workflow builds the solution and runs the
+  managed tests and the Chromium integration script's tests.
+
+### Known limitations
+
+- What NVDA had to announce is inferred, never a transcript. Formatting
+  reporting, focus mode, page loads, and many roles and commands are not
+  modelled, and are shown as unknown. Over one part of cnib.ca/en the model
+  counts one line more than NVDA when moving by page, for a reason not
+  known; the step falls back to the request's object and is marked
+  uncertain.
+- The secure desktop of a permission prompt is not yet checked; input to
+  an elevated window or the secure desktop reaches neither hook.
+- NVDA crashed once on exit (0xC0000409 in UIAutomationCore.dll) and the
+  recorder crashed in the same place after its collectors had stopped; it
+  did not recur, and is open.
+- No head pointer or eye tracking software was tested.
+- Heat maps of pointer movement and the whole screen's accessibility tree
+  are deferred; see
+  [analysis outstanding work](docs/architecture/analysis-outstanding-work.md).
+- The recreation limits in
+  [recreation outstanding work](docs/architecture/recreation-outstanding-work.md)
+  stand, and the system test of a recording of about an hour still waits.
+
 ## 1.0.0 - 2026-10-07
 
 The first complete version of the Windows Accessibility Session Recorder. It

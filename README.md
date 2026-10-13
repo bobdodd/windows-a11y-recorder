@@ -7,12 +7,16 @@ The project is intended to produce one standalone application that works with NV
 ## Status
 
 The current release is
+[`v1.1.0`](https://github.com/bobdodd/windows-a11y-recorder/releases/tag/v1.1.0),
+which completes the recording work planned after 1.0.0: accessibility
+preferences, magnified view playback, NVDA's activity, and what NVDA had
+to announce at each step, inferred from its source. It is a source release;
+the changes to Chromium are in `chromium/`. See the [changelog](CHANGELOG.md)
+for its scope and known limitations. Earlier releases:
 [`v1.0.0`](https://github.com/bobdodd/windows-a11y-recorder/releases/tag/v1.0.0),
-the first complete version of the recorder, with page recreation at any
-captured frame. It is a source release; the changes to Chromium are in
-`chromium/`. See the [changelog](CHANGELOG.md) for its scope and known
-limitations. The first development baseline was
-[`v0.1.0`](https://github.com/bobdodd/windows-a11y-recorder/releases/tag/v0.1.0).
+the first complete version, and
+[`v0.1.0`](https://github.com/bobdodd/windows-a11y-recorder/releases/tag/v0.1.0),
+the first development baseline.
 
 The repository contains a working technical prototype. The managed solution
 currently implements:

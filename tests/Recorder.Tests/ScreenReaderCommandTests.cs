@@ -271,8 +271,10 @@ public sealed class ScreenReaderCommandTests
     [Fact]
     public void TheConfigurationFolderIsTheCopysOwn()
     {
+        // The copy's own folder, as Windows writes it ("C:\NVDA") or as
+        // another system leaves it ("C:/NVDA").
         Assert.Equal(
-            Path.Combine("C:/NVDA", "userConfig"),
+            Path.Combine(Path.GetDirectoryName("C:/NVDA/nvda.exe")!, "userConfig"),
             NvdaSettings.ConfigFolder("C:/NVDA/nvda.exe", "portable", "C:/Users/User/AppData/Roaming"));
         Assert.Equal(
             Path.Combine("C:/Users/User/AppData/Roaming", "nvda"),
