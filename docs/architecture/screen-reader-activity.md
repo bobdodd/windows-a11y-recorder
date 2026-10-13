@@ -1670,6 +1670,11 @@ the Speech Viewer showed, the Down Arrows inferred, without uncertainty;
 for the target run of 2026-10-12, the one change is that its Down Arrow
 onto the page's opening paragraph reads the first of its two parts.
 
+Checked on the target machine on 2026-10-13 with the fix (7cda55c): in
+"NVDA had to announce", the two Down Arrows are separate rows, the first
+ending "raise awareness and" and the second starting "understanding of
+guide dogs" and ending "equal access for", as the Speech Viewer showed.
+
 ## The screen reader's windows
 
 UI Automation already records them. At playback, NVDA's windows in front
