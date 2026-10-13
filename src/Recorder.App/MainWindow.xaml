@@ -800,10 +800,22 @@
           <ColumnDefinition Width="8" />
           <ColumnDefinition Width="3*" MinWidth="360" />
         </Grid.ColumnDefinitions>
-        <GroupBox Grid.Column="0"
-                  Padding="8"
-                  Header="Browser navigation correlation">
-          <Grid>
+        <!-- Two tabs: the browser navigations, and the reading position's
+             steps (screen-reader-activity.md, "4b, the list of steps").
+             The tabs and each step are at least 44 pixels high, for a
+             head pointer or eye tracking. -->
+        <TabControl x:Name="DetailsTabControl"
+                    Grid.Column="0"
+                    AutomationProperties.Name="Browser navigations and reading position steps">
+          <TabControl.Resources>
+            <Style TargetType="TabItem">
+              <Setter Property="MinHeight" Value="44" />
+              <Setter Property="MinWidth" Value="44" />
+              <Setter Property="Padding" Value="12,4" />
+            </Style>
+          </TabControl.Resources>
+          <TabItem x:Name="BrowserNavigationTab" Header="Browser navigation correlation">
+          <Grid Margin="8">
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto" />
               <RowDefinition Height="*" />
@@ -854,7 +866,89 @@
                      AutomationProperties.Name="Browser navigation correlation summary"
                      Text="Open a recording with browser evidence to inspect navigation correlation." />
           </Grid>
-        </GroupBox>
+          </TabItem>
+          <TabItem x:Name="ReadingStepsTab" Header="Reading position steps">
+            <Grid Margin="8">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+              </Grid.RowDefinitions>
+              <DockPanel Grid.Row="0" Margin="0,0,0,6" LastChildFill="True">
+                <Button x:Name="ShowCurrentStepButton"
+                        DockPanel.Dock="Left"
+                        MinHeight="44"
+                        MinWidth="44"
+                        Padding="12,0"
+                        Content="Show current step"
+                        Click="ShowCurrentStepButton_Click"
+                        AutomationProperties.HelpText="Scrolls the list to the step at the playhead. The list does not scroll by itself." />
+                <TextBlock x:Name="ReadingStepsStatusTextBlock"
+                           Margin="12,0,0,0"
+                           VerticalAlignment="Center"
+                           TextWrapping="Wrap"
+                           Text="Open a recording with accessibility requests to list the reading position's steps." />
+              </DockPanel>
+              <ListBox x:Name="ReadingStepsListBox"
+                       Grid.Row="1"
+                       MinHeight="70"
+                       HorizontalContentAlignment="Stretch"
+                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                       VirtualizingPanel.ScrollUnit="Pixel"
+                       Grid.IsSharedSizeScope="True"
+                       AutomationProperties.Name="Reading position steps"
+                       AutomationProperties.HelpText="Click a step, or press Enter or Space on it, to move the playhead to it and show its basis in Selected event values.">
+                <ListBox.ItemContainerStyle>
+                  <Style TargetType="ListBoxItem">
+                    <Setter Property="MinHeight" Value="44" />
+                    <Setter Property="VerticalContentAlignment" Value="Top" />
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="Padding" Value="4,6" />
+                    <Setter Property="AutomationProperties.Name" Value="{Binding Spoken}" />
+                    <EventSetter Event="MouseLeftButtonUp" Handler="ReadingStep_MouseLeftButtonUp" />
+                    <EventSetter Event="KeyDown" Handler="ReadingStep_KeyDown" />
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                        <Setter Property="BorderBrush" Value="#6A4C93" />
+                        <Setter Property="BorderThickness" Value="3,0,0,0" />
+                        <Setter Property="FontWeight" Value="SemiBold" />
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="StepTime" />
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="StepState" />
+                        <ColumnDefinition Width="2*" />
+                        <ColumnDefinition Width="3*" />
+                      </Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                        <TextBlock Text="{Binding Time}" />
+                        <TextBlock Text="at the playhead">
+                          <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                              <Setter Property="Visibility" Value="Collapsed" />
+                              <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                  <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                              </Style.Triggers>
+                            </Style>
+                          </TextBlock.Style>
+                        </TextBlock>
+                      </StackPanel>
+                      <TextBlock Grid.Column="1" Margin="0,0,10,0" Text="{Binding State}" />
+                      <TextBlock Grid.Column="2" Margin="0,0,10,0" Text="{Binding Cause}" TextWrapping="Wrap" />
+                      <TextBlock Grid.Column="3" Text="{Binding Value}" TextWrapping="Wrap" />
+                    </Grid>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Grid>
+          </TabItem>
+        </TabControl>
         <GridSplitter Grid.Column="1"
                       Width="8"
                       HorizontalAlignment="Stretch"

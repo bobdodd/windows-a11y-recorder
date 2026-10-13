@@ -37,7 +37,28 @@ public sealed record ReadingPositionStep(
 {
     /// <summary>The record of the key or click the step's action is linked with, where it has one.</summary>
     public string? LinkEventId { get; init; }
+
+    /// <summary>What moved it, for the list of steps: the key and its command, the click, the page's focus, or a page load.</summary>
+    public string Cause { get; init; } = string.Empty;
+
+    /// <summary>The step's record on the timeline, where playback has it, so a step can select it.</summary>
+    public SessionTimelineEvent? Event { get; init; }
+
+    /// <summary>The step's time as the player's clock gives it.</summary>
+    public string When => WindowsPreferenceTimeline.Clock(Time);
+
+    /// <summary>What is known, in words, so the list does not rest on colour.</summary>
+    public string State => Kind switch
+    {
+        ReadingPositionKind.Known => "Known",
+        ReadingPositionKind.SameObject => "Same object",
+        ReadingPositionKind.Uncertain => "Uncertain",
+        _ => "Unknown"
+    };
 }
+
+/// <summary>A page loaded in the tab's main frame: its time and its record.</summary>
+public sealed record PageLoad(long Time, string? EventId);
 
 /// <summary>A span of the reading position band: a known or uncertain object from a step to the next.</summary>
 public sealed record ReadingPositionSpan(ReadingPositionKind Kind, long Start, long End, string Label);
@@ -78,16 +99,18 @@ public sealed class ReadingPositionTimeline
     /// <param name="foreground">The windows brought to the front.</param>
     /// <param name="browserProcessName">The browser's process name, for the windows in front.</param>
     /// <param name="focus">The page's focus changes, of page documents only.</param>
-    /// <param name="pageLoads">The times pages were loaded in the main frame, browser UI pages left out.</param>
+    /// <param name="pageLoads">The pages loaded in the main frame, browser UI pages left out.</param>
     /// <param name="duration">The recording's length, for the band's last span.</param>
+    /// <param name="events">The timeline events of the records, by record, so each step can select its record.</param>
     public ReadingPositionTimeline(
         AccessibilityRequests requests,
         IReadOnlyList<KeptCommand> kept,
         IReadOnlyList<ForegroundWindow> foreground,
         string? browserProcessName,
         IEnumerable<PageFocusChange> focus,
-        IEnumerable<long> pageLoads,
-        long duration)
+        IEnumerable<PageLoad> pageLoads,
+        long duration,
+        IReadOnlyDictionary<string, SessionTimelineEvent>? events = null)
     {
         ArgumentNullException.ThrowIfNull(requests);
         ArgumentNullException.ThrowIfNull(kept);
@@ -104,7 +127,7 @@ public sealed class ReadingPositionTimeline
         // The inputs in time order; at one time, a page load first, then a
         // key, then an action, then a focus change.
         var inputs = new List<(long Time, int Order, object Item)>();
-        inputs.AddRange(pageLoads.Select(time => (time, 0, (object)time)));
+        inputs.AddRange(pageLoads.Select(load => (load.Time, 0, (object)load)));
         inputs.AddRange(kept.Select(command => (command.Time, 1, (object)command)));
         inputs.AddRange(requests.Actions
             .Where(action => action.Action is "scrollToMakeVisible" or "focus")
@@ -117,8 +140,8 @@ public sealed class ReadingPositionTimeline
         {
             ReadingPositionStep? step = item switch
             {
-                long => Unknown(time, null, 5, $"unknown: a page was loaded at {Clock(time)}",
-                    "A page was loaded in the tab, and nothing yet shows where NVDA is reading in it"),
+                PageLoad load => Unknown(time, load.EventId, 5, $"unknown: a page was loaded at {Clock(time)}",
+                    "A page was loaded in the tab, and nothing yet shows where NVDA is reading in it") with { Cause = "a page was loaded" },
                 KeptCommand command => KeptStep(command, current, linkedKeys, windows, browserProcessName, requests),
                 RequestedAction action => ActionStep(action, current, requests),
                 PageFocusChange change => FocusStep(change, current, requests),
@@ -131,6 +154,11 @@ public sealed class ReadingPositionTimeline
                 current.Rule == step.Rule && step.Rule is 6 or 8)
             {
                 continue;
+            }
+
+            if (events is not null && step.EventId is { } recorded && events.TryGetValue(recorded, out var timelineEvent))
+            {
+                step = step with { Event = timelineEvent };
             }
 
             current = step;
@@ -152,6 +180,23 @@ public sealed class ReadingPositionTimeline
 
     public static ReadingPositionTimeline Empty { get; } = new(
         AccessibilityRequests.Empty, [], [], null, [], [], 0);
+
+    /// <summary>The step at a time: the last at or before it; -1 before the first.</summary>
+    public int IndexAt(long time)
+    {
+        var index = _times.BinarySearch(time);
+        if (index < 0)
+        {
+            return ~index - 1;
+        }
+
+        while (index + 1 < _times.Count && _times[index + 1] == time)
+        {
+            index++;
+        }
+
+        return index;
+    }
 
     /// <summary>Whether the recording holds requests made of the page, which the reading position rests on.</summary>
     public bool Recorded { get; }
@@ -247,16 +292,17 @@ public sealed class ReadingPositionTimeline
         var name = string.Join(" or ", command.Names);
         var eventId = requests.KeyEventAt(command.Time);
         var said = $"{name} ({command.Gesture}) at {Clock(command.Time)}";
+        var cause = $"{command.Gesture} ({name})";
         if (command.Names.Any(IsSayAll))
         {
             return Unknown(command.Time, eventId, 6, $"unknown: {said} moves the caret as NVDA reads, and sent nothing",
-                $"NVDA kept {said}, which reads from the caret, moving it as it goes; nothing was sent to the page as it read");
+                $"NVDA kept {said}, which reads from the caret, moving it as it goes; nothing was sent to the page as it read") with { Cause = cause };
         }
 
         if (command.Names.Any(IsSelection))
         {
             return Unknown(command.Time, eventId, 8, $"unknown: {said} moved the caret with the selection, and sent nothing",
-                $"NVDA kept {said}, which moves the caret as it selects; nothing was sent to the page");
+                $"NVDA kept {said}, which moves the caret as it selects; nothing was sent to the page") with { Cause = cause };
         }
 
         if (!command.Names.Any(IsMove) || current is not { Object: { } item })
@@ -275,7 +321,10 @@ public sealed class ReadingPositionTimeline
             requests.LabelOf(item, command.Time),
             $"NVDA kept {said} and sent nothing to the page in the " +
             $"{(AccessibilityRequests.KeyWindowNanoseconds / 1_000_000).ToString(CultureInfo.InvariantCulture)} ms after it; " +
-            "it may not have moved, as at the last of its kind, or may have moved without a trace");
+            "it may not have moved, as at the last of its kind, or may have moved without a trace")
+        {
+            Cause = cause
+        };
     }
 
     // Rules 1, 3, and 9: a scroll request; rule 2: a focus request.
@@ -295,7 +344,8 @@ public sealed class ReadingPositionTimeline
             return new ReadingPositionStep(action.Time, action.EventId, ReadingPositionKind.Known, 2, item,
                 $"{described}, focused", label, $"A request to focus it{after}; NVDA's caret follows the focus")
             {
-                LinkEventId = action.LinkEventId
+                LinkEventId = action.LinkEventId,
+                Cause = CauseOf(action)
             };
         }
 
@@ -307,7 +357,8 @@ public sealed class ReadingPositionTimeline
                 $"A request to scroll it into view{after}. NVDA moves Page Down and Page Up by its lines per page, 25 by default, " +
                 "but in the target run of 2026-10-12 both Page Downs sent a request on the paragraph the caret started on")
             {
-                LinkEventId = action.LinkEventId
+                LinkEventId = action.LinkEventId,
+                Cause = CauseOf(action)
             };
         }
 
@@ -317,14 +368,16 @@ public sealed class ReadingPositionTimeline
                 $"{described}; where within it is unknown", label,
                 $"A request to scroll it into view again{after}; the request names the whole object, not the line, word, or character")
             {
-                LinkEventId = action.LinkEventId
+                LinkEventId = action.LinkEventId,
+                Cause = CauseOf(action)
             };
         }
 
         return new ReadingPositionStep(action.Time, action.EventId, ReadingPositionKind.Known, 1, item, described, label,
             $"A request to scroll it into view{after}")
         {
-            LinkEventId = action.LinkEventId
+            LinkEventId = action.LinkEventId,
+            Cause = CauseOf(action)
         };
     }
 
@@ -337,7 +390,10 @@ public sealed class ReadingPositionTimeline
             return new ReadingPositionStep(change.Time, change.EventId, ReadingPositionKind.Unknown, 2, null,
                 $"unknown: the page's focus moved to DOM node {change.DomNode.ToString(CultureInfo.InvariantCulture)}, which the recorded tree does not name",
                 string.Empty,
-                "The page's focus moved; NVDA's caret follows the focus, but the object is not in the recorded accessibility tree");
+                "The page's focus moved; NVDA's caret follows the focus, but the object is not in the recorded accessibility tree")
+            {
+                Cause = "the page's focus moved"
+            };
         }
 
         if (current is { Object: { } before, Kind: ReadingPositionKind.Known or ReadingPositionKind.SameObject } &&
@@ -349,11 +405,20 @@ public sealed class ReadingPositionTimeline
         return new ReadingPositionStep(change.Time, change.EventId, ReadingPositionKind.Known, 2, item,
             $"{requests.DescribeObject(item, change.Time)}, focused",
             requests.LabelOf(item, change.Time),
-            "The page's focus moved to it; NVDA's caret follows the focus, in browse mode as in focus mode");
+            "The page's focus moved to it; NVDA's caret follows the focus, in browse mode as in focus mode")
+        {
+            Cause = "the page's focus moved"
+        };
     }
 
     private static ReadingPositionStep Unknown(long time, string? eventId, int rule, string value, string basis) =>
         new(time, eventId, ReadingPositionKind.Unknown, rule, null, value, string.Empty, basis);
+
+    // What moved it, for the list of steps.
+    private static string CauseOf(RequestedAction action) =>
+        action.Command is { } command
+            ? $"{command.Gesture} ({string.Join(" or ", command.Names)})"
+            : action.Click ?? (action.KeyName is { } key ? $"{key}, no NVDA command" : "no key or click");
 
     private static string LinkText(RequestedAction action)
     {

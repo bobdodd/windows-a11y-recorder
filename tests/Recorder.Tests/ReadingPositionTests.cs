@@ -63,7 +63,7 @@ public sealed class ReadingPositionTests
         IReadOnlyList<KeptCommand> kept,
         IReadOnlyList<ForegroundWindow>? foreground = null,
         IEnumerable<PageFocusChange>? focus = null,
-        IEnumerable<long>? loads = null)
+        IEnumerable<PageLoad>? loads = null)
     {
         var requests = new AccessibilityRequests(records, keys, kept);
         return new ReadingPositionTimeline(requests, kept, foreground ?? [], "chrome", focus ?? [], loads ?? [], 30 * Second);
@@ -89,6 +89,8 @@ public sealed class ReadingPositionTests
         Assert.Equal("heading \"Contact us\" (node 652)", ValueAt(timeline, 2 * Second));
         var step = Assert.Single(timeline.Steps);
         Assert.Equal((1, ReadingPositionKind.Known), (step.Rule, step.Kind));
+        Assert.Equal(("h (next heading)", "Known", "00:00:01.025"), (step.Cause, step.State, step.When));
+        Assert.Equal((-1, 0, 0), (timeline.IndexAt(Second), timeline.IndexAt(Second + 25 * Millisecond), timeline.IndexAt(9 * Second)));
         Assert.Equal(
             "Reading position after it (inferred, rule 1 of step 4, rule 1): heading \"Contact us\" (node 652)." + Environment.NewLine +
             "Basis: A request to scroll it into view, 25 ms after NVDA kept next heading (h).",
@@ -121,7 +123,7 @@ public sealed class ReadingPositionTests
                 TreeNode("n2", Second / 10, 652, "heading", "Contact us", 42),
                 Sent("s1", Second, "focus", Link, 700)
             ],
-            [],
+            [KeyDown("k1", Second - 20 * Millisecond, 0x09)],
             [],
             focus:
             [
@@ -137,6 +139,7 @@ public sealed class ReadingPositionTests
             "unknown: the page's focus moved to DOM node 99, which the recorded tree does not name",
             ValueAt(timeline, 3 * Second));
         Assert.All(timeline.Steps, step => Assert.Equal(2, step.Rule));
+        Assert.Equal(["Tab, no NVDA command", "the page's focus moved", "the page's focus moved"], timeline.Steps.Select(step => step.Cause));
     }
 
     [Fact]
@@ -154,6 +157,7 @@ public sealed class ReadingPositionTests
         Assert.Equal(2, timeline.Steps.Count);
         var step = timeline.Steps[1];
         Assert.Equal((4, ReadingPositionKind.Uncertain, "k2"), (step.Rule, step.Kind, step.EventId));
+        Assert.Equal(("h (next heading)", "Uncertain"), (step.Cause, step.State));
         Assert.Equal(
             "heading \"Contact us\" (node 652), uncertain since next heading (h) at 00:00:02.000 sent nothing",
             ValueAt(timeline, 4 * Second));
@@ -182,10 +186,10 @@ public sealed class ReadingPositionTests
             [Sent("s1", Second, "scrollToMakeVisible", Heading, 652)],
             [],
             [],
-            loads: [2 * Second]);
+            loads: [new PageLoad(2 * Second, "p1")]);
 
         Assert.Equal("unknown: a page was loaded at 00:00:02.000", ValueAt(timeline, 3 * Second));
-        Assert.Equal(5, timeline.Steps[1].Rule);
+        Assert.Equal((5, "p1", "a page was loaded", "Unknown"), (timeline.Steps[1].Rule, timeline.Steps[1].EventId, timeline.Steps[1].Cause, timeline.Steps[1].State));
         Assert.Equal((Second, 2 * Second), (Assert.Single(timeline.Spans).Start, timeline.Spans[0].End));
     }
 
@@ -314,7 +318,8 @@ public sealed class ReadingPositionTests
             new SessionRecordingConfiguration(true, true, true, true, 5, true, true),
             [], [], 1, 0, null));
 
-        Assert.Equal([null, "e4", "e5"], archive.ReadingPosition.Steps.Select(step => step.EventId));
+        Assert.Equal(["e1", "e4", "e5"], archive.ReadingPosition.Steps.Select(step => step.EventId));
+        Assert.Equal(["e1", "e4", "e5"], archive.ReadingPosition.Steps.Select(step => step.Event?.EventId));
         Assert.Equal(5, archive.ReadingPosition.Steps[0].Rule);
         Assert.Equal("link \"Donate\" (node 700), focused", Assert.Single(archive.ReadingPosition.RowsAt(3 * Second)).Value);
     }

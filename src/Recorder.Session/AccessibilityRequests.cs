@@ -23,7 +23,11 @@ public sealed record RequestedAction(
     string? LinkEventId,
     long? LinkTime,
     string? Click,
-    KeptCommand? Command);
+    KeptCommand? Command)
+{
+    /// <summary>The name of the key before it, where a key, not a click, is linked with it.</summary>
+    public string? KeyName { get; init; }
+}
 
 /// <summary>An object of a page's accessibility tree: its tree, node, role, and name.</summary>
 public sealed record TreeObject(string TreeId, long NodeId, string Role, string Name);
@@ -895,7 +899,10 @@ public sealed class AccessibilityRequests
                     before?.EventId,
                     before?.Time,
                     before?.Click,
-                    before is { Click: null } pressed ? kept.GetValueOrDefault(pressed.Time) : null));
+                    before is { Click: null } pressed ? kept.GetValueOrDefault(pressed.Time) : null)
+                {
+                    KeyName = before is { Click: null } linkedKey ? KeyboardHookRecords.KeyName(linkedKey.VirtualKey) : null
+                });
             }
 
             if (KeyBefore(keys, item.Time) is { } key && SentText(item) is { } text)

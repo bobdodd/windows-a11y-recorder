@@ -114,6 +114,11 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<BrowserPageCommit> _pageCommits = [];
     private readonly List<(string EventId, long Time, JsonElement Payload)> _pageFocus = [];
     private readonly HashSet<string> _pageDocuments = new(StringComparer.Ordinal);
+    private readonly List<PageLoad> _pageLoads = [];
+
+    // The timeline events of the records a reading position step can rest
+    // on, so the list of steps can select them.
+    private readonly Dictionary<string, SessionTimelineEvent> _stepEvents = new(StringComparer.Ordinal);
     private readonly List<ForegroundWindow> _foreground = [];
     private readonly List<FocusedElement> _focus = [];
     private readonly List<WindowSnapshot> _windowSnapshots = [];
@@ -301,6 +306,7 @@ public sealed class SessionPlaybackArchiveBuilder
         {
             _keyEvidence.Add(new KeyEvidenceRecord(
                 timelineEvent.EventId, timestamp, timelineEvent.Channel, timelineEvent.EventType, payload.Clone()));
+            _stepEvents.TryAdd(timelineEvent.EventId, timelineEvent);
         }
 
         if (payload.ValueKind == JsonValueKind.Object &&
@@ -316,6 +322,10 @@ public sealed class SessionPlaybackArchiveBuilder
         {
             _accessibilityRequests.Add(new KeyEvidenceRecord(
                 timelineEvent.EventId, timestamp, timelineEvent.Channel, timelineEvent.EventType, payload.Clone()));
+            if (timelineEvent.EventType == BrowserEvidenceEventTypes.AccessibilityActionSent)
+            {
+                _stepEvents.TryAdd(timelineEvent.EventId, timelineEvent);
+            }
         }
 
         if (timelineEvent.Channel == "window.foreground" &&
@@ -359,6 +369,11 @@ public sealed class SessionPlaybackArchiveBuilder
             PageCommitOf(timestamp, payload) is { } commit)
         {
             _pageCommits.Add(commit);
+            if (ReadingPositionTimeline.IsPageUrl(commit.Url))
+            {
+                _pageLoads.Add(new PageLoad(timestamp, timelineEvent.EventId));
+                _stepEvents.TryAdd(timelineEvent.EventId, timelineEvent);
+            }
         }
 
         // The documents of pages, main frames' and frames', not the
@@ -378,6 +393,7 @@ public sealed class SessionPlaybackArchiveBuilder
             ReadingPositionTimeline.IsFocusEvidence(timelineEvent.Channel, timelineEvent.EventType))
         {
             _pageFocus.Add((timelineEvent.EventId, timestamp, payload.Clone()));
+            _stepEvents.TryAdd(timelineEvent.EventId, timelineEvent);
         }
 
         if (timelineEvent.Channel.StartsWith("audio.", StringComparison.Ordinal) &&
@@ -489,8 +505,9 @@ public sealed class SessionPlaybackArchiveBuilder
                     _pageFocus
                         .Select(focus => ReadingPositionTimeline.FocusOf(focus.EventId, focus.Time, focus.Payload, _pageDocuments))
                         .OfType<PageFocusChange>(),
-                    _pageCommits.Where(commit => ReadingPositionTimeline.IsPageUrl(commit.Url)).Select(commit => commit.MonotonicNanoseconds),
-                    duration)
+                    _pageLoads,
+                    duration,
+                    _stepEvents)
         };
     }
 

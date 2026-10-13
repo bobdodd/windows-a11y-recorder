@@ -1380,6 +1380,32 @@ rule 5, 1 by rule 6, 1 by rule 8, and 3 by rule 9. The Tabs give the focus
 steps on Home, Section two, and Far down, and after focus mode, Down moves
 from the "Show message" button to the "Read more about the test" link.
 
+### 4b as built
+
+Agreed with the owner on 2026-10-12 and built the same day. The list of
+steps is a tab, "Reading position steps", beside Browser navigation
+correlation in the panel under the timeline, so the video and timeline
+keep their size.
+
+- Each step is a row at least 44 pixels high, with its time, what is known
+  in words (Known, Same object, Uncertain, or Unknown), what moved it, and
+  where it went, as the Properties row gives it. What moved it is the key
+  and NVDA's command, such as "downArrow (next line)", the click, the key
+  with "no NVDA command" where NVDA named none, "the page's focus moved",
+  or "a page was loaded".
+- A click on a step, or Enter or Space on it, selects the step's record:
+  the request, the focus record, the key, or the page's navigation. That
+  moves the playhead to it, and Selected event values gives the basis, as
+  the owner chose, not a second line in each row.
+- The step at the playhead is marked with a purple bar, bold text, and the
+  words "at the playhead", as playback moves. The list never scrolls by
+  itself, so rows do not move under a head pointer; "Show current step"
+  scrolls to it. A line above the list says which step is at the playhead.
+- The tabs and the button are at least 44 by 44 pixels.
+
+Over the target run of 2026-10-12, every one of the 48 steps has a record
+to select.
+
 ## The screen reader's windows
 
 UI Automation already records them. At playback, NVDA's windows in front

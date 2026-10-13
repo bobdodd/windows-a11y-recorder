@@ -848,6 +848,19 @@ public sealed class SessionTimelineControl : FrameworkElement
     private bool IsChannelVisible(string channel) =>
         _visibleChannels is null || _visibleChannels.Contains(channel);
 
+    /// <summary>
+    /// Selects an event from outside the timeline, such as a reading
+    /// position step, raising <see cref="SelectedEventChanged"/> even when
+    /// it is already selected, so the playhead moves back to it.
+    /// </summary>
+    public void SelectTimelineEvent(SessionTimelineEvent item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        _selectedEvent = null;
+        _inWindowStrip = false;
+        SelectEvent(item);
+    }
+
     private void SelectEvent(
         SessionTimelineEvent? item,
         IReadOnlyList<SessionTimelineEvent>? atPoint = null,
