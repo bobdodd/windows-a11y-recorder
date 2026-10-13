@@ -32,7 +32,10 @@ public partial class MainWindow
         var steps = _playbackArchive?.ReadingPosition.Steps ?? [];
         for (var index = 0; index < steps.Count; index++)
         {
-            _readingSteps.Add(new ReadingStepView(steps[index], index));
+            _readingSteps.Add(new ReadingStepView(steps[index], index)
+            {
+                Announcement = _playbackArchive?.NvdaAnnouncements.Of(steps[index])?.Line ?? string.Empty
+            });
         }
 
         ShowCurrentStepButton.IsEnabled = _readingSteps.Count > 0;
@@ -90,7 +93,7 @@ public partial class MainWindow
     {
         if (sender is FrameworkElement { DataContext: ReadingStepView step })
         {
-            GoToReadingStep(step);
+            GoToReadingStep(step.Step);
         }
     }
 
@@ -98,28 +101,28 @@ public partial class MainWindow
     {
         if (e.Key is Key.Enter or Key.Space && sender is FrameworkElement { DataContext: ReadingStepView step })
         {
-            GoToReadingStep(step);
+            GoToReadingStep(step.Step);
             e.Handled = true;
         }
     }
 
     // Selects the step's record, which moves the playhead to it and shows
     // its values; a step without a record moves the playhead only.
-    private void GoToReadingStep(ReadingStepView view)
+    private void GoToReadingStep(ReadingPositionStep step)
     {
         if (_playbackArchive is null)
         {
             return;
         }
 
-        if (view.Step.Event is { } item)
+        if (step.Event is { } item)
         {
             TimelineControl.SelectTimelineEvent(item);
             return;
         }
 
         PausePlayback();
-        SeekTo(view.Step.Time, synchronizeAudio: false);
+        SeekTo(step.Time, synchronizeAudio: false);
     }
 }
 
@@ -148,6 +151,9 @@ public sealed class ReadingStepView : INotifyPropertyChanged
 
     public string Value => Step.Value;
 
+    /// <summary>What NVDA had to announce at the step, for its second line; empty where not worked out.</summary>
+    public string Announcement { get; init; } = string.Empty;
+
     /// <summary>Whether the step is the one at the playhead.</summary>
     public bool IsCurrent
     {
@@ -167,5 +173,5 @@ public sealed class ReadingStepView : INotifyPropertyChanged
 
     /// <summary>The row's accessible name: all its text, and whether it is at the playhead.</summary>
     public string Spoken =>
-        $"{Time}, {State}, {Cause}, {Value}{(IsCurrent ? ", at the playhead" : string.Empty)}";
+        $"{Time}, {State}, {Cause}, {Value}{(Announcement.Length > 0 ? ", " + Announcement : string.Empty)}{(IsCurrent ? ", at the playhead" : string.Empty)}";
 }

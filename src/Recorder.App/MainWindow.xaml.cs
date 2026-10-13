@@ -606,6 +606,12 @@ public partial class MainWindow : Window
         var reading = archive.ReadingPosition.Of(item.EventId) is { } position
             ? position + Environment.NewLine + Environment.NewLine
             : string.Empty;
+        // What NVDA had to announce there (screen-reader-activity.md, "What
+        // NVDA had to announce"), after the reading position.
+        if (archive.NvdaAnnouncements.OfEvent(item.EventId) is { } announced)
+        {
+            reading += announced + Environment.NewLine + Environment.NewLine;
+        }
         return reading + (archive.KeyDispositions.Of(item.EventId) is { } outcome
             ? $"Key outcome ({archive.KeyDispositions.Rule}): {outcome.Text}{Environment.NewLine}" +
               string.Join(Environment.NewLine, outcome.Details) + Environment.NewLine +
@@ -843,6 +849,7 @@ public partial class MainWindow : Window
             TimelineControl.SetScreenReaderWindowSpans(_playbackArchive.ScreenReaderWindows.Spans);
             TimelineControl.SetReadingPositionSpans(_playbackArchive.ReadingPosition.Spans);
             BindReadingSteps();
+            BindAnnouncements();
             BindAccessibilityTree();
             ApplyBrowserNavigationFilter();
             BrowserCorrelationTextBox.Text =
@@ -897,6 +904,7 @@ public partial class MainWindow : Window
             ApplyLayout();
             DisplayPropertiesAt(0);
             BindReadingSteps();
+            BindAnnouncements();
             BindAccessibilityTree();
             busy.Dispose();
             MessageBox.Show(
@@ -1062,6 +1070,7 @@ public partial class MainWindow : Window
         DisplayFrameAt(positionNanoseconds);
         DisplayPropertiesAt(positionNanoseconds);
         DisplayReadingStepAt(positionNanoseconds);
+        DisplayAnnouncementAt(positionNanoseconds);
         DisplayAccessibilityTreeAt(positionNanoseconds);
         DisplayNearestEvent(positionNanoseconds);
         DisplayBrowserCorrelationAt(positionNanoseconds);

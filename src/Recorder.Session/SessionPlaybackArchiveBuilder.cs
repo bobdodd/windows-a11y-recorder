@@ -473,6 +473,23 @@ public sealed class SessionPlaybackArchiveBuilder
         var accessibilityRequests = _accessibilityRequests.Count == 0
             ? AccessibilityRequests.Empty
             : new AccessibilityRequests(_accessibilityRequests, _keyEvidence, keyDispositions.KeptCommands, _mouseEvidence);
+        var readingPosition = accessibilityRequests.Actions.Count == 0
+            ? ReadingPositionTimeline.Empty
+            : new ReadingPositionTimeline(
+                accessibilityRequests,
+                keyDispositions.KeptCommands,
+                _foreground,
+                assistiveTechnology.BrowserProcessName,
+                _pageFocus
+                    .Select(focus => ReadingPositionTimeline.FocusOf(focus.EventId, focus.Time, focus.Payload, _pageDocuments))
+                    .OfType<PageFocusChange>(),
+                _pageLoads,
+                duration,
+                _stepEvents);
+        var accessibilityTree = accessibilityRequests.Trees.Count == 0
+            ? AccessibilityTreeTimeline.Empty
+            : new AccessibilityTreeTimeline(accessibilityRequests, _treeDocuments);
+
         return new SessionPlaybackArchive(
             _root,
             manifest,
@@ -505,22 +522,11 @@ public sealed class SessionPlaybackArchiveBuilder
                 ? new MouseActivity(_mouseEvidence, assistiveTechnology)
                 : MouseActivity.Empty,
             AccessibilityRequests = accessibilityRequests,
-            ReadingPosition = accessibilityRequests.Actions.Count == 0
-                ? ReadingPositionTimeline.Empty
-                : new ReadingPositionTimeline(
-                    accessibilityRequests,
-                    keyDispositions.KeptCommands,
-                    _foreground,
-                    assistiveTechnology.BrowserProcessName,
-                    _pageFocus
-                        .Select(focus => ReadingPositionTimeline.FocusOf(focus.EventId, focus.Time, focus.Payload, _pageDocuments))
-                        .OfType<PageFocusChange>(),
-                    _pageLoads,
-                    duration,
-                    _stepEvents),
-            AccessibilityTree = accessibilityRequests.Trees.Count == 0
-                ? AccessibilityTreeTimeline.Empty
-                : new AccessibilityTreeTimeline(accessibilityRequests, _treeDocuments),
+            ReadingPosition = readingPosition,
+            AccessibilityTree = accessibilityTree,
+            NvdaAnnouncements = readingPosition.Recorded && accessibilityTree.Recorded
+                ? new NvdaAnnouncementTimeline(readingPosition, accessibilityTree, assistiveTechnology, screenReaderMode)
+                : NvdaAnnouncementTimeline.Empty,
             TimelineEvents = _stepEvents
         };
     }

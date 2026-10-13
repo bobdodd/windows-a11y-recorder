@@ -1475,6 +1475,153 @@ as `child_ids=-1000000032,-1000000033`, which the reading of child lists did
 not accept, so their parents seemed to list no children. Fixed for the tree
 and for the Under the pointer row's parents.
 
+## What NVDA had to announce
+
+Agreed with the owner on 2026-10-12 and built the same day. For each
+reading position step, the player works out what NVDA had to announce
+there, by NVDA 2026.2's own rules, from the page's recorded tree and NVDA's
+recorded settings. It is what NVDA had to announce, never what it said:
+speech cut off by the next key, or not heard, is not known, and the
+recording holds no speech to check it against (speech recognition is ruled
+out). Each is labelled "inferred", and where the model does not cover a
+case it says "not modelled yet" or "unknown" and why, rather than guess.
+
+### What the owner chose
+
+- Where it shows: both, as a second line on each row of Reading position
+  steps, and as a fourth tab, "NVDA had to announce".
+- Settings: record all the NVDA settings the rules need.
+- Checking: NVDA's Speech Viewer may be turned on for the test runs only;
+  the recorder neither needs it nor reads it.
+- Scope: the first scope below.
+
+### The first scope
+
+- Tab and Shift+Tab, and the page's focus moving, in browse mode: NVDA's
+  focus rule (reason FOCUS). In focus mode NVDA reports the object instead,
+  which is "not modelled yet".
+- Quick navigation by heading, heading at a level, link, unvisited and
+  visited link, button, graphic, list, list item, landmark, and frame
+  (reason QUICKNAV).
+- Down and Up Arrow, next and previous line (reason CARET, by line).
+- Any other command, a page load, or a key passed to the page is "not
+  modelled yet"; after one, what NVDA last read (its container stack) is
+  not known, and the next step says so.
+- The roles covered: document, section, paragraph, text frame (strong and
+  emphasis), landmarks and region, heading with its level, link, button,
+  graphic, list and list item, frame, and status. A step within or holding
+  an object of any other role, a table for one, is "unknown".
+
+### NVDA's rules ported
+
+- Which function speaks: on focus, `event_gainFocus` calls
+  `speakTextInfo` with reason FOCUS for the focused object
+  ([browseMode.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/browseMode.py)); quick navigation reads the
+  item with `TextInfoQuickNavItem.report`, by its first line for a list,
+  landmark, or frame (same file); moving by line reads the line with
+  `_caretMovementScriptHelper`
+  ([cursorManager.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/cursorManager.py)).
+- What is said: `getTextInfoSpeech` and `getControlFieldSpeech`
+  ([speech.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/speech/speech.py)): the fields NVDA left are said
+  first, by line only ("out of list"; a landmark is left silently); the
+  fields it was already in are said again only where they are links,
+  headings, buttons, or graphics; the fields entered are said; then the
+  text with the fields within it. On focus and quick navigation a link's
+  or heading's text comes before its role, and a named landmark says its
+  name and role. A link's states come before its role. "blank" where
+  nothing else is said.
+- Which fields speak at all: the presentation categories of
+  `getPresentationCategory` ([textInfos](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/textInfos/__init__.py)),
+  with the document formatting settings (a link with reportLinks off is
+  silent, for one).
+- The wording: role names ([role.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/controlTypes/role.py)),
+  "same page" and "visited" ([state.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/controlTypes/state.py),
+  [processAndLabelStates.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/controlTypes/processAndLabelStates.py)),
+  landmark names ([aria.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/aria.py)), and "with N items".
+  "Same page" is NVDA's `isSamePageURL`
+  ([urlUtils.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/utils/urlUtils.py)).
+- The buffer: how NVDA's Chromium backend makes its browse mode text from
+  the tree ([gecko_ia2.cpp](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/nvdaHelper/vbufBackends/gecko_ia2/gecko_ia2.cpp),
+  [gecko_ia2.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/virtualBuffers/gecko_ia2.py)): a link's,
+  button's, heading's, or graphic's name is its content; a name not from
+  the content (an aria-label, a title) is always said, unless a visible
+  label gives it; a block is decided by its display alone, and Chromium's
+  serialization leaves out `display=block`
+  ([ax_node_data.cc](https://raw.githubusercontent.com/chromium/chromium/main/ui/accessibility/ax_node_data.cc));
+  a line is a block's inline run.
+- The text is shown as the Speech Viewer joins the parts, with two spaces
+  between them ([speechViewer.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/speechViewer.py)), each part's
+  spaces collapsed.
+
+### NVDA's reporting settings
+
+NVDA's settings record (`assistive-technology-settings`) gains 35
+settings, each a member named by its key, as written in nvda.ini or null
+where NVDA's default applies, with their defaults from NVDA's
+configuration specification ([configSpec.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/config/configSpec.py)):
+from `[documentFormatting]`, what is reported of links, link types,
+graphics, headings, lists, block quotes, groupings, landmarks, articles,
+frames, figures, clickables, and tables, and the formatting settings; from
+`[presentation]`, shortcut keys and descriptions; from `[virtualBuffers]`,
+the maximum line length, screen layout, and say all on page load; and from
+`[annotations]`, details and ARIA descriptions. Migration
+`0032_nvda_reporting_settings.sql` adds their columns. Formatting reported
+(fonts, colour, emphasis, and the rest) is not modelled, so where one is
+on, each step says so and is uncertain.
+
+A recording made before these settings were recorded, as every recording
+before 2026-10-12, is worked out with NVDA's defaults, and every step says
+so and is marked uncertain. This was the reading taken of the owner's "Yes"
+to the question; showing "unknown" instead for such recordings is a one
+line change if the owner prefers it.
+
+### As built
+
+- `NvdaAnnouncementTimeline` in `Recorder.Session`, built with the
+  playback archive from the reading position's steps, the tree, NVDA's
+  settings at each step, and the mode band. The steps now keep their NVDA
+  command (`CommandNames`) and passed key (`KeyName`); the tree's objects
+  keep Chromium's serialization and description.
+- Each announcement is inferred, uncertain, not modelled, or unknown, with
+  its basis. Uncertain where NVDA's settings are not recorded, where what
+  NVDA last read is not known, where NVDA's mode at a focus change is not
+  known, where a heading's level is taken from its tag (Chromium sends the
+  level only in its extended mode,
+  [ax_object.cc](https://raw.githubusercontent.com/chromium/chromium/main/third_party/blink/renderer/modules/accessibility/ax_object.cc)),
+  where a name comes from another element whose visibility is not
+  recorded, where an object has a description or a state the model does
+  not cover, where a line is longer than NVDA's maximum line length, or
+  where screen layout is off.
+- Reading position steps: each row has a second line, "NVDA had to
+  announce (inferred): ...", or "(inferred, uncertain)", or "not modelled
+  yet" or "unknown" with why.
+- "NVDA had to announce", a fourth tab, tears out as the others do: each
+  step's time, what is known, what moved the reading position, and the
+  text, in rows at least 44 pixels high. As in Reading position steps, the
+  row at the playhead is marked but the list never scrolls by itself;
+  "Show current step" scrolls to it, and a click, or Enter or Space, moves
+  the playhead to the step and selects its record.
+- Selected event values gives, for a step's record or its key, what NVDA
+  had to announce and the basis, after the reading position.
+- Not recorded, and so noted in each basis: whether an object has a click
+  handler, for which NVDA would add "clickable" to an object that is not a
+  link or button.
+
+Worked out for the target run of 2026-10-12, with NVDA's defaults, for
+example: Tab to the Home link, "banner landmark  Main  navigation
+landmark  Home  same page  link"; quick navigation to the second heading,
+"Section one  heading  level 2"; and Down Arrow onto the frame's heading,
+"Same-site frame  frame  heading  level 2  Inside the frame".
+
+Unit tests: `NvdaAnnouncementTests`, 11 tests: focus, quick navigation,
+lines entering and leaving a list and landmarks, the recorded settings,
+a recording without them, a command not modelled, a role not modelled,
+NVDA's same page rule, and the settings record's validation.
+
+To check on the target machine: a new recording with NVDA's Speech Viewer
+on, comparing the player's text with the Speech Viewer's for the same
+steps.
+
 ## The screen reader's windows
 
 UI Automation already records them. At playback, NVDA's windows in front

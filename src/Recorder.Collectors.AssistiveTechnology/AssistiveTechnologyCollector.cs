@@ -833,37 +833,45 @@ public sealed class AssistiveTechnologyCollector : ICaptureCollector
                 copy,
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
         var reading = folder is null ? null : NvdaSettings.Read(folder);
-        Emit(NvdaSettings.SettingsEventType, new
+        var payload = new Dictionary<string, object?>
         {
-            product = AssistiveTechnologyRecords.Nvda.Product,
-            processId,
-            copy,
-            configFolder = folder,
-            read = reading?.Read ?? false,
-            problem = reading is null ? "The configuration folder is not known for this copy." : reading.Problem,
-            keyboardLayout = reading?.KeyboardLayout,
-            nvdaModifierKeys = reading?.NvdaModifierKeys,
-            multiPressTimeout = reading?.MultiPressTimeout,
-            autoPassThroughOnFocusChange = reading?.AutoPassThroughOnFocusChange,
-            autoPassThroughOnCaretMove = reading?.AutoPassThroughOnCaretMove,
-            trapNonCommandGestures = reading?.TrapNonCommandGestures,
-            enableOnPageLoad = reading?.EnableOnPageLoad,
-            profiles = reading?.Profiles ?? [],
-            profileTriggers = reading?.ProfileTriggers ?? false,
-            customGestures = (reading?.CustomGestures ?? []).Select(gesture => new
+            ["product"] = AssistiveTechnologyRecords.Nvda.Product,
+            ["processId"] = processId,
+            ["copy"] = copy,
+            ["configFolder"] = folder,
+            ["read"] = reading?.Read ?? false,
+            ["problem"] = reading is null ? "The configuration folder is not known for this copy." : reading.Problem,
+            ["keyboardLayout"] = reading?.KeyboardLayout,
+            ["nvdaModifierKeys"] = reading?.NvdaModifierKeys,
+            ["multiPressTimeout"] = reading?.MultiPressTimeout,
+            ["autoPassThroughOnFocusChange"] = reading?.AutoPassThroughOnFocusChange,
+            ["autoPassThroughOnCaretMove"] = reading?.AutoPassThroughOnCaretMove,
+            ["trapNonCommandGestures"] = reading?.TrapNonCommandGestures,
+            ["enableOnPageLoad"] = reading?.EnableOnPageLoad,
+            ["profiles"] = reading?.Profiles ?? [],
+            ["profileTriggers"] = reading?.ProfileTriggers ?? false,
+            ["customGestures"] = (reading?.CustomGestures ?? []).Select(gesture => new
             {
                 section = gesture.Section,
                 script = gesture.Script,
                 gesture = gesture.Gesture
             }).ToArray(),
-            gesturesProblem = reading?.GesturesProblem,
-            enableMouseTracking = reading?.EnableMouseTracking,
-            ignoreInjectedMouseInput = reading?.IgnoreInjectedMouseInput,
-            mouseTextUnit = reading?.MouseTextUnit,
-            reportObjectRoleOnMouseEnter = reading?.ReportObjectRoleOnMouseEnter,
-            audioCoordinatesOnMouseMove = reading?.AudioCoordinatesOnMouseMove,
-            reportMouseShapeChanges = reading?.ReportMouseShapeChanges
-        }, Now());
+            ["gesturesProblem"] = reading?.GesturesProblem,
+            ["enableMouseTracking"] = reading?.EnableMouseTracking,
+            ["ignoreInjectedMouseInput"] = reading?.IgnoreInjectedMouseInput,
+            ["mouseTextUnit"] = reading?.MouseTextUnit,
+            ["reportObjectRoleOnMouseEnter"] = reading?.ReportObjectRoleOnMouseEnter,
+            ["audioCoordinatesOnMouseMove"] = reading?.AudioCoordinatesOnMouseMove,
+            ["reportMouseShapeChanges"] = reading?.ReportMouseShapeChanges
+        };
+
+        // The reporting settings, each a member named by its key.
+        foreach (var (_, key, _) in NvdaSettings.ReportingSettings)
+        {
+            payload[key] = reading?.Reporting.GetValueOrDefault(key);
+        }
+
+        Emit(NvdaSettings.SettingsEventType, payload, Now());
     }
 
     private static long Milliseconds(int milliseconds) => milliseconds * 1_000_000L;

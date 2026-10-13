@@ -36,6 +36,12 @@ public sealed record NvdaSettingsReading(
     public string? ReportObjectRoleOnMouseEnter { get; init; }
     public string? AudioCoordinatesOnMouseMove { get; init; }
     public string? ReportMouseShapeChanges { get; init; }
+
+    // The settings that decide what NVDA reports in a browse mode document,
+    // by key (NvdaSettings.ReportingSettings), as written or null where
+    // NVDA's default applies. See docs/architecture/screen-reader-activity.md,
+    // "What NVDA had to announce".
+    public IReadOnlyDictionary<string, string?> Reporting { get; init; } = new Dictionary<string, string?>();
 }
 
 /// <summary>
@@ -48,6 +54,55 @@ public sealed record NvdaSettingsReading(
 public static class NvdaSettings
 {
     public const string SettingsEventType = "assistive-technology-settings";
+
+    /// <summary>
+    /// The settings that decide what NVDA reports in a browse mode document,
+    /// with NVDA's defaults, from NVDA 2026.2's configuration specification
+    /// (https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/config/configSpec.py):
+    /// what is reported of links, headings, lists, landmarks, frames, and the
+    /// rest; the formatting reported, which the model does not cover and so
+    /// notes when it is on; descriptions and shortcut keys; the line length
+    /// and screen layout of browse mode; and annotations. Each is recorded as
+    /// a member of the settings record named by its key.
+    /// </summary>
+    public static IReadOnlyList<(string Section, string Key, string Default)> ReportingSettings { get; } =
+    [
+        ("documentFormatting", "reportLinks", "true"),
+        ("documentFormatting", "reportLinkType", "true"),
+        ("documentFormatting", "reportGraphics", "true"),
+        ("documentFormatting", "reportHeadings", "true"),
+        ("documentFormatting", "reportLists", "true"),
+        ("documentFormatting", "reportBlockQuotes", "true"),
+        ("documentFormatting", "reportGroupings", "true"),
+        ("documentFormatting", "reportLandmarks", "true"),
+        ("documentFormatting", "reportArticles", "false"),
+        ("documentFormatting", "reportFrames", "true"),
+        ("documentFormatting", "reportFigures", "true"),
+        ("documentFormatting", "reportClickable", "true"),
+        ("documentFormatting", "reportTables", "true"),
+        ("documentFormatting", "includeLayoutTables", "false"),
+        ("documentFormatting", "detectFormatAfterCursor", "false"),
+        ("documentFormatting", "reportFontName", "false"),
+        ("documentFormatting", "reportFontSize", "false"),
+        ("documentFormatting", "fontAttributeReporting", "0"),
+        ("documentFormatting", "reportEmphasis", "false"),
+        ("documentFormatting", "reportHighlight", "true"),
+        ("documentFormatting", "reportSuperscriptsAndSubscripts", "false"),
+        ("documentFormatting", "reportColor", "false"),
+        ("documentFormatting", "reportAlignment", "false"),
+        ("documentFormatting", "reportLineSpacing", "false"),
+        ("documentFormatting", "reportStyle", "false"),
+        ("documentFormatting", "reportLineNumber", "false"),
+        ("documentFormatting", "reportLineIndentation", "0"),
+        ("documentFormatting", "reportParagraphIndentation", "false"),
+        ("presentation", "reportKeyboardShortcuts", "true"),
+        ("presentation", "reportObjectDescriptions", "true"),
+        ("virtualBuffers", "maxLineLength", "100"),
+        ("virtualBuffers", "useScreenLayout", "true"),
+        ("virtualBuffers", "autoSayAllOnPageLoad", "true"),
+        ("annotations", "reportDetails", "true"),
+        ("annotations", "reportAriaDescription", "true")
+    ];
 
     /// <summary>The settings read, as section and key of nvda.ini.</summary>
     public static IReadOnlyList<(string Section, string Key)> Keys { get; } =
@@ -64,8 +119,10 @@ public static class NvdaSettings
         ("mouse", "mouseTextUnit"),
         ("mouse", "reportObjectRoleOnMouseEnter"),
         ("mouse", "audioCoordinatesOnMouseMove"),
-        ("mouse", "reportMouseShapeChanges")
+        ("mouse", "reportMouseShapeChanges"),
+        .. ReportingSettings.Select(setting => (setting.Section, setting.Key))
     ];
+
 
     // The defaults of NVDA's configuration specification, for the player.
     public const string DefaultKeyboardLayout = "desktop";
@@ -208,7 +265,8 @@ public static class NvdaSettings
             MouseTextUnit = Value("mouse", "mouseTextUnit"),
             ReportObjectRoleOnMouseEnter = Value("mouse", "reportObjectRoleOnMouseEnter"),
             AudioCoordinatesOnMouseMove = Value("mouse", "audioCoordinatesOnMouseMove"),
-            ReportMouseShapeChanges = Value("mouse", "reportMouseShapeChanges")
+            ReportMouseShapeChanges = Value("mouse", "reportMouseShapeChanges"),
+            Reporting = ReportingSettings.ToDictionary(setting => setting.Key, setting => Value(setting.Section, setting.Key))
         };
     }
 

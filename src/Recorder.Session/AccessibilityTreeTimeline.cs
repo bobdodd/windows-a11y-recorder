@@ -131,6 +131,29 @@ public sealed class AccessibilityTreeTimeline
 
     public static AccessibilityTreeTimeline Empty { get; } = new(AccessibilityRequests.Empty, []);
 
+    // An object of a document as Chromium last serialized it at or before a
+    // time; null where none was by then.
+    internal AccessibilityRequests.TreeNode? NodeAt(string documentToken, long nodeId, long time)
+    {
+        if (!_requests.Trees.TryGetValue(documentToken, out var tree) || !tree.TryGetValue(nodeId, out var versions))
+        {
+            return null;
+        }
+
+        AccessibilityRequests.TreeNode? found = null;
+        foreach (var candidate in versions)
+        {
+            if (candidate.Time > time)
+            {
+                break;
+            }
+
+            found = candidate;
+        }
+
+        return found;
+    }
+
     /// <summary>Whether the recording holds a page's tree.</summary>
     public bool Recorded => _requests.Trees.Count > 0 && _documents.Any(document => document.MainFrame);
 

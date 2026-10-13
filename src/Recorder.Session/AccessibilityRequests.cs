@@ -125,6 +125,11 @@ public sealed class AccessibilityRequests
         public string? EventId { get; init; }
 
         public bool HasChildTree { get; init; }
+
+        // Chromium's serialization of the object, and its description.
+        public string Properties { get; init; } = string.Empty;
+
+        public string Description { get; init; } = string.Empty;
     }
 
     private static readonly System.Text.RegularExpressions.Regex ChildIds =
@@ -449,7 +454,9 @@ public sealed class AccessibilityRequests
                 record.MonotonicNanoseconds, ReadString(payload, "roleName") ?? "object", ReadString(payload, "name") ?? string.Empty, children)
             {
                 EventId = record.EventId,
-                HasChildTree = HasChildTree.IsMatch(serialized)
+                HasChildTree = HasChildTree.IsMatch(serialized),
+                Properties = serialized,
+                Description = ReadString(payload, "description") ?? string.Empty
             });
             if (ReadInt64(payload, "domNodeId") is { } domNode)
             {

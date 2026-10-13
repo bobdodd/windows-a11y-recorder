@@ -100,7 +100,9 @@ Designed in [screen reader activity](screen-reader-activity.md), agreed
   and checked on the target machine 2026-10-12: 4b, the list of steps, as
   in its "4b as built"; the owner found it works functionally. Built and
   checked on the target machine on 2026-10-12: 4c, the tree view, as in its
-  "4c, the tree view, as built".
+  "4c, the tree view, as built". Built 2026-10-12, to check on the target
+  machine with NVDA's Speech Viewer: what NVDA had to announce at each
+  step, as in its "What NVDA had to announce".
 - To settle: the items in its "Questions to settle".
 - To test: as in its "Required tests".
 

@@ -110,7 +110,9 @@ Agreed with the owner on 2026-10-12, as the player is already busy: the
 tabs of the panel under the timeline (Browser navigation correlation,
 Reading position steps, and, with step 4c, Accessibility tree) tear out
 into windows of their own, as tabs do in web browsers, in place of a
-separate window for the tree. Only these three tabs for now.
+separate window for the tree. Only these three tabs for now. A fourth,
+NVDA had to announce, added on 2026-10-12 (screen-reader-activity.md,
+"What NVDA had to announce"), tears out in the same way.
 
 - Each tab has a button with Windows' "open in new window" icon (Segoe
   MDL2 Assets, E8A7), whose name and tip give the full text, such as "Open

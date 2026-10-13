@@ -463,6 +463,13 @@ strip on the timeline, and a basis in Selected event values. See
 [screen reader activity](docs/architecture/screen-reader-activity.md), "The
 reading position (step 4)".
 
+For each step of the reading position, the player also works out what
+NVDA had to announce there, by NVDA's own rules, from the recorded tree and
+NVDA's recorded reporting settings: inferred, never what it said, and "not
+modelled yet" or "unknown" where the rules do not reach. It is a second
+line on each reading position step, and a tab, "NVDA had to announce". See
+the same document, "What NVDA had to announce".
+
 Protocol 0.59 records the browser's theme, its color, color style,
 grayscale setting, and any installed theme, with the light, dark, or
 device mode already recorded, in the Properties panel and on the

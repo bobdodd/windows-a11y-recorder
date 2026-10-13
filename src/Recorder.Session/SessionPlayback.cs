@@ -73,6 +73,9 @@ public sealed record SessionPlaybackArchive(
     /// <summary>The page's accessibility tree at any time, from the checkpoints (step 4c).</summary>
     public AccessibilityTreeTimeline AccessibilityTree { get; init; } = AccessibilityTreeTimeline.Empty;
 
+    /// <summary>What NVDA had to announce at each reading position step (NvdaAnnouncementTimeline).</summary>
+    public NvdaAnnouncementTimeline NvdaAnnouncements { get; init; } = NvdaAnnouncementTimeline.Empty;
+
     /// <summary>
     /// The timeline events of the records the reading position and the tree
     /// view can select, by record: keys, actions sent, page focus, page

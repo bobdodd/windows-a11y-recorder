@@ -1026,9 +1026,131 @@
                 <ListBox.ItemTemplate>
                   <DataTemplate>
                     <Grid>
+                      <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                      </Grid.RowDefinitions>
                       <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" SharedSizeGroup="StepTime" />
                         <ColumnDefinition Width="Auto" SharedSizeGroup="StepState" />
+                        <ColumnDefinition Width="2*" />
+                        <ColumnDefinition Width="3*" />
+                      </Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0" Grid.RowSpan="2" Margin="0,0,10,0">
+                        <TextBlock Text="{Binding Time}" />
+                        <TextBlock Text="at the playhead">
+                          <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                              <Setter Property="Visibility" Value="Collapsed" />
+                              <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                  <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                              </Style.Triggers>
+                            </Style>
+                          </TextBlock.Style>
+                        </TextBlock>
+                      </StackPanel>
+                      <TextBlock Grid.Column="1" Margin="0,0,10,0" Text="{Binding State}" />
+                      <TextBlock Grid.Column="2" Margin="0,0,10,0" Text="{Binding Cause}" TextWrapping="Wrap" />
+                      <TextBlock Grid.Column="3" Text="{Binding Value}" TextWrapping="Wrap" />
+                      <!-- What NVDA had to announce at the step
+                           (screen-reader-activity.md, "What NVDA had to
+                           announce"), on a second line. -->
+                      <TextBlock Grid.Row="1"
+                                 Grid.Column="1"
+                                 Grid.ColumnSpan="3"
+                                 Margin="0,4,0,0"
+                                 Text="{Binding Announcement}"
+                                 TextWrapping="Wrap">
+                        <TextBlock.Style>
+                          <Style TargetType="TextBlock">
+                            <Style.Triggers>
+                              <DataTrigger Binding="{Binding Announcement}" Value="">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                              </DataTrigger>
+                            </Style.Triggers>
+                          </Style>
+                        </TextBlock.Style>
+                      </TextBlock>
+                    </Grid>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Grid>
+          </TabItem>
+          <!-- What NVDA had to announce at each reading position step
+               (screen-reader-activity.md, "What NVDA had to announce"): as
+               the list of steps, marked at the playhead but never scrolled
+               by itself; Show current step scrolls to it. -->
+          <TabItem x:Name="AnnouncementsTab"
+                   AutomationProperties.Name="NVDA had to announce"
+                   PreviewMouseLeftButtonDown="DetailsTab_PreviewMouseLeftButtonDown"
+                   PreviewMouseMove="DetailsTab_PreviewMouseMove"
+                   PreviewMouseLeftButtonUp="DetailsTab_PreviewMouseLeftButtonUp"
+                   LostMouseCapture="DetailsTab_LostMouseCapture">
+            <TabItem.Header>
+              <StackPanel Orientation="Horizontal">
+                <TextBlock VerticalAlignment="Center" Text="NVDA had to announce" />
+                <Button Style="{StaticResource TearOutButton}"
+                        Tag="{Binding ElementName=AnnouncementsTab}"
+                        Click="TearOutButton_Click"
+                        AutomationProperties.Name="Open NVDA had to announce in its own window" />
+              </StackPanel>
+            </TabItem.Header>
+            <Grid Margin="8">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+              </Grid.RowDefinitions>
+              <DockPanel Grid.Row="0" Margin="0,0,0,6" LastChildFill="True">
+                <Button x:Name="ShowCurrentAnnouncementButton"
+                        DockPanel.Dock="Left"
+                        MinHeight="44"
+                        MinWidth="44"
+                        Padding="12,0"
+                        Content="Show current step"
+                        Click="ShowCurrentAnnouncementButton_Click"
+                        AutomationProperties.HelpText="Scrolls the list to the step at the playhead. The list does not scroll by itself." />
+                <TextBlock x:Name="AnnouncementsStatusTextBlock"
+                           Margin="12,0,0,0"
+                           VerticalAlignment="Center"
+                           TextWrapping="Wrap"
+                           Text="Open a recording with accessibility requests to list what NVDA had to announce." />
+              </DockPanel>
+              <ListBox x:Name="AnnouncementsListBox"
+                       Grid.Row="1"
+                       MinHeight="70"
+                       HorizontalContentAlignment="Stretch"
+                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                       VirtualizingPanel.ScrollUnit="Pixel"
+                       Grid.IsSharedSizeScope="True"
+                       AutomationProperties.Name="NVDA had to announce"
+                       AutomationProperties.HelpText="Click a step, or press Enter or Space on it, to move the playhead to it and show the basis of what NVDA had to announce in Selected event values.">
+                <ListBox.ItemContainerStyle>
+                  <Style TargetType="ListBoxItem">
+                    <Setter Property="MinHeight" Value="44" />
+                    <Setter Property="VerticalContentAlignment" Value="Top" />
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="Padding" Value="4,6" />
+                    <Setter Property="AutomationProperties.Name" Value="{Binding Spoken}" />
+                    <EventSetter Event="MouseLeftButtonUp" Handler="Announcement_MouseLeftButtonUp" />
+                    <EventSetter Event="KeyDown" Handler="Announcement_KeyDown" />
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                        <Setter Property="BorderBrush" Value="#6A4C93" />
+                        <Setter Property="BorderThickness" Value="3,0,0,0" />
+                        <Setter Property="FontWeight" Value="SemiBold" />
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="AnnouncementTime" />
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="AnnouncementState" />
                         <ColumnDefinition Width="2*" />
                         <ColumnDefinition Width="3*" />
                       </Grid.ColumnDefinitions>
@@ -1049,7 +1171,7 @@
                       </StackPanel>
                       <TextBlock Grid.Column="1" Margin="0,0,10,0" Text="{Binding State}" />
                       <TextBlock Grid.Column="2" Margin="0,0,10,0" Text="{Binding Cause}" TextWrapping="Wrap" />
-                      <TextBlock Grid.Column="3" Text="{Binding Value}" TextWrapping="Wrap" />
+                      <TextBlock Grid.Column="3" Text="{Binding Text}" TextWrapping="Wrap" />
                     </Grid>
                   </DataTemplate>
                 </ListBox.ItemTemplate>

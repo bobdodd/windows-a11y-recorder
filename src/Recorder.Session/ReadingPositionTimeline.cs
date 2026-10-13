@@ -41,6 +41,12 @@ public sealed record ReadingPositionStep(
     /// <summary>What moved it, for the list of steps: the key and its command, the click, the page's focus, or a page load.</summary>
     public string Cause { get; init; } = string.Empty;
 
+    /// <summary>The NVDA command the step's key was, where it was one; empty otherwise.</summary>
+    public IReadOnlyList<string> CommandNames { get; init; } = [];
+
+    /// <summary>The key, where the step's action is linked with one that was not an NVDA command.</summary>
+    public string? KeyName { get; init; }
+
     /// <summary>The step's record on the timeline, where playback has it, so a step can select it.</summary>
     public SessionTimelineEvent? Event { get; init; }
 
@@ -296,13 +302,13 @@ public sealed class ReadingPositionTimeline
         if (command.Names.Any(IsSayAll))
         {
             return Unknown(command.Time, eventId, 6, $"unknown: {said} moves the caret as NVDA reads, and sent nothing",
-                $"NVDA kept {said}, which reads from the caret, moving it as it goes; nothing was sent to the page as it read") with { Cause = cause };
+                $"NVDA kept {said}, which reads from the caret, moving it as it goes; nothing was sent to the page as it read") with { Cause = cause, CommandNames = command.Names };
         }
 
         if (command.Names.Any(IsSelection))
         {
             return Unknown(command.Time, eventId, 8, $"unknown: {said} moved the caret with the selection, and sent nothing",
-                $"NVDA kept {said}, which moves the caret as it selects; nothing was sent to the page") with { Cause = cause };
+                $"NVDA kept {said}, which moves the caret as it selects; nothing was sent to the page") with { Cause = cause, CommandNames = command.Names };
         }
 
         if (!command.Names.Any(IsMove) || current is not { Object: { } item })
@@ -323,7 +329,8 @@ public sealed class ReadingPositionTimeline
             $"{(AccessibilityRequests.KeyWindowNanoseconds / 1_000_000).ToString(CultureInfo.InvariantCulture)} ms after it; " +
             "it may not have moved, as at the last of its kind, or may have moved without a trace")
         {
-            Cause = cause
+            Cause = cause,
+            CommandNames = command.Names
         };
     }
 
@@ -345,7 +352,9 @@ public sealed class ReadingPositionTimeline
                 $"{described}, focused", label, $"A request to focus it{after}; NVDA's caret follows the focus")
             {
                 LinkEventId = action.LinkEventId,
-                Cause = CauseOf(action)
+                Cause = CauseOf(action),
+                CommandNames = action.Command?.Names ?? [],
+                KeyName = action.KeyName
             };
         }
 
@@ -358,7 +367,9 @@ public sealed class ReadingPositionTimeline
                 "but in the target run of 2026-10-12 both Page Downs sent a request on the paragraph the caret started on")
             {
                 LinkEventId = action.LinkEventId,
-                Cause = CauseOf(action)
+                Cause = CauseOf(action),
+                CommandNames = action.Command?.Names ?? [],
+                KeyName = action.KeyName
             };
         }
 
@@ -369,7 +380,9 @@ public sealed class ReadingPositionTimeline
                 $"A request to scroll it into view again{after}; the request names the whole object, not the line, word, or character")
             {
                 LinkEventId = action.LinkEventId,
-                Cause = CauseOf(action)
+                Cause = CauseOf(action),
+                CommandNames = action.Command?.Names ?? [],
+                KeyName = action.KeyName
             };
         }
 
@@ -377,7 +390,9 @@ public sealed class ReadingPositionTimeline
             $"A request to scroll it into view{after}")
         {
             LinkEventId = action.LinkEventId,
-            Cause = CauseOf(action)
+            Cause = CauseOf(action),
+            CommandNames = action.Command?.Names ?? [],
+            KeyName = action.KeyName
         };
     }
 
