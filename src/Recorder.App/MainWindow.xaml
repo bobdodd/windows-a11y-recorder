@@ -898,7 +898,8 @@
                    AutomationProperties.Name="Browser navigation correlation"
                    PreviewMouseLeftButtonDown="DetailsTab_PreviewMouseLeftButtonDown"
                    PreviewMouseMove="DetailsTab_PreviewMouseMove"
-                   PreviewMouseLeftButtonUp="DetailsTab_PreviewMouseLeftButtonUp">
+                   PreviewMouseLeftButtonUp="DetailsTab_PreviewMouseLeftButtonUp"
+                   LostMouseCapture="DetailsTab_LostMouseCapture">
             <TabItem.Header>
               <StackPanel Orientation="Horizontal">
                 <TextBlock VerticalAlignment="Center" Text="Browser navigation correlation" />
@@ -964,7 +965,8 @@
                    AutomationProperties.Name="Reading position steps"
                    PreviewMouseLeftButtonDown="DetailsTab_PreviewMouseLeftButtonDown"
                    PreviewMouseMove="DetailsTab_PreviewMouseMove"
-                   PreviewMouseLeftButtonUp="DetailsTab_PreviewMouseLeftButtonUp">
+                   PreviewMouseLeftButtonUp="DetailsTab_PreviewMouseLeftButtonUp"
+                   LostMouseCapture="DetailsTab_LostMouseCapture">
             <TabItem.Header>
               <StackPanel Orientation="Horizontal">
                 <TextBlock VerticalAlignment="Center" Text="Reading position steps" />

@@ -9,9 +9,11 @@ namespace Recorder.App;
 // The tabs of the panel under the timeline tear out into windows of their
 // own, as tabs do in web browsers (player-layout.md, "Tabs that tear out").
 // A tab's icon button opens it in its own window with one click, and
-// dragging the tab away from the tab strip does the same; closing the
-// window puts the tab back in its place. A window opens where the tab's
-// content was, at its size, and keeps its place for the rest of the session.
+// dragging the tab away from the tab strip does the same, opening the
+// window where the mouse button is released; closing the window puts the
+// tab back in its place. A window opened by its button opens where the
+// tab's content was, at its size; each keeps its place and size for the
+// rest of the session.
 // Agreed with the owner on 2026-10-12.
 public partial class MainWindow
 {
@@ -58,19 +60,47 @@ public partial class MainWindow
             return;
         }
 
-        var point = e.GetPosition(tab);
-        if (point.Y < -TearDistance || point.Y > tab.ActualHeight + TearDistance)
+        // Beyond the tear distance, the move cursor shows that releasing
+        // the button opens the tab in its own window there; back within
+        // it, releasing is a click.
+        Mouse.OverrideCursor = IsTearPoint(tab, e.GetPosition(tab)) ? Cursors.SizeAll : null;
+    }
+
+    // Tears the tab out where the button is released, when that is beyond
+    // the tear distance (owner, 2026-10-12: "Positioning of the new window
+    // should be based on mouse up").
+    private void DetailsTab_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_draggedTab is not { } tab || !ReferenceEquals(sender, tab))
         {
-            var screen = tab.PointToScreen(point);
             EndTabDrag();
-            TearOut(tab, screen);
+            return;
+        }
+
+        var point = e.GetPosition(tab);
+        EndTabDrag();
+        if (IsTearPoint(tab, point))
+        {
+            TearOut(tab, tab.PointToScreen(point));
+            e.Handled = true;
         }
     }
 
-    private void DetailsTab_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e) => EndTabDrag();
+    private static bool IsTearPoint(TabItem tab, Point point) =>
+        point.Y < -TearDistance || point.Y > tab.ActualHeight + TearDistance;
+
+    private void DetailsTab_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        if (ReferenceEquals(sender, _draggedTab))
+        {
+            _draggedTab = null;
+            Mouse.OverrideCursor = null;
+        }
+    }
 
     private void EndTabDrag()
     {
+        Mouse.OverrideCursor = null;
         if (_draggedTab is { } tab)
         {
             _draggedTab = null;
@@ -109,10 +139,20 @@ public partial class MainWindow
             bounds = new Rect(origin, size);
         }
 
+        // Dragged out: the window's title bar under the pointer where the
+        // button was released, kept on the screen.
         if (screenPoint is { } point)
         {
             var at = fromDevice.Transform(point);
-            bounds.Location = new Point(at.X - 40, at.Y - 20);
+            var left = Math.Clamp(
+                at.X - 40,
+                SystemParameters.VirtualScreenLeft,
+                Math.Max(SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenLeft + SystemParameters.VirtualScreenWidth - bounds.Width));
+            var top = Math.Clamp(
+                at.Y - 15,
+                SystemParameters.VirtualScreenTop,
+                Math.Max(SystemParameters.VirtualScreenTop, SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight - 60));
+            bounds.Location = new Point(left, top);
         }
 
         var name = AutomationProperties.GetName(tab);

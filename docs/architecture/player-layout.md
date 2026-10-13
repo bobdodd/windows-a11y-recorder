@@ -117,12 +117,17 @@ separate window for the tree. Only these three tabs for now.
   Accessibility tree in its own window", as the owner asked. It is 44 by 44
   pixels, the size of the Properties change buttons.
 - Dragging a tab more than 40 pixels above or below the tab strip also
-  tears it out, at the pointer. The button is the way without dragging,
+  tears it out: beyond that distance the pointer shows the move cursor,
+  and the window opens where the mouse button is released, its title bar
+  under the pointer and kept on the screen. Released back within that
+  distance, it is a click. As first built, the window opened as soon as
+  the drag passed the distance; the owner asked on 2026-10-12 that it be
+  placed where the button is released. The button is the way without dragging,
   as WCAG 2.5.7, Dragging Movements, asks: "All functionality that uses a
   dragging movement for operation can be achieved by a single pointer
   without dragging"
   ([W3C](https://www.w3.org/WAI/WCAG22/Understanding/dragging-movements.html)).
-- A torn out tab's window opens where its content was, at its size, takes
+- A tab's window opened by its button opens where its content was, at its size, takes
   the player's dark panels and styles, and keeps its place for the rest of
   the session. Closing it puts the tab back in its place in the panel and
   selects it. The windows close with the player.
