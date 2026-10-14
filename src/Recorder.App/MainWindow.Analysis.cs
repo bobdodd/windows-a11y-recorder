@@ -283,7 +283,7 @@ public partial class MainWindow
         try
         {
             await catalog.QueueTaskAsync(recording, kind, 1, profiles, afterTaskId: afterTaskId, sessionDirectory: _analysisSessionDirectory, cancellationToken: CancellationToken.None);
-            ShowAnalysisStatus($"{AnalysisPlayer.KindName(kind)} queued with {string.Join(", ", profiles.Values)}.");
+            ShowAnalysisStatus($"{AnalysisPlayer.KindName(kind)} queued with {string.Join(", ", profiles.Values.Distinct())}.");
             _busy.AnnounceCompleted(AnalysisStatusTextBlock.Text);
             StartWorker();
             await ReadAnalysisAsync();
