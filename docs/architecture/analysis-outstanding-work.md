@@ -286,7 +286,10 @@ design.
   decision 6). Its second run stopped at the tenth moment, the model
   repeating its statements; sampling options, a stop at the first repeated
   statement, and trials of one step were built the same day (the runner
-  design's decision 4). Not yet passed on the target machine.
+  design's decision 4). It passed on the target machine on 2026-10-14
+  with build f1b2229, the presence penalty set for the image profile
+  only: all 12 steps were accepted at the first attempt, and moment 10
+  gave the same 369 output tokens as its trial.
 - Built 2026-10-14: text in the player can be selected and copied; see
   [player layout](player-layout.md), "Selecting and copying text". Not
   yet tested on the target machine.

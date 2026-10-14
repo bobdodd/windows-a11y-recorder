@@ -10,8 +10,9 @@ system test on the target machine on 2026-10-14, on the cnib.ca recording,
 and Run again gave the same report; see
 [the validation](../validation/analysis-runner-2026-10-14.md). Stage 2
 is built in two steps, agreed by the owner on 2026-10-14: 4a, the moments
-and their captured frames, built the same day and not yet tested on the
-target machine; and 4b, the recreated pages, not built. See "Stage 2
+and their captured frames, built the same day, which passed on the
+target machine on 2026-10-14 with build f1b2229, on the cnib.ca
+recording, all 12 of its steps accepted at the first attempt; and 4b, the recreated pages, not built. See "Stage 2
 implementation status" and "Decisions (2026-10-14)".
 The first task kind for the [analysis runner](analysis-runner.md), chosen
 by the owner the same day: a summary of the recording that describes each
