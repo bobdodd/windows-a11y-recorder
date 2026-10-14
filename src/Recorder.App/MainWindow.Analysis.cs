@@ -100,6 +100,7 @@ public partial class MainWindow
         QueueSummaryButton.IsEnabled = open && ProfileComboBox.Items.Count > 0;
         ProfileComboBox.IsEnabled = open && ProfileComboBox.Items.Count > 0;
         SummariseMenuItem.IsEnabled = QueueSummaryButton.IsEnabled;
+        VisionMenuItem.IsEnabled = open && AnalysisPlayer.DefaultProfile(_analysisSettings, ModelCapabilities.Image) is not null;
         CapabilitiesMenuItem.IsEnabled = open;
     }
 
@@ -271,7 +272,7 @@ public partial class MainWindow
 
     private string? SelectedProfile => (ProfileComboBox.SelectedItem as ComboBoxItem)?.Tag as string;
 
-    private async Task QueueAsync(string kind, IReadOnlyDictionary<string, string> profiles)
+    private async Task QueueAsync(string kind, IReadOnlyDictionary<string, string> profiles, Guid? afterTaskId = null)
     {
         if (AnalysisCatalogOrNull is not { } catalog || _analysisRecordingId is not { } recording || _analysisSessionDirectory is null)
         {
@@ -281,7 +282,7 @@ public partial class MainWindow
 
         try
         {
-            await catalog.QueueTaskAsync(recording, kind, 1, profiles, sessionDirectory: _analysisSessionDirectory, cancellationToken: CancellationToken.None);
+            await catalog.QueueTaskAsync(recording, kind, 1, profiles, afterTaskId: afterTaskId, sessionDirectory: _analysisSessionDirectory, cancellationToken: CancellationToken.None);
             ShowAnalysisStatus($"{AnalysisPlayer.KindName(kind)} queued with {string.Join(", ", profiles.Values)}.");
             _busy.AnnounceCompleted(AnalysisStatusTextBlock.Text);
             StartWorker();
@@ -320,6 +321,56 @@ public partial class MainWindow
         await QueueAsync(RecordingSummaryKind.Name, new Dictionary<string, string> { [ModelCapabilities.Text] = profile });
     }
 
+    private async void VisionMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        ShowAnalysisTab();
+        await QueueVisionAsync();
+    }
+
+    // Vision is added to the newest summary of the recording that is
+    // queued, running, or finished, and runs after it; all of it on the
+    // image profile (recording-summary.md, "Decisions (2026-10-14)").
+    private async Task QueueVisionAsync()
+    {
+        if (AnalysisPlayer.DefaultProfile(_analysisSettings, ModelCapabilities.Image) is not { } profile)
+        {
+            ShowAnalysisStatus("There is no model profile for images. Open Model profiles... from the Analysis menu.");
+            return;
+        }
+
+        if (AnalysisCatalogOrNull is not { } catalog || _analysisRecordingId is not { } recording)
+        {
+            ShowAnalysisStatus("Open a recording that is in the catalog to queue its analysis.");
+            return;
+        }
+
+        AnalysisTaskSummary? summary;
+        try
+        {
+            summary = (await catalog.TasksAsync(recording, CancellationToken.None))
+                .Where(task => task.Kind == RecordingSummaryKind.Name &&
+                    task.State is AnalysisTaskStates.Queued or AnalysisTaskStates.Running or AnalysisTaskStates.Done)
+                .OrderByDescending(task => task.QueuedUtc)
+                .FirstOrDefault();
+        }
+        catch (NpgsqlException exception)
+        {
+            ShowAnalysisStatus($"The task could not be queued: {exception.Message}");
+            return;
+        }
+
+        if (summary is null)
+        {
+            ShowAnalysisStatus("Summarise the recording first: vision is added to a summary.");
+            return;
+        }
+
+        await QueueAsync(
+            RecordingSummaryVisionKind.Name,
+            new Dictionary<string, string> { [ModelCapabilities.Text] = profile.Name, [ModelCapabilities.Image] = profile.Name },
+            summary.TaskId);
+    }
+
     private async void RefreshAnalysisButton_Click(object sender, RoutedEventArgs e)
     {
         ReadAnalysisSettings();
@@ -338,7 +389,9 @@ public partial class MainWindow
 
     // Run again queues a new task of the same kind with the same profiles;
     // the earlier one and its report stay (owner, 2026-10-13).
-    private Task RunAgainAsync(AnalysisTaskSummary task) => QueueAsync(task.Kind, task.StageProfiles);
+    // Vision run again is added to the newest summary, as from the menu.
+    private Task RunAgainAsync(AnalysisTaskSummary task) =>
+        task.Kind == RecordingSummaryVisionKind.Name ? QueueVisionAsync() : QueueAsync(task.Kind, task.StageProfiles);
 
     private async Task OpenResultAsync(AnalysisTaskSummary task)
     {

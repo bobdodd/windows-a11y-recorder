@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Recorder.Contracts;
 using Recorder.Session;
 
 namespace Recorder.Database.RecordingFiles;
@@ -166,6 +167,30 @@ public static class RecordingFilePlayback
             stored => builder.Add(stored.EventKey, stored.Event),
             cancellationToken);
         return builder.Build();
+    }
+
+    /// <summary>
+    /// Reads the events of some browser channels from a recording file, in
+    /// file order, for records the playback index does not keep, such as
+    /// layout changes and compositor animations for the recording summary's
+    /// moments. One group of chunks is held at a time.
+    /// </summary>
+    public static void ReadBrowserEvents(
+        string filePath,
+        IReadOnlySet<string> channels,
+        Action<RecorderEvent> add,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(channels);
+        ArgumentNullException.ThrowIfNull(add);
+        using var reader = RecordingFileReader.Open(filePath);
+        var streams = channels.Select(RecordingFileBatchTarget.StreamOf).ToHashSet(StringComparer.Ordinal);
+        ForEachGroup(
+            reader,
+            reader.Chunks.Where(chunk => streams.Contains(chunk.Stream)).ToArray(),
+            channels.Contains,
+            stored => add(stored.Event),
+            cancellationToken);
     }
 
     // Decodes chunks in groups, on all processors, and passes their events

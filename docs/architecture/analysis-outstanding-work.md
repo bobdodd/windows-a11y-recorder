@@ -278,13 +278,19 @@ design.
   2026-10-14: the six tests, with the mouse alone, and the same report
   from Run again. Five faults were found and fixed on the way; see
   [the validation](../validation/analysis-runner-2026-10-14.md).
-- To do, in the agreed order: step 4, the summary's stage 2.
+- Built 2026-10-14: step 4a, the summary with vision from the moments'
+  captured frames; see the summary design's "Stage 2 implementation
+  status". Not yet tested on the target machine.
+- To do, in the agreed order: the system test of step 4a, then step 4b,
+  the recreated pages.
 
 ## Recording summary
 
 Designed in [recording summary](recording-summary.md), proposed and agreed
 2026-10-13. Stage 1 built the same day, and passed its system test on
-the target machine on 2026-10-14; stage 2 not built. The first task kind for the analysis runner, chosen by
+the target machine on 2026-10-14. Stage 2's step 4a, the moments and their
+captured frames, built on 2026-10-14; step 4b, the recreated pages, not
+built. The first task kind for the analysis runner, chosen by
 the owner: a summary of each page visited and of the site tested, from the
 recorder's collation and a model's text analysis, then enhanced with vision
 analysis of recreated pages and captured frames at the moments of each

@@ -6,7 +6,9 @@ Proposed on 2026-10-13 and agreed by the owner the same day, to be tried as
 it stands. Steps 1 and 2 of the build order were built the same day, and
 step 3 on 2026-10-14; see "Implementation status". Steps 1 to 3 passed
 their system test on the target machine on 2026-10-14; see
-[the validation](../validation/analysis-runner-2026-10-14.md). The owner set three requirements the same day:
+[the validation](../validation/analysis-runner-2026-10-14.md). Step 4a was
+built the same day and is not yet tested on the target machine; step 4b
+is not built. The owner set three requirements the same day:
 
 - Analysis runs detached from the player. Tasks are queued, and the player
   announces each completed task and report as it becomes available.
@@ -300,7 +302,9 @@ Agreed by the owner on 2026-10-13, with the recording summary:
    notifications, and the capability description. The system test on the
    target machine follows this step.
 4. The recording summary's stage 2: the moments of a visit, the pictures,
-   and the vision requests.
+   and the vision requests. Built in two steps, agreed by the owner on
+   2026-10-14: 4a, the moments and their captured frames; and 4b, the
+   recreated pages.
 
 ## Implementation status
 
@@ -438,6 +442,26 @@ player (2026-10-13)". Passed its system test on the target machine on
   passed, 1,681 tests, with the Chromium launcher and browser receiver
   tests left out as before. The windows themselves are tested on the
   target machine.
+
+Step 4a, the summary with vision from the moments' captured frames, built
+on 2026-10-14; see "Stage 2 implementation status" in
+[recording summary](recording-summary.md). For the runner and the player:
+
+- **A task may follow another.** The vision task is queued after a
+  summary, with `after_task_id`, which the worker already honoured.
+- **The Analysis menu** has Add vision to the summary, available when a
+  recording is open and there is a default profile for images.
+- **The catalog** gives the input references of a step's accepted
+  attempt, so that the vision task can check that it builds on a summary
+  written from the same facts.
+- **The settings file** reports two profiles served by this PC with the
+  same model name as a problem.
+- **Tests:** 13 unit tests of choosing moments, and 6 integration tests:
+  the vision task end to end after a summary, without a summary, on a
+  summary written from other facts, on a recording without frames, the
+  recording file's moment records, and the duplicate model name. The full
+  suite passed, 1,707 tests, with the Chromium launcher and browser
+  receiver tests left out as before.
 
 ## Required tests
 

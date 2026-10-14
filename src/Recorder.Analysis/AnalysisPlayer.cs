@@ -21,6 +21,7 @@ public static class AnalysisPlayer
     public static string KindName(string kind) => kind switch
     {
         Summary.RecordingSummaryKind.Name => "Recording summary",
+        Summary.RecordingSummaryVisionKind.Name => "Summary with vision",
         _ => kind
     };
 

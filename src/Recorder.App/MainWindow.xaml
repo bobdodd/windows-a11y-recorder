@@ -139,6 +139,10 @@
                 Style="{StaticResource AnalysisMenuItem}"
                 Header="_Summarise this recording"
                 Click="SummariseMenuItem_Click" />
+      <MenuItem x:Name="VisionMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="Add _vision to the summary"
+                Click="VisionMenuItem_Click" />
       <MenuItem x:Name="CapabilitiesMenuItem"
                 Style="{StaticResource AnalysisMenuItem}"
                 Header="_Describe the participant's capabilities..."

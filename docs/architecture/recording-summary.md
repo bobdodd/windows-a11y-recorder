@@ -8,8 +8,11 @@ built the same day, as step 2 of "Build order" in
 player queues it from step 3, built on 2026-10-14. Stage 1 passed its
 system test on the target machine on 2026-10-14, on the cnib.ca recording,
 and Run again gave the same report; see
-[the validation](../validation/analysis-runner-2026-10-14.md). Stage 2 is
-not built.
+[the validation](../validation/analysis-runner-2026-10-14.md). Stage 2
+is built in two steps, agreed by the owner on 2026-10-14: 4a, the moments
+and their captured frames, built the same day and not yet tested on the
+target machine; and 4b, the recreated pages, not built. See "Stage 2
+implementation status" and "Decisions (2026-10-14)".
 The first task kind for the [analysis runner](analysis-runner.md), chosen
 by the owner the same day: a summary of the recording that describes each
 page visited and the site or application being tested. It is built from
@@ -256,6 +259,85 @@ the facts do not say. Every claim cites the evidence references it rests
 on, and the runner's checks apply. The default profile needs text only;
 on this PC, that is Qwen3.6-35B-A3B.
 
+## Stage 2 implementation status
+
+Step 4a built on 2026-10-14, in `Recorder.Analysis/Summary`, as the task
+kind `recording-summary-vision`, version 1, shown in the player as
+"Summary with vision". These decisions were made while building it:
+
+- **It builds on a summary.** Add vision to the summary, on the Analysis
+  menu, queues the task after the recording's newest summary that is
+  queued, running, or finished, so the worker runs it once that summary
+  has finished, and fails it if the summary does not finish. Run again
+  does the same. Where there is no summary, the player says to summarise
+  the recording first. A task naming no summary fails, saying so.
+- **The summary must have been written from the same facts.** The vision
+  task collates the recording again, with the summary's limits, and
+  compares each visit's references with those given to the summary's
+  accepted step for that visit. Where any differ, it fails, saying to
+  summarise the recording again. A recording with no captured frames in
+  its visits fails, saying there is nothing to add vision from.
+- **All of it runs on the image profile**, its text requests too, so that
+  the model is not changed between requests (decision 2 below). The menu
+  item is available only when there is a default profile for images.
+- **The moments, as built:**
+  - **Settled:** the first layout change set of the page's document,
+    within 5 s of the visit's start, followed by 1 s without another; the
+    moment is 1 s after it. If none is, the moment is 5 s after the visit
+    starts. A visit with no layout change recorded is taken as settled
+    1 s after it starts, and the moment says so.
+  - **NVDA's windows:** each of NVDA's own windows coming to the front and
+    leaving it, from the player's NVDA window spans.
+  - **The page's popups:** each opening and closing.
+  - **Animations:** the start, middle, and end of each animation recorded
+    on the compositor, with its end paired by the compositor animation's
+    ID. Animations run on the main thread are not yet used. An animation
+    with no recorded end gives its start only.
+  - **A large change:** a layout change set, after the settled moment,
+    of at least 50 elements, from its `recordedNodeCount`. The value 50 is
+    a starting value set while building, not one the owner agreed; it is
+    a setting.
+  - **Clicks:** each mouse button press.
+  - **Scrolls:** a scroller's vertical position moving by at least the
+    viewport's height from where it was at its last such moment, or from
+    the top, each scroller separately. Where the viewport's height is not
+    recorded, scrolls give no moments.
+  - **Typing:** the keys received by the page while one text control had
+    the focus, at the last of them.
+  - **The last frame:** the last captured frame before the visit ends.
+
+  Reasons less than 2 s apart are one moment, at the first frame at or
+  after the latest of them. Reasons that fall on the same frame are one
+  moment. Over the limit of 10, the settled and last moments are kept
+  first, then NVDA's windows and popups, typing, clicks, large changes,
+  animations, and scrolls, earliest first within each, and the number
+  left out is stated.
+- **Layout changes, scrolls, and compositor animations are read from the
+  recording file** in one more pass, since the playback index does not
+  keep them.
+- **Each moment is a step**, `visit-0001-moment-01` upward, with a request
+  of its own: the capabilities, the visit's address and title, the reasons
+  for the moment, the visit's facts since the moment before, and the
+  captured frame, sent whole. The frame and each reason are entries in the
+  evidence list with references of their own. Then each visit's enhanced
+  description is the step `visit-0001`, given the visit's facts, its
+  description from the summary, and its moments' descriptions, both
+  labelled inferred, with a fourth section, the participant's journey.
+  Then the whole recording is the step `recording`.
+- **The prompt templates** are `recording-summary-vision-moment`,
+  `recording-summary-vision-visit`, and `recording-summary-vision-recording`,
+  version 1.
+- **The report** is `analysis\<task>\summary-with-vision.md`, laid out
+  as the summary, titled "Summary with vision", with each visit's moments
+  under "The moments" and the moment limits under "How this was made".
+  It says that recreated pages are not yet used.
+- **Image profiles on this PC** are served with llama.cpp's multimodal
+  projector, the image add-on, given with `--mmproj`
+  ([llama.cpp multimodal](https://github.com/ggml-org/llama.cpp/blob/master/docs/multimodal.md)).
+  The local server knows each profile by its model name, one section of
+  its preset each, so the settings file reports two local profiles with
+  the same model name as a problem.
+
 ## Stage 2: the summary with vision
 
 ### The moments of a visit
@@ -406,6 +488,22 @@ which pictures are recreations.
    on the target machine, which gave "Recorder.App, \"Windows
    Accessibility Recorder\"" there and in the session: the recorder is a
    genuine window in the recording.
+
+The owner's answers, the same day, to the questions raised before
+building stage 2:
+
+2. **Stage 2 is built in two steps.** Step 4a, the moments and their
+   captured frames, is built first and tested on the target machine; then
+   step 4b, the recreated pages, after a check that the recreation
+   browser can run without a window.
+3. **A second profile, "This PC, with images"**: the same model with its
+   image add-on, the default for images. All of stage 2, its text
+   requests too, runs on it.
+4. **The limits, all settings:** 10 moments for each visit; moments less
+   than 2 s apart merged; settled after 1 s without a layout change, or
+   else 5 s after the visit starts; 6 tiles.
+5. **In step 4b, one request for each tile**, with the tiles' descriptions
+   combined by the visit's text request.
 
 ## Decisions (2026-10-13)
 

@@ -12,14 +12,23 @@ namespace Recorder.Analysis.Summary;
 /// inferred announcements, the assistive technology records, and each
 /// document's recorded state at a time.
 /// </summary>
-public sealed class RecordedSummaryEvidence : ISummaryEvidence
+public sealed class RecordedSummaryEvidence : ISummaryEvidence, IMomentEvidence
 {
     private readonly SessionPlaybackArchive _archive;
     private readonly RecordingFileDocuments _documents;
     private readonly Dictionary<(string Token, long Time), BrowserDocumentState?> _states = [];
 
-    public RecordedSummaryEvidence(SessionPlaybackArchive archive, RecordingFileDocuments documents)
+    private readonly string? _recordingFile;
+    private (List<LayoutChangeFact> Layout, List<ScrollFact> Scrolls, List<AnimationFact> Animations)? _moments;
+
+    /// <param name="recordingFile">
+    /// The recording file, for the vision stage's layout changes, scrolls,
+    /// and animations, which the playback index does not keep; they are read
+    /// from it in one pass when first asked for.
+    /// </param>
+    public RecordedSummaryEvidence(SessionPlaybackArchive archive, RecordingFileDocuments documents, string? recordingFile = null)
     {
+        _recordingFile = recordingFile;
         _archive = archive ?? throw new ArgumentNullException(nameof(archive));
         _documents = documents ?? throw new ArgumentNullException(nameof(documents));
         var index = documents.Index;
@@ -29,9 +38,16 @@ public sealed class RecordedSummaryEvidence : ISummaryEvidence
         var focus = new List<FocusFact>();
         var foreground = new List<ForegroundFact>();
         var popups = new List<TimedFact>();
+        var closed = new List<TimedFact>();
         foreach (var item in index.Events)
         {
             var payload = item.Payload;
+            if (item.EventType == BrowserEvidenceEventTypes.PagePopupClosed)
+            {
+                closed.Add(new TimedFact(item.MonotonicNanoseconds, item.EventId, "A page popup closed."));
+                continue;
+            }
+
             if (item.EventType == BrowserEvidenceEventTypes.NavigationCompleted && item.Channel == BrowserEvidenceChannels.Navigation)
             {
                 if (Commit(item) is { } commit)
@@ -74,6 +90,11 @@ public sealed class RecordedSummaryEvidence : ISummaryEvidence
         Focus = focus;
         Foreground = foreground;
         Popups = popups;
+        PopupsClosed = closed;
+        Frames = [.. archive.Frames.Select(frame => new CapturedFrame(
+            frame.MonotonicNanoseconds, frame.Path, frame.AbsolutePath, frame.Width, frame.Height, frame.Magnification?.Level))];
+        NvdaWindows = [.. archive.ScreenReaderWindows.Spans.Select(span => new NvdaWindowFact(
+            span.Name, span.Start, span.Events.FirstOrDefault()?.EventId, span.End, span.Events.Count > 1 ? span.Events[^1].EventId : null))];
         Commands = [.. archive.KeyDispositions.KeptCommands.Select(command => new TimedFact(
             command.Time,
             null,
@@ -98,6 +119,101 @@ public sealed class RecordedSummaryEvidence : ISummaryEvidence
     public IReadOnlyList<ForegroundFact> Foreground { get; }
 
     public IReadOnlyList<TimedFact> Popups { get; }
+
+    public IReadOnlyList<CapturedFrame> Frames { get; }
+
+    public IReadOnlyList<LayoutChangeFact> LayoutChanges => MomentRecords().Layout;
+
+    public IReadOnlyList<ScrollFact> Scrolls => MomentRecords().Scrolls;
+
+    public IReadOnlyList<AnimationFact> Animations => MomentRecords().Animations;
+
+    private (List<LayoutChangeFact> Layout, List<ScrollFact> Scrolls, List<AnimationFact> Animations) MomentRecords()
+    {
+        if (_moments is { } read)
+        {
+            return read;
+        }
+
+        var layout = new List<LayoutChangeFact>();
+        var scrolls = new List<ScrollFact>();
+        var started = new List<(long Time, string EventId, long? Id)>();
+        var ended = new List<(long Time, string EventId, long? Id)>();
+        if (_recordingFile is not null)
+        {
+            RecordingFilePlayback.ReadBrowserEvents(
+                _recordingFile,
+                new HashSet<string>(StringComparer.Ordinal) { BrowserEvidenceChannels.Layout, BrowserEvidenceChannels.Compositor },
+                item =>
+                {
+                    var payload = item.Payload;
+                    if (payload.ValueKind != JsonValueKind.Object)
+                    {
+                        return;
+                    }
+
+                    var time = item.MonotonicNanoseconds;
+                    switch (item.EventType)
+                    {
+                        case BrowserEvidenceEventTypes.LayoutChangesCompleted when Context(payload, "documentToken") is { } token:
+                            layout.Add(new LayoutChangeFact(time, item.EventId, token, Number(payload, "recordedNodeCount")));
+                            break;
+                        case BrowserEvidenceEventTypes.LayoutScrollOffsetChanged when Context(payload, "documentToken") is { } token &&
+                            payload.TryGetProperty("scrollOffset", out var offset) && offset.ValueKind == JsonValueKind.Object &&
+                            offset.TryGetProperty("y", out var y) && y.ValueKind == JsonValueKind.Number:
+                            scrolls.Add(new ScrollFact(time, item.EventId, token, Text(payload, "scrollElementId") ?? "a scroller not named", y.GetDouble()));
+                            break;
+                        case BrowserEvidenceEventTypes.CompositorAnimationStarted:
+                            started.Add((time, item.EventId, Number(payload, "compositorAnimationId")));
+                            break;
+                        case BrowserEvidenceEventTypes.CompositorAnimationEnded:
+                            ended.Add((time, item.EventId, Number(payload, "compositorAnimationId")));
+                            break;
+                    }
+                },
+                CancellationToken.None);
+        }
+
+        // An animation's end is the first end of the same compositor
+        // animation after its start; one with no ID is given no end.
+        var animations = new List<AnimationFact>();
+        var used = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var start in started)
+        {
+            var end = start.Id is { } id
+                ? ended.FirstOrDefault(item => item.Id == id && item.Time >= start.Time && !used.Contains(item.EventId))
+                : default;
+            if (end.EventId is not null)
+            {
+                used.Add(end.EventId);
+            }
+
+            animations.Add(new AnimationFact(start.Time, start.EventId, end.EventId is null ? null : end.Time, end.EventId));
+        }
+
+        _moments = (layout, scrolls, animations);
+        return _moments.Value;
+    }
+
+    public IReadOnlyList<TimedFact> PopupsClosed { get; }
+
+    public IReadOnlyList<NvdaWindowFact> NvdaWindows { get; }
+
+    // The viewport is read at most once a second of the recording, since a
+    // scroll may be recorded on every frame.
+    private readonly Dictionary<(string, long), double?> _viewports = [];
+
+    public double? ViewportHeightAt(string documentToken, long time)
+    {
+        var second = time / 1_000_000_000;
+        if (!_viewports.TryGetValue((documentToken, second), out var height))
+        {
+            height = State(documentToken, time)?.Viewport?.Height;
+            _viewports[(documentToken, second)] = height;
+        }
+
+        return height;
+    }
 
     public string? BrowserProcess => _archive.AssistiveTechnology.BrowserProcessName ?? "chrome";
 

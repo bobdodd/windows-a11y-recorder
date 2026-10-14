@@ -186,6 +186,15 @@ public static class AnalysisSettingsFile
                         continue;
                     }
 
+                    // The local server knows each profile it serves by its
+                    // model name, one section of its preset each.
+                    if (profile.Local is not null &&
+                        profiles.FirstOrDefault(existing => existing.Local is not null && existing.Model == profile.Model) is { } same)
+                    {
+                        problems.Add($"Profiles \"{same.Name}\" and \"{profile.Name}\" are both served by this PC as model \"{profile.Model}\"; each needs a model name of its own.");
+                        continue;
+                    }
+
                     profiles.Add(profile);
                 }
             }

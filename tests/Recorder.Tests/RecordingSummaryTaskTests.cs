@@ -73,7 +73,7 @@ public sealed partial class RecordingSummaryTaskTests(EmbeddedPostgresFixture fi
 
     // Two page visits, each a document with a DOM walk and Chromium's
     // accessibility records for its title, main landmark, and heading.
-    private string WriteRecording()
+    private string WriteRecording(bool frames = false, IEnumerable<(long Time, string Channel, string EventType, string Json)>? extra = null)
     {
         Directory.CreateDirectory(_session);
         var items = new List<(long Time, string Channel, string EventType, JsonElement Payload)>();
@@ -98,7 +98,31 @@ public sealed partial class RecordingSummaryTaskTests(EmbeddedPostgresFixture fi
 
         Page(1 * Second, "token-a", "https://shop.example.test/", "Example shop", "Welcome to the shop");
         Page(8 * Second, "token-b", "https://shop.example.test/basket", "Your basket", "Basket");
-        var collector = Collector("test.summary", "browser.navigation", "browser.dom", "browser.accessibility");
+        if (frames)
+        {
+            // A captured frame every second from 1.5 s to 15.5 s.
+            Directory.CreateDirectory(Path.Combine(_session, "frames", "desktop"));
+            for (var index = 0; index < 15; index++)
+            {
+                var relative = $"frames/desktop/{index:D10}.png";
+                File.WriteAllBytes(Path.Combine(_session, relative), FramePicture);
+                var node = JsonNode.Parse(EvidenceSamples.Sample("graphics.desktop.frames", "desktop-frame"))!;
+                node["path"] = relative;
+                node["width"] = 1920;
+                node["height"] = 1080;
+                using var frame = JsonDocument.Parse(node.ToJsonString());
+                items.Add((1_500_000_000 + index * Second, "graphics.desktop.frames", "desktop-frame", frame.RootElement.Clone()));
+            }
+        }
+
+        foreach (var item in extra ?? [])
+        {
+            using var document = JsonDocument.Parse(item.Json);
+            items.Add((item.Time, item.Channel, item.EventType, document.RootElement.Clone()));
+        }
+
+        var collector = Collector("test.summary", ["browser.navigation", "browser.dom", "browser.accessibility", "graphics.desktop.frames",
+            .. (extra ?? []).Select(item => item.Channel).Distinct()]);
         var path = Path.Combine(_session, SessionDatabase.RecordingFileName);
         using var target = new RecordingFileBatchTarget(
             path,
@@ -122,6 +146,10 @@ public sealed partial class RecordingSummaryTaskTests(EmbeddedPostgresFixture fi
         File.WriteAllText(Path.Combine(_session, "manifest.json"), JsonSerializer.Serialize(manifest, JsonOptions));
         return path;
     }
+
+    // A picture of one pixel, as a captured frame's file.
+    private static readonly byte[] FramePicture = Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
 
     private async Task<(AnalysisCatalog Catalog, Guid Recording)> CatalogAsync(bool withFile = true)
     {

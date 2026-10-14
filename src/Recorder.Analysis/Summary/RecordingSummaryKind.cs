@@ -96,18 +96,7 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
     public async Task RunAsync(AnalysisTaskContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
-        var task = context.Task;
-        var session = task.SessionDirectory ??
-            throw new StepFailedException("The task has no session folder, so the recording cannot be read.");
-        var recordingFile = await context.Catalog.RecordingFilePathAsync(task.RecordingId, cancellationToken).ConfigureAwait(false) ??
-            throw new StepFailedException("This recording's events are in the database's evidence tables, not a recording file; the summary reads recording files only.");
-        var filePath = Path.GetFullPath(Path.Combine(session, recordingFile));
-        if (!File.Exists(filePath))
-        {
-            throw new StepFailedException($"The recording file {filePath} is not there.");
-        }
-
-        var (archive, documents) = await _open(session, filePath, cancellationToken).ConfigureAwait(false);
+        var (archive, documents, session, _) = await OpenRecordingAsync(context, _open, cancellationToken).ConfigureAwait(false);
         try
         {
             await SummarizeAsync(context, session, archive, documents, cancellationToken).ConfigureAwait(false);
@@ -127,27 +116,15 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
         CancellationToken cancellationToken)
     {
         var task = context.Task;
-        var described = (await context.Catalog.CapabilitiesAsync(task.RecordingId, cancellationToken).ConfigureAwait(false)).FirstOrDefault();
-        var capabilities = described is null ? ParticipantCapabilities.Unknown : new ParticipantCapabilities(described.Description, described.WrittenUtc);
+        var capabilities = await CapabilitiesAsync(context, cancellationToken).ConfigureAwait(false);
         var collation = SummaryCollator.Collate(new RecordedSummaryEvidence(archive, documents), capabilities, Limits);
 
         var visits = new List<(VisitCollation Visit, AcceptedStep Step)>();
         foreach (var visit in collation.Visits)
         {
-            var references = new HashSet<string>(visit.References, StringComparer.Ordinal);
-            references.UnionWith(CapabilityReferences(collation));
-            var input = new StringBuilder()
-                .Append(string.Join('\n', collation.CapabilityLines)).Append("\n\n")
-                .Append(CultureInfo.InvariantCulture, $"Page visit {visit.Visit.Number}, derived by the recorder:\n")
-                .Append(visit.Text);
-            if (visit.LeftOut > 0)
-            {
-                input.Append(CultureInfo.InvariantCulture, $"\n\nThe recorder left {visit.LeftOut} facts out of this visit to keep it within the limit; do not describe what was left out as absent.");
-            }
-
             var step = await context.RunStepAsync(
-                $"visit-{visit.Visit.Number.ToString("D4", CultureInfo.InvariantCulture)}",
-                new ModelRequest(VisitTemplate, TemplateVersion, VisitInstructions, input.ToString(), [], VisitSections, references),
+                VisitStepKey(visit),
+                new ModelRequest(VisitTemplate, TemplateVersion, VisitInstructions, VisitInput(collation, visit), [], VisitSections, VisitReferences(collation, visit)),
                 cancellationToken).ConfigureAwait(false);
             visits.Add((visit, step));
         }
@@ -155,36 +132,10 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
         AcceptedStep? overall = null;
         if (visits.Count > 0)
         {
-            var references = new HashSet<string>(CapabilityReferences(collation), StringComparer.Ordinal);
-            var overview = SummaryCollator.Overview(collation);
-            foreach (var entry in collation.Evidence.Entries.Where(entry => overview.Contains($"[{entry.Reference}]", StringComparison.Ordinal)))
-            {
-                references.Add(entry.Reference);
-            }
-
-            var input = new StringBuilder()
-                .Append(string.Join('\n', collation.CapabilityLines)).Append("\n\n")
-                .Append("The page visits, derived by the recorder:\n").Append(overview)
-                .Append("\nEach visit as a model described it from the recorder's facts. These are inferences, not facts:\n");
-            foreach (var (visit, step) in visits)
-            {
-                input.Append(CultureInfo.InvariantCulture, $"Visit {visit.Visit.Number}:\n");
-                foreach (var claim in step.Claims)
-                {
-                    references.UnionWith(claim.Evidence);
-                    input.Append(CultureInfo.InvariantCulture, $"  ({claim.Section}, inferred) {claim.Text}");
-                    if (claim.Evidence.Count > 0)
-                    {
-                        input.Append(' ').Append(string.Join(' ', claim.Evidence.Select(reference => $"[{reference}]")));
-                    }
-
-                    input.Append('\n');
-                }
-            }
-
+            var (input, references) = RecordingInput(collation, visits, "Each visit as a model described it from the recorder's facts. These are inferences, not facts:");
             overall = await context.RunStepAsync(
                 "recording",
-                new ModelRequest(RecordingTemplate, TemplateVersion, RecordingInstructions, input.ToString(), [], RecordingSections, references),
+                new ModelRequest(RecordingTemplate, TemplateVersion, RecordingInstructions, input, [], RecordingSections, references),
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -199,16 +150,119 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
             attempts,
             Limits,
             DateTime.UtcNow);
-        var relative = Path.Combine("analysis", task.TaskId.ToString("D"), FileName);
+        await WriteReportAsync(context, session, FileName, report, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static IEnumerable<string> CapabilityReferences(RecordingCollation collation) =>
+        collation.Evidence.Entries.Where(entry => collation.CapabilityLines.Any(line => line.StartsWith($"[{entry.Reference}]", StringComparison.Ordinal)))
+            .Select(entry => entry.Reference);
+
+    /// <summary>A visit's step key, visit-0001 upward.</summary>
+    internal static string VisitStepKey(VisitCollation visit) =>
+        $"visit-{visit.Visit.Number.ToString("D4", CultureInfo.InvariantCulture)}";
+
+    /// <summary>The references a visit's request is given: its facts' and the capabilities'.</summary>
+    internal static HashSet<string> VisitReferences(RecordingCollation collation, VisitCollation visit)
+    {
+        var references = new HashSet<string>(visit.References, StringComparer.Ordinal);
+        references.UnionWith(CapabilityReferences(collation));
+        return references;
+    }
+
+    /// <summary>A visit's facts as its request is given them, after the capabilities.</summary>
+    internal static string VisitInput(RecordingCollation collation, VisitCollation visit)
+    {
+        var input = new StringBuilder()
+            .Append(string.Join('\n', collation.CapabilityLines)).Append("\n\n")
+            .Append(CultureInfo.InvariantCulture, $"Page visit {visit.Visit.Number}, derived by the recorder:\n")
+            .Append(visit.Text);
+        if (visit.LeftOut > 0)
+        {
+            input.Append(CultureInfo.InvariantCulture, $"\n\nThe recorder left {visit.LeftOut} facts out of this visit to keep it within the limit; do not describe what was left out as absent.");
+        }
+
+        return input.ToString();
+    }
+
+    /// <summary>The whole recording's request: the capabilities, the visits' overview, and each visit as a model described it.</summary>
+    internal static (string Input, HashSet<string> References) RecordingInput(
+        RecordingCollation collation,
+        IReadOnlyList<(VisitCollation Visit, AcceptedStep Step)> visits,
+        string describedAs)
+    {
+        var references = new HashSet<string>(CapabilityReferences(collation), StringComparer.Ordinal);
+        var overview = SummaryCollator.Overview(collation);
+        foreach (var entry in collation.Evidence.Entries.Where(entry => overview.Contains($"[{entry.Reference}]", StringComparison.Ordinal)))
+        {
+            references.Add(entry.Reference);
+        }
+
+        var input = new StringBuilder()
+            .Append(string.Join('\n', collation.CapabilityLines)).Append("\n\n")
+            .Append("The page visits, derived by the recorder:\n").Append(overview)
+            .Append('\n').Append(describedAs).Append('\n');
+        foreach (var (visit, step) in visits)
+        {
+            input.Append(CultureInfo.InvariantCulture, $"Visit {visit.Visit.Number}:\n");
+            AppendClaims(input, step.Claims, references);
+        }
+
+        return (input.ToString(), references);
+    }
+
+    /// <summary>A model's statements as a later request is given them, each labelled inferred, with its references.</summary>
+    internal static void AppendClaims(StringBuilder input, IEnumerable<Claim> claims, ISet<string> references, string indent = "  ")
+    {
+        foreach (var claim in claims)
+        {
+            references.UnionWith(claim.Evidence);
+            input.Append(CultureInfo.InvariantCulture, $"{indent}({claim.Section}, inferred) {claim.Text}");
+            if (claim.Evidence.Count > 0)
+            {
+                input.Append(' ').Append(string.Join(' ', claim.Evidence.Select(reference => $"[{reference}]")));
+            }
+
+            input.Append('\n');
+        }
+    }
+
+    /// <summary>Opens a recording file for a task kind, given the session folder and the file's path.</summary>
+    internal static async Task<(Recorder.Session.SessionPlaybackArchive Archive, RecordingFileDocuments Documents, string Session, string FilePath)> OpenRecordingAsync(
+        AnalysisTaskContext context,
+        Func<string, string, CancellationToken, Task<(Recorder.Session.SessionPlaybackArchive Archive, RecordingFileDocuments Documents)>> open,
+        CancellationToken cancellationToken)
+    {
+        var task = context.Task;
+        var session = task.SessionDirectory ??
+            throw new StepFailedException("The task has no session folder, so the recording cannot be read.");
+        var recordingFile = await context.Catalog.RecordingFilePathAsync(task.RecordingId, cancellationToken).ConfigureAwait(false) ??
+            throw new StepFailedException("This recording's events are in the database's evidence tables, not a recording file; the summary reads recording files only.");
+        var filePath = Path.GetFullPath(Path.Combine(session, recordingFile));
+        if (!File.Exists(filePath))
+        {
+            throw new StepFailedException($"The recording file {filePath} is not there.");
+        }
+
+        var (archive, documents) = await open(session, filePath, cancellationToken).ConfigureAwait(false);
+        return (archive, documents, session, filePath);
+    }
+
+    /// <summary>The participant's capabilities as last described for the recording.</summary>
+    internal static async Task<ParticipantCapabilities> CapabilitiesAsync(AnalysisTaskContext context, CancellationToken cancellationToken)
+    {
+        var described = (await context.Catalog.CapabilitiesAsync(context.Task.RecordingId, cancellationToken).ConfigureAwait(false)).FirstOrDefault();
+        return described is null ? ParticipantCapabilities.Unknown : new ParticipantCapabilities(described.Description, described.WrittenUtc);
+    }
+
+    /// <summary>Writes a report to the task's folder and records it in the catalog.</summary>
+    internal static async Task WriteReportAsync(AnalysisTaskContext context, string session, string fileName, string report, CancellationToken cancellationToken)
+    {
+        var relative = Path.Combine("analysis", context.Task.TaskId.ToString("D"), fileName);
         var path = Path.Combine(session, relative);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var bytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(report);
         await File.WriteAllBytesAsync(path, bytes, cancellationToken).ConfigureAwait(false);
-        await context.Catalog.AddReportAsync(task.TaskId, FileName, relative, Convert.ToHexStringLower(SHA256.HashData(bytes)), cancellationToken)
+        await context.Catalog.AddReportAsync(context.Task.TaskId, fileName, relative, Convert.ToHexStringLower(SHA256.HashData(bytes)), cancellationToken)
             .ConfigureAwait(false);
     }
-
-    private static IEnumerable<string> CapabilityReferences(RecordingCollation collation) =>
-        collation.Evidence.Entries.Where(entry => collation.CapabilityLines.Any(line => line.StartsWith($"[{entry.Reference}]", StringComparison.Ordinal)))
-            .Select(entry => entry.Reference);
 }

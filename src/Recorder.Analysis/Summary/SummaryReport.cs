@@ -19,7 +19,10 @@ public static class SummaryReport
         ["activity"] = "What the participant did",
         ["site"] = "The site or application",
         ["audience"] = "Who it appears to be for",
-        ["session"] = "The session"
+        ["session"] = "The session",
+        ["journey"] = "The participant's journey",
+        ["screen"] = "On the screen",
+        ["change"] = "What changed"
     };
 
     public static string Write(
@@ -30,7 +33,8 @@ public static class SummaryReport
         AcceptedStep? overall,
         IReadOnlyList<AttemptRecord> attempts,
         CollationLimits limits,
-        DateTime nowUtc)
+        DateTime nowUtc,
+        VisionReportParts? vision = null)
     {
         ArgumentNullException.ThrowIfNull(collation);
         ArgumentNullException.ThrowIfNull(capabilities);
@@ -57,6 +61,37 @@ public static class SummaryReport
         string? RefOf(string? eventId) =>
             eventId is null ? null : collation.Evidence.Entries.FirstOrDefault(entry => entry.EventId == eventId)?.Reference;
 
+        void Moments(VisitVision? part)
+        {
+            builder.Append("#### The moments\n\n");
+            if (part is null || part.Moments.Count == 0)
+            {
+                builder.Append("No captured frames were recorded during this visit, so it has no moments; its description is from the facts alone.\n\n");
+                return;
+            }
+
+            builder.Append("Chosen by the recorder from the recorded evidence, each with a captured frame of the whole screen.\n\n");
+            foreach (var moment in part.Moments)
+            {
+                var reasons = string.Join(" ", moment.Moment.Reasons.Select((reason, index) => OneLine(reason.Text) + Refs([moment.ReasonReferences[index]])));
+                builder.Append(CultureInfo.InvariantCulture, $"Moment {moment.Moment.Number}, {Clock(moment.Moment.Frame.Time)}: {reasons} Captured frame{Refs([moment.FrameReference])}.\n\n");
+                foreach (var section in RecordingSummaryVisionKind.MomentSections)
+                {
+                    var claims = moment.Step.Claims.Where(claim => claim.Section == section).OrderBy(claim => claim.Paragraph).ThenBy(claim => claim.Ordinal).ToList();
+                    builder.Append(SectionHeadings[section]).Append(": ");
+                    builder.Append(claims.Count == 0
+                        ? "the model gave nothing for this part."
+                        : string.Join(' ', claims.Select(claim => OneLine(claim.Text) + Refs(claim.Evidence))));
+                    builder.Append("\n\n");
+                }
+            }
+
+            if (part.MomentsLeftOut > 0)
+            {
+                builder.Append(CultureInfo.InvariantCulture, $"{part.MomentsLeftOut} more moments were left out to keep within the limit of {vision!.Limits.PerVisit}.\n\n");
+            }
+        }
+
         void Claims(AcceptedStep step, IReadOnlyList<string> sections, string level)
         {
             foreach (var section in sections)
@@ -79,7 +114,7 @@ public static class SummaryReport
         }
 
         var accepted = attempts.FirstOrDefault(attempt => attempt.Outcome == "accepted") ?? attempts.FirstOrDefault();
-        builder.Append("# Summary of recording ").Append(sessionKey).Append("\n\n");
+        builder.Append(vision is null ? "# Summary of recording " : "# Summary with vision of recording ").Append(sessionKey).Append("\n\n");
         var date = nowUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         if (accepted is not null)
         {
@@ -87,6 +122,14 @@ public static class SummaryReport
             builder.Append(CultureInfo.InvariantCulture,
                 $"Inferred by {accepted.Model}{quantization}, profile \"{accepted.ProfileName}\", {date}. ");
             builder.Append("Every statement below is a model's inference from the recorded evidence cited after it. Page visits are derived by the recorder.\n\n");
+        }
+
+        if (vision is not null)
+        {
+            builder.Append(CultureInfo.InvariantCulture,
+                $"This adds what captured frames of the screen show to the summary of task {vision.SummaryTaskId:D}, whose descriptions from the facts alone were given to the model with them. ");
+            builder.Append("The moments of each visit are chosen by the recorder. A captured frame shows what was on the screen, not what the participant saw. ");
+            builder.Append("Recreated pages are not yet used.\n\n");
         }
         else
         {
@@ -176,7 +219,12 @@ public static class SummaryReport
             }
             else
             {
-                Claims(described.Step, RecordingSummaryKind.VisitSections, "####");
+                Claims(described.Step, vision is null ? RecordingSummaryKind.VisitSections : RecordingSummaryVisionKind.VisitSections, "####");
+            }
+
+            if (vision is not null)
+            {
+                Moments(vision.Visits.TryGetValue(visit.Visit.Number, out var part) ? part : null);
             }
         }
 
@@ -225,9 +273,25 @@ public static class SummaryReport
             builder.Append(CultureInfo.InvariantCulture, $"- Generation settings: `{accepted.Parameters}`.\n");
         }
 
-        builder.Append(CultureInfo.InvariantCulture,
-            $"- Prompt templates: {RecordingSummaryKind.VisitTemplate} version {RecordingSummaryKind.TemplateVersion} for each visit, " +
-            $"{RecordingSummaryKind.RecordingTemplate} version {RecordingSummaryKind.TemplateVersion} for the whole recording.\n");
+        if (vision is null)
+        {
+            builder.Append(CultureInfo.InvariantCulture,
+                $"- Prompt templates: {RecordingSummaryKind.VisitTemplate} version {RecordingSummaryKind.TemplateVersion} for each visit, " +
+                $"{RecordingSummaryKind.RecordingTemplate} version {RecordingSummaryKind.TemplateVersion} for the whole recording.\n");
+        }
+        else
+        {
+            builder.Append(CultureInfo.InvariantCulture,
+                $"- Prompt templates: {RecordingSummaryVisionKind.MomentTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for each moment, " +
+                $"{RecordingSummaryVisionKind.VisitTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for each visit, " +
+                $"{RecordingSummaryVisionKind.RecordingTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for the whole recording.\n");
+            var moments = vision.Limits;
+            builder.Append(CultureInfo.InvariantCulture,
+                $"- Moment limits: {moments.PerVisit} moments for each visit; moments less than {Seconds(moments.MergeNanoseconds)} apart merged; " +
+                $"settled when the layout has not changed for {Seconds(moments.SettleQuietNanoseconds)}, or {Seconds(moments.SettleFallbackNanoseconds)} after the visit starts; " +
+                $"a large change is {moments.LargeChangeNodes} elements or more at once.\n");
+            builder.Append("- Each picture is the captured frame as recorded, sent to the model whole.\n");
+        }
         builder.Append(CultureInfo.InvariantCulture,
             $"- Collation limits: {limits.Landmarks} landmarks, {limits.Headings} headings, {limits.Fields} form fields, {limits.Buttons} buttons, " +
             $"{limits.MainTextCharacters} characters of opening text, {limits.KeyKinds} kinds of key, {limits.Commands} NVDA commands, " +
@@ -260,6 +324,8 @@ public static class SummaryReport
         "stated" => "as the profile states it, not checked",
         _ => "unknown"
     };
+
+    private static string Seconds(long nanoseconds) => (nanoseconds / 1e9).ToString("0.###", CultureInfo.InvariantCulture) + " s";
 
     private static string Count(int? value) => value?.ToString(CultureInfo.InvariantCulture) ?? "unknown";
 

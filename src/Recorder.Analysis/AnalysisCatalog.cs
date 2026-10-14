@@ -357,6 +357,24 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
         }, cancellationToken);
 
     /// <summary>
+    /// The evidence references given to a step's accepted attempt, in order,
+    /// or null when the step has none accepted. A later task that builds on
+    /// the step compares them with its own collation, so that it does not
+    /// build on output written from other facts.
+    /// </summary>
+    public Task<IReadOnlyList<string>?> AcceptedInputReferencesAsync(Guid taskId, string stepKey, CancellationToken cancellationToken) =>
+        UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT input_references FROM analysis_attempts WHERE task_id = $1 AND step_key = $2 AND outcome = 'accepted'",
+                connection);
+            command.Parameters.AddWithValue(taskId);
+            command.Parameters.AddWithValue(stepKey);
+            var value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+            return value is string[] references ? (IReadOnlyList<string>?)references : null;
+        }, cancellationToken);
+
+    /// <summary>
     /// Sets aside a step's accepted attempt whose input has changed, so the
     /// step runs again. The attempt stays, recorded as failed.
     /// </summary>
