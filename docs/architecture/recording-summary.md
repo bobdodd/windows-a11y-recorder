@@ -96,7 +96,7 @@ they are able to do: whether they work by sight, by hearing through a
 screen reader, by magnification, by voice, by switch, or by head pointer
 or eye tracking.
 
-The owner's capability work from his PhD will be the model for this
+The capability work from the owner's PhD will be the model for this
 later. It separates what a person is able to do from what they would
 prefer: "A capability model says what a person is able to do and says
 nothing about what they would rather"
@@ -337,7 +337,7 @@ Two further answers, the same day:
 5. **Fragment changes are judged from the page's structure**, so that skip
    links and back to top links are recognised. See "Fragment changes".
 6. **The participant's capabilities are an input to the analysis.** The
-   owner's capability work from his PhD is to be the model later. See
+   capability work from the owner's PhD is to be the model later. See
    "The participant's capabilities".
 
 ## Questions to settle

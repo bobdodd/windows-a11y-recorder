@@ -277,5 +277,5 @@ analysis of recreated pages and captured frames at the moments of each
 visit, each stage writing a Markdown file. The owner answered its four
 questions the same day, and two more: fragment changes are judged from
 the page's structure, to recognise skip links and back to top links, and
-the participant's capabilities are an input, with the owner's capability
-model from his PhD work to follow later.
+the participant's capabilities are an input, with the capability model
+from the owner's PhD work to follow later.
