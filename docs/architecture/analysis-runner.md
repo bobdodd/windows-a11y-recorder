@@ -509,6 +509,51 @@ catalog. It does not run while the worker is running.
   repeats a statement failing without being asked for again; and a trial
   of one step that writes nothing to the catalog.
 
+### Reusing steps when run again
+
+Agreed with the owner on 2026-10-14 and built the same day, because a run
+of the summary with vision takes about 45 minutes to reach its ninth
+moment, and runs are expected to fail as the analysis is developed. The
+player's task row has two buttons:
+
+- **Run again** queues a new task that records the task it runs again.
+  Before sending a step's request, the worker looks in that task for an
+  accepted attempt at the same step made with the same request, the same
+  model file, the same server build, and the same settings: the request's
+  SHA-256, which covers the model's name, the prompt, the input, the
+  pictures, the sampling settings, the seed, and the answer's form; the
+  model file's SHA-256; the server's build; and the settings sent with the
+  server's defaults. Where there is one, its answer is reused: it is
+  copied into the new task as that task's accepted attempt, with its
+  statements, token counts, and times, and it points to the attempt the
+  model wrote, so that a chain of reruns leads back to it. A step with a
+  model file whose SHA-256 is unknown, or a server whose build is unknown,
+  is not reused.
+- **Run again from scratch** queues a new task that reuses nothing, for
+  checking that a run repeats.
+
+Where that task's step failed with the same request, model file, server
+build, and settings, and the checks refused its output, the new task fails
+at once at temperature 0, saying that nothing has changed and why it
+failed, as in decision 8. A failure with no output, such as a server
+error, is run again. The report's "How this was made" lists the steps
+reused and the tasks whose attempts the model wrote, and its table of
+attempts marks each one reused.
+
+- **Catalog:** migration 0036 adds `rerun_of_task_id` to `analysis_tasks`
+  and `reused_from_attempt_id` to `analysis_attempts`.
+- **Whether the page's steps are reused** depends on the recreated page
+  being pictured the same, byte for byte, at each run: the request covers
+  the pictures. This is unknown until the first run again on the target
+  machine.
+- **Tests:** integration tests with the catalog in a real PostgreSQL
+  server and a stand-in endpoint: a step reused, with its answer and
+  statements, and one run again because its request changed; nothing
+  reused after the server build or the model file changed; nothing reused
+  from scratch; a step that failed unchanged failing at once with no
+  request sent; and a rerun of a rerun pointing to the attempt the model
+  wrote. A report test for the reused steps listed.
+
 ## Required tests
 
 - **Unit tests:** queue order and grouping by model; profile reading,

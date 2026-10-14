@@ -299,7 +299,16 @@ design.
   tiles at full size, the page's changes to live regions as moments, read
   from the recorded DOM, and no limit on moments or tiles. The check that
   the recreation browser can run without a window passed on the target
-  machine on 2026-10-14. Not yet tested on the target machine.
+  machine on 2026-10-14. Its first run on the target machine stopped at
+  the first moment, the combined description copying the groups of tiles;
+  the page and combined prompts were changed to version 2 the same day.
+  Its second run, with build 043cbf1, accepted moments 1 to 8 and stopped
+  at moment 9, a statement of what is unknown labelled a claim; the
+  combined prompt was changed to version 3 (the summary design's "Step
+  4b").
+- Built 2026-10-14: reusing the accepted steps of a task run again, and
+  Run again from scratch; see the runner design's "Reusing steps when run
+  again". Not yet tested on the target machine.
 
 ## Recording summary
 

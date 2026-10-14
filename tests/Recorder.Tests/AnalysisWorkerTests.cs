@@ -40,8 +40,10 @@ internal sealed class StandInEndpoint : IModelEndpoint
             : response;
     }
 
+    public string Build { get; set; } = "b11607-ff026f8c0";
+
     public Task<string?> ServerBuildAsync(ModelProfile profile, CancellationToken cancellationToken) =>
-        Task.FromResult<string?>("b11607-ff026f8c0");
+        Task.FromResult<string?>(Build);
 
     public Task<System.Text.Json.Nodes.JsonObject?> ServerSamplingAsync(ModelProfile profile, CancellationToken cancellationToken) =>
         Task.FromResult<System.Text.Json.Nodes.JsonObject?>(new() { ["repeat_last_n"] = 64, ["presence_penalty"] = 0.0 });
@@ -81,6 +83,9 @@ internal sealed class StandInKind(params string[] steps) : IAnalysisTaskKind
 
     public ConcurrentQueue<string> Ran { get; } = new();
 
+    /// <summary>Each step's input, so that a test can change one.</summary>
+    public Func<string, string> Input { get; init; } = step => $"E1: fact for {step}";
+
     public async Task RunAsync(AnalysisTaskContext context, CancellationToken cancellationToken)
     {
         foreach (var step in steps)
@@ -90,7 +95,7 @@ internal sealed class StandInKind(params string[] steps) : IAnalysisTaskKind
                 : [];
             await context.RunStepAsync(
                 step,
-                new ModelRequest("stand-in-template", 3, "Describe.", $"E1: fact for {step}", images, ["description"], new HashSet<string> { "E1", "E2" }),
+                new ModelRequest("stand-in-template", 3, "Describe.", Input(step), images, ["description"], new HashSet<string> { "E1", "E2" }),
                 cancellationToken);
             Ran.Enqueue($"{context.Task.TaskId}:{step}");
         }
@@ -568,6 +573,131 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
             [("visit-1", AttemptOutcomes.Accepted), ("visit-2", AttemptOutcomes.Failed), ("visit-2", AttemptOutcomes.Accepted)],
             attempts.Select(attempt => ((string)attempt["step_key"]!, (string)attempt["outcome"]!)));
         Assert.Equal("The worker stopped during the attempt.", attempts[1]["failure"]);
+    }
+
+    // Reusing steps when run again: analysis-runner.md, "Reusing steps when
+    // run again".
+    private async Task<(AnalysisCatalog Catalog, Guid Recording, Guid First)> RunOnceAsync(StandInEndpoint? endpoint = null)
+    {
+        var catalog = await CatalogAsync();
+        var recording = await RecordingAsync();
+        var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), cancellationToken: Token);
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1", "visit-2")], endpoint ?? new StandInEndpoint(), options: Fast)
+            .RunUntilEmptyAsync(Token);
+        return (catalog, recording, first);
+    }
+
+    [Fact]
+    public async Task A_task_run_again_reuses_its_unchanged_steps_and_runs_the_changed_one()
+    {
+        var (catalog, recording, first) = await RunOnceAsync();
+        var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), rerunOfTaskId: first, cancellationToken: Token);
+        var endpoint = new StandInEndpoint();
+        var changed = new StandInKind("visit-1", "visit-2") { Input = step => step == "visit-2" ? "E1: another fact for visit-2" : $"E1: fact for {step}" };
+
+        await new AnalysisWorker(catalog, SettingsWith(), [changed], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(again));
+        Assert.Contains("another fact for visit-2", Assert.Single(endpoint.Bodies), StringComparison.Ordinal);
+        var original = await RowsAsync("SELECT attempt_id, raw_output FROM analysis_attempts WHERE task_id = $1 AND step_key = 'visit-1'", first);
+        var reused = await RowsAsync(
+            "SELECT attempt_id, step_key, outcome, raw_output, prompt_tokens, reused_from_attempt_id FROM analysis_attempts WHERE task_id = $1 ORDER BY step_key",
+            again);
+        Assert.Equal(AttemptOutcomes.Accepted, reused[0]["outcome"]);
+        Assert.Equal(original[0]["attempt_id"], reused[0]["reused_from_attempt_id"]);
+        Assert.Equal(original[0]["raw_output"], reused[0]["raw_output"]);
+        Assert.Equal(120, reused[0]["prompt_tokens"]);
+        Assert.Single(await RowsAsync("SELECT 1 FROM analysis_claims WHERE attempt_id = $1", reused[0]["attempt_id"]!));
+        Assert.Equal(AttemptOutcomes.Accepted, reused[1]["outcome"]);
+        Assert.Null(reused[1]["reused_from_attempt_id"]);
+        var records = await catalog.AttemptsAsync(again, Token);
+        Assert.Equal(first, records.Single(record => record.StepKey == "visit-1").ReusedFromTaskId);
+        Assert.Null(records.Single(record => record.StepKey == "visit-2").ReusedFromTaskId);
+        Assert.Equal((Guid?)first, (await catalog.TaskAsync(again, Token))!.RerunOfTaskId);
+    }
+
+    [Fact]
+    public async Task A_task_run_again_after_the_server_build_changed_reuses_nothing()
+    {
+        var (catalog, recording, first) = await RunOnceAsync();
+        var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), rerunOfTaskId: first, cancellationToken: Token);
+        var endpoint = new StandInEndpoint { Build = "b11700-0000000" };
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1", "visit-2")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(2, endpoint.Bodies.Count);
+        Assert.Empty(await RowsAsync("SELECT 1 FROM analysis_attempts WHERE task_id = $1 AND reused_from_attempt_id IS NOT NULL", again));
+    }
+
+    [Fact]
+    public async Task A_task_run_again_after_the_model_file_changed_reuses_nothing()
+    {
+        var (catalog, recording, first) = await RunOnceAsync();
+        var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), rerunOfTaskId: first, cancellationToken: Token);
+        var endpoint = new StandInEndpoint();
+        var other = Profile("This PC", "qwen") with { File = new ModelFile("qwen.gguf", "Q4_K_M", new string('b', 64), null) };
+
+        await new AnalysisWorker(catalog, SettingsWith(3, other), [new StandInKind("visit-1", "visit-2")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(2, endpoint.Bodies.Count);
+        Assert.Empty(await RowsAsync("SELECT 1 FROM analysis_attempts WHERE task_id = $1 AND reused_from_attempt_id IS NOT NULL", again));
+    }
+
+    [Fact]
+    public async Task A_task_run_again_from_scratch_reuses_nothing()
+    {
+        var (catalog, recording, _) = await RunOnceAsync();
+        var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var endpoint = new StandInEndpoint();
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1", "visit-2")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(again));
+        Assert.Equal(2, endpoint.Bodies.Count);
+        Assert.Null((await catalog.TaskAsync(again, Token))!.RerunOfTaskId);
+    }
+
+    [Fact]
+    public async Task A_step_that_failed_unchanged_at_temperature_0_fails_at_once_when_run_again()
+    {
+        var refusing = new StandInEndpoint
+        {
+            Answer = (_, body, _) => Task.FromResult(StandInEndpoint.Valid(body.Contains("visit-2", StringComparison.Ordinal) ? "E7" : "E1"))
+        };
+        var (catalog, recording, first) = await RunOnceAsync(refusing);
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(first));
+        var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), rerunOfTaskId: first, cancellationToken: Token);
+        var endpoint = new StandInEndpoint();
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1", "visit-2")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Empty(endpoint.Bodies);
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(again));
+        Assert.Equal(
+            $"Step visit-2 failed in task {first} with the same request, model, server build, and settings, so it was not asked for again: " +
+            "at temperature 0 it would give the same output. It failed: Statement 1 of paragraph 1 of \"description\" cites E7, which was not in the input.",
+            await FailureAsync(again));
+        var attempts = await AttemptsAsync(again);
+        Assert.Equal("visit-1", Assert.Single(attempts)["step_key"]);
+    }
+
+    [Fact]
+    public async Task A_rerun_of_a_rerun_points_to_the_attempt_the_model_wrote()
+    {
+        var (catalog, recording, first) = await RunOnceAsync();
+        var second = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), rerunOfTaskId: first, cancellationToken: Token);
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1", "visit-2")], new StandInEndpoint(), options: Fast).RunUntilEmptyAsync(Token);
+        var third = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), rerunOfTaskId: second, cancellationToken: Token);
+        var endpoint = new StandInEndpoint();
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1", "visit-2")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(third));
+        Assert.Empty(endpoint.Bodies);
+        var written = await RowsAsync("SELECT step_key, attempt_id FROM analysis_attempts WHERE task_id = $1 ORDER BY step_key", first);
+        var copies = await RowsAsync("SELECT step_key, reused_from_attempt_id FROM analysis_attempts WHERE task_id = $1 ORDER BY step_key", third);
+        Assert.Equal(written.Select(row => row["attempt_id"]), copies.Select(row => row["reused_from_attempt_id"]));
+        Assert.All(await catalog.AttemptsAsync(third, Token), record => Assert.Equal(first, record.ReusedFromTaskId));
     }
 
     [Fact]

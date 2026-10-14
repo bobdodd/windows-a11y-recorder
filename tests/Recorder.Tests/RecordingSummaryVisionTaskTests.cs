@@ -210,7 +210,8 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Matches(@"On the screen: A statement about screen\. \[E\d+\]", text);
         Assert.Matches(@"What changed: A statement about change\. \[E\d+\]", text);
         Assert.Contains("- Moment limits: no limit on the moments of a visit; moments less than 2 s apart merged; settled when the layout has not changed for 1 s, or 5 s after the visit starts; a large change is 50 elements or more at once.", text, StringComparison.Ordinal);
-        Assert.Contains($"{RecordingSummaryVisionKind.MomentTemplate} version 2 for each moment's captured frame, {RecordingSummaryVisionKind.PageTemplate} version 2 for each group of its page's tiles", text, StringComparison.Ordinal);
+        Assert.Contains($"{RecordingSummaryVisionKind.MomentTemplate} version 2 for each moment's captured frame, {RecordingSummaryVisionKind.PageTemplate} version 2 for each group of its page's tiles, " +
+            $"{RecordingSummaryVisionKind.CombinedTemplate} version 3 for each moment's description from both", text, StringComparison.Ordinal);
         Assert.Contains("each request holds as many tiles as fit 4096 image tokens", text, StringComparison.Ordinal);
         Assert.Contains("The captured frame at 00:00:02.500: the whole screen, 1920 by 1080 pixels, file frames/desktop/0000000001.png", text, StringComparison.Ordinal);
         Assert.Matches($@"Tile 3 of 5 of the page as the recorder rebuilt it .* file analysis/{vision:D}/pages/visit-0001-moment-01-tile-03\.png", text);
@@ -250,6 +251,22 @@ public sealed partial class RecordingSummaryTaskTests
         }
 
         Assert.DoesNotContain("without its brackets", RecordingSummaryKind.RecordingInstructions, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_combined_template_of_version_3_says_a_statement_of_what_is_unknown_is_of_kind_unknown_and_no_other_template_does()
+    {
+        Assert.Equal(3, RecordingSummaryVisionKind.CombinedTemplateVersion);
+        const string Sentence = "A statement that says something is unknown, or that cites no reference, is of kind unknown; every claim cites at least one reference.";
+        Assert.Contains(Sentence, RecordingSummaryVisionKind.CombinedInstructions, StringComparison.Ordinal);
+        foreach (var instructions in new[]
+                 {
+                     RecordingSummaryVisionKind.MomentInstructions, RecordingSummaryVisionKind.PageInstructions,
+                     RecordingSummaryVisionKind.VisitInstructions, RecordingSummaryVisionKind.RecordingInstructions,
+                 })
+        {
+            Assert.DoesNotContain("is of kind unknown", instructions, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

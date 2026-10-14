@@ -257,7 +257,8 @@ public partial class MainWindow
         }
 
         Add("Cancel", "cancel", $"Cancel {label}", task.State is AnalysisTaskStates.Queued or AnalysisTaskStates.Running, () => CancelTaskAsync(task));
-        Add("Run again", "again", $"Run {label} again", AnalysisPlayer.Ended(task.State), () => RunAgainAsync(task));
+        Add("Run again", "again", $"Run {label} again, reusing its unchanged steps", AnalysisPlayer.Ended(task.State), () => RunAgainAsync(task, reuse: true));
+        Add("Run again from scratch", "scratch", $"Run {label} again from scratch", AnalysisPlayer.Ended(task.State), () => RunAgainAsync(task, reuse: false));
         Add(task.State == AnalysisTaskStates.Failed ? "Why it failed" : "Open result", "open",
             task.State == AnalysisTaskStates.Failed ? $"Why {label} failed" : $"Open the result of {label}",
             task.State is AnalysisTaskStates.Done or AnalysisTaskStates.Failed, () => OpenResultAsync(task));
@@ -280,7 +281,7 @@ public partial class MainWindow
     private static int KindVersion(string kind) =>
         AnalysisTaskKinds.All.FirstOrDefault(item => item.Kind == kind)?.Version ?? 1;
 
-    private async Task QueueAsync(string kind, IReadOnlyDictionary<string, string> profiles, Guid? afterTaskId = null)
+    private async Task QueueAsync(string kind, IReadOnlyDictionary<string, string> profiles, Guid? afterTaskId = null, Guid? rerunOfTaskId = null)
     {
         if (AnalysisCatalogOrNull is not { } catalog || _analysisRecordingId is not { } recording || _analysisSessionDirectory is null)
         {
@@ -290,7 +291,7 @@ public partial class MainWindow
 
         try
         {
-            await catalog.QueueTaskAsync(recording, kind, KindVersion(kind), profiles, afterTaskId: afterTaskId, sessionDirectory: _analysisSessionDirectory, cancellationToken: CancellationToken.None);
+            await catalog.QueueTaskAsync(recording, kind, KindVersion(kind), profiles, afterTaskId: afterTaskId, sessionDirectory: _analysisSessionDirectory, rerunOfTaskId: rerunOfTaskId, cancellationToken: CancellationToken.None);
             ShowAnalysisStatus($"{AnalysisPlayer.KindName(kind)} queued with {string.Join(", ", profiles.Values.Distinct())}.");
             _busy.AnnounceCompleted(AnalysisStatusTextBlock.Text);
             StartWorker();
@@ -338,7 +339,7 @@ public partial class MainWindow
     // Vision is added to the newest summary of the recording that is
     // queued, running, or finished, and runs after it; all of it on the
     // image profile (recording-summary.md, "Decisions (2026-10-14)").
-    private async Task QueueVisionAsync()
+    private async Task QueueVisionAsync(Guid? rerunOfTaskId = null)
     {
         if (AnalysisPlayer.DefaultProfile(_analysisSettings, ModelCapabilities.Image) is not { } profile)
         {
@@ -376,7 +377,8 @@ public partial class MainWindow
         await QueueAsync(
             RecordingSummaryVisionKind.Name,
             new Dictionary<string, string> { [ModelCapabilities.Text] = profile.Name, [ModelCapabilities.Image] = profile.Name },
-            summary.TaskId);
+            summary.TaskId,
+            rerunOfTaskId);
     }
 
     private async void RefreshAnalysisButton_Click(object sender, RoutedEventArgs e)
@@ -398,8 +400,14 @@ public partial class MainWindow
     // Run again queues a new task of the same kind with the same profiles;
     // the earlier one and its report stay (owner, 2026-10-13).
     // Vision run again is added to the newest summary, as from the menu.
-    private Task RunAgainAsync(AnalysisTaskSummary task) =>
-        task.Kind == RecordingSummaryVisionKind.Name ? QueueVisionAsync() : QueueAsync(task.Kind, task.StageProfiles);
+    // Run again reuses the earlier task's accepted steps whose requests are
+    // unchanged; Run again from scratch runs every step (owner, 2026-10-14;
+    // analysis-runner.md, "Reusing steps when run again").
+    private Task RunAgainAsync(AnalysisTaskSummary task, bool reuse)
+    {
+        Guid? rerunOf = reuse ? task.TaskId : null;
+        return task.Kind == RecordingSummaryVisionKind.Name ? QueueVisionAsync(rerunOf) : QueueAsync(task.Kind, task.StageProfiles, rerunOfTaskId: rerunOf);
+    }
 
     private async Task OpenResultAsync(AnalysisTaskSummary task)
     {

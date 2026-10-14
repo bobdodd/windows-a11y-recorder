@@ -298,7 +298,7 @@ public static class SummaryReport
             builder.Append(CultureInfo.InvariantCulture,
                 $"- Prompt templates: {RecordingSummaryVisionKind.MomentTemplate} version {RecordingSummaryVisionKind.MomentTemplateVersion} for each moment's captured frame, " +
                 $"{RecordingSummaryVisionKind.PageTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for each group of its page's tiles, " +
-                $"{RecordingSummaryVisionKind.CombinedTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for each moment's description from both, " +
+                $"{RecordingSummaryVisionKind.CombinedTemplate} version {RecordingSummaryVisionKind.CombinedTemplateVersion} for each moment's description from both, " +
                 $"{RecordingSummaryVisionKind.VisitTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for each visit, " +
                 $"{RecordingSummaryVisionKind.RecordingTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for the whole recording.\n");
             var moments = vision.Limits;
@@ -322,12 +322,26 @@ public static class SummaryReport
             : "- Facts left out to keep within the limits: " + string.Join("; ", leftOut.Select(visit =>
                 string.Create(CultureInfo.InvariantCulture, $"visit {visit.Visit.Number}, {visit.LeftOut}"))) + ".\n");
         builder.Append("- What NVDA had to announce is the recorder's inference from the page, not a recording of speech.\n");
+        var reused = attempts.Where(attempt => attempt.ReusedFromTaskId is not null).ToList();
+        if (reused.Count > 0)
+        {
+            // Reused steps, and the tasks whose attempts the model wrote
+            // (analysis-runner.md, "Reusing steps when run again").
+            var steps = attempts.Select(attempt => attempt.StepKey).Distinct(StringComparer.Ordinal).Count();
+            var sources = string.Join("; ", reused.GroupBy(attempt => attempt.ReusedFromTaskId!.Value).Select(group =>
+                $"task {group.Key}: {string.Join(", ", group.Select(attempt => attempt.StepKey))}"));
+            builder.Append(CultureInfo.InvariantCulture,
+                $"- Steps reused, unchanged, from an earlier run: {reused.Count} of {steps}. Their answers were written in {sources}.\n");
+        }
+
         if (attempts.Count > 0)
         {
             builder.Append("\nAttempts:\n\n| Step | Attempt | Outcome | Prompt tokens | Output tokens | Prompt ms | Output ms |\n| --- | --- | --- | --- | --- | --- | --- |\n");
             foreach (var attempt in attempts)
             {
-                var outcome = attempt.Failure is { Length: > 0 } failure ? $"{attempt.Outcome}: {failure}" : attempt.Outcome;
+                var outcome = attempt.Failure is { Length: > 0 } failure ? $"{attempt.Outcome}: {failure}"
+                    : attempt.ReusedFromTaskId is { } from ? $"{attempt.Outcome}, reused from task {from}"
+                    : attempt.Outcome;
                 builder.Append(CultureInfo.InvariantCulture,
                     $"| {attempt.StepKey} | {attempt.AttemptNumber} | {Cell(outcome)} | {Count(attempt.PromptTokens)} | {Count(attempt.CompletionTokens)} | " +
                     $"{Milliseconds(attempt.PromptMilliseconds)} | {Milliseconds(attempt.CompletionMilliseconds)} |\n");

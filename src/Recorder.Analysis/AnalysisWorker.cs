@@ -288,6 +288,33 @@ public sealed class AnalysisWorker
         // so that each attempt records how it was sampled.
         var parameters = ChatRequest.Parameters(profile, request);
         parameters["server_defaults"] = await _endpoint.ServerSamplingAsync(profile, cancellationToken).ConfigureAwait(false);
+
+        // A task run again reuses the accepted answer of the task it runs
+        // again where the request, model file, server build, and settings
+        // are unchanged; and where the step failed there with them all
+        // unchanged at temperature 0, it fails at once (owner, 2026-10-14).
+        // See analysis-runner.md, "Reusing steps when run again".
+        if (task.RerunOfTaskId is { } source && modelSha is not null && build is not null)
+        {
+            var identity = new StepIdentity(inputSha, modelSha, build, (JsonObject)parameters.DeepClone());
+            if (await Catalog.ReusableAttemptAsync(source, stepKey, identity, cancellationToken).ConfigureAwait(false) is { } reusable)
+            {
+                var number = await Catalog.AttemptCountAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false) + 1;
+                await Catalog.ReuseAttemptAsync(reusable, task.TaskId, number, cancellationToken).ConfigureAwait(false);
+                _status($"Running {task.Kind}, step {stepKey} reused from task {source}.");
+                return await Catalog.AcceptedStepAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false) ??
+                    throw new StepFailedException($"Step {stepKey} was reused from task {source}, but its answer could not be read back.");
+            }
+
+            if (Repeatable(profile) &&
+                await Catalog.UnchangedFailureAsync(source, stepKey, identity, cancellationToken).ConfigureAwait(false) is { } failed)
+            {
+                throw new StepFailedException(
+                    $"Step {stepKey} failed in task {source} with the same request, model, server build, and settings, " +
+                    $"so it was not asked for again: at temperature 0 it would give the same output. It failed: {failed.Failure}");
+            }
+        }
+
         string? lastFailure = null;
         while (true)
         {

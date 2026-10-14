@@ -64,6 +64,19 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // the owner, 2026-10-14; recording-summary.md, "Step 4b").
     public const int TemplateVersion = 2;
 
+    // Version 3 of the combined template, from the second run of step 4b on
+    // the target machine, 2026-10-14: moments 1 to 8 were accepted, and
+    // moment 9's combined description was refused for a statement that
+    // said something was unknown but was of kind claim, citing nothing.
+    // The sentence is in the combined template only, so that the other
+    // steps' requests are unchanged and a run again can reuse them (agreed
+    // with the owner, 2026-10-14; recording-summary.md, "Step 4b").
+    public const int CombinedTemplateVersion = 3;
+
+    /// <summary>What kind a statement of what is unknown is, said in the combined template of version 3.</summary>
+    public const string UnknownIsUnknown =
+        "A statement that says something is unknown, or that cites no reference, is of kind unknown; every claim cites at least one reference. ";
+
     /// <summary>How a reference is cited, said in the templates of version 2.</summary>
     public const string CiteWithoutBrackets = "Cite each reference as it is written without its brackets, such as \"E3\". ";
 
@@ -208,7 +221,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
         "A statement is {\"kind\": \"claim\", \"text\": ..., \"evidence\": [...]} citing every reference it rests on, " +
         "with a statement from a description citing the picture or the tiles that description cites, " +
-        "or {\"kind\": \"unknown\", \"text\": ..., \"evidence\": []}. Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown. " +
+        "or {\"kind\": \"unknown\", \"text\": ..., \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown. " +
         "Write the JSON on one line, with no indentation and no line breaks.";
 
     public const string VisitInstructions =
@@ -376,7 +389,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                 var (combinedInput, combinedReferences) = CombinedInput(collation, visit, moment, frameReference, reasonReferences, frameStep, page, tileReferences, pageSteps);
                 var combined = await context.RunStepAsync(
                     $"{key}-described",
-                    new ModelRequest(CombinedTemplate, TemplateVersion, CombinedInstructions, combinedInput, [], CombinedSections, combinedReferences),
+                    new ModelRequest(CombinedTemplate, CombinedTemplateVersion, CombinedInstructions, combinedInput, [], CombinedSections, combinedReferences),
                     cancellationToken).ConfigureAwait(false);
                 descriptions.Add(new MomentDescription(moment, frameReference, reasonReferences, combined, page, tileReferences));
                 previous = frame.Time;

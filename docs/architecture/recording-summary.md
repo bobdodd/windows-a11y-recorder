@@ -422,8 +422,9 @@ it:
   unknown.
 - **The prompt templates** added are `recording-summary-vision-page`,
   version 1, then 2 (below), with one section, the page; and
-  `recording-summary-vision-moment-combined`, version 1, then 2, with three: on
-  the screen, the page as recreated, and what changed, in view or not.
+  `recording-summary-vision-moment-combined`, version 1, then 2 and 3,
+  with three: on the screen, the page as recreated, and what changed, in
+  view or not.
   The visit's request is given each moment's combined description.
 - **The first run on the target machine,** 2026-10-14, build 9759ceb,
   failed at `visit-0001-moment-01-described`. The page was rebuilt and
@@ -448,6 +449,22 @@ it:
   - a statement given to the combined description that is the same, word
     for word, as an earlier one in any of its descriptions is given once,
     with the references of both. This changes the input, not an answer.
+- **The second run on the target machine,** 2026-10-14, build 043cbf1,
+  accepted every step of moments 1 to 8 at the first attempt, 32 steps,
+  and failed at `visit-0001-moment-09-described`. Its answer combined the
+  descriptions as intended, the page as an overview of its regions from
+  the header to the copyright line, but its third statement of the
+  change, "It is unknown whether the mouse clicks affected the CNIB
+  webpage or any other application, since the browser is not in view and
+  no further context is provided.", was of kind claim, citing nothing,
+  and was refused. Each moment took 4.5 to 6 minutes. The owner agreed the
+  same day that version 3 of the combined template adds "A statement that
+  says something is unknown, or that cites no reference, is of kind
+  unknown; every claim cites at least one reference.", in the combined
+  template only, so that the other steps' requests are unchanged and Run
+  again can reuse them (the runner design's "Reusing steps when run
+  again"). The answer is not relabelled in code: refused output is run
+  again, not repaired.
 - **The report** lists under each moment its recreated page's size,
   scroll position, and tiles, marking those on the screen, and what the
   recreation lacked, then the three parts. "How this was made" gives the

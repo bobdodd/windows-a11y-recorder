@@ -42,6 +42,12 @@ public sealed record AnalysisTask(
 {
     /// <summary>The session folder the player gave when queuing the task, or null.</summary>
     public string? SessionDirectory { get; init; }
+
+    /// <summary>
+    /// The task this one runs again, whose accepted steps with unchanged
+    /// requests are reused, or null when it runs every step itself.
+    /// </summary>
+    public Guid? RerunOfTaskId { get; init; }
 }
 
 /// <summary>A description of the participant's capabilities, and when it was written.</summary>
@@ -101,7 +107,21 @@ public sealed record AttemptRecord(
     int? PromptTokens,
     int? CompletionTokens,
     double? PromptMilliseconds,
-    double? CompletionMilliseconds);
+    double? CompletionMilliseconds)
+{
+    /// <summary>For a reused attempt, the task whose attempt the model wrote; otherwise null.</summary>
+    public Guid? ReusedFromTaskId { get; init; }
+}
+
+/// <summary>
+/// What an attempt was made with that decides whether its answer can be
+/// reused: the request's fingerprint, the model file's hash, the server's
+/// build, and the sampling settings with the server's defaults.
+/// </summary>
+public sealed record StepIdentity(string InputSha256, string ModelSha256, string ServerBuild, JsonObject Parameters);
+
+/// <summary>A failed attempt at a step, for a rerun to say why it was not asked again.</summary>
+public sealed record FailedStep(Guid AttemptId, string? Failure);
 
 /// <summary>A step's accepted attempt.</summary>
 public sealed record AcceptedStep(Guid AttemptId, string InputSha256, JsonElement Output, IReadOnlyList<Claim> Claims);
@@ -153,12 +173,14 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
         long? scopeStartNanoseconds = null,
         long? scopeEndNanoseconds = null,
         string? sessionDirectory = null,
+        Guid? rerunOfTaskId = null,
         CancellationToken cancellationToken = default) =>
         UseAsync(async connection =>
         {
             await using var command = new NpgsqlCommand(
                 "INSERT INTO analysis_tasks (recording_id, kind, kind_version, stage_profiles, after_task_id, " +
-                "scope_start_nanoseconds, scope_end_nanoseconds, session_directory) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING task_id",
+                "scope_start_nanoseconds, scope_end_nanoseconds, session_directory, rerun_of_task_id) " +
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING task_id",
                 connection);
             command.Parameters.AddWithValue(recordingId);
             command.Parameters.AddWithValue(kind);
@@ -168,6 +190,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             command.Parameters.AddWithValue((object?)scopeStartNanoseconds ?? DBNull.Value);
             command.Parameters.AddWithValue((object?)scopeEndNanoseconds ?? DBNull.Value);
             command.Parameters.AddWithValue((object?)sessionDirectory ?? DBNull.Value);
+            command.Parameters.AddWithValue((object?)rerunOfTaskId ?? DBNull.Value);
             return (Guid)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
         }, cancellationToken);
 
@@ -195,7 +218,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             await using var command = new NpgsqlCommand(
                 "SELECT t.task_id, t.recording_id, t.kind, t.kind_version, t.scope_start_nanoseconds, " +
                 "t.scope_end_nanoseconds, t.after_task_id, a.state, t.stage_profiles::text, t.state, " +
-                "t.cancel_requested, t.queued_utc, t.session_directory FROM analysis_tasks t " +
+                "t.cancel_requested, t.queued_utc, t.session_directory, t.rerun_of_task_id FROM analysis_tasks t " +
                 "LEFT JOIN analysis_tasks a ON a.task_id = t.after_task_id " + where,
                 connection);
             if (taskId is { } id)
@@ -221,7 +244,8 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
                     reader.GetBoolean(10),
                     reader.GetDateTime(11))
                 {
-                    SessionDirectory = reader.IsDBNull(12) ? null : reader.GetString(12)
+                    SessionDirectory = reader.IsDBNull(12) ? null : reader.GetString(12),
+                    RerunOfTaskId = reader.IsDBNull(13) ? null : reader.GetGuid(13)
                 });
             }
 
@@ -383,6 +407,111 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             command.Parameters.AddWithValue(stepKey);
             var value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
             return value is string[] references ? (IReadOnlyList<string>?)references : null;
+        }, cancellationToken);
+
+    /// <summary>
+    /// The accepted attempt at a step in an earlier task that was made with
+    /// the same request, model file, server build, and sampling settings, so
+    /// that a task run again can reuse its answer; or null where there is
+    /// none.
+    /// </summary>
+    public Task<Guid?> ReusableAttemptAsync(Guid taskId, string stepKey, StepIdentity identity, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        return UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT attempt_id FROM analysis_attempts WHERE task_id = $1 AND step_key = $2 AND outcome = 'accepted' " +
+                "AND input_sha256 = $3 AND model_sha256 = $4 AND server_build = $5 AND parameters = $6",
+                connection);
+            command.Parameters.AddWithValue(taskId);
+            command.Parameters.AddWithValue(stepKey);
+            command.Parameters.AddWithValue(identity.InputSha256);
+            command.Parameters.AddWithValue(identity.ModelSha256);
+            command.Parameters.AddWithValue(identity.ServerBuild);
+            command.Parameters.Add(new NpgsqlParameter { Value = identity.Parameters.ToJsonString(), NpgsqlDbType = NpgsqlDbType.Jsonb });
+            return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is Guid id ? (Guid?)id : null;
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// The latest failed attempt at a step in an earlier task that was made
+    /// with the same request, model file, server build, and sampling
+    /// settings, whose output the checks refused: not attempts set aside
+    /// because their input changed, ended by the worker stopping, or failed
+    /// by the server with no output. Null where there is none.
+    /// </summary>
+    public Task<FailedStep?> UnchangedFailureAsync(Guid taskId, string stepKey, StepIdentity identity, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        return UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT attempt_id, failure FROM analysis_attempts WHERE task_id = $1 AND step_key = $2 AND outcome = 'failed' " +
+                "AND input_sha256 = $3 AND model_sha256 = $4 AND server_build = $5 AND parameters = $6 " +
+                "AND failure IS DISTINCT FROM 'Its input changed, so the step ran again.' " +
+                "AND failure IS DISTINCT FROM 'The worker stopped during the attempt.' " +
+                "AND raw_output IS NOT NULL " +
+                "ORDER BY attempt_number DESC LIMIT 1",
+                connection);
+            command.Parameters.AddWithValue(taskId);
+            command.Parameters.AddWithValue(stepKey);
+            command.Parameters.AddWithValue(identity.InputSha256);
+            command.Parameters.AddWithValue(identity.ModelSha256);
+            command.Parameters.AddWithValue(identity.ServerBuild);
+            command.Parameters.Add(new NpgsqlParameter { Value = identity.Parameters.ToJsonString(), NpgsqlDbType = NpgsqlDbType.Jsonb });
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+                ? new FailedStep(reader.GetGuid(0), reader.IsDBNull(1) ? null : reader.GetString(1))
+                : null;
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Copies an accepted attempt into another task as that task's accepted
+    /// attempt at the step, with its answer, token counts, times, and
+    /// statements, pointing to the attempt the model wrote. Returns the
+    /// copy's id.
+    /// </summary>
+    public Task<Guid> ReuseAttemptAsync(Guid sourceAttemptId, Guid taskId, int attemptNumber, CancellationToken cancellationToken) =>
+        UseAsync(async connection =>
+        {
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            Guid copy;
+            await using (var command = new NpgsqlCommand(
+                "INSERT INTO analysis_attempts (task_id, step_key, attempt_number, started_utc, finished_utc, outcome, failure, " +
+                "profile_name, profile, endpoint, model, model_file, quantization, model_sha256, model_sha256_basis, server_build, " +
+                "parameters, prompt_template, prompt_template_version, input_sha256, input_references, prompt_tokens, " +
+                "completion_tokens, prompt_milliseconds, completion_milliseconds, finish_reason, raw_output, output, reused_from_attempt_id) " +
+                "SELECT $2, step_key, $3, now(), now(), 'accepted', NULL, " +
+                "profile_name, profile, endpoint, model, model_file, quantization, model_sha256, model_sha256_basis, server_build, " +
+                "parameters, prompt_template, prompt_template_version, input_sha256, input_references, prompt_tokens, " +
+                "completion_tokens, prompt_milliseconds, completion_milliseconds, finish_reason, raw_output, output, " +
+                "coalesce(reused_from_attempt_id, attempt_id) FROM analysis_attempts WHERE attempt_id = $1 AND outcome = 'accepted' " +
+                "RETURNING attempt_id",
+                connection,
+                transaction))
+            {
+                command.Parameters.AddWithValue(sourceAttemptId);
+                command.Parameters.AddWithValue(taskId);
+                command.Parameters.AddWithValue(attemptNumber);
+                copy = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as Guid? ??
+                    throw new InvalidOperationException($"Attempt {sourceAttemptId} is not an accepted attempt.");
+            }
+
+            await using (var command = new NpgsqlCommand(
+                "INSERT INTO analysis_claims (attempt_id, section, paragraph, ordinal, claim_kind, text, evidence) " +
+                "SELECT $2, section, paragraph, ordinal, claim_kind, text, evidence FROM analysis_claims WHERE attempt_id = $1",
+                connection,
+                transaction))
+            {
+                command.Parameters.AddWithValue(sourceAttemptId);
+                command.Parameters.AddWithValue(copy);
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return copy;
         }, cancellationToken);
 
     /// <summary>
@@ -628,10 +757,11 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
         UseAsync<IReadOnlyList<AttemptRecord>>(async connection =>
         {
             await using var command = new NpgsqlCommand(
-                "SELECT step_key, attempt_number, outcome, failure, profile_name, model, model_file, quantization, " +
-                "model_sha256, model_sha256_basis, server_build, parameters::text, prompt_template, prompt_template_version, " +
-                "prompt_tokens, completion_tokens, prompt_milliseconds, completion_milliseconds, started_utc " +
-                "FROM analysis_attempts WHERE task_id = $1 ORDER BY started_utc, step_key, attempt_number",
+                "SELECT a.step_key, a.attempt_number, a.outcome, a.failure, a.profile_name, a.model, a.model_file, a.quantization, " +
+                "a.model_sha256, a.model_sha256_basis, a.server_build, a.parameters::text, a.prompt_template, a.prompt_template_version, " +
+                "a.prompt_tokens, a.completion_tokens, a.prompt_milliseconds, a.completion_milliseconds, a.started_utc, o.task_id " +
+                "FROM analysis_attempts a LEFT JOIN analysis_attempts o ON o.attempt_id = a.reused_from_attempt_id " +
+                "WHERE a.task_id = $1 ORDER BY a.started_utc, a.step_key, a.attempt_number",
                 connection);
             command.Parameters.AddWithValue(taskId);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -644,7 +774,10 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
                 attempts.Add(new AttemptRecord(
                     reader.GetString(0), reader.GetInt32(1), reader.GetString(2), Text(3), reader.GetString(4), reader.GetString(5),
                     Text(6), Text(7), Text(8), reader.GetString(9), Text(10), reader.GetString(11), reader.GetString(12), reader.GetInt32(13),
-                    Count(14), Count(15), Milliseconds(16), Milliseconds(17)));
+                    Count(14), Count(15), Milliseconds(16), Milliseconds(17))
+                {
+                    ReusedFromTaskId = reader.IsDBNull(19) ? null : reader.GetGuid(19)
+                });
             }
 
             return attempts;

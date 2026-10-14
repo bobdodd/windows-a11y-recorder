@@ -668,4 +668,20 @@ public sealed class RecordingSummaryTests
         Assert.Contains("No assistive technology was observed running at the start of the recording.", report, StringComparison.Ordinal);
         Assert.DoesNotContain("## The site tested", report, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void ReportListsTheStepsReusedFromAnEarlierRunAndTheTaskThatWroteThem()
+    {
+        var collation = SummaryCollator.Collate(new FakeSummaryEvidence(), ParticipantCapabilities.Unknown);
+        var source = Guid.Parse("01990000-0000-7000-8000-000000000001");
+        AttemptRecord Attempt(string step) => new(step, 1, AttemptOutcomes.Accepted, null, "This PC", "qwen", null, null, null, "unknown", null, "{}",
+            "stand-in-template", 1, 120, 40, 500, 1500);
+        AttemptRecord[] attempts = [Attempt("visit-0001") with { ReusedFromTaskId = source }, Attempt("recording")];
+
+        var report = SummaryReport.Write("key", collation, ParticipantCapabilities.Unknown, [], null, attempts, CollationLimits.Default, DateTime.UtcNow);
+
+        Assert.Contains($"- Steps reused, unchanged, from an earlier run: 1 of 2. Their answers were written in task {source}: visit-0001.", report, StringComparison.Ordinal);
+        Assert.Contains($"| visit-0001 | 1 | accepted, reused from task {source} |", report, StringComparison.Ordinal);
+        Assert.Contains("| recording | 1 | accepted |", report, StringComparison.Ordinal);
+    }
 }
