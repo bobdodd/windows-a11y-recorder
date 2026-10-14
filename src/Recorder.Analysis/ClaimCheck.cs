@@ -1,0 +1,172 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+
+namespace Recorder.Analysis;
+
+/// <summary>
+/// One statement in a model's output. A claim rests on the evidence it
+/// cites; an unknown says what the evidence does not say, and need not cite
+/// anything.
+/// </summary>
+public sealed record Claim(string Section, int Paragraph, int Ordinal, string Kind, string Text, IReadOnlyList<string> Evidence)
+{
+    public const string ClaimKind = "claim";
+    public const string UnknownKind = "unknown";
+}
+
+/// <summary>
+/// The shape every model step answers in, and the recorder's own check of
+/// it. The output is a JSON object with one member for each section the
+/// step asks for. A section is a list of paragraphs, and a paragraph is a
+/// list of statements, each with its kind, its text, and the evidence
+/// references it cites. The check confirms that the output parses, that
+/// every section is there, that every claim cites at least one reference,
+/// and that every reference cited was in the step's input. Output that
+/// fails is not repaired: the attempt fails.
+/// </summary>
+public static class ClaimCheck
+{
+    /// <summary>The JSON schema the server is asked to hold output to.</summary>
+    public static JsonObject Schema(IReadOnlyList<string> sections)
+    {
+        ArgumentNullException.ThrowIfNull(sections);
+        var statement = new JsonObject
+        {
+            ["type"] = "object",
+            ["properties"] = new JsonObject
+            {
+                ["kind"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(Claim.ClaimKind, Claim.UnknownKind) },
+                ["text"] = new JsonObject { ["type"] = "string", ["minLength"] = 1 },
+                ["evidence"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } }
+            },
+            ["required"] = new JsonArray("kind", "text", "evidence")
+        };
+        var properties = new JsonObject();
+        foreach (var section in sections)
+        {
+            properties[section] = new JsonObject
+            {
+                ["type"] = "array",
+                ["items"] = new JsonObject
+                {
+                    ["type"] = "array",
+                    ["items"] = statement.DeepClone()
+                }
+            };
+        }
+
+        return new JsonObject
+        {
+            ["type"] = "object",
+            ["properties"] = properties,
+            ["required"] = new JsonArray([.. sections.Select(section => JsonValue.Create(section))])
+        };
+    }
+
+    /// <summary>
+    /// Checks a model's output. Returns its claims, or the reason it fails.
+    /// </summary>
+    public static (IReadOnlyList<Claim> Claims, JsonElement Output, string? Failure) Check(
+        string? output,
+        IReadOnlyList<string> sections,
+        IReadOnlySet<string> inputReferences)
+    {
+        ArgumentNullException.ThrowIfNull(sections);
+        ArgumentNullException.ThrowIfNull(inputReferences);
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return ([], default, "The output is empty.");
+        }
+
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(output);
+        }
+        catch (JsonException exception)
+        {
+            return ([], default, $"The output is not valid JSON: {exception.Message}");
+        }
+
+        using (document)
+        {
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return ([], default, "The output is not a JSON object.");
+            }
+
+            var claims = new List<Claim>();
+            foreach (var section in sections)
+            {
+                if (!root.TryGetProperty(section, out var paragraphs) || paragraphs.ValueKind != JsonValueKind.Array)
+                {
+                    return ([], default, $"The output has no \"{section}\" section.");
+                }
+
+                var paragraphIndex = 0;
+                foreach (var paragraph in paragraphs.EnumerateArray())
+                {
+                    if (paragraph.ValueKind != JsonValueKind.Array)
+                    {
+                        return ([], default, $"Paragraph {paragraphIndex + 1} of \"{section}\" is not a list of statements.");
+                    }
+
+                    var ordinal = 0;
+                    foreach (var statement in paragraph.EnumerateArray())
+                    {
+                        var place = $"Statement {ordinal + 1} of paragraph {paragraphIndex + 1} of \"{section}\"";
+                        if (statement.ValueKind != JsonValueKind.Object ||
+                            !statement.TryGetProperty("kind", out var kindElement) || kindElement.ValueKind != JsonValueKind.String ||
+                            !statement.TryGetProperty("text", out var textElement) || textElement.ValueKind != JsonValueKind.String ||
+                            !statement.TryGetProperty("evidence", out var evidenceElement) || evidenceElement.ValueKind != JsonValueKind.Array)
+                        {
+                            return ([], default, $"{place} does not have a kind, a text, and a list of evidence.");
+                        }
+
+                        var kind = kindElement.GetString()!;
+                        var text = textElement.GetString()!;
+                        if (kind is not (Claim.ClaimKind or Claim.UnknownKind))
+                        {
+                            return ([], default, $"{place} has the kind \"{kind}\", which is neither claim nor unknown.");
+                        }
+
+                        if (string.IsNullOrWhiteSpace(text))
+                        {
+                            return ([], default, $"{place} has no text.");
+                        }
+
+                        var evidence = new List<string>();
+                        foreach (var reference in evidenceElement.EnumerateArray())
+                        {
+                            if (reference.ValueKind != JsonValueKind.String)
+                            {
+                                return ([], default, $"{place} cites evidence that is not a reference.");
+                            }
+
+                            var value = reference.GetString()!;
+                            if (!inputReferences.Contains(value))
+                            {
+                                return ([], default, $"{place} cites {value}, which was not in the input.");
+                            }
+
+                            evidence.Add(value);
+                        }
+
+                        if (kind == Claim.ClaimKind && evidence.Count == 0)
+                        {
+                            return ([], default, $"{place} is a claim that cites no evidence.");
+                        }
+
+                        claims.Add(new Claim(section, paragraphIndex, ordinal, kind, text, evidence));
+                        ordinal++;
+                    }
+
+                    paragraphIndex++;
+                }
+            }
+
+            return (claims, root.Clone(), null);
+        }
+    }
+}

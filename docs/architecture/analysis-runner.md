@@ -3,7 +3,8 @@
 ## Status
 
 Proposed on 2026-10-13 and agreed by the owner the same day, to be tried as
-it stands. Not built. The owner set three requirements the same day:
+it stands. Step 1 of the build order was built the same day; see
+"Implementation status". The owner set three requirements the same day:
 
 - Analysis runs detached from the player. Tasks are queued, and the player
   announces each completed task and report as it becomes available.
@@ -287,6 +288,55 @@ Agreed by the owner on 2026-10-13, with the recording summary:
    target machine follows this step.
 4. The recording summary's stage 2: the moments of a visit, the pictures,
    and the vision requests.
+
+## Implementation status
+
+Step 1, the runner, built on 2026-10-13. Not yet run on the target
+machine, and the player has no analysis controls yet.
+
+- **Projects:** the library `Recorder.Analysis` and the worker program
+  `Recorder.AnalysisWorker.exe`. Migration 0034 adds the tables
+  `analysis_tasks`, `analysis_attempts`, `analysis_claims`,
+  `analysis_reviews`, `analysis_reports`, and `analysis_model_file_hashes`.
+  Removing a recording removes its analysis.
+- **Classes:** `AnalysisSettingsFile` reads the settings;
+  `EndpointPolicy` refuses addresses outside this PC and the local
+  network; `ChatRequest` builds the request body; `HttpModelEndpoint`
+  talks to the server; `LocalModelServer` and `LocalServerHost` start
+  llama.cpp in router mode; `ClaimCheck` checks the output;
+  `AnalysisCatalog` holds the queue and the attempts; `AnalysisWorker`
+  runs the queue; `IAnalysisTaskKind` is what each task kind implements.
+- **The settings file**, `%LOCALAPPDATA%\Windows A11y Recorder\analysis-models.json`:
+  `version` (1); `maxAttempts` (1 to 10, default 3); `localServer` with
+  `executable` and `port`; `profiles`, each with `name`, `endpoint`,
+  `model`, `capabilities` (`text`, `image`), `file` (`name`,
+  `quantization`, `sha256`, `path`), `local` for a model this PC serves
+  (`modelPath`, `imageAddOnPath`, `arguments`), `generation`
+  (`maxTokens`, default 2048; `temperature`, default 0; `seed`, default 1;
+  `thinking`, default false), and `protectedApiKey`; and `defaults`, the
+  profile for each capability. A profile that breaks a rule is left out
+  and its problem listed; the others are still used. There is no editor
+  yet; the player's settings come in step 3.
+- **The worker's files**, in `%LOCALAPPDATA%\Windows A11y Recorder\Analysis`:
+  `worker-status.json` (what it is doing, the loaded profile, the
+  settings problems), and for the local server `llama-server-models.ini`,
+  `llama-server.log`, and `llama-server.pid`. One worker runs at a time
+  for each Windows user, held by the mutex
+  `Local\WindowsA11yRecorder.AnalysisWorker`.
+- **No task kinds yet.** Until step 2, a queued task fails with "This
+  worker has no task kind". The tests use a stand-in kind.
+- **A worker killed during an attempt:** the next worker closes the
+  attempt as failed, "The worker stopped during the attempt.", and it
+  counts against the attempt limit. Steps already accepted are not asked
+  again.
+- **A recording left marked as in progress by a crash** keeps the worker
+  waiting, with no model loaded, until the app next starts and marks the
+  recording interrupted.
+- **Tests:** 71 new, unit tests of the rules and integration tests of the
+  worker with a real PostgreSQL server, a stand-in model server, and a
+  stand-in HTTP server on loopback. The full suite passed, 1,631 tests,
+  with the Chromium launcher and browser receiver tests left out as
+  before.
 
 ## Required tests
 

@@ -257,7 +257,7 @@ What is known so far:
 ## Analysis runner
 
 Designed in [analysis runner](analysis-runner.md), proposed 2026-10-13 and
-agreed by the owner the same day, to be tried as it stands. Not built. The
+agreed by the owner the same day, to be tried as it stands. The
 owner decided that analysis runs detached from the player with completed
 tasks announced, that stages may use specialised models, and that the
 model is a setting, since the PC is expected to be upgraded and a server
@@ -266,6 +266,12 @@ security is deferred until the architecture is settled. A trial on the
 target machine the same day ran Qwen3.6-35B-A3B at 4-bit in llama.cpp
 b11607 at 25 to 29 tokens per second writing; the results are in the
 design.
+
+- Built 2026-10-13: step 1, the runner, with no player changes; see the
+  design's "Implementation status". Not yet run on the target machine.
+- To build, in the agreed order: step 2, the recording summary's stage 1;
+  step 3, the player with the system test on the target machine; step 4,
+  the summary's stage 2.
 
 ## Recording summary
 

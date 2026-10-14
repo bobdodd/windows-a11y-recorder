@@ -1,0 +1,497 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Npgsql;
+using NpgsqlTypes;
+
+namespace Recorder.Analysis;
+
+/// <summary>Task states, as the catalog stores them.</summary>
+public static class AnalysisTaskStates
+{
+    public const string Queued = "queued";
+    public const string Running = "running";
+    public const string Done = "done";
+    public const string Failed = "failed";
+    public const string Cancelled = "cancelled";
+}
+
+/// <summary>Attempt outcomes, as the catalog stores them.</summary>
+public static class AttemptOutcomes
+{
+    public const string Running = "running";
+    public const string Accepted = "accepted";
+    public const string Failed = "failed";
+    public const string StoppedForRecording = "stopped-for-recording";
+    public const string Cancelled = "cancelled";
+}
+
+/// <summary>A queued or running task, as the worker reads it.</summary>
+public sealed record AnalysisTask(
+    Guid TaskId,
+    Guid RecordingId,
+    string Kind,
+    int KindVersion,
+    long? ScopeStartNanoseconds,
+    long? ScopeEndNanoseconds,
+    Guid? AfterTaskId,
+    string? AfterTaskState,
+    IReadOnlyDictionary<string, string> StageProfiles,
+    string State,
+    bool CancelRequested,
+    DateTime QueuedUtc);
+
+/// <summary>A task as the player lists it.</summary>
+public sealed record AnalysisTaskSummary(
+    Guid TaskId,
+    Guid RecordingId,
+    string Kind,
+    string State,
+    IReadOnlyDictionary<string, string> StageProfiles,
+    DateTime QueuedUtc,
+    DateTime? FinishedUtc,
+    string? Failure,
+    DateTime? ReadUtc);
+
+/// <summary>What an attempt was made with, recorded when it starts.</summary>
+public sealed record AttemptStart(
+    Guid TaskId,
+    string StepKey,
+    int AttemptNumber,
+    ModelProfile Profile,
+    string? ModelSha256,
+    string ModelSha256Basis,
+    string? ServerBuild,
+    JsonObject Parameters,
+    string PromptTemplate,
+    int PromptTemplateVersion,
+    string InputSha256,
+    IReadOnlyList<string> InputReferences);
+
+/// <summary>How an attempt ended.</summary>
+public sealed record AttemptEnd(
+    string Outcome,
+    string? Failure,
+    ModelResponse? Response,
+    JsonElement? Output,
+    IReadOnlyList<Claim> Claims);
+
+/// <summary>A step's accepted attempt.</summary>
+public sealed record AcceptedStep(Guid AttemptId, string InputSha256, JsonElement Output, IReadOnlyList<Claim> Claims);
+
+/// <summary>
+/// The analysis tables in the catalog. Every use opens its own connection.
+/// If the database server has stopped, as when the player closes and stops
+/// the server it started, the catalog asks for the server to be started
+/// again and repeats the use once.
+/// </summary>
+public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSource>> connect)
+{
+    private NpgsqlDataSource? _dataSource;
+
+    public static AnalysisCatalog For(NpgsqlDataSource dataSource) =>
+        new(_ => Task.FromResult(dataSource));
+
+    private async Task<T> UseAsync<T>(Func<NpgsqlConnection, Task<T>> use, CancellationToken cancellationToken)
+    {
+        for (var tried = 0; ; tried++)
+        {
+            _dataSource ??= await connect(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+                return await use(connection).ConfigureAwait(false);
+            }
+            catch (NpgsqlException exception) when (exception.IsTransient && tried == 0 && !cancellationToken.IsCancellationRequested)
+            {
+                _dataSource = null;
+                NpgsqlConnection.ClearAllPools();
+            }
+        }
+    }
+
+    private Task UseAsync(Func<NpgsqlConnection, Task> use, CancellationToken cancellationToken) =>
+        UseAsync<bool>(async connection =>
+        {
+            await use(connection).ConfigureAwait(false);
+            return true;
+        }, cancellationToken);
+
+    public Task<Guid> QueueTaskAsync(
+        Guid recordingId,
+        string kind,
+        int kindVersion,
+        IReadOnlyDictionary<string, string> stageProfiles,
+        Guid? afterTaskId = null,
+        long? scopeStartNanoseconds = null,
+        long? scopeEndNanoseconds = null,
+        CancellationToken cancellationToken = default) =>
+        UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "INSERT INTO analysis_tasks (recording_id, kind, kind_version, stage_profiles, after_task_id, " +
+                "scope_start_nanoseconds, scope_end_nanoseconds) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING task_id",
+                connection);
+            command.Parameters.AddWithValue(recordingId);
+            command.Parameters.AddWithValue(kind);
+            command.Parameters.AddWithValue(kindVersion);
+            command.Parameters.Add(new NpgsqlParameter { Value = JsonSerializer.Serialize(stageProfiles), NpgsqlDbType = NpgsqlDbType.Jsonb });
+            command.Parameters.AddWithValue((object?)afterTaskId ?? DBNull.Value);
+            command.Parameters.AddWithValue((object?)scopeStartNanoseconds ?? DBNull.Value);
+            command.Parameters.AddWithValue((object?)scopeEndNanoseconds ?? DBNull.Value);
+            return (Guid)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+        }, cancellationToken);
+
+    /// <summary>Whether any recording is in progress.</summary>
+    public Task<bool> RecordingInProgressAsync(CancellationToken cancellationToken) =>
+        UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT EXISTS (SELECT 1 FROM recordings WHERE recording_status_id = 1)",
+                connection);
+            return (bool)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+        }, cancellationToken);
+
+    /// <summary>The queued and running tasks, oldest first.</summary>
+    public Task<IReadOnlyList<AnalysisTask>> OpenTasksAsync(CancellationToken cancellationToken) =>
+        UseAsync<IReadOnlyList<AnalysisTask>>(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT t.task_id, t.recording_id, t.kind, t.kind_version, t.scope_start_nanoseconds, " +
+                "t.scope_end_nanoseconds, t.after_task_id, a.state, t.stage_profiles::text, t.state, " +
+                "t.cancel_requested, t.queued_utc FROM analysis_tasks t " +
+                "LEFT JOIN analysis_tasks a ON a.task_id = t.after_task_id " +
+                "WHERE t.state IN ('queued', 'running') ORDER BY t.queued_utc, t.task_id",
+                connection);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            var tasks = new List<AnalysisTask>();
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                tasks.Add(new AnalysisTask(
+                    reader.GetGuid(0),
+                    reader.GetGuid(1),
+                    reader.GetString(2),
+                    reader.GetInt32(3),
+                    reader.IsDBNull(4) ? null : reader.GetInt64(4),
+                    reader.IsDBNull(5) ? null : reader.GetInt64(5),
+                    reader.IsDBNull(6) ? null : reader.GetGuid(6),
+                    reader.IsDBNull(7) ? null : reader.GetString(7),
+                    Profiles(reader.GetString(8)),
+                    reader.GetString(9),
+                    reader.GetBoolean(10),
+                    reader.GetDateTime(11)));
+            }
+
+            return tasks;
+        }, cancellationToken);
+
+    /// <summary>A recording's tasks, newest first, for the player.</summary>
+    public Task<IReadOnlyList<AnalysisTaskSummary>> TasksAsync(Guid recordingId, CancellationToken cancellationToken) =>
+        UseAsync<IReadOnlyList<AnalysisTaskSummary>>(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT task_id, recording_id, kind, state, stage_profiles::text, queued_utc, finished_utc, failure, read_utc " +
+                "FROM analysis_tasks WHERE recording_id = $1 ORDER BY queued_utc DESC, task_id DESC",
+                connection);
+            command.Parameters.AddWithValue(recordingId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            var tasks = new List<AnalysisTaskSummary>();
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                tasks.Add(new AnalysisTaskSummary(
+                    reader.GetGuid(0),
+                    reader.GetGuid(1),
+                    reader.GetString(2),
+                    reader.GetString(3),
+                    Profiles(reader.GetString(4)),
+                    reader.GetDateTime(5),
+                    reader.IsDBNull(6) ? null : reader.GetDateTime(6),
+                    reader.IsDBNull(7) ? null : reader.GetString(7),
+                    reader.IsDBNull(8) ? null : reader.GetDateTime(8)));
+            }
+
+            return tasks;
+        }, cancellationToken);
+
+    public Task MarkRunningAsync(Guid taskId, CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            "UPDATE analysis_tasks SET state = 'running', started_utc = coalesce(started_utc, now()) " +
+            "WHERE task_id = $1 AND state IN ('queued', 'running')",
+            cancellationToken,
+            taskId);
+
+    public Task FinishTaskAsync(Guid taskId, string state, string? failure, CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            "UPDATE analysis_tasks SET state = $2, failure = $3, finished_utc = now() WHERE task_id = $1",
+            cancellationToken,
+            taskId,
+            state,
+            (object?)failure ?? DBNull.Value);
+
+    /// <summary>
+    /// Cancels a task: at once if it is queued, or by asking the worker if
+    /// it is running.
+    /// </summary>
+    public Task RequestCancelAsync(Guid taskId, CancellationToken cancellationToken) =>
+        UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "UPDATE analysis_tasks SET " +
+                "state = CASE WHEN state = 'queued' THEN 'cancelled' ELSE state END, " +
+                "finished_utc = CASE WHEN state = 'queued' THEN now() ELSE finished_utc END, " +
+                "cancel_requested = (state = 'running') " +
+                "WHERE task_id = $1 AND state IN ('queued', 'running')",
+                connection);
+            command.Parameters.AddWithValue(taskId);
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
+    public Task<bool> CancelRequestedAsync(Guid taskId, CancellationToken cancellationToken) =>
+        UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT cancel_requested FROM analysis_tasks WHERE task_id = $1",
+                connection);
+            command.Parameters.AddWithValue(taskId);
+            return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is true;
+        }, cancellationToken);
+
+    public Task MarkReadAsync(Guid taskId, CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            "UPDATE analysis_tasks SET read_utc = coalesce(read_utc, now()) WHERE task_id = $1",
+            cancellationToken,
+            taskId);
+
+    /// <summary>
+    /// Ends the attempts a worker left running when it stopped, so each is
+    /// recorded as failed and its step runs again.
+    /// </summary>
+    public Task<int> CloseAbandonedAttemptsAsync(CancellationToken cancellationToken) =>
+        UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "UPDATE analysis_attempts SET outcome = 'failed', finished_utc = now(), " +
+                "failure = 'The worker stopped during the attempt.' WHERE outcome = 'running'",
+                connection);
+            return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
+    public Task<AcceptedStep?> AcceptedStepAsync(Guid taskId, string stepKey, CancellationToken cancellationToken) =>
+        UseAsync(async connection =>
+        {
+            Guid attemptId;
+            string inputSha;
+            JsonElement output;
+            await using (var command = new NpgsqlCommand(
+                "SELECT attempt_id, input_sha256, output::text FROM analysis_attempts " +
+                "WHERE task_id = $1 AND step_key = $2 AND outcome = 'accepted'",
+                connection))
+            {
+                command.Parameters.AddWithValue(taskId);
+                command.Parameters.AddWithValue(stepKey);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+                if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    return null;
+                }
+
+                attemptId = reader.GetGuid(0);
+                inputSha = reader.GetString(1);
+                using var document = JsonDocument.Parse(reader.GetString(2));
+                output = document.RootElement.Clone();
+            }
+
+            var claims = new List<Claim>();
+            await using (var command = new NpgsqlCommand(
+                "SELECT section, paragraph, ordinal, claim_kind, text, evidence FROM analysis_claims " +
+                "WHERE attempt_id = $1 ORDER BY section, paragraph, ordinal",
+                connection))
+            {
+                command.Parameters.AddWithValue(attemptId);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    claims.Add(new Claim(
+                        reader.GetString(0),
+                        reader.GetInt32(1),
+                        reader.GetInt32(2),
+                        reader.GetString(3),
+                        reader.GetString(4),
+                        reader.GetFieldValue<string[]>(5)));
+                }
+            }
+
+            return (AcceptedStep?)new AcceptedStep(attemptId, inputSha, output, claims);
+        }, cancellationToken);
+
+    /// <summary>
+    /// Sets aside a step's accepted attempt whose input has changed, so the
+    /// step runs again. The attempt stays, recorded as failed.
+    /// </summary>
+    public Task SupersedeAcceptedAsync(Guid attemptId, CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            "UPDATE analysis_attempts SET outcome = 'failed', " +
+            "failure = 'Its input changed, so the step ran again.' WHERE attempt_id = $1",
+            cancellationToken,
+            attemptId);
+
+    public Task<int> AttemptCountAsync(Guid taskId, string stepKey, CancellationToken cancellationToken) =>
+        UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT coalesce(max(attempt_number), 0) FROM analysis_attempts WHERE task_id = $1 AND step_key = $2",
+                connection);
+            command.Parameters.AddWithValue(taskId);
+            command.Parameters.AddWithValue(stepKey);
+            return (int)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+        }, cancellationToken);
+
+    /// <summary>
+    /// The number of failed attempts at a step. Attempts stopped for a
+    /// recording or cancelled, and accepted attempts set aside because their
+    /// input changed, do not count against the limit.
+    /// </summary>
+    public Task<int> FailedAttemptCountAsync(Guid taskId, string stepKey, CancellationToken cancellationToken) =>
+        UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT count(*) FROM analysis_attempts WHERE task_id = $1 AND step_key = $2 AND outcome = 'failed' " +
+                "AND failure IS DISTINCT FROM 'Its input changed, so the step ran again.'",
+                connection);
+            command.Parameters.AddWithValue(taskId);
+            command.Parameters.AddWithValue(stepKey);
+            return (int)(long)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+        }, cancellationToken);
+
+    public Task<Guid> BeginAttemptAsync(AttemptStart start, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(start);
+        return UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "INSERT INTO analysis_attempts (task_id, step_key, attempt_number, started_utc, outcome, " +
+                "profile_name, profile, endpoint, model, model_file, quantization, model_sha256, model_sha256_basis, " +
+                "server_build, parameters, prompt_template, prompt_template_version, input_sha256, input_references) " +
+                "VALUES ($1, $2, $3, now(), 'running', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) " +
+                "RETURNING attempt_id",
+                connection);
+            command.Parameters.AddWithValue(start.TaskId);
+            command.Parameters.AddWithValue(start.StepKey);
+            command.Parameters.AddWithValue(start.AttemptNumber);
+            command.Parameters.AddWithValue(start.Profile.Name);
+            command.Parameters.Add(new NpgsqlParameter { Value = AnalysisSettingsFile.Describe(start.Profile).ToJsonString(), NpgsqlDbType = NpgsqlDbType.Jsonb });
+            command.Parameters.AddWithValue(start.Profile.Endpoint.ToString());
+            command.Parameters.AddWithValue(start.Profile.Model);
+            command.Parameters.AddWithValue((object?)start.Profile.File.Name ?? DBNull.Value);
+            command.Parameters.AddWithValue((object?)start.Profile.File.Quantization ?? DBNull.Value);
+            command.Parameters.AddWithValue((object?)start.ModelSha256 ?? DBNull.Value);
+            command.Parameters.AddWithValue(start.ModelSha256Basis);
+            command.Parameters.AddWithValue((object?)start.ServerBuild ?? DBNull.Value);
+            command.Parameters.Add(new NpgsqlParameter { Value = start.Parameters.ToJsonString(), NpgsqlDbType = NpgsqlDbType.Jsonb });
+            command.Parameters.AddWithValue(start.PromptTemplate);
+            command.Parameters.AddWithValue(start.PromptTemplateVersion);
+            command.Parameters.AddWithValue(start.InputSha256);
+            command.Parameters.AddWithValue(start.InputReferences.ToArray());
+            return (Guid)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+        }, cancellationToken);
+    }
+
+    public Task FinishAttemptAsync(Guid attemptId, AttemptEnd end, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(end);
+        return UseAsync(async connection =>
+        {
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            await using (var command = new NpgsqlCommand(
+                "UPDATE analysis_attempts SET finished_utc = now(), outcome = $2, failure = $3, prompt_tokens = $4, " +
+                "completion_tokens = $5, prompt_milliseconds = $6, completion_milliseconds = $7, finish_reason = $8, " +
+                "raw_output = $9, output = $10 WHERE attempt_id = $1",
+                connection,
+                transaction))
+            {
+                var response = end.Response;
+                command.Parameters.AddWithValue(attemptId);
+                command.Parameters.AddWithValue(end.Outcome);
+                command.Parameters.AddWithValue((object?)end.Failure ?? DBNull.Value);
+                command.Parameters.AddWithValue((object?)response?.PromptTokens ?? DBNull.Value);
+                command.Parameters.AddWithValue((object?)response?.CompletionTokens ?? DBNull.Value);
+                command.Parameters.AddWithValue((object?)response?.PromptMilliseconds ?? DBNull.Value);
+                command.Parameters.AddWithValue((object?)response?.CompletionMilliseconds ?? DBNull.Value);
+                command.Parameters.AddWithValue((object?)response?.FinishReason ?? DBNull.Value);
+                command.Parameters.AddWithValue((object?)response?.Content ?? DBNull.Value);
+                command.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = end.Output is { } output ? output.GetRawText() : DBNull.Value,
+                    NpgsqlDbType = NpgsqlDbType.Jsonb
+                });
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            foreach (var claim in end.Claims)
+            {
+                await using var command = new NpgsqlCommand(
+                    "INSERT INTO analysis_claims (attempt_id, section, paragraph, ordinal, claim_kind, text, evidence) " +
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                    connection,
+                    transaction);
+                command.Parameters.AddWithValue(attemptId);
+                command.Parameters.AddWithValue(claim.Section);
+                command.Parameters.AddWithValue(claim.Paragraph);
+                command.Parameters.AddWithValue(claim.Ordinal);
+                command.Parameters.AddWithValue(claim.Kind);
+                command.Parameters.AddWithValue(claim.Text);
+                command.Parameters.AddWithValue(claim.Evidence.ToArray());
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+    }
+
+    /// <summary>A model file's hash, if it was hashed at this size and change time.</summary>
+    public Task<string?> FileHashAsync(string path, long length, DateTime lastWriteUtc, CancellationToken cancellationToken) =>
+        UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT sha256 FROM analysis_model_file_hashes WHERE path = $1 AND length = $2 AND last_write_utc = $3",
+                connection);
+            command.Parameters.AddWithValue(path);
+            command.Parameters.AddWithValue(length);
+            command.Parameters.AddWithValue(DateTime.SpecifyKind(lastWriteUtc, DateTimeKind.Utc));
+            return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string;
+        }, cancellationToken);
+
+    public Task SaveFileHashAsync(string path, long length, DateTime lastWriteUtc, string sha256, CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            "INSERT INTO analysis_model_file_hashes (path, length, last_write_utc, sha256) VALUES ($1, $2, $3, $4) " +
+            "ON CONFLICT (path) DO UPDATE SET length = excluded.length, last_write_utc = excluded.last_write_utc, " +
+            "sha256 = excluded.sha256, hashed_utc = now()",
+            cancellationToken,
+            path,
+            length,
+            DateTime.SpecifyKind(lastWriteUtc, DateTimeKind.Utc),
+            sha256);
+
+    public Task AddReportAsync(Guid taskId, string fileName, string relativePath, string sha256, CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            "INSERT INTO analysis_reports (task_id, file_name, relative_path, sha256) VALUES ($1, $2, $3, $4)",
+            cancellationToken,
+            taskId,
+            fileName,
+            relativePath,
+            sha256);
+
+    private Task ExecuteAsync(string sql, CancellationToken cancellationToken, params object[] values) =>
+        UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(sql, connection);
+            foreach (var value in values)
+            {
+                command.Parameters.AddWithValue(value);
+            }
+
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
+    private static IReadOnlyDictionary<string, string> Profiles(string json) =>
+        JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new Dictionary<string, string>();
+}

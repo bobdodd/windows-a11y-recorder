@@ -17,5 +17,6 @@
     <ProjectReference Include="../../src/Recorder.Recreation/Recorder.Recreation.csproj" />
     <ProjectReference Include="../../src/Recorder.Collectors.Automation/Recorder.Collectors.Automation.csproj" />
     <ProjectReference Include="../../src/Recorder.Collectors.Windowing/Recorder.Collectors.Windowing.csproj" />
+    <ProjectReference Include="../../src/Recorder.Analysis/Recorder.Analysis.csproj" />
   </ItemGroup>
 </Project>

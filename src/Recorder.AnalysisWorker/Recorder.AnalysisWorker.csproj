@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Recorder.Analysis/Recorder.Analysis.csproj" />
+  </ItemGroup>
+  <!-- The same PostgreSQL server the app runs, copied to pgsql in the
+       output folder. See Recorder.App.csproj. -->
+  <PropertyGroup>
+    <PostgresBinariesRoot>$(MSBuildThisFileDirectory)..\..\.postgres\pgsql\</PostgresBinariesRoot>
+  </PropertyGroup>
+  <ItemGroup Condition="Exists('$(PostgresBinariesRoot)bin\postgres.exe')">
+    <None Include="$(PostgresBinariesRoot)**\*"
+          LinkBase="pgsql"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false" />
+  </ItemGroup>
+</Project>
