@@ -4,9 +4,12 @@
 
 Proposed on 2026-10-13 and agreed by the owner the same day. Stage 1 was
 built the same day, as step 2 of "Build order" in
-[analysis runner](analysis-runner.md); see "Implementation status". It
-has not yet been run on the target machine. The player queues it from step
-3, built on 2026-10-14. Stage 2 is not built.
+[analysis runner](analysis-runner.md); see "Implementation status". The
+player queues it from step 3, built on 2026-10-14. Stage 1 passed its
+system test on the target machine on 2026-10-14, on the cnib.ca recording,
+and Run again gave the same report; see
+[the validation](../validation/analysis-runner-2026-10-14.md). Stage 2 is
+not built.
 The first task kind for the [analysis runner](analysis-runner.md), chosen
 by the owner the same day: a summary of the recording that describes each
 page visited and the site or application being tested. It is built from
@@ -395,6 +398,14 @@ which pictures are recreations.
   recording of 2026-10-13 with Qwen3.6-35B-A3B, checking on screen that
   both reports appear in the Analysis tab, open in the reading view, and
   move the playhead from a reference.
+
+## Decisions (2026-10-14)
+
+1. **The recorder's own windows stay in "Other windows"**, and in the
+   facts given to the model. The owner's decision, from the first report
+   on the target machine, which gave "Recorder.App, \"Windows
+   Accessibility Recorder\"" there and in the session: the recorder is a
+   genuine window in the recording.
 
 ## Decisions (2026-10-13)
 

@@ -639,6 +639,23 @@ public sealed class RecordingSummaryTests
     }
 
     [Fact]
+    public void ReportGivesTheAssistiveTechnologyObservedRunningWithItsReference()
+    {
+        var evidence = new FakeSummaryEvidence();
+        evidence.Running.Add("NVDA 2026.2");
+        var collation = SummaryCollator.Collate(evidence, ParticipantCapabilities.Unknown);
+
+        var report = SummaryReport.Write("key", collation, ParticipantCapabilities.Unknown, [], null, [], CollationLimits.Default, DateTime.UtcNow);
+
+        Assert.Contains(
+            "Observed running at the start of the recording: NVDA 2026.2. This shows what was running, not what the participant is able to do. [E1]",
+            report,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("No assistive technology was observed", report, StringComparison.Ordinal);
+        Assert.Contains("| E1 | 00:00:00.000 | Observed running at the start of the recording: NVDA 2026.2 |", report, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReportWithNoVisitsSaysSoAndNamesNoModel()
     {
         var collation = SummaryCollator.Collate(new FakeSummaryEvidence(), ParticipantCapabilities.Unknown);
@@ -648,6 +665,7 @@ public sealed class RecordingSummaryTests
         Assert.Contains("No model was asked, because no page visits were recorded.", report, StringComparison.Ordinal);
         Assert.Contains("No page visits were recorded", report, StringComparison.Ordinal);
         Assert.Contains("Unknown: no description of the participant's capabilities was given.", report, StringComparison.Ordinal);
+        Assert.Contains("No assistive technology was observed running at the start of the recording.", report, StringComparison.Ordinal);
         Assert.DoesNotContain("## The site tested", report, StringComparison.Ordinal);
     }
 }

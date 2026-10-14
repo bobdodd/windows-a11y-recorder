@@ -107,8 +107,14 @@ public static class SummaryReport
             builder.Append("Unknown: no description of the participant's capabilities was given.\n\n");
         }
 
-        var observed = collation.CapabilityLines.FirstOrDefault(line => line.StartsWith("Observed running", StringComparison.Ordinal));
-        builder.Append(observed ?? "No assistive technology was observed running at the start of the recording.").Append("\n\n");
+        // Found by its evidence entry, not by the line's start: since the line
+        // gained its reference it starts "[E1]", and on the target machine on
+        // 2026-10-14 the report said nothing was running while NVDA was.
+        var observed = collation.Evidence.Entries.FirstOrDefault(entry =>
+            entry.EventId is null && entry.Text.StartsWith("Observed running at the start of the recording", StringComparison.Ordinal));
+        builder.Append(observed is null
+            ? "No assistive technology was observed running at the start of the recording."
+            : observed.Text + ". This shows what was running, not what the participant is able to do." + Refs([observed.Reference])).Append("\n\n");
 
         if (overall is not null)
         {

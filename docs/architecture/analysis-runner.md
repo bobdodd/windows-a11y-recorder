@@ -4,7 +4,9 @@
 
 Proposed on 2026-10-13 and agreed by the owner the same day, to be tried as
 it stands. Steps 1 and 2 of the build order were built the same day, and
-step 3 on 2026-10-14; see "Implementation status". The owner set three requirements the same day:
+step 3 on 2026-10-14; see "Implementation status". Steps 1 to 3 passed
+their system test on the target machine on 2026-10-14; see
+[the validation](../validation/analysis-runner-2026-10-14.md). The owner set three requirements the same day:
 
 - Analysis runs detached from the player. Tasks are queued, and the player
   announces each completed task and report as it becomes available.
@@ -302,8 +304,10 @@ Agreed by the owner on 2026-10-13, with the recording summary:
 
 ## Implementation status
 
-Step 1, the runner, built on 2026-10-13. Not yet run on the target
-machine. The player's controls are step 3, below.
+Step 1, the runner, built on 2026-10-13. Passed its system test on the
+target machine on 2026-10-14, with steps 2 and 3; see
+[the validation](../validation/analysis-runner-2026-10-14.md). The
+player's controls are step 3, below.
 
 - **Projects:** the library `Recorder.Analysis` and the worker program
   `Recorder.AnalysisWorker.exe`. Migration 0034 adds the tables
@@ -363,7 +367,8 @@ machine. The player's controls are step 3, below.
   before.
 
 Step 3, the player, built on 2026-10-14 as agreed under "Decisions on the
-player (2026-10-13)". Not yet run on the target machine.
+player (2026-10-13)". Passed its system test on the target machine on
+2026-10-14: all six tests, with the mouse alone; cancelling took 3 s.
 
 - **Classes:** in `Recorder.Analysis`, `ReportDocument` reads a report's
   Markdown back into headings, paragraphs, list items, quotes, and tables,

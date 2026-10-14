@@ -268,22 +268,23 @@ b11607 at 25 to 29 tokens per second writing; the results are in the
 design.
 
 - Built 2026-10-13: step 1, the runner, with no player changes; see the
-  design's "Implementation status". Not yet run on the target machine.
+  design's "Implementation status".
 - Built 2026-10-13: step 2, the recording summary's stage 1; see the
-  summary design's "Implementation status". Not yet run on the target
-  machine.
+  summary design's "Implementation status".
 - Built 2026-10-14: step 3, the player: the Analysis menu, the Analysis
   tab, the reading view, the notifications, the capability description,
-  and the model profiles; see the design's "Implementation status". Not
-  yet run on the target machine.
-- To do, in the agreed order: the system test of steps 1 to 3 on the
-  target machine; step 4, the summary's stage 2.
+  and the model profiles; see the design's "Implementation status".
+- Steps 1 to 3 passed their system test on the target machine on
+  2026-10-14: the six tests, with the mouse alone, and the same report
+  from Run again. Five faults were found and fixed on the way; see
+  [the validation](../validation/analysis-runner-2026-10-14.md).
+- To do, in the agreed order: step 4, the summary's stage 2.
 
 ## Recording summary
 
 Designed in [recording summary](recording-summary.md), proposed and agreed
-2026-10-13. Stage 1 built the same day, not yet run on the target machine;
-stage 2 not built. The first task kind for the analysis runner, chosen by
+2026-10-13. Stage 1 built the same day, and passed its system test on
+the target machine on 2026-10-14; stage 2 not built. The first task kind for the analysis runner, chosen by
 the owner: a summary of each page visited and of the site tested, from the
 recorder's collation and a model's text analysis, then enhanced with vision
 analysis of recreated pages and captured frames at the moments of each
