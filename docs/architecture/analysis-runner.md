@@ -619,6 +619,34 @@ three at the end.
    for the profile are to be chosen from the trials. See "Sampling
    options" and "Trying a step with other sampling options".
 
+The trials of moment 10 alone, on the target machine the same day, with
+server build b11607-ff026f8c0, temperature 0, and seed 1:
+
+| Sampling options | Outcome | Statements | Output tokens | Time |
+|---|---|---|---|---|
+| `presence_penalty` 1.5 | Passes the checks; finish reason "stop" | 6 | 369 | 73.1 s, of which 58.8 s on the prompt |
+| None | Stopped at statement 40, the first repeated word for word | 40 | Not given, as stopped | 132.6 s |
+
+The 40 statements without the penalty were the same, in order, as the
+first 40 of the run that reached the output limit, so streaming the answer
+did not change it. The server's defaults, as recorded, were
+`presence_penalty` 0, `repeat_penalty` 1.0, `frequency_penalty` 0,
+`repeat_last_n` 64, and `dry_multiplier` 0; with the same server and
+preset, the earlier runs had no penalty for repetition. With the penalty,
+the answer named the recorder's window with its capture channels and
+settings, its timeline, NVDA's Speech Viewer, and the taskbar, said that
+the moment was the visit's last frame, and gave what changed at it as
+unknown. One moment of one recording shows that the penalty can stop the
+repetition, not that it always will.
+
+5. **The penalty is set for "This PC, with images" only**: the owner,
+   "Let's be conservative and apply it only to images for now". The
+   profile's `generation` has `"sampling": { "presence_penalty": 1.5 }`;
+   "This PC", for text, has no sampling options, since its answers have
+   not repeated themselves. The start script of the build that follows
+   sets it in the settings file on the target machine, keeping the file
+   as it was beside it, so that no file is copied by hand.
+
 ## Decisions (2026-10-13)
 
 The owner's answers to the questions raised with the design:
