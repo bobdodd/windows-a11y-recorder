@@ -1,10 +1,10 @@
 namespace Recorder.Analysis;
 
 /// <summary>
-/// The task kinds the worker runs. The first, the recording summary, is
-/// added in step 2 of the build order in docs/architecture/analysis-runner.md.
+/// The task kinds the worker runs. The first is the recording summary, see
+/// docs/architecture/recording-summary.md.
 /// </summary>
 public static class AnalysisTaskKinds
 {
-    public static IReadOnlyList<IAnalysisTaskKind> All { get; } = [];
+    public static IReadOnlyList<IAnalysisTaskKind> All { get; } = [new Summary.RecordingSummaryKind()];
 }

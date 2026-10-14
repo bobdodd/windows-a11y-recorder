@@ -38,7 +38,14 @@ public sealed record AnalysisTask(
     IReadOnlyDictionary<string, string> StageProfiles,
     string State,
     bool CancelRequested,
-    DateTime QueuedUtc);
+    DateTime QueuedUtc)
+{
+    /// <summary>The session folder the player gave when queuing the task, or null.</summary>
+    public string? SessionDirectory { get; init; }
+}
+
+/// <summary>A description of the participant's capabilities, and when it was written.</summary>
+public sealed record CapabilityDescription(Guid CapabilityId, string Description, DateTime WrittenUtc);
 
 /// <summary>A task as the player lists it.</summary>
 public sealed record AnalysisTaskSummary(
@@ -74,6 +81,27 @@ public sealed record AttemptEnd(
     ModelResponse? Response,
     JsonElement? Output,
     IReadOnlyList<Claim> Claims);
+
+/// <summary>An attempt as a report describes it.</summary>
+public sealed record AttemptRecord(
+    string StepKey,
+    int AttemptNumber,
+    string Outcome,
+    string? Failure,
+    string ProfileName,
+    string Model,
+    string? ModelFileName,
+    string? ModelQuantization,
+    string? ModelSha256,
+    string ModelSha256Basis,
+    string? ServerBuild,
+    string Parameters,
+    string PromptTemplate,
+    int PromptTemplateVersion,
+    int? PromptTokens,
+    int? CompletionTokens,
+    double? PromptMilliseconds,
+    double? CompletionMilliseconds);
 
 /// <summary>A step's accepted attempt.</summary>
 public sealed record AcceptedStep(Guid AttemptId, string InputSha256, JsonElement Output, IReadOnlyList<Claim> Claims);
@@ -124,12 +152,13 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
         Guid? afterTaskId = null,
         long? scopeStartNanoseconds = null,
         long? scopeEndNanoseconds = null,
+        string? sessionDirectory = null,
         CancellationToken cancellationToken = default) =>
         UseAsync(async connection =>
         {
             await using var command = new NpgsqlCommand(
                 "INSERT INTO analysis_tasks (recording_id, kind, kind_version, stage_profiles, after_task_id, " +
-                "scope_start_nanoseconds, scope_end_nanoseconds) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING task_id",
+                "scope_start_nanoseconds, scope_end_nanoseconds, session_directory) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING task_id",
                 connection);
             command.Parameters.AddWithValue(recordingId);
             command.Parameters.AddWithValue(kind);
@@ -138,6 +167,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             command.Parameters.AddWithValue((object?)afterTaskId ?? DBNull.Value);
             command.Parameters.AddWithValue((object?)scopeStartNanoseconds ?? DBNull.Value);
             command.Parameters.AddWithValue((object?)scopeEndNanoseconds ?? DBNull.Value);
+            command.Parameters.AddWithValue((object?)sessionDirectory ?? DBNull.Value);
             return (Guid)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
         }, cancellationToken);
 
@@ -158,7 +188,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             await using var command = new NpgsqlCommand(
                 "SELECT t.task_id, t.recording_id, t.kind, t.kind_version, t.scope_start_nanoseconds, " +
                 "t.scope_end_nanoseconds, t.after_task_id, a.state, t.stage_profiles::text, t.state, " +
-                "t.cancel_requested, t.queued_utc FROM analysis_tasks t " +
+                "t.cancel_requested, t.queued_utc, t.session_directory FROM analysis_tasks t " +
                 "LEFT JOIN analysis_tasks a ON a.task_id = t.after_task_id " +
                 "WHERE t.state IN ('queued', 'running') ORDER BY t.queued_utc, t.task_id",
                 connection);
@@ -178,7 +208,10 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
                     Profiles(reader.GetString(8)),
                     reader.GetString(9),
                     reader.GetBoolean(10),
-                    reader.GetDateTime(11)));
+                    reader.GetDateTime(11))
+                {
+                    SessionDirectory = reader.IsDBNull(12) ? null : reader.GetString(12)
+                });
             }
 
             return tasks;
@@ -470,6 +503,89 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             length,
             DateTime.SpecifyKind(lastWriteUtc, DateTimeKind.Utc),
             sha256);
+
+    /// <summary>Adds a description of the participant's capabilities; the earlier ones are kept.</summary>
+    public Task<Guid> SaveCapabilitiesAsync(Guid recordingId, string description, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(description);
+        return UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "INSERT INTO participant_capabilities (recording_id, description) VALUES ($1, $2) RETURNING capability_id",
+                connection);
+            command.Parameters.AddWithValue(recordingId);
+            command.Parameters.AddWithValue(description.Trim());
+            return (Guid)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+        }, cancellationToken);
+    }
+
+    /// <summary>A recording's capability descriptions, newest first.</summary>
+    public Task<IReadOnlyList<CapabilityDescription>> CapabilitiesAsync(Guid recordingId, CancellationToken cancellationToken) =>
+        UseAsync<IReadOnlyList<CapabilityDescription>>(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT capability_id, description, written_utc FROM participant_capabilities " +
+                "WHERE recording_id = $1 ORDER BY written_utc DESC, capability_id DESC",
+                connection);
+            command.Parameters.AddWithValue(recordingId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            var descriptions = new List<CapabilityDescription>();
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                descriptions.Add(new CapabilityDescription(reader.GetGuid(0), reader.GetString(1), reader.GetDateTime(2)));
+            }
+
+            return descriptions;
+        }, cancellationToken);
+
+    /// <summary>The path of a recording's recording file under its session folder, or null when its events are in the evidence tables.</summary>
+    public Task<string?> RecordingFilePathAsync(Guid recordingId, CancellationToken cancellationToken) =>
+        UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand("SELECT path FROM recording_files WHERE recording_id = $1", connection);
+            command.Parameters.AddWithValue(recordingId);
+            return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string;
+        }, cancellationToken);
+
+    /// <summary>A recording's session key and start, for a report's heading.</summary>
+    public Task<(string SessionKey, DateTime StartedUtc)?> RecordingAsync(Guid recordingId, CancellationToken cancellationToken) =>
+        UseAsync<(string, DateTime)?>(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT session_key, started_utc FROM recordings WHERE recording_id = $1", connection);
+            command.Parameters.AddWithValue(recordingId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+                ? (reader.GetString(0), reader.GetDateTime(1))
+                : null;
+        }, cancellationToken);
+
+    /// <summary>The attempts of a task, in order, for a report's account of how it was made.</summary>
+    public Task<IReadOnlyList<AttemptRecord>> AttemptsAsync(Guid taskId, CancellationToken cancellationToken) =>
+        UseAsync<IReadOnlyList<AttemptRecord>>(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT step_key, attempt_number, outcome, failure, profile_name, model, model_file, quantization, " +
+                "model_sha256, model_sha256_basis, server_build, parameters::text, prompt_template, prompt_template_version, " +
+                "prompt_tokens, completion_tokens, prompt_milliseconds, completion_milliseconds, started_utc " +
+                "FROM analysis_attempts WHERE task_id = $1 ORDER BY started_utc, step_key, attempt_number",
+                connection);
+            command.Parameters.AddWithValue(taskId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            var attempts = new List<AttemptRecord>();
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                string? Text(int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+                int? Count(int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
+                double? Milliseconds(int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetDouble(ordinal);
+                attempts.Add(new AttemptRecord(
+                    reader.GetString(0), reader.GetInt32(1), reader.GetString(2), Text(3), reader.GetString(4), reader.GetString(5),
+                    Text(6), Text(7), Text(8), reader.GetString(9), Text(10), reader.GetString(11), reader.GetString(12), reader.GetInt32(13),
+                    Count(14), Count(15), Milliseconds(16), Milliseconds(17)));
+            }
+
+            return attempts;
+        }, cancellationToken);
 
     public Task AddReportAsync(Guid taskId, string fileName, string relativePath, string sha256, CancellationToken cancellationToken) =>
         ExecuteAsync(

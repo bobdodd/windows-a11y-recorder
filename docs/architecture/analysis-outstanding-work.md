@@ -269,14 +269,17 @@ design.
 
 - Built 2026-10-13: step 1, the runner, with no player changes; see the
   design's "Implementation status". Not yet run on the target machine.
-- To build, in the agreed order: step 2, the recording summary's stage 1;
-  step 3, the player with the system test on the target machine; step 4,
-  the summary's stage 2.
+- Built 2026-10-13: step 2, the recording summary's stage 1; see the
+  summary design's "Implementation status". Not yet run on the target
+  machine.
+- To build, in the agreed order: step 3, the player with the system test
+  on the target machine; step 4, the summary's stage 2.
 
 ## Recording summary
 
-Designed in [recording summary](recording-summary.md), proposed 2026-10-13,
-not agreed or built. The first task kind for the analysis runner, chosen by
+Designed in [recording summary](recording-summary.md), proposed and agreed
+2026-10-13. Stage 1 built the same day, not yet run on the target machine;
+stage 2 not built. The first task kind for the analysis runner, chosen by
 the owner: a summary of each page visited and of the site tested, from the
 recorder's collation and a model's text analysis, then enhanced with vision
 analysis of recreated pages and captured frames at the moments of each

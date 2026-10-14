@@ -48,7 +48,7 @@ public sealed class BrowserStateTests : IDisposable
     }
 
     // Generates the records of one document in the shapes the bridge writes.
-    private sealed class Records(string token, string document = "doc-1", int process = 3440)
+    internal sealed class Records(string token, string document = "doc-1", int process = 3440)
     {
         private readonly string _context = Context(token, document, process);
         private int _transition;
@@ -252,7 +252,10 @@ public sealed class BrowserStateTests : IDisposable
             return this;
         }
 
-        public Records Accessibility(params (long Dom, string Role)[] nodes)
+        public Records Accessibility(params (long Dom, string Role)[] nodes) =>
+            NamedAccessibility([.. nodes.Select(node => (node.Dom, node.Role, $"n{node.Dom}"))]);
+
+        public Records NamedAccessibility(params (long Dom, string Role, string Name)[] nodes)
         {
             var id = $"accessibility-{token}-{++_checkpoint}";
             Items.Add(("browser.accessibility", "accessibility-checkpoint-started", J($$"""
@@ -260,12 +263,12 @@ public sealed class BrowserStateTests : IDisposable
                  "documentId":null,"documentToken":"{{token}}"},"checkpointId":"{{id}}","reason":"renderer-serialization"}
                 """)));
             var index = 0;
-            foreach (var (dom, role) in nodes)
+            foreach (var (dom, role, name) in nodes)
             {
                 Items.Add(("browser.accessibility", "accessibility-checkpoint-node", J($$"""
                     {"context":{"browserInstanceId":"browser-1","processId":{{process}},"processType":"renderer",
                      "documentId":null,"documentToken":"{{token}}"},"checkpointId":"{{id}}","nodeIndex":{{index++}},
-                     "accessibilityNodeId":{{dom + 1000}},"domNodeId":{{dom}},"roleName":"{{role}}","name":"n{{dom}}"}
+                     "accessibilityNodeId":{{dom + 1000}},"domNodeId":{{dom}},"roleName":"{{role}}","name":{{JsonSerializer.Serialize(name)}}}
                     """)));
             }
             Items.Add(("browser.accessibility", "accessibility-checkpoint-completed", J($$"""
@@ -285,7 +288,7 @@ public sealed class BrowserStateTests : IDisposable
         }
     }
 
-    private static readonly (long, long?, string, string, string?)[] Page =
+    internal static readonly (long, long?, string, string, string?)[] Page =
     [
         (1, null, "document", "#document", null),
         (2, 1, "element", "HTML", null),

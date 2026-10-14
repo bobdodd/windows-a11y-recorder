@@ -129,6 +129,9 @@ public sealed class RecordingFileDocuments
         return _pages.TryGetValue(documentKey.Split(' ', 2)[0], out var page) ? page : null;
     }
 
+    /// <summary>The recording's playback index, which the documents were found from.</summary>
+    public PlaybackIndex Index => _index;
+
     /// <summary>The state reader, made when first asked for.</summary>
     public RecordingFileBrowserState State => _state ??= new RecordingFileBrowserState(_reader, _index);
 

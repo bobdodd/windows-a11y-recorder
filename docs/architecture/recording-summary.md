@@ -2,9 +2,11 @@
 
 ## Status
 
-Proposed on 2026-10-13 and agreed by the owner the same day. Not built.
-It is built after the analysis runner, stage 1 first; see "Build order"
-in [analysis runner](analysis-runner.md).
+Proposed on 2026-10-13 and agreed by the owner the same day. Stage 1 was
+built the same day, as step 2 of "Build order" in
+[analysis runner](analysis-runner.md); see "Implementation status". It
+has not yet been run on the target machine, and the player cannot queue it
+until step 3. Stage 2 is not built.
 The first task kind for the [analysis runner](analysis-runner.md), chosen
 by the owner the same day: a summary of the recording that describes each
 page visited and the site or application being tested. It is built from
@@ -14,6 +16,71 @@ the captured frames. Each stage writes a Markdown file. The owner answered
 the four questions raised with it the same day; see "Decisions
 (2026-10-13)". Listed in
 [outstanding work](analysis-outstanding-work.md).
+
+## Implementation status
+
+Stage 1 built on 2026-10-13, in `Recorder.Analysis/Summary`, as the task
+kind `recording-summary`, version 1. Migration 0035 adds the task's
+session folder and the capability descriptions. These decisions were made
+while building it:
+
+- **The session folder is held on the task.** The catalog holds a
+  recording by its session key, not its folder, so the player gives the
+  folder when it queues the task (`analysis_tasks.session_directory`). A
+  task without one fails, saying so.
+- **Only recordings with a recording file.** The summary reads the
+  recording file through the player's own readers. A recording whose events
+  are in the database's evidence tables fails, saying that the summary
+  reads recording files only.
+- **Roles and names are Chromium's.** The recorder starts Chromium with
+  `--force-renderer-accessibility`, so a page's accessibility records give
+  each node's role and computed name, with Chromium's role names such as
+  `main`, `heading`, `link`, `textField`, `comboBoxSelect`, `dialog`, and
+  `rootWebArea`
+  ([ax_enum_util.cc, Chromium](https://source.chromium.org/chromium/chromium/src/+/main:ui/accessibility/ax_enum_util.cc)).
+  A page with no accessibility records is read from its tags, and the
+  facts say so. Text is the static text Chromium exposed, so text that was
+  not rendered is left out; without records, it is the text nodes outside
+  `script`, `style`, `noscript`, `template`, and `head`.
+- **The title** is the root web area's name, or else the `title`
+  element's text. Only the title at the visit's end is given, not each
+  title over the visit.
+- **The structure is read from the page at the visit's end**, as recorded
+  then. Shadow trees are not read.
+- **The fragment's place** is found by HTML's rule for the indicated part
+  of the document: an empty fragment is the top; then the first element
+  with that ID, or the first `a` element with that name; then the same
+  after percent-decoding; then `top` in any case is the top
+  ([HTML Standard](https://html.spec.whatwg.org/multipage/browsing-the-web.html#scroll-to-the-fragment-identifier)).
+- **The link that caused a jump** is the link focused when the change
+  committed, or else the only link in the page pointing there. NVDA's
+  activation requests are not yet used. Where neither finds one, the step
+  is an "in-page jump" whose cause is not recorded.
+- **"Main content replaced"** means the main landmark's children, or the
+  body's where there is no main landmark, at the change and just before
+  the tab's next commit have no node in common.
+- **A return** names the most recent earlier visit to the same URL.
+- **Typed text** is each text control whose value at the visit's end
+  differs from its value at the start, given verbatim.
+- **Observed assistive technology** is the screen readers running, with
+  their versions, and full screen magnification above 100% from the
+  frames. Magnifier's lens and docked views are not included.
+- **What the participant did** gives keys by kind with what happened to
+  each, NVDA's kept commands, mouse button presses with NVDA's inferred
+  mouse outcome, focus moves, and every line of what NVDA had to announce
+  during the visit, up to the limits. NVDA's modes and the element a click
+  hit are not yet given.
+- **Other windows** are the front window records whose process is not the
+  browser's.
+- **The prompt templates** are `recording-summary-visit` and
+  `recording-summary-recording`, version 1. Each visit is a step,
+  `visit-0001` upward, and the whole recording the step `recording`. A
+  recording with no page visits asks no model and says so.
+- **The report** is `analysis\<task>\summary.md` in the session folder.
+  The evidence list gives only the references the report cites. The
+  auditor's description is listed as not in the recording.
+- **The capability item** on the Analysis menu comes with the player, in
+  step 3; until then a description can be saved only through the catalog.
 
 ## Two task kinds
 
