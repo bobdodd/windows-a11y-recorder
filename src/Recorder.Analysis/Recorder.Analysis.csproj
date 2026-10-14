@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="../Recorder.Database/Recorder.Database.csproj" />
+    <!-- The page recreated at a moment, for the summary with vision. -->
+    <ProjectReference Include="../Recorder.Recreation/Recorder.Recreation.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Recorder.Tests" />

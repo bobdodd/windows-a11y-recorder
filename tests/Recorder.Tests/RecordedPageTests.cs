@@ -330,6 +330,62 @@ public sealed class RecordedPageTests : IDisposable
         Assert.Contains("data-a11y-recorded-no-layout-object", Encoding.UTF8.GetString(RecordedPage.Builder()), StringComparison.Ordinal);
     }
 
+    // With RECORDER_RECREATION_CHROMIUM set to a Chromium executable: a
+    // recreated page taller than its viewport is reported built, and its
+    // picture beyond the viewport is the page's whole content size, with a
+    // window and without one (the check before step 4b,
+    // docs/architecture/recording-summary.md, decision 7). The run with a
+    // window needs a display.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TheWholeRecreatedPageIsPictured(bool withoutWindow)
+    {
+        if (Environment.GetEnvironmentVariable("RECORDER_RECREATION_CHROMIUM") is not { } chromium)
+        {
+            return;
+        }
+        var token = TestContext.Current.CancellationToken;
+        var tree = new DomDocumentTree();
+        void Add(long id, long? parent, string type, string name, string? data = null)
+        {
+            tree.Nodes.Add(id, new DomNode(id) { ParentId = parent, NodeType = type, NodeName = name, Data = data });
+            if (parent is { } parentId)
+            {
+                tree.Nodes[parentId].Children.Add(id);
+            }
+        }
+        Add(1, null, "document", "#document");
+        Add(2, 1, "other", "html");
+        Add(3, 1, "element", "HTML");
+        Add(4, 3, "element", "HEAD");
+        Add(5, 3, "element", "BODY");
+        for (var line = 0; line < 200; line++)
+        {
+            Add(10 + (line * 2), 5, "element", "DIV");
+            Add(11 + (line * 2), 10 + (line * 2), "text", "#text", $"Line {line + 1}");
+        }
+        var state = new BrowserDocumentState("token-a dom-document-1") { Dom = tree, DomCompleteness = BrowserStateCompleteness.Complete };
+        var content = RecordedPage.Content(state, "https://example.test/", 4_000_000_000, 4_000_000_000, "presented") with
+        {
+            Viewport = new RecreationViewport(1600, 925, 1, 1),
+        };
+        await using var session = await RecreationSession.OpenAsync(
+            chromium, Path.Combine(_directory, withoutWindow ? "without-window" : "with-window"), content, token,
+            withoutWindow ? ["--headless"] : []);
+
+        Assert.True(await session.WaitForBuildAsync(TimeSpan.FromSeconds(60), token));
+        var picture = await session.CaptureWholePageAsync(token);
+
+        Assert.True(picture.ContentHeight > 925, $"The page is {picture.ContentHeight} high.");
+        var width = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(picture.Png.AsSpan(16, 4));
+        var height = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(picture.Png.AsSpan(20, 4));
+        Assert.Equal((int)Math.Round(picture.ContentWidth), width);
+        Assert.Equal((int)Math.Round(picture.ContentHeight), height);
+        Assert.NotNull(session.WindowFit);
+        Assert.False(session.WindowFit!.Emulated, $"The window's page area was {session.WindowFit.AreaWidth} by {session.WindowFit.AreaHeight}.");
+    }
+
     // Stage 3, with RECORDER_RECREATION_CHROMIUM set to the instrumented
     // Chromium: a page whose recorded box sizes, child offsets, and item
     // rectangles differ from those Blink would lay out is drawn with the

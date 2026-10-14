@@ -696,6 +696,68 @@ public sealed class RecreationControl : IAsyncDisposable
         }
         """;
 
+    // Waits until the recreation's top document is built and its first frame
+    // after the build is painted, as the builder reports in
+    // window.__recorderRecreation, and its fonts are ready: read every 100 ms
+    // until the timeout. False when the timeout passes first. For the check
+    // of the recreation without a window, 2026-10-14
+    // (docs/architecture/recording-summary.md, decision 7).
+    public async Task<bool> WaitForBuildAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var session = _recreationSession ?? throw new InvalidOperationException("The recreation's tab is not attached.");
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (clock.Elapsed < timeout)
+        {
+            var answer = await _connection.SendAsync("Runtime.evaluate", new
+            {
+                expression = "(() => { const r = window.__recorderRecreation; return !!(r && r.built && r.times && r.times.firstPaint !== undefined); })()",
+                returnByValue = true
+            }, session, cancellationToken);
+            if (answer.GetProperty("result").TryGetProperty("value", out var built) && built.ValueKind == JsonValueKind.True)
+            {
+                await _connection.SendAsync("Runtime.evaluate", new
+                {
+                    expression = "document.fonts.ready.then(() => document.fonts.status)",
+                    awaitPromise = true,
+                    returnByValue = true
+                }, session, cancellationToken);
+                return true;
+            }
+            await Task.Delay(100, cancellationToken);
+        }
+        return false;
+    }
+
+    // A picture of the whole recreated page, beyond the viewport, through
+    // Page.captureScreenshot with captureBeyondViewport, clipped to the
+    // page's CSS content size from Page.getLayoutMetrics, as a PNG; and what
+    // the page held when it was taken: its images, those not loaded, those
+    // loaded lazily, its scroll position, and its viewport.
+    public async Task<RecreationPicture> CaptureWholePageAsync(CancellationToken cancellationToken)
+    {
+        var session = _recreationSession ?? throw new InvalidOperationException("The recreation's tab is not attached.");
+        var page = await _connection.SendAsync("Runtime.evaluate", new
+        {
+            expression = "JSON.stringify({ images: document.images.length, imagesNotLoaded: [...document.images].filter(i => !i.complete || i.naturalWidth === 0).length, imagesLazy: [...document.images].filter(i => i.loading === 'lazy').length, scrollX, scrollY, innerWidth, innerHeight, devicePixelRatio })",
+            returnByValue = true
+        }, session, cancellationToken);
+        var metrics = await _connection.SendAsync("Page.getLayoutMetrics", null, session, cancellationToken);
+        var content = metrics.GetProperty("cssContentSize");
+        var width = content.GetProperty("width").GetDouble();
+        var height = content.GetProperty("height").GetDouble();
+        var shot = await _connection.SendAsync("Page.captureScreenshot", new
+        {
+            format = "png",
+            captureBeyondViewport = true,
+            clip = new { x = 0, y = 0, width, height, scale = 1 }
+        }, session, cancellationToken);
+        return new RecreationPicture(
+            Convert.FromBase64String(shot.GetProperty("data").GetString()!),
+            width,
+            height,
+            page.GetProperty("result").GetProperty("value").GetString()!);
+    }
+
     public async ValueTask DisposeAsync()
     {
         _stop.Cancel();
@@ -779,6 +841,10 @@ public sealed record RecreationViewport(double Width, double Height, double Devi
 // one the window was given, and whether the page's size is emulated at the
 // frame's, drawn at a scale, because the screen cannot hold the window. The
 // evidence panel's Viewport as shown section reports it.
+// A picture of the whole recreated page: the PNG, the page's CSS content
+// size it was clipped to, and what the page held when it was taken, as JSON.
+public sealed record RecreationPicture(byte[] Png, double ContentWidth, double ContentHeight, string Page);
+
 public sealed record RecreationWindowFit(double NeededWidth, double NeededHeight, double AreaWidth, double AreaHeight, bool Emulated, double Scale)
 {
     /// <summary>The emulated page width, the frame's, in whole device-independent pixels.</summary>

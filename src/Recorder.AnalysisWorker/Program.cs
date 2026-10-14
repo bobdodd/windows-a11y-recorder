@@ -38,6 +38,44 @@ if (args.Length > 0 && args[0] == "--trial")
     trial = (trialTask, args[2], args[3], sampling);
 }
 
+// With --recreation-check RECORDING TIME FOLDER [CHROMIUM], the worker
+// instead rebuilds the page at the last captured frame at or before TIME in
+// the recording in the folder RECORDING, opens it in the instrumented
+// Chromium with a window and then without one, and writes a picture of the
+// whole page each time and a report to FOLDER; it does not use the catalog,
+// so it may run while the worker runs. See
+// docs/architecture/recording-summary.md, decision 7.
+if (args.Length > 0 && args[0] == "--recreation-check")
+{
+    if (args.Length is < 4 or > 5 || !Recorder.Analysis.Summary.RecreationCheck.TryParseTime(args[2], out var checkTime))
+    {
+        Console.Error.WriteLine("Give: --recreation-check RECORDING TIME FOLDER [CHROMIUM], for example --recreation-check \"C:\\Users\\User\\Documents\\Windows A11y Recorder\\20261013-173155-...\" 00:00:48.950 C:\\Users\\Public\\Downloads\\recreation-check");
+        return 2;
+    }
+
+    var chromium = args.Length == 5 ? args[4] : Recorder.Recreation.RecreationBrowser.DefaultExecutablePath(AppContext.BaseDirectory);
+    try
+    {
+        Console.WriteLine("Rebuilding the page with a window, then without one. A window opens for a while.");
+        var written = await Recorder.Analysis.Summary.RecreationCheck.RunAsync(
+            args[1],
+            checkTime,
+            args[3],
+            chromium,
+            Path.Combine(AnalysisLocation.Directory, "recreation-check"),
+            CancellationToken.None).ConfigureAwait(false);
+        Console.WriteLine($"Written: {written}");
+        return 0;
+    }
+#pragma warning disable CA1031 // The check reports any failure before exiting.
+    catch (Exception exception)
+#pragma warning restore CA1031
+    {
+        Console.Error.WriteLine($"The check stopped with an error: {exception.Message}");
+        return 1;
+    }
+}
+
 using var mutex = new Mutex(initiallyOwned: true, AnalysisLocation.WorkerMutexName, out var createdNew);
 if (!createdNew)
 {

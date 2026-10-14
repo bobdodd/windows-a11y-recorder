@@ -424,6 +424,43 @@ they saw it is unknown. See "The participant's capabilities".
 Whether the recreation browser can be run by the worker without showing a
 window is to be checked when this is built.
 
+### The check of the recreation without a window
+
+Built on 2026-10-14, as agreed with the owner, before step 4b. The
+player's code that writes a page's recreation at a frame, for Inspect page
+at this frame, was moved to the recreation library as
+`RecordedPageAtFrame`, with no change to what it writes, so that the
+worker uses the same code; the recreation library now refers to the
+database library for the recording file's documents, and the analysis
+library to the recreation library. The worker program, run as
+
+`Recorder.AnalysisWorker.exe --recreation-check RECORDING TIME FOLDER [CHROMIUM]`
+
+reads the recording file in the folder RECORDING, takes the last captured
+frame at or before TIME, and rebuilds the first page the player lists at
+it, its default. It opens the page in the instrumented Chromium with a
+window, then again without one, with Chromium's `--headless`: Chrome's
+headless and headful modes are now "unified", and since Chrome 132 the
+old headless mode is a separate binary
+([Chrome for Developers, headless](https://developer.chrome.com/docs/chromium/headless)).
+Each time it waits until the builder reports the page built and painted
+and its fonts ready, then takes a picture of the whole page through
+`Page.captureScreenshot` with `captureBeyondViewport`, clipped to the
+page's CSS content size from `Page.getLayoutMetrics`
+([Chrome DevTools Protocol, Page domain](https://chromedevtools.github.io/devtools-protocol/tot/Page/)).
+It writes both pictures to FOLDER with a report: the page used, each
+picture's size and SHA-256, the page's images and how many were not
+loaded or loaded lazily, its scroll position and viewport, how the window
+was fitted to the recorded viewport, refused requests, timings, and
+whether the pictures are the same. It does not use the catalog, and
+writes nothing to the recording's folder. CHROMIUM defaults to the
+player's default.
+
+In the development sandbox, with a stock Chromium and a recreated page of
+200 lines at viewports of 800 by 600 and of 1,600 by 925, both ways gave a
+picture of the page's whole content size, and the window was fitted to
+the viewport without emulation in both.
+
 ### Vision analysis by a model
 
 From step 4b, each moment is several requests, then one for each visit

@@ -1736,25 +1736,8 @@ public partial class MainWindow : Window
         control.Focus();
     }
 
-    private static string GetDefaultChromiumExecutablePath()
-    {
-        var bundledPath = Path.Combine(
-            AppContext.BaseDirectory,
-            "browser",
-            "chrome.exe");
-        var developmentPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            "chromium-dev",
-            "chromium",
-            "src",
-            "out",
-            "A11yRecorder",
-            "chrome.exe");
-
-        return File.Exists(bundledPath) || !File.Exists(developmentPath)
-            ? bundledPath
-            : developmentPath;
-    }
+    private static string GetDefaultChromiumExecutablePath() =>
+        RecreationBrowser.DefaultExecutablePath(AppContext.BaseDirectory);
 
     private async void OnClosing(object? sender, CancelEventArgs eventArgs)
     {
@@ -1890,73 +1873,12 @@ public partial class MainWindow : Window
                 var clock = System.Diagnostics.Stopwatch.StartNew();
                 await CloseRecreationAsync();
                 timings.Add(new RecreationTiming("Closing the previous recreation", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
+                // Moved to the recreation library on 2026-10-14, so that
+                // the analysis worker rebuilds a page at a moment with the
+                // same code (docs/architecture/recording-summary.md,
+                // decision 7).
                 var content = await Task.Run(() =>
-                {
-                    clock.Restart();
-                    var found = documents.Document(chosen.Key, frame)
-                        ?? throw new InvalidDataException("The page's state at this frame could not be read from the recording.");
-                    timings.Add(new RecreationTiming("Reading the page's state at the frame from the recording", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
-                    clock.Restart();
-                    if (found.State!.Dom is null)
-                    {
-                        throw new InvalidDataException("No DOM walk of this page was recorded at or before this frame, so it cannot be recreated here. A page can be drawn before its first DOM walk; a later frame may have one.");
-                    }
-                    var basis = found.Basis is { Basis: "presented", PresentedTime: { } presented }
-                        ? $"the state after the page's last rendering update drawn at or before the frame, drawn at {FormatTime(presented)}"
-                        : "no rendering update of the page was drawn at or before the frame, so this is its state at the frame's composition time";
-                    // Slice 4d sub-step 2: the page popups the page owned
-                    // open at the frame, each at its own popup widget's
-                    // last presented rendering update.
-                    var popups = documents.Popups(chosen.Key, frame)
-                        .Select(item => new RecordedPopup(
-                            item.Popup,
-                            item.State?.State,
-                            item.State?.Basis is { Basis: "presented", PresentedTime: { } popupPresented }
-                                ? $"its state is the one after its last rendering update drawn at or before the frame, drawn at {FormatTime(popupPresented)}"
-                                : "no rendering update of it was drawn at or before the frame, so its state is the one at the frame's composition time"))
-                        .ToArray();
-                    timings.Add(new RecreationTiming("Reading the page's popups at the frame from the recording", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
-                    clock.Restart();
-                    // Slice 4b sub-step 2a: the frame each animated image
-                    // is held at, chosen at the frame's composition.
-                    var resources = documents.Resources(chosen.Key, found.Basis.CutTime, compositionNanoseconds: documents.CompositionTime(frame));
-                    var resourcesMilliseconds = Math.Round(clock.Elapsed.TotalMilliseconds, 1);
-                    var framesMilliseconds = resources.ImageFramesMilliseconds ?? 0;
-                    timings.Add(new RecreationTiming("Reading the page's fonts and images from the recording", Math.Round(resourcesMilliseconds - framesMilliseconds, 1)));
-                    if (resources.ImageFramesMilliseconds is { } imageFrames)
-                    {
-                        timings.Add(new RecreationTiming("Choosing the frame of each animated image and the compositor values from the recording's compositor records", imageFrames));
-                    }
-                    clock.Restart();
-                    RecordedFrame[] frames = [];
-                    try
-                    {
-                        // Slice 5b: the page's frames, each with the document
-                        // it showed at the frame, its state, and its fonts
-                        // and images.
-                        frames = RecordedFrames.Read(documents, documents.Frames(chosen.Key, found.State, frame), frame, FormatTime);
-                        timings.Add(new RecreationTiming("Reading the page's frames, their states, and their fonts and images from the recording", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
-                        clock.Restart();
-                        // Accessibility preferences stage 3: the page's
-                        // recorded values at the state's time.
-                        var pageValues = browserPreferences.PageValuesAt(
-                            documents.PageFrameTreeNodeIdOf(chosen.Key),
-                            chosen.Url,
-                            found.Basis.CutTime);
-                        // Protocol 0.59: the participant's browser theme at
-                        // the same time, for the recreation browser's window.
-                        var browserTheme = browserPreferences.ThemeAt(found.Basis.CutTime);
-                        var written = RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis, resources, popups, frames: frames, preferences: pageValues, browserTheme: browserTheme);
-                        timings.Add(new RecreationTiming("Writing the page", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
-                        return written;
-                    }
-                    catch
-                    {
-                        resources.Dispose();
-                        RecordedFrame.DisposeAll(frames);
-                        throw;
-                    }
-                });
+                    RecordedPageAtFrame.Content(documents, browserPreferences, chosen, frame, FormatTime, timings));
                 var directory = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "Windows A11y Recorder",

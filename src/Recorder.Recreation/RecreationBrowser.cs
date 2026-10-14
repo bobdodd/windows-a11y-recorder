@@ -36,6 +36,25 @@ public sealed class RecreationBrowser : IAsyncDisposable
 
     public Process Process => _process;
 
+    // The instrumented Chromium the player offers first, and the analysis
+    // worker uses: the one bundled in the program's folder, or else the
+    // development build's, if it is there and the bundled one is not.
+    public static string DefaultExecutablePath(string baseDirectory)
+    {
+        var bundledPath = Path.Combine(baseDirectory, "browser", "chrome.exe");
+        var developmentPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "chromium-dev",
+            "chromium",
+            "src",
+            "out",
+            "A11yRecorder",
+            "chrome.exe");
+        return File.Exists(bundledPath) || !File.Exists(developmentPath)
+            ? bundledPath
+            : developmentPath;
+    }
+
     // Writes the evidence panel extension: its fixed files, and the address
     // from which it reads the evidence.
     public static void WriteExtension(string directory, string evidenceAddress)

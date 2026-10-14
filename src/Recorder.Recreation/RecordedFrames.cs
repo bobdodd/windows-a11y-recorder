@@ -1,7 +1,6 @@
 using Recorder.Database.RecordingFiles;
-using Recorder.Recreation;
 
-namespace Recorder.App;
+namespace Recorder.Recreation;
 
 /// <summary>
 /// The frames of a recorded page at a frame of the recording, as the
@@ -9,7 +8,7 @@ namespace Recorder.App;
 /// was chosen, its state's basis, and its fonts and images. See
 /// docs/architecture/page-recreation.md, "Build plan for 5b".
 /// </summary>
-internal static class RecordedFrames
+public static class RecordedFrames
 {
     public static RecordedFrame[] Read(
         RecordingFileDocuments documents,

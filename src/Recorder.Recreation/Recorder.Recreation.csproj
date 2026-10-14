@@ -12,6 +12,9 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Recorder.Session/Recorder.Session.csproj" />
+    <!-- A page is rebuilt at a frame from the recording file's documents,
+         by the player and by the analysis worker. -->
+    <ProjectReference Include="../Recorder.Database/Recorder.Database.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Recorder.Tests" />

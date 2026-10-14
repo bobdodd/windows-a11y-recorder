@@ -37,6 +37,19 @@ public sealed class RecreationSession : IAsyncDisposable
 
     public Uri DevToolsAddress { get; private init; } = null!;
 
+    // How the window was fitted to the recorded viewport, once it was.
+    public RecreationWindowFit? WindowFit => _server.WindowFit;
+
+    // The time each step of opening the recreation took, as the evidence
+    // panel shows them.
+    public IReadOnlyList<RecreationTiming> Timings => _server.Timings;
+
+    public Task<bool> WaitForBuildAsync(TimeSpan timeout, CancellationToken cancellationToken) =>
+        _control.WaitForBuildAsync(timeout, cancellationToken);
+
+    public Task<RecreationPicture> CaptureWholePageAsync(CancellationToken cancellationToken) =>
+        _control.CaptureWholePageAsync(cancellationToken);
+
     // The directory is a new folder of its own for this recreation.
     public static async Task<RecreationSession> OpenAsync(
         string executablePath,
