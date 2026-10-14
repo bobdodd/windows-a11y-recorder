@@ -41,6 +41,13 @@ public static class RecreationCheck
         return true;
     }
 
+    // The last nanosecond shown as the same time: a time is shown to the
+    // millisecond, cut short, so a frame shown at 00:00:48.950 may be up to
+    // 999,999 ns after it. On the target machine, 2026-10-14, the check at
+    // 00:00:48.950 took the frame before, at 00:00:48.745, as the frame
+    // shown at 00:00:48.950 was after it.
+    public static long LastShownAs(long nanoseconds) => nanoseconds + 999_999;
+
     public static string FormatTime(long nanoseconds)
     {
         var value = TimeSpan.FromTicks(Math.Max(0, nanoseconds) / 100);
@@ -49,7 +56,7 @@ public static class RecreationCheck
 
     /// <summary>
     /// Runs the check on the recording in the session folder, at the last
-    /// captured frame at or before the time, and writes the two pictures and
+    /// captured frame shown at or before the time, and writes the two pictures and
     /// the report to the folder. Returns the report's path.
     /// </summary>
     public static async Task<string> RunAsync(
@@ -74,7 +81,7 @@ public static class RecreationCheck
         var opened = await RecordingFilePlayback.OpenAsync(sessionDirectory, filePath, cancellationToken).ConfigureAwait(false);
         var documents = opened.Documents ?? throw new InvalidDataException("The recording file's browser documents could not be read.");
         var archive = opened.Archive;
-        var frame = archive.Frames.LastOrDefault(item => item.MonotonicNanoseconds <= timeNanoseconds)
+        var frame = archive.Frames.LastOrDefault(item => item.MonotonicNanoseconds <= LastShownAs(timeNanoseconds))
             ?? throw new InvalidDataException($"No frame was captured at or before {FormatTime(timeNanoseconds)}.");
         var choices = documents.At(frame.MonotonicNanoseconds, cancellationToken);
         if (choices.Count == 0)

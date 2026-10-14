@@ -296,9 +296,11 @@ design.
 - To do: step 4b, the recreated pages, as revised by the owner on
   2026-10-14 (the summary design's decision 7): the whole page recreated
   at every moment, the page's announcements as moments, and no limit on
-  moments or tiles; first, a check that the recreation browser can run
-  without a window, and of what the recorded accessibility events give
-  for alerts, status messages, and live regions.
+  moments or tiles. The check that the recreation browser can run without
+  a window passed on the target machine on 2026-10-14 (the summary
+  design's "The check of the recreation without a window"); the recorded
+  page attributes and text changes give alerts, status messages, and live
+  regions, and no recorded event says that one changed.
 
 ## Recording summary
 

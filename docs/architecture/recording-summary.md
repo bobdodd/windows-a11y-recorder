@@ -461,6 +461,34 @@ In the development sandbox, with a stock Chromium and a recreated page of
 picture of the page's whole content size, and the window was fitted to
 the viewport without emulation in both.
 
+On the target machine on 2026-10-14, with build 3b94a0e and the
+instrumented Chromium 156.0.8065.0, on the cnib.ca recording at
+00:00:48.950, the check passed: the recreation runs without a window, so
+step 4b runs it so.
+
+- **Both ways** rebuilt https://www.cnib.ca/en, built and painted it with
+  its fonts ready, in 9.2 s with a window and 6.7 s without, fitted the
+  window's page area to the recorded viewport, 929 by 925, without
+  emulation, at a device pixel ratio of 1, and gave a picture 922 by 7,197
+  pixels, the page's whole CSS content size, scrolled to 6,017. Both
+  refused 4 requests for which nothing was recorded.
+- **The pictures differ in 2,902 of their 6,635,634 pixels.** 2,271 of
+  them are Chromium's window size label, "929px × 925px", at the top right
+  of the picture with a window, shown after the window is resized; the
+  picture without a window has none. The other 631 differ by at most 11
+  of 255, on the edges of curves.
+- **Images:** the page held 15 images, 2 of them not loaded and 3 loaded
+  lazily, the same both ways; the Blogs section's image is an empty box in
+  both. Which images were not loaded, and why, is unknown; it is to be
+  looked at in step 4b, as a picture of the page must say where it is not
+  the recorded page.
+- **The frame used** was at 00:00:48.745, not the frame shown at
+  00:00:48.950: times are shown cut short to the millisecond, and the
+  check took the last frame at or before the time's first nanosecond. The
+  check now takes the last frame shown at or before the time. Moments are
+  chosen from the recorded times, not from times as shown, so step 4a is
+  not affected.
+
 ### Vision analysis by a model
 
 From step 4b, each moment is several requests, then one for each visit
