@@ -275,4 +275,7 @@ the owner: a summary of each page visited and of the site tested, from the
 recorder's collation and a model's text analysis, then enhanced with vision
 analysis of recreated pages and captured frames at the moments of each
 visit, each stage writing a Markdown file. The owner answered its four
-questions the same day; two smaller ones are open there.
+questions the same day, and two more: fragment changes are judged from
+the page's structure, to recognise skip links and back to top links, and
+the participant's capabilities are an input, with the owner's capability
+model from his PhD work to follow later.

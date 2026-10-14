@@ -38,10 +38,10 @@ derived, and is labelled so in the report.
 - Every same-document commit that changes the URL also starts a visit,
   labelled same document, so that route changes in single-page
   applications are covered. That includes a change of the query alone.
-- A change of the fragment alone, the part after `#`, starts a visit too,
-  because some single-page applications route by the fragment. It is
-  listed under the page's visit as a step within it, so a skip link such
-  as `#main` does not break one page into several in the list.
+- A change of the fragment alone, the part after `#`, is judged from the
+  page's structure, because skip links, back to top links, and tables of
+  contents change only the fragment, while some single-page applications
+  route by it. See "Fragment changes".
 - Returning to a URL already visited is a new visit, noted as a return to
   the earlier visit by URL alone. Deciding when two visits show the same
   view is the separate unique view proposal, not this task.
@@ -49,10 +49,75 @@ derived, and is labelled so in the report.
   times they were in front. Nothing more is known about them until the
   whole screen's accessibility tree is recorded, which is deferred.
 
+### Fragment changes
+
+A fragment-only change is an in-page jump, listed as a step within the
+page's visit, when the recorded document has the place it points to.
+HTML's own rule decides that: an empty fragment, or `top` in any case
+where no element has that ID, means the top of the document; otherwise
+it is the first element whose ID equals the fragment, or the first `a`
+element whose `name` does, tried before and after percent-decoding
+([HTML, selecting the indicated part](https://html.spec.whatwg.org/multipage/browsing-the-web.html#scroll-to-the-fragment-identifier)).
+The recorder applies the rule to the recorded document at that moment.
+
+The step is named from the link that caused it, where the recording shows
+one: the link clicked or activated just before the change, and its `href`
+in the recorded document. From the page's structure:
+
+- **Skip link:** the link comes before the main landmark, or before the
+  page's first heading where there is no main landmark, and points to the
+  main landmark, or to an element at its start or before its first
+  heading.
+- **Back to top link:** the link comes after the start of the main
+  content, and points to the top of the document or to an element before
+  the main content.
+- **In-page link:** any other link to a place on the page, such as a table
+  of contents.
+
+These names are derived, and say which rule gave them. A fragment change
+is a visit of its own, labelled fragment route, when the recorded document
+has no place it points to, or when the page's main content is replaced
+after it, as in a single-page application that routes by the fragment.
+
+A skip link or back to top link that moves focus or scrolls with a script,
+without changing the URL, does not appear here. It appears as a moment of
+the visit, a click and a scroll, and the summary describes it from those.
+
 The navigation evidence alone does not prove that a navigation produced a
 distinct view the participant saw
 ([navigation and document identity](navigation-document-identity-evidence-model.md)),
 so the report calls these page visits and does not claim more.
+
+## The participant's capabilities
+
+The participant's capabilities are an input to the analysis. What a
+participant does with a page, and what the journey means, depends on what
+they are able to do: whether they work by sight, by hearing through a
+screen reader, by magnification, by voice, by switch, or by head pointer
+or eye tracking.
+
+The owner's capability work from his PhD will be the model for this
+later. It separates what a person is able to do from what they would
+prefer: "A capability model says what a person is able to do and says
+nothing about what they would rather"
+([Adaptation, a11ybob.com](https://a11ybob.com/adaptation),
+[Describing people to computers](https://a11ybob.com/adaptation/describing-people-to-computers)).
+Adopting that model is for later, and gets its own design.
+
+Until then:
+
+- A session can hold a short description of the participant's
+  capabilities, written by the auditor, through an item on the Analysis
+  menu. It is stored in the catalog with when it was written. A change
+  keeps the earlier text, and each report records the text it used.
+- The description goes to the model labelled reported: a person's
+  statement, not an observation.
+- The assistive technology the recorder detected, such as NVDA or
+  Magnifier running, goes in as observed. It shows what was running, not
+  what the participant is able to do, and the model is told so.
+- With no description, the participant's capabilities are unknown. The
+  journey then says what was on the screen and what was announced, and
+  does not say what the participant saw or heard.
 
 ## Stage 1: the summary
 
@@ -162,9 +227,9 @@ recording without Chromium evidence, the visit is described from its
 facts and its captured frames, and the report says so.
 
 A captured frame shows what was on the screen, not what the participant
-saw. The journey reads as what was on the screen, and says the
-participant saw it only where the session records that the participant was
-working by sight; otherwise, whether they saw it is unknown.
+saw. The journey says the participant saw something only where the
+participant's capabilities say they work by sight; otherwise, whether
+they saw it is unknown. See "The participant's capabilities".
 
 Whether the recreation browser can be run by the worker without showing a
 window is to be checked when this is built.
@@ -231,7 +296,11 @@ which pictures are recreations.
 
 - **Unit tests:** dividing visits, including same-document commits, a
   fragment-only change, a return to a URL, several tabs, and a recording
-  with no navigations, and fragment-only changes listed within a visit;
+  with no navigations; fragment changes judged by HTML's rule, including
+  an empty fragment, `top`, a name anchor, and a percent-encoded ID; skip,
+  back to top, and in-page links named from the page's structure; a
+  fragment route with no target or with the main content replaced; the
+  capability description, its earlier versions, and its absence;
   the collation's facts and its size limit; choosing and merging moments,
   and the limit on them; cutting tiles; writing the report
   from checked output, with every reference in the evidence list.
@@ -263,11 +332,15 @@ The owner's answers to the questions raised with the design:
    change is listed as a step within the page's visit, as proposed under
    "What counts as a page visit".
 
+Two further answers, the same day:
+
+5. **Fragment changes are judged from the page's structure**, so that skip
+   links and back to top links are recognised. See "Fragment changes".
+6. **The participant's capabilities are an input to the analysis.** The
+   owner's capability work from his PhD is to be the model later. See
+   "The participant's capabilities".
+
 ## Questions to settle
 
-1. Whether a fragment-only change should be a step within the visit, as
-   proposed, or a visit of its own in the list.
-2. How the session records that the participant works by sight. The
-   recorder has no such field. It could be a setting chosen when a
-   recording starts, or the journey could always say what was on the
-   screen and leave whether it was seen as unknown.
+None at present. The proposal waits for the owner's agreement before it
+is built.
