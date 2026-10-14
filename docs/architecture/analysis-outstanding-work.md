@@ -293,8 +293,12 @@ design.
 - Built 2026-10-14: text in the player can be selected and copied; see
   [player layout](player-layout.md), "Selecting and copying text". Not
   yet tested on the target machine.
-- To do, in the agreed order: the system test of step 4a, then step 4b,
-  the recreated pages.
+- To do: step 4b, the recreated pages, as revised by the owner on
+  2026-10-14 (the summary design's decision 7): the whole page recreated
+  at every moment, the page's announcements as moments, and no limit on
+  moments or tiles; first, a check that the recreation browser can run
+  without a window, and of what the recorded accessibility events give
+  for alerts, status messages, and live regions.
 
 ## Recording summary
 

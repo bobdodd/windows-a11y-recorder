@@ -12,8 +12,10 @@ and Run again gave the same report; see
 is built in two steps, agreed by the owner on 2026-10-14: 4a, the moments
 and their captured frames, built the same day, which passed on the
 target machine on 2026-10-14 with build f1b2229, on the cnib.ca
-recording, all 12 of its steps accepted at the first attempt; and 4b, the recreated pages, not built. See "Stage 2
-implementation status" and "Decisions (2026-10-14)".
+recording, all 12 of its steps accepted at the first attempt; and 4b,
+the recreated pages, not built, its design revised by the owner the same
+day (decision 7). See "Stage 2 implementation status" and "Decisions
+(2026-10-14)".
 The first task kind for the [analysis runner](analysis-runner.md), chosen
 by the owner the same day: a summary of the recording that describes each
 page visited and the site or application being tested. It is built from
@@ -361,11 +363,15 @@ recorded evidence:
   checkpoints;
 - each click, each scroll to a new part of the page, and each field the
   participant typed into;
+- each announcement the page makes to assistive technology, whether or not
+  it is in view: an alert, a status message, or a live region appearing or
+  changing (decision 7, from step 4b; what the recorded accessibility
+  events give for these is to be checked before it is built);
 - the last captured frame before the visit ends.
 
 Each moment is labelled derived, with what chose it. Moments close
-together are merged. Each visit has a set limit, with the number left out
-stated.
+together are merged. From step 4b there is no limit on the number of
+moments in a visit (decision 7); step 4a has a limit of 10.
 
 ### Two kinds of picture
 
@@ -373,22 +379,35 @@ stated.
   screen, including other windows, but only the part of the page in the
   window. It describes the participant's journey: where they were on the
   page, what was open, and what changed.
-- **The recreated page**, once for each visit at its first settled moment,
-  and again after a large change in content. The page is rebuilt with the
-  same recreation the player's Inspect page at this frame uses
+- **The recreated page at every moment** (decision 7), as it was at that
+  moment's time. The page is rebuilt with the same recreation the
+  player's Inspect page at this frame uses
   ([page recreation](page-recreation.md)), at the recorded viewport size.
   A picture of the whole page, beyond the viewport, is taken through
   DevTools' `Page.captureScreenshot` with `captureBeyondViewport`
   ([Chrome DevTools Protocol, Page domain](https://chromedevtools.github.io/devtools-protocol/tot/Page/)).
-  It describes the page itself, including what the participant never
-  scrolled to.
+  It describes the page itself at that moment, including what is out of
+  the participant's view: the frame may be far down the page or under
+  high magnification, and a toast or status message may appear anywhere
+  on the page, small on a large and busy one.
 
-The recreated picture is cut into viewport-sized tiles, up to a set number,
-with the number left out stated. Every captured frame and every tile has
-its own evidence reference, giving the frame, the visit, and for a tile its
-position on the page. In the trial, one full-screen frame became about
-2,000 image tokens and took 45 seconds, so a visit with ten moments takes
-around ten minutes, which a queue can absorb.
+The recreated picture is cut into viewport-sized tiles, all of them, with
+no limit on their number, and the tiles are not scaled down, so that a
+small toast is as legible in its tile as on the screen. Whether the
+model's image add-on reduces a tile's resolution itself is to be checked
+when this is built. Every captured frame and every tile has its own
+evidence reference, giving the frame, the moment, and for a tile its
+position on the page. Each tile is labelled with its position, and the
+model is told which part of the page was in view in the captured frame,
+and, where Magnifier was on, what was magnified, from the recorded
+Magnifier evidence, so that it can say what changed out of view.
+
+In the trial, one full-screen frame became about 2,000 image tokens and
+took 45 seconds. The cnib.ca page scrolled to at least 6,017 CSS pixels
+from the top with a viewport 925 high, so it is at least 8 tiles; with 10
+moments, a visit is around 90 picture requests at about 45 to 70 seconds
+each, one to two hours, which the queue can absorb. Making this faster is
+left until it is shown to work.
 
 A recreation is a view of recorded evidence, not the page itself
 ([page recreation](page-recreation.md)). Its geometry and theme checks do
@@ -407,17 +426,23 @@ window is to be checked when this is built.
 
 ### Vision analysis by a model
 
-There is one request for each moment, then one for each visit:
+From step 4b, each moment is several requests, then one for each visit
+(decision 7):
 
-- **Each moment:** the model is given the captured frame, the facts around
-  that moment, and why the moment was chosen, and describes what was on
-  the screen and what changed.
-- **The recreated page:** the model is given the tiles and the visit's
-  facts, and describes what the facts cannot give: layout, imagery,
-  colour, emphasis, and what stands out.
+- **The moment's frame:** the model is given the captured frame, the facts
+  around that moment, and why the moment was chosen, and describes what
+  was on the screen and what changed, as in step 4a.
+- **The moment's recreated page:** the model is given the tiles, in groups
+  that fit one request on the profile's server, with their positions,
+  the part in view, the moment's facts, and why it was chosen, and
+  describes what the facts cannot give: layout, imagery, colour,
+  emphasis, what stands out, and any toast or message, in view or not.
+- **The moment's description:** a text-only request is given the frame's
+  and the tiles' descriptions, labelled inferred, and writes the moment's
+  description, each statement citing the frame or tile it rests on.
 - **Each visit:** a text-only request is given the visit's description from
-  the summary and these descriptions, labelled inferred, and writes the
-  visit's enhanced description and its part of the journey.
+  the summary and its moments' descriptions, labelled inferred, and writes
+  the visit's enhanced description and its part of the journey.
 
 Visual claims cite the frame or tile they rest on. The recording's overall description is
 then written again with the enhanced visit descriptions. The default
@@ -504,9 +529,10 @@ building stage 2:
    requests too, runs on it.
 4. **The limits, all settings:** 10 moments for each visit; moments less
    than 2 s apart merged; settled after 1 s without a layout change, or
-   else 5 s after the visit starts; 6 tiles.
+   else 5 s after the visit starts; 6 tiles. The limits of 10 moments and
+   6 tiles are replaced from step 4b by decision 7.
 5. **In step 4b, one request for each tile**, with the tiles' descriptions
-   combined by the visit's text request.
+   combined by the visit's text request. Replaced by decision 7.
 
 From the first run of step 4a on the target machine, the same day:
 
@@ -529,6 +555,38 @@ From the first run of step 4a on the target machine, the same day:
    the moment prompt, version 2, asks for an overview, and the output
    limit stays at 8,192 tokens. Every answer of that run was indented
    JSON over many lines, although the prompt asks for one line.
+
+From the review of the report of step 4a, which passed on the target
+machine the same day:
+
+7. **Step 4b recreates the page at every moment, whole.** It had been
+   designed to recreate the page once for each visit, at its first settled
+   moment and after a large change, cut into at most 6 tiles. The owner
+   disagreed: "The frame may be well down the page, or in high
+   magnification and we need to capture toasts and system messages
+   generally which may be off-screen at any time. Toast can seem small on
+   a large and busy page. You are falling into the trap of making highly
+   efficient designs that don't work rather than optimizing those that
+   do". Agreed with the owner:
+   - each moment has the recreated page as it was at that moment, as well
+     as its captured frame;
+   - the whole page is cut into viewport-sized tiles with no limit on
+     their number, not scaled down, each labelled with its position, and
+     the model is told what was in view and what Magnifier showed;
+   - each moment is several requests, the frame, the tiles in groups that
+     fit one request, and a text request combining them, so a visit takes
+     about one to two hours on this PC;
+   - each announcement the page makes to assistive technology, an alert,
+     a status message, or a live region appearing or changing, is a
+     moment, whether or not it is in view;
+   - there is no limit on the number of moments in a visit.
+
+   Windows notifications and other system messages are not part of the
+   page, so the recreation cannot show them; they are in a captured frame
+   only when on the screen. Whether the recording holds other evidence of
+   them is unknown; the whole-screen UI Automation tree, in
+   [outstanding work](analysis-outstanding-work.md), is where it would
+   come from.
 
 ## Decisions (2026-10-13)
 
