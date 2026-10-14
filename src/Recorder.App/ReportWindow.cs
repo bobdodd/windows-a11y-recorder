@@ -27,7 +27,7 @@ internal sealed class ReportWindow : Window
     {
         _report = report;
         _seek = seek;
-        Title = (report.Title ?? "Analysis report") + " - Windows Accessibility Recorder";
+        Title = (report.Title ?? "Analysis report") + ", Windows A11y Recorder";
         Width = 900;
         Height = 760;
         MinWidth = 480;
