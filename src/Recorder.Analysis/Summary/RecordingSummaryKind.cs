@@ -21,7 +21,13 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
 
     public const string RecordingTemplate = "recording-summary-recording";
 
-    public const int TemplateVersion = 3;
+    // Each version was raised by one on 2026-10-14 when the statement's
+    // fields were put in the order text, kind, evidence, so that the model
+    // writes a statement before saying whether it is a claim: the answer
+    // form is held to the schema's order, and twice the model began a
+    // statement as a claim and then wrote that something was unknown
+    // (agreed with the owner; analysis-runner.md, decision 7).
+    public const int TemplateVersion = 4;
 
     public static readonly IReadOnlyList<string> VisitSections = ["page", "purpose", "activity"];
 
@@ -72,8 +78,8 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
         "Each section holds only its own paragraphs: what the page is for goes only in \"purpose\", and what the participant did only in \"activity\". " +
         "In \"activity\", summarise what the participant did, such as moving through the headings or reading down the page, " +
         "and group repeated actions into one statement citing each of their references, rather than one statement for each fact. " +
-        "A statement is {\"kind\": \"claim\", \"text\": ..., \"evidence\": [...]} for something the facts support, citing every reference it rests on, " +
-        "or {\"kind\": \"unknown\", \"text\": ..., \"evidence\": []} for something the facts leave open. " +
+        "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} for something the facts support, citing every reference it rests on, " +
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []} for something the facts leave open. " +
         "Cite only references that appear in the facts. Write plain sentences without Markdown. " +
         "Write the JSON on one line, with no indentation and no line breaks.";
 
@@ -89,8 +95,8 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
         "Each section is a list of paragraphs, and each paragraph a list of statements. " +
         "Each section holds only its own paragraphs: what the site or application is goes only in \"site\", who it is for only in \"audience\", " +
         "and what the participant did, visit by visit, only in \"session\". Do not repeat a visit's description; say what it adds to the whole. " +
-        "A statement is {\"kind\": \"claim\", \"text\": ..., \"evidence\": [...]} citing every reference it rests on, " +
-        "or {\"kind\": \"unknown\", \"text\": ..., \"evidence\": []}. Cite only references that appear in the input. Write plain sentences without Markdown. " +
+        "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. Cite only references that appear in the input. Write plain sentences without Markdown. " +
         "Write the JSON on one line, with no indentation and no line breaks.";
 
     public async Task RunAsync(AnalysisTaskContext context, CancellationToken cancellationToken)

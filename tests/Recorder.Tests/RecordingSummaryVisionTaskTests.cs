@@ -181,7 +181,10 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Contains("At the frame the page was scrolled to 1850 CSS pixels from the top and 0 from the left, with a viewport 922 by 925, so the part on the screen was CSS pixels 1850 to 2775:", tiles, StringComparison.Ordinal);
         Assert.Contains("1 of its 15 images were not loaded in the recreation, so they are blank or missing in the tiles: https://example.com/blogs.jpg.", tiles, StringComparison.Ordinal);
         Assert.Contains("CSS pixels 925 to 1850 from the top of a page 4625 high and 922 wide, pictured at 922 by 925 pixels, none of it on the screen at the frame", tiles, StringComparison.Ordinal);
-        Assert.Contains("CSS pixels 1850 to 2775 from the top of a page 4625 high and 922 wide, pictured at 922 by 925 pixels, part of it on the screen at the frame", tiles, StringComparison.Ordinal);
+        Assert.Contains("CSS pixels 1850 to 2775 from the top of a page 4625 high and 922 wide, pictured at 922 by 925 pixels, part of it on the screen at the frame. A recreation", tiles, StringComparison.Ordinal);
+        // The tiles' files are in the task's own folder, so the request
+        // leaves them out, to be the same at every run.
+        Assert.DoesNotContain(", file ", tiles, StringComparison.Ordinal);
         var combined = Input(bodies[3]);
         Assert.Contains("The moment as a model described it from the captured frame and the recorder's facts. These are inferences, not facts:", combined, StringComparison.Ordinal);
         Assert.Contains("The recreated page as a model described it from tile 5 [", combined, StringComparison.Ordinal);
@@ -210,10 +213,11 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Matches(@"On the screen: A statement about screen\. \[E\d+\]", text);
         Assert.Matches(@"What changed: A statement about change\. \[E\d+\]", text);
         Assert.Contains("- Moment limits: no limit on the moments of a visit; moments less than 2 s apart merged; settled when the layout has not changed for 1 s, or 5 s after the visit starts; a large change is 50 elements or more at once.", text, StringComparison.Ordinal);
-        Assert.Contains($"{RecordingSummaryVisionKind.MomentTemplate} version 2 for each moment's captured frame, {RecordingSummaryVisionKind.PageTemplate} version 2 for each group of its page's tiles, " +
-            $"{RecordingSummaryVisionKind.CombinedTemplate} version 3 for each moment's description from both", text, StringComparison.Ordinal);
+        Assert.Contains($"{RecordingSummaryVisionKind.MomentTemplate} version 3 for each moment's captured frame, {RecordingSummaryVisionKind.PageTemplate} version 3 for each group of its page's tiles, " +
+            $"{RecordingSummaryVisionKind.CombinedTemplate} version 4 for each moment's description from both", text, StringComparison.Ordinal);
         Assert.Contains("each request holds as many tiles as fit 4096 image tokens", text, StringComparison.Ordinal);
         Assert.Contains("The captured frame at 00:00:02.500: the whole screen, 1920 by 1080 pixels, file frames/desktop/0000000001.png", text, StringComparison.Ordinal);
+        Assert.Contains("part of it on the screen at the frame, file ", text, StringComparison.Ordinal);
         Assert.Matches($@"Tile 3 of 5 of the page as the recorder rebuilt it .* file analysis/{vision:D}/pages/visit-0001-moment-01-tile-03\.png", text);
         Assert.True(File.Exists(Path.Combine(_session, "analysis", vision.ToString("D"), "pages", "visit-0001-moment-02-tile-05.png")));
         var read = ReportDocument.Parse(text);
@@ -239,9 +243,8 @@ public sealed partial class RecordingSummaryTaskTests
     }
 
     [Fact]
-    public void The_templates_of_version_2_say_what_the_first_run_of_step_4b_showed_was_needed()
+    public void The_templates_from_version_2_say_what_the_first_run_of_step_4b_showed_was_needed()
     {
-        Assert.Equal(2, RecordingSummaryVisionKind.TemplateVersion);
         Assert.Contains("Do not restate the facts you are given", RecordingSummaryVisionKind.PageInstructions, StringComparison.Ordinal);
         Assert.Contains("Combine the descriptions; do not copy them. State each thing once", RecordingSummaryVisionKind.CombinedInstructions, StringComparison.Ordinal);
         Assert.Contains("not tile by tile", RecordingSummaryVisionKind.CombinedInstructions, StringComparison.Ordinal);
@@ -254,9 +257,8 @@ public sealed partial class RecordingSummaryTaskTests
     }
 
     [Fact]
-    public void The_combined_template_of_version_3_says_a_statement_of_what_is_unknown_is_of_kind_unknown_and_no_other_template_does()
+    public void The_combined_template_from_version_3_says_a_statement_of_what_is_unknown_is_of_kind_unknown_and_no_other_template_does()
     {
-        Assert.Equal(3, RecordingSummaryVisionKind.CombinedTemplateVersion);
         const string Sentence = "A statement that says something is unknown, or that cites no reference, is of kind unknown; every claim cites at least one reference.";
         Assert.Contains(Sentence, RecordingSummaryVisionKind.CombinedInstructions, StringComparison.Ordinal);
         foreach (var instructions in new[]
@@ -266,6 +268,25 @@ public sealed partial class RecordingSummaryTaskTests
                  })
         {
             Assert.DoesNotContain("is of kind unknown", instructions, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void Every_template_shows_a_statement_with_its_text_before_its_kind()
+    {
+        Assert.Equal((4, 3, 3, 4), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+            RecordingSummaryVisionKind.TemplateVersion, RecordingSummaryVisionKind.CombinedTemplateVersion));
+        foreach (var instructions in new[]
+                 {
+                     RecordingSummaryKind.VisitInstructions, RecordingSummaryKind.RecordingInstructions,
+                     RecordingSummaryVisionKind.MomentInstructions, RecordingSummaryVisionKind.PageInstructions,
+                     RecordingSummaryVisionKind.CombinedInstructions, RecordingSummaryVisionKind.VisitInstructions,
+                     RecordingSummaryVisionKind.RecordingInstructions,
+                 })
+        {
+            Assert.Contains("{\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]}", instructions, StringComparison.Ordinal);
+            Assert.Contains("{\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}", instructions, StringComparison.Ordinal);
+            Assert.DoesNotContain("{\"kind\"", instructions, StringComparison.Ordinal);
         }
     }
 

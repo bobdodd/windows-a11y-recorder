@@ -308,7 +308,12 @@ design.
   4b").
 - Built 2026-10-14: reusing the accepted steps of a task run again, and
   Run again from scratch; see the runner design's "Reusing steps when run
-  again". Not yet tested on the target machine.
+  again". Its first run on the target machine, build 8addabd, reused
+  moment 1's frame step; the tiles' steps were sent again, as their files
+  were in the requests, and the combined description failed with a
+  statement of what is unknown labelled a claim. The statement's fields
+  were put in the order text, kind, evidence, and the files left out of
+  the requests, the same day (the runner design's decision 7).
 
 ## Recording summary
 

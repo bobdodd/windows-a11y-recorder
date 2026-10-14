@@ -204,6 +204,24 @@ code then checks that the output parses, that every claim cites a
 reference, and that every reference cited was in the input. A claim that
 fails the check fails the attempt; it is not dropped quietly.
 
+A statement's fields are in the order text, kind, evidence (owner,
+2026-10-14). The server turns the schema into a grammar that writes an
+object's required fields in the order of its properties
+([llama.cpp json-schema-to-grammar.cpp at b11607](https://github.com/ggml-org/llama.cpp/blob/b11607/common/json-schema-to-grammar.cpp)),
+and every answer before the change began each statement with its kind,
+the first of the schema's fields. On the target machine the summary with vision
+twice began a statement as a claim and then wrote that something was
+unknown, citing nothing: "It is unknown whether the mouse clicks affected
+the CNIB webpage...", at moment 9 with build 043cbf1, and "What NVDA
+announced at this moment is not provided in the facts...", at moment 1
+with build 8addabd, after a sentence in the prompt said such a statement
+is of kind unknown. With the text first, the model writes the statement
+before saying what kind it is. The check is unchanged, so a claim citing
+nothing still fails. Holding every claim to cite one of the input's
+references was considered and not done: a claim with nothing to cite would
+then have to cite something, and the check would no longer show it. Every
+template's version was raised by one, as each shows the fields' order.
+
 ### 8. Failed output is rerun, not repaired
 
 A stage may make several requests, such as one for each page visit. Each
@@ -544,8 +562,12 @@ attempts marks each one reused.
   and `reused_from_attempt_id` to `analysis_attempts`.
 - **Whether the page's steps are reused** depends on the recreated page
   being pictured the same, byte for byte, at each run: the request covers
-  the pictures. This is unknown until the first run again on the target
-  machine.
+  the pictures. On the target machine on 2026-10-14 moment 1's 8 tiles
+  were the same, byte for byte, in three runs. The first run again with
+  build 8addabd reused the frame's step but not the tiles' steps: each
+  tile's text in the request ended with its file, in the task's own
+  folder, so the request differed at every run. The request now leaves the
+  file out; the report's evidence list still gives it (owner, 2026-10-14).
 - **Tests:** integration tests with the catalog in a real PostgreSQL
   server and a stand-in endpoint: a step reused, with its answer and
   statements, and one run again because its request changed; nothing

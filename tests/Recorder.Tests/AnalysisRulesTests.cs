@@ -31,6 +31,15 @@ public sealed class AnalysisRulesTests
         Assert.Equal(local, EndpointPolicy.IsLocal(IPAddress.Parse(address)));
 
     [Fact]
+    public void A_statement_in_the_answer_form_has_its_text_before_its_kind_and_evidence()
+    {
+        var statement = ClaimCheck.Schema(["description"])["properties"]!["description"]!["items"]!["items"]!;
+
+        Assert.Equal(["text", "kind", "evidence"], statement["properties"]!.AsObject().Select(property => property.Key));
+        Assert.Equal(["text", "kind", "evidence"], statement["required"]!.AsArray().Select(name => (string)name!));
+    }
+
+    [Fact]
     public void An_outside_address_is_refused_and_a_host_name_waits_to_be_resolved()
     {
         Assert.NotNull(EndpointPolicy.Refusal(new Uri("http://8.8.8.8:8080/")));

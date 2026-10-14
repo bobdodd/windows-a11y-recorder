@@ -33,13 +33,18 @@ public static class ClaimCheck
         var statement = new JsonObject
         {
             ["type"] = "object",
+            // The text comes before the kind, so that the model writes the
+            // statement before saying whether it is a claim: the server holds
+            // the answer to the schema's order, and twice the model began a
+            // statement as a claim and then wrote that something was unknown
+            // (owner, 2026-10-14; analysis-runner.md, decision 7).
             ["properties"] = new JsonObject
             {
-                ["kind"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(Claim.ClaimKind, Claim.UnknownKind) },
                 ["text"] = new JsonObject { ["type"] = "string", ["minLength"] = 1 },
+                ["kind"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(Claim.ClaimKind, Claim.UnknownKind) },
                 ["evidence"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } }
             },
-            ["required"] = new JsonArray("kind", "text", "evidence")
+            ["required"] = new JsonArray("text", "kind", "evidence")
         };
         var properties = new JsonObject();
         foreach (var section in sections)

@@ -62,7 +62,13 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // thing once, as an overview; and the combined, visit, and recording
     // templates say to cite a reference without its brackets (agreed with
     // the owner, 2026-10-14; recording-summary.md, "Step 4b").
-    public const int TemplateVersion = 2;
+    // Each version was raised by one on 2026-10-14 when the statement's
+    // fields were put in the order text, kind, evidence, so that the model
+    // writes a statement before saying whether it is a claim: the answer
+    // form is held to the schema's order, and twice the model began a
+    // statement as a claim and then wrote that something was unknown
+    // (agreed with the owner; analysis-runner.md, decision 7).
+    public const int TemplateVersion = 3;
 
     // Version 3 of the combined template, from the second run of step 4b on
     // the target machine, 2026-10-14: moments 1 to 8 were accepted, and
@@ -71,9 +77,11 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // The sentence is in the combined template only, so that the other
     // steps' requests are unchanged and a run again can reuse them (agreed
     // with the owner, 2026-10-14; recording-summary.md, "Step 4b").
-    public const int CombinedTemplateVersion = 3;
+    // Version 4 puts the statement's fields in the order text, kind,
+    // evidence, as TemplateVersion above.
+    public const int CombinedTemplateVersion = 4;
 
-    /// <summary>What kind a statement of what is unknown is, said in the combined template of version 3.</summary>
+    /// <summary>What kind a statement of what is unknown is, said in the combined template from version 3.</summary>
     public const string UnknownIsUnknown =
         "A statement that says something is unknown, or that cites no reference, is of kind unknown; every claim cites at least one reference. ";
 
@@ -84,7 +92,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // the recorder's own player was answered with every control and time
     // on it, 128 statements, until the output limit (recording-summary.md,
     // "Stage 2 implementation status").
-    public const int MomentTemplateVersion = 2;
+    // Version 3 puts the statement's fields in the order text, kind,
+    // evidence, as TemplateVersion above.
+    public const int MomentTemplateVersion = 3;
 
     public static readonly IReadOnlyList<string> MomentSections = ["screen", "change"];
 
@@ -171,9 +181,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "what was open, such as a dialog, a menu, or a popup, which part of the page was in view, and any other window in view; " +
         "and \"change\", what changed at this moment, as the reasons and facts give it, and what the picture shows of it. " +
         "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
-        "A statement is {\"kind\": \"claim\", \"text\": ..., \"evidence\": [...]} citing every reference it rests on, " +
+        "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
         "with every statement about the picture citing the picture's reference, " +
-        "or {\"kind\": \"unknown\", \"text\": ..., \"evidence\": []} for something the picture and facts leave open. " +
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []} for something the picture and facts leave open. " +
         "Cite only references that appear in the input. Write plain sentences without Markdown. " +
         "Write the JSON on one line, with no indentation and no line breaks.";
 
@@ -195,9 +205,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Do not list each control, link, or line of text. " +
         "Answer in JSON with one section: \"page\", what these tiles show of the page. " +
         "The section is a list of paragraphs, and each paragraph a list of statements. " +
-        "A statement is {\"kind\": \"claim\", \"text\": ..., \"evidence\": [...]} citing every reference it rests on, " +
+        "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
         "with every statement about a tile citing that tile's reference, " +
-        "or {\"kind\": \"unknown\", \"text\": ..., \"evidence\": []} for something the tiles and facts leave open. " +
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []} for something the tiles and facts leave open. " +
         "Cite only references that appear in the input. Write plain sentences without Markdown. " +
         "Write the JSON on one line, with no indentation and no line breaks.";
 
@@ -219,9 +229,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "\"page\", the page as recreated, top to bottom, including the parts not on the screen, with every message, notice, alert, toast, error, dialog, or popup on it and where it is; " +
         "and \"change\", what changed at this moment, as the reasons and facts give it, and what the frame and the tiles show of it, whether or not it was on the screen. " +
         "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
-        "A statement is {\"kind\": \"claim\", \"text\": ..., \"evidence\": [...]} citing every reference it rests on, " +
+        "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
         "with a statement from a description citing the picture or the tiles that description cites, " +
-        "or {\"kind\": \"unknown\", \"text\": ..., \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown. " +
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown. " +
         "Write the JSON on one line, with no indentation and no line breaks.";
 
     public const string VisitInstructions =
@@ -240,9 +250,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "\"purpose\", what the page appears to be for; \"activity\", what the participant did there, in order, with repeated actions grouped into one statement; " +
         "and \"journey\", the participant's course through the visit moment by moment: which part of the page was on the screen, what was open, and what changed. " +
         "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
-        "A statement is {\"kind\": \"claim\", \"text\": ..., \"evidence\": [...]} citing every reference it rests on, " +
+        "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
         "with a statement from a moment's description citing the picture or tiles it cites, " +
-        "or {\"kind\": \"unknown\", \"text\": ..., \"evidence\": []}. Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown. " +
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown. " +
         "Write the JSON on one line, with no indentation and no line breaks.";
 
     public static readonly string RecordingInstructions = RecordingSummaryKind.RecordingInstructions.Replace(
@@ -439,8 +449,14 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             $"The captured frame at {SummaryCollator.Time(frame.Time)}: the whole screen, {frame.Width} by {frame.Height} pixels{magnified}, file {frame.Path}");
     }
 
-    /// <summary>A tile of a recreated page as the evidence list gives it.</summary>
-    public static string TileText(Moment moment, RecreatedPage page, PageTile tile)
+    /// <summary>
+    /// A tile of a recreated page as the evidence list gives it, with its
+    /// file. A model's request gives it without the file, as the file is in
+    /// the task's own folder and would make the request differ at every run
+    /// (owner, 2026-10-14; analysis-runner.md, "Reusing steps when run
+    /// again").
+    /// </summary>
+    public static string TileText(Moment moment, RecreatedPage page, PageTile tile, bool withFile = true)
     {
         ArgumentNullException.ThrowIfNull(moment);
         ArgumentNullException.ThrowIfNull(page);
@@ -448,7 +464,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         return string.Concat(
             FormattableString.Invariant($"Tile {tile.Number} of {page.Tiles.Count} of the page as the recorder rebuilt it at the captured frame at {SummaryCollator.Time(moment.Frame.Time)}: ") +
             FormattableString.Invariant($"CSS pixels {tile.Top:0} to {tile.Top + tile.Height:0} from the top of a page {page.Height:0} high and {page.Width:0} wide, ") +
-            FormattableString.Invariant($"pictured at {tile.PixelWidth} by {tile.PixelHeight} pixels{(InView(page, tile) ? ", part of it on the screen at the frame" : ", none of it on the screen at the frame")}, file {tile.Path}. ") +
+            FormattableString.Invariant($"pictured at {tile.PixelWidth} by {tile.PixelHeight} pixels{(InView(page, tile) ? ", part of it on the screen at the frame" : ", none of it on the screen at the frame")}{(withFile ? $", file {tile.Path}" : "")}. ") +
             "A recreation from the recorded evidence, not the page itself: what the recording lacks, the recreation lacks");
     }
 
@@ -526,7 +542,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         foreach (var tile in group)
         {
             var reference = tileReferences[tile.Number - 1];
-            input.Append(CultureInfo.InvariantCulture, $"[{reference}] {TileText(moment, page, tile)}. It is labelled Picture {reference}.\n");
+            input.Append(CultureInfo.InvariantCulture, $"[{reference}] {TileText(moment, page, tile, withFile: false)}. It is labelled Picture {reference}.\n");
         }
 
         return (input.ToString(), references);

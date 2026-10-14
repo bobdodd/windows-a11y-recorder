@@ -465,6 +465,22 @@ it:
   again can reuse them (the runner design's "Reusing steps when run
   again"). The answer is not relabelled in code: refused output is run
   again, not repaired.
+- **The third run on the target machine,** 2026-10-14, build 8addabd, a
+  run again of the second, reused moment 1's frame step and sent its two
+  groups of tiles again, as each tile's file, in the task's own folder,
+  was in the request. Its combined description failed in the same way:
+  "What NVDA announced at this moment is not provided in the facts; only
+  that it was running." was of kind claim, citing nothing. The owner
+  agreed the same day to put a statement's fields in the order text,
+  kind, evidence, in the answer's schema and in every template, raising
+  every template's version by one (the moment template to 3, the page,
+  visit, and recording templates to 3, the combined template to 4, and
+  the summary's templates to 4), and to leave the tiles' files out of the
+  requests (the runner design's decision 7, and its "Reusing steps when
+  run again"). The same run's first group of tiles said the hero image of
+  two people "is missing in the recreation due to a refused request",
+  while describing it; the one image recorded as not loaded is "A Ball
+  for All.jpg". It is noted, not changed.
 - **The report** lists under each moment its recreated page's size,
   scroll position, and tiles, marking those on the screen, and what the
   recreation lacked, then the three parts. "How this was made" gives the
