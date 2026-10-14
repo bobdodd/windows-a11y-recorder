@@ -10,6 +10,9 @@
     <ServerGarbageCollection>true</ServerGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../Recorder.Analysis/Recorder.Analysis.csproj" />
+    <!-- The worker program is built beside the player, which starts it. -->
+    <ProjectReference Include="../Recorder.AnalysisWorker/Recorder.AnalysisWorker.csproj" />
     <ProjectReference Include="../Recorder.Coordinator/Recorder.Coordinator.csproj" />
     <ProjectReference Include="../Recorder.Database/Recorder.Database.csproj" />
     <ProjectReference Include="../Recorder.Recreation/Recorder.Recreation.csproj" />

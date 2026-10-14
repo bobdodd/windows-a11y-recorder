@@ -22,6 +22,7 @@ internal sealed class BusyIndicator
 {
     private const string BusyActivityId = "Recorder.App.Busy";
     private const string LayoutActivityId = "Recorder.App.Layout";
+    private const string AnalysisActivityId = "Recorder.App.Analysis";
     private const string CollectorHealthActivityId =
         "Recorder.App.CollectorHealth";
 
@@ -86,6 +87,14 @@ internal sealed class BusyIndicator
     /// </summary>
     public void AnnounceLayout(string message) =>
         Announce(message, AutomationNotificationKind.ActionCompleted, LayoutActivityId);
+
+    /// <summary>
+    /// Speaks an analysis task finishing or failing, which happens in the
+    /// worker while the auditor does other things (analysis-runner.md,
+    /// "The player").
+    /// </summary>
+    public void AnnounceAnalysis(string message) =>
+        Announce(message, AutomationNotificationKind.Other, AnalysisActivityId);
 
     private void End()
     {

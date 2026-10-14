@@ -5,8 +5,8 @@
 Proposed on 2026-10-13 and agreed by the owner the same day. Stage 1 was
 built the same day, as step 2 of "Build order" in
 [analysis runner](analysis-runner.md); see "Implementation status". It
-has not yet been run on the target machine, and the player cannot queue it
-until step 3. Stage 2 is not built.
+has not yet been run on the target machine. The player queues it from step
+3, built on 2026-10-14. Stage 2 is not built.
 The first task kind for the [analysis runner](analysis-runner.md), chosen
 by the owner the same day: a summary of the recording that describes each
 page visited and the site or application being tested. It is built from
@@ -79,8 +79,8 @@ while building it:
 - **The report** is `analysis\<task>\summary.md` in the session folder.
   The evidence list gives only the references the report cites. The
   auditor's description is listed as not in the recording.
-- **The capability item** on the Analysis menu comes with the player, in
-  step 3; until then a description can be saved only through the catalog.
+- **The capability item** on the Analysis menu, Describe the participant's
+  capabilities..., was built with the player in step 3, on 2026-10-14.
 
 ## Two task kinds
 

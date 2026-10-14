@@ -272,8 +272,12 @@ design.
 - Built 2026-10-13: step 2, the recording summary's stage 1; see the
   summary design's "Implementation status". Not yet run on the target
   machine.
-- To build, in the agreed order: step 3, the player with the system test
-  on the target machine; step 4, the summary's stage 2.
+- Built 2026-10-14: step 3, the player: the Analysis menu, the Analysis
+  tab, the reading view, the notifications, the capability description,
+  and the model profiles; see the design's "Implementation status". Not
+  yet run on the target machine.
+- To do, in the agreed order: the system test of steps 1 to 3 on the
+  target machine; step 4, the summary's stage 2.
 
 ## Recording summary
 

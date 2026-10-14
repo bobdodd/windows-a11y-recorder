@@ -3,8 +3,8 @@
 ## Status
 
 Proposed on 2026-10-13 and agreed by the owner the same day, to be tried as
-it stands. Step 1 of the build order was built the same day; see
-"Implementation status". The owner set three requirements the same day:
+it stands. Steps 1 and 2 of the build order were built the same day, and
+step 3 on 2026-10-14; see "Implementation status". The owner set three requirements the same day:
 
 - Analysis runs detached from the player. Tasks are queued, and the player
   announces each completed task and report as it becomes available.
@@ -292,7 +292,7 @@ Agreed by the owner on 2026-10-13, with the recording summary:
 ## Implementation status
 
 Step 1, the runner, built on 2026-10-13. Not yet run on the target
-machine, and the player has no analysis controls yet.
+machine. The player's controls are step 3, below.
 
 - **Projects:** the library `Recorder.Analysis` and the worker program
   `Recorder.AnalysisWorker.exe`. Migration 0034 adds the tables
@@ -315,16 +315,19 @@ machine, and the player has no analysis controls yet.
   (`maxTokens`, default 2048; `temperature`, default 0; `seed`, default 1;
   `thinking`, default false), and `protectedApiKey`; and `defaults`, the
   profile for each capability. A profile that breaks a rule is left out
-  and its problem listed; the others are still used. There is no editor
-  yet; the player's settings come in step 3.
+  and its problem listed; the others are still used. There is no full
+  editor; the player's Model profiles window, from step 3, sets the
+  defaults and opens the file in Notepad.
 - **The worker's files**, in `%LOCALAPPDATA%\Windows A11y Recorder\Analysis`:
   `worker-status.json` (what it is doing, the loaded profile, the
   settings problems), and for the local server `llama-server-models.ini`,
   `llama-server.log`, and `llama-server.pid`. One worker runs at a time
   for each Windows user, held by the mutex
   `Local\WindowsA11yRecorder.AnalysisWorker`.
-- **No task kinds yet.** Until step 2, a queued task fails with "This
-  worker has no task kind". The tests use a stand-in kind.
+- **Task kinds:** the recording summary, from step 2; see
+  [recording summary](recording-summary.md). A task of a kind the worker
+  does not have fails with "This worker has no task kind". The tests also
+  use a stand-in kind.
 - **A worker killed during an attempt:** the next worker closes the
   attempt as failed, "The worker stopped during the attempt.", and it
   counts against the attempt limit. Steps already accepted are not asked
@@ -337,6 +340,71 @@ machine, and the player has no analysis controls yet.
   stand-in HTTP server on loopback. The full suite passed, 1,631 tests,
   with the Chromium launcher and browser receiver tests left out as
   before.
+
+Step 3, the player, built on 2026-10-14 as agreed under "Decisions on the
+player (2026-10-13)". Not yet run on the target machine.
+
+- **Classes:** in `Recorder.Analysis`, `ReportDocument` reads a report's
+  Markdown back into headings, paragraphs, list items, quotes, and tables,
+  and its evidence list into each reference's time; `AnalysisPlayer` holds
+  the names the player shows, the unread count, what to announce, the
+  worker's line, the default profiles, and starting the worker. In the
+  player, `MainWindow.Analysis.cs`, `ReportWindow`, `CapabilityDialog`, and
+  `ModelProfilesWindow`. The catalog gained `RecordingIdAsync`,
+  `ReportsAsync`, and `AnyQueuedAsync`.
+- **The menu bar** has one menu, Analysis: Summarise this recording,
+  Describe the participant's capabilities..., Show the Analysis tab, and
+  Model profiles.... Each item is 44 pixels high, in the system's menu
+  colors, and none has a submenu.
+- **The Analysis tab** is the fifth detachable tab. It shows the worker's
+  line (what it is doing and the model loaded, or that it has stopped,
+  with any settings problems), the profile to use and Queue summary, Read
+  the queue again, and each task of the open recording with its state,
+  profile, times, and failure. Each task has Cancel, Run again, and Open
+  result, or Why it failed for a failed task; every button is at least 44
+  by 44 pixels. The rows are made again only when a task changes, and the
+  focused button keeps focus.
+- **Reading the catalog:** every 3 seconds, the worker's status file and
+  the open recording's tasks. The recording is found by its session
+  folder's name, as the catalog's `recordings.session_key` holds it.
+- **Unread:** a finished or failed task with no read time. The tab's name
+  gives the count, such as "Analysis (2 unread)". Opening a result, or Why
+  it failed, marks the task read.
+- **Notifications:** a task that finishes, fails, or is cancelled between
+  two reads is announced as a UI Automation notification, activity
+  `Recorder.App.Analysis`, and shown in a second line of the status bar
+  until the next. Results already waiting when a recording is opened are
+  shown as unread, not announced.
+- **The reading view** opens each report in its own window. Headings have
+  their heading level for screen readers. Each paragraph, list item, or
+  quote is followed by its reference buttons, such as "E3 00:00:04", named
+  "Go to E3, 00:00:04.210" with the evidence as help text; in the evidence
+  list, each reference is a button. A reference with no time in the
+  recording, such as the auditor's description, has no button. The
+  playhead moves only when the report's session folder is the recording
+  open in the player; otherwise the window says so.
+- **Checking the report:** the file's SHA-256 is checked against the
+  catalog when it is opened. A file that has changed still opens, with a
+  warning that it may not be the task's result.
+- **The worker** is `Recorder.AnalysisWorker.exe` in the player's own
+  folder (`AppContext.BaseDirectory`); the player's project references it,
+  so it is built beside the player. The player starts it, hidden, when a
+  task is queued and when the database starts with tasks still waiting.
+  A second worker exits at once.
+- **The capability dialog** shows the current description and when it was
+  written, and the earlier versions read only. Saving unchanged text adds
+  no version, and an empty text is refused.
+- **Model profiles** lists each profile with its model, endpoint, and
+  capabilities, and the file's problems, with a default for text and for
+  images ("No default"). Save the defaults changes only `defaults` in the
+  file. Open the file in Notepad writes an empty file first when there is
+  none (version 1, no profiles); Read the file again shows it as saved.
+- **Tests:** 12 new unit tests of reading reports, the unread count, the
+  announcements, the worker's line, and the defaults, and checks of the
+  three catalog methods in the summary's integration tests. The full suite
+  passed, 1,681 tests, with the Chromium launcher and browser receiver
+  tests left out as before. The windows themselves are tested on the
+  target machine.
 
 ## Required tests
 
@@ -365,6 +433,37 @@ machine, and the player has no analysis controls yet.
 - The threat model. Its trust boundaries gain the worker and the model
   endpoint once the network server's security is settled; see
   "Decisions (2026-10-13)".
+
+## Decisions on the player (2026-10-13)
+
+Before step 3 was built, the owner chose among four proposals:
+
+1. **References in the reading view are buttons under each paragraph.**
+   The prose reads normally, with each reference as plain text, and each
+   paragraph is followed by a row of buttons, at least 44 by 44 pixels,
+   such as "E3 00:00:04", each moving the playhead to that evidence.
+   Buttons inline in the text were not chosen, since every line holding a
+   reference would become 44 pixels tall.
+2. **A report opens in its own window**, not modal, so that it can sit
+   beside the player while its references move the playhead. Several can
+   be open at once.
+3. **Model profiles... opens a window of the profiles and the defaults.**
+   It lists each profile with its problems, lets the auditor choose the
+   default profile for text and for images, and opens
+   `analysis-models.json` in Notepad and reads it again. A full profile
+   editor comes later.
+4. **Run again queues a new task** of the same kind with the same
+   profile. The earlier task and its report stay, so the two can be
+   compared.
+
+The rest of step 3 was proposed with them and agreed: a menu bar with one
+Analysis menu, holding Summarise this recording, Describe the
+participant's capabilities..., Show the Analysis tab, and Model
+profiles...; the Analysis tab as the fifth detachable tab; the player
+reading the catalog every 3 seconds while a recording is open; a
+capability dialog showing when the current text was written and the
+earlier versions; and the player starting the worker when a task is
+queued, and when it opens with tasks still waiting.
 
 ## Decisions (2026-10-13)
 

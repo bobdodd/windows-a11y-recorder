@@ -224,11 +224,15 @@ public sealed partial class RecordingSummaryTaskTests(EmbeddedPostgresFixture fi
         var task = await catalog.QueueTaskAsync(
             recording, RecordingSummaryKind.Name, 1, new Dictionary<string, string> { [ModelCapabilities.Text] = "This PC" },
             sessionDirectory: _session, cancellationToken: Token);
+        Assert.Equal(recording, await catalog.RecordingIdAsync(Path.GetFileName(_session), Token));
+        Assert.Null(await catalog.RecordingIdAsync("not-a-session", Token));
+        Assert.True(await catalog.AnyQueuedAsync(Token));
 
         await new AnalysisWorker(catalog, Settings(), [new RecordingSummaryKind()], Endpoint(), options: Fast).RunUntilEmptyAsync(Token);
 
         var state = (await RowsAsync("SELECT state, failure FROM analysis_tasks WHERE task_id = $1", task))[0];
         Assert.Equal((AnalysisTaskStates.Done, (object?)null), ((string)state["state"]!, state["failure"]));
+        Assert.False(await catalog.AnyQueuedAsync(Token));
         var attempts = await RowsAsync(
             "SELECT step_key, outcome, prompt_template, input_references FROM analysis_attempts WHERE task_id = $1 ORDER BY started_utc", task);
         Assert.Equal(["visit-0001", "visit-0002", "recording"], attempts.Select(row => (string)row["step_key"]!));
@@ -245,6 +249,13 @@ public sealed partial class RecordingSummaryTaskTests(EmbeddedPostgresFixture fi
         Assert.Equal(Path.Combine(_session, "analysis", task.ToString("D"), "summary.md"), path);
         var bytes = await File.ReadAllBytesAsync(path, Token);
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(bytes)), report["sha256"]);
+        Assert.Equal(
+            [((string)report["file_name"]!, (string)report["relative_path"]!, (string)report["sha256"]!)],
+            await catalog.ReportsAsync(task, Token));
+        var read = ReportDocument.Parse(System.Text.Encoding.UTF8.GetString(bytes));
+        Assert.Null(read.Evidence["E1"].Nanoseconds);
+        Assert.All(read.Blocks.SelectMany(block => block.References).Distinct(),
+            reference => Assert.True(read.Evidence.ContainsKey(reference), reference));
         var text = await File.ReadAllTextAsync(path, Token);
         Assert.StartsWith($"# Summary of recording {Path.GetFileName(_session)}", text, StringComparison.Ordinal);
         Assert.Contains("> Uses NVDA with speech; no useful vision. [E1]", text, StringComparison.Ordinal);

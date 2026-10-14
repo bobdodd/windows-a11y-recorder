@@ -168,6 +168,8 @@ public partial class MainWindow : Window
             StartButton.IsEnabled = _database is not null;
             OpenRecordingButton.IsEnabled = _database is not null;
         }
+
+        await StartAnalysisAsync();
     }
 
     private string DatabaseUnavailableText =>
@@ -851,6 +853,7 @@ public partial class MainWindow : Window
             BindReadingSteps();
             BindAnnouncements();
             BindAccessibilityTree();
+            BindAnalysis();
             ApplyBrowserNavigationFilter();
             BrowserCorrelationTextBox.Text =
                 _playbackArchive.BrowserNavigations.Count == 0
@@ -906,6 +909,7 @@ public partial class MainWindow : Window
             BindReadingSteps();
             BindAnnouncements();
             BindAccessibilityTree();
+            BindAnalysis();
             busy.Dispose();
             MessageBox.Show(
                 this,
@@ -1761,6 +1765,8 @@ public partial class MainWindow : Window
 
         SaveLayout();
         CloseTornTabs();
+        CloseReportWindows();
+        _analysisTimer?.Stop();
         eventArgs.Cancel = true;
         if (_transitioning)
         {

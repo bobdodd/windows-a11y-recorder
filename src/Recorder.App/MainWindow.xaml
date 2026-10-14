@@ -102,8 +102,57 @@
         </Trigger>
       </Style.Triggers>
     </Style>
+    <!-- The analysis controls (analysis-runner.md, "The player"): every
+         target at least 44 by 44 pixels, for head pointer and eye tracking
+         use, and every one a single click. -->
+    <Style x:Key="AnalysisButton" TargetType="Button">
+      <Setter Property="MinWidth" Value="44" />
+      <Setter Property="MinHeight" Value="44" />
+      <Setter Property="Padding" Value="12,0" />
+      <Setter Property="Margin" Value="0,0,8,0" />
+    </Style>
+    <!-- The Analysis menu's items: 44 pixels high, in the system's menu
+         colors so their text has the menu's own contrast. -->
+    <Style x:Key="AnalysisMenuItem" TargetType="MenuItem">
+      <Setter Property="MinHeight" Value="44" />
+      <Setter Property="Padding" Value="8,0" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.MenuTextBrushKey}}" />
+    </Style>
   </Window.Resources>
 
+  <DockPanel>
+  <!-- The menu bar, with one menu: Analysis (analysis-runner.md, "The
+       player"). Each item opens with a single click; none has a submenu. -->
+  <Menu x:Name="MainMenu"
+        DockPanel.Dock="Top"
+        Background="{StaticResource PanelBackground}"
+        AutomationProperties.Name="Menu bar">
+    <MenuItem x:Name="AnalysisMenu"
+              Header="_Analysis"
+              MinHeight="44"
+              Padding="12,0"
+              VerticalContentAlignment="Center"
+              Foreground="#CDCCCA"
+              SubmenuOpened="AnalysisMenu_SubmenuOpened">
+      <MenuItem x:Name="SummariseMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="_Summarise this recording"
+                Click="SummariseMenuItem_Click" />
+      <MenuItem x:Name="CapabilitiesMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="_Describe the participant's capabilities..."
+                Click="CapabilitiesMenuItem_Click" />
+      <MenuItem x:Name="ShowAnalysisMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="Show the Analysis _tab"
+                Click="ShowAnalysisMenuItem_Click" />
+      <MenuItem x:Name="ModelProfilesMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="_Model profiles..."
+                Click="ModelProfilesMenuItem_Click" />
+    </MenuItem>
+  </Menu>
   <Grid>
     <Grid.ColumnDefinitions>
       <ColumnDefinition x:Name="SidePanelColumn" Width="340" MinWidth="300" MaxWidth="440" />
@@ -1310,6 +1359,63 @@
               </TreeView>
             </Grid>
           </TabItem>
+          <!-- The session's analysis tasks (analysis-runner.md, "The
+               player"): the worker's line, queuing a summary with the
+               profile to use, and each task with its buttons. -->
+          <TabItem x:Name="AnalysisTab"
+                   AutomationProperties.Name="Analysis"
+                   PreviewMouseLeftButtonDown="DetailsTab_PreviewMouseLeftButtonDown"
+                   PreviewMouseMove="DetailsTab_PreviewMouseMove"
+                   PreviewMouseLeftButtonUp="DetailsTab_PreviewMouseLeftButtonUp"
+                   LostMouseCapture="DetailsTab_LostMouseCapture">
+            <TabItem.Header>
+              <StackPanel Orientation="Horizontal">
+                <TextBlock x:Name="AnalysisTabHeaderText" VerticalAlignment="Center" Text="Analysis" />
+                <Button Style="{StaticResource TearOutButton}"
+                        Tag="{Binding ElementName=AnalysisTab}"
+                        Click="TearOutButton_Click"
+                        AutomationProperties.Name="Open Analysis in its own window" />
+              </StackPanel>
+            </TabItem.Header>
+            <Grid Margin="8">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+              </Grid.RowDefinitions>
+              <TextBlock x:Name="WorkerStatusTextBlock"
+                         Grid.Row="0"
+                         Margin="0,0,0,8"
+                         TextWrapping="Wrap"
+                         Text="The analysis worker is stopped."
+                         AutomationProperties.Name="Analysis worker" />
+              <WrapPanel Grid.Row="1" Margin="0,0,0,8">
+                <Label Target="{Binding ElementName=ProfileComboBox}"
+                       VerticalAlignment="Center"
+                       Content="_Profile:" />
+                <ComboBox x:Name="ProfileComboBox"
+                          MinWidth="200"
+                          MinHeight="44"
+                          Margin="0,0,8,0"
+                          VerticalContentAlignment="Center"
+                          AutomationProperties.Name="Profile to use" />
+                <Button x:Name="QueueSummaryButton"
+                        Style="{StaticResource AnalysisButton}"
+                        Content="_Queue summary"
+                        Click="QueueSummaryButton_Click" />
+                <Button x:Name="RefreshAnalysisButton"
+                        Style="{StaticResource AnalysisButton}"
+                        Content="_Read the queue again"
+                        Click="RefreshAnalysisButton_Click" />
+              </WrapPanel>
+              <ScrollViewer Grid.Row="2"
+                            VerticalScrollBarVisibility="Auto"
+                            HorizontalScrollBarVisibility="Disabled">
+                <StackPanel x:Name="AnalysisTasksPanel"
+                            AutomationProperties.Name="Analysis tasks" />
+              </ScrollViewer>
+            </Grid>
+          </TabItem>
         </TabControl>
         <GridSplitter Grid.Column="1"
                       Width="8"
@@ -1335,6 +1441,10 @@
       </Grid>
 
       <Grid x:Name="StatusPanel" Grid.Row="3" Margin="0,8,0,0">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="*" />
@@ -1365,8 +1475,17 @@
         <TextBlock Grid.Column="2"
                    Foreground="{StaticResource MutedText}"
                    Text="Keyboard | Mouse | UIA | Window | Frames | Mic | System audio" />
+        <!-- The latest analysis task to finish or fail, until the next. -->
+        <TextBlock x:Name="AnalysisStatusTextBlock"
+                   Grid.Row="1"
+                   Grid.ColumnSpan="3"
+                   Margin="0,4,0,0"
+                   TextWrapping="Wrap"
+                   Visibility="Collapsed"
+                   AutomationProperties.Name="Analysis status" />
       </Grid>
       </Grid>
     </Grid>
   </Grid>
+  </DockPanel>
 </Window>

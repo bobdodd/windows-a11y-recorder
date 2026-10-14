@@ -547,6 +547,40 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string;
         }, cancellationToken);
 
+    /// <summary>The recording with a session key, or null.</summary>
+    public Task<Guid?> RecordingIdAsync(string sessionKey, CancellationToken cancellationToken) =>
+        UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand("SELECT recording_id FROM recordings WHERE session_key = $1", connection);
+            command.Parameters.AddWithValue(sessionKey);
+            return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as Guid?;
+        }, cancellationToken);
+
+    /// <summary>A task's report files, oldest first: each file's name, its path under the session folder, and its SHA-256.</summary>
+    public Task<IReadOnlyList<(string FileName, string RelativePath, string Sha256)>> ReportsAsync(Guid taskId, CancellationToken cancellationToken) =>
+        UseAsync<IReadOnlyList<(string, string, string)>>(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT file_name, relative_path, sha256 FROM analysis_reports WHERE task_id = $1 ORDER BY written_utc, report_id", connection);
+            command.Parameters.AddWithValue(taskId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            var reports = new List<(string, string, string)>();
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                reports.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+            }
+
+            return reports;
+        }, cancellationToken);
+
+    /// <summary>Whether any task is waiting to run, for starting the worker when the player opens.</summary>
+    public Task<bool> AnyQueuedAsync(CancellationToken cancellationToken) =>
+        UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand("SELECT EXISTS (SELECT 1 FROM analysis_tasks WHERE state IN ('queued', 'running'))", connection);
+            return (bool)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+        }, cancellationToken);
+
     /// <summary>A recording's session key and start, for a report's heading.</summary>
     public Task<(string SessionKey, DateTime StartedUtc)?> RecordingAsync(Guid recordingId, CancellationToken cancellationToken) =>
         UseAsync<(string, DateTime)?>(async connection =>
