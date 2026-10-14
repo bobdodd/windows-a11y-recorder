@@ -657,8 +657,58 @@ public sealed class HttpModelEndpointTests
         listener.Prefixes.Add($"http://127.0.0.1:{port}/");
         listener.Start();
         using var client = new HttpClient();
-        var endpoint = new HttpModelEndpoint(client, null);
-        var profile = new ModelProfile(
+        var endpoint = new HttpModelEndpoint(client, null, loadPoll: TimeSpan.FromMilliseconds(10));
+        var profile = LocalProfile(port);
+
+        var serving = ServeAsync(listener, "{\"success\": true}", Models("loading"), Models("loading"), Models("loaded"));
+        await endpoint.LoadAsync(profile, Token);
+        var seen = await serving;
+        Assert.Equal(("POST", "/models/load", "{\"model\":\"qwen3.6-35b-a3b\"}", null), seen[0]);
+        Assert.Equal(["/models", "/models", "/models"], seen.Skip(1).Select(request => request.Path));
+
+        var unloading = ServeOnceAsync(listener, 200, "{\"success\": true}");
+        await endpoint.UnloadAsync(profile, Token);
+        Assert.Equal("/models/unload", (await unloading).Path);
+    }
+
+    [Fact]
+    public async Task A_model_that_fails_to_load_fails_saying_so()
+    {
+        var port = FreePort();
+        using var listener = new HttpListener();
+        listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+        listener.Start();
+        using var client = new HttpClient();
+        var endpoint = new HttpModelEndpoint(client, null, loadPoll: TimeSpan.FromMilliseconds(10));
+
+        var serving = ServeAsync(listener, "{\"success\": true}", Models("loading"), Models("unloaded", "\"failed\": true, \"exit_code\": 1"));
+        var failure = await Assert.ThrowsAsync<ModelEndpointException>(() => endpoint.LoadAsync(LocalProfile(port), Token));
+        await serving;
+
+        Assert.Equal(
+            "The model server could not load qwen3.6-35b-a3b; its model process exited with code 1. Its log is llama-server.log in the analysis folder.",
+            failure.Message);
+    }
+
+    [Fact]
+    public async Task A_model_still_loading_at_the_limit_fails_saying_so()
+    {
+        var port = FreePort();
+        using var listener = new HttpListener();
+        listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+        listener.Start();
+        using var client = new HttpClient();
+        var endpoint = new HttpModelEndpoint(client, null, loadTimeout: TimeSpan.Zero, loadPoll: TimeSpan.FromMilliseconds(10));
+
+        var serving = ServeAsync(listener, "{\"success\": true}", Models("loading"));
+        var failure = await Assert.ThrowsAsync<ModelEndpointException>(() => endpoint.LoadAsync(LocalProfile(port), Token));
+        await serving;
+
+        Assert.StartsWith("The model server had not loaded qwen3.6-35b-a3b after 0 minutes; its state was loading.", failure.Message, StringComparison.Ordinal);
+    }
+
+    private static ModelProfile LocalProfile(int port) =>
+        new(
             "This PC",
             new Uri($"http://127.0.0.1:{port}/"),
             "qwen3.6-35b-a3b",
@@ -668,13 +718,20 @@ public sealed class HttpModelEndpointTests
             GenerationSettings.Default,
             null);
 
-        var serving = ServeOnceAsync(listener, 200, "{\"success\": true}");
-        await endpoint.LoadAsync(profile, Token);
-        Assert.Equal(("POST", "/models/load", "{\"model\":\"qwen3.6-35b-a3b\"}", null), await serving);
+    // The router's list of models, as llama.cpp's server documents it.
+    private static string Models(string state, string? more = null) =>
+        "{\"data\": [{\"id\": \"other\", \"status\": {\"value\": \"unloaded\"}}, " +
+        "{\"id\": \"qwen3.6-35b-a3b\", \"status\": {\"value\": \"" + state + "\"" + (more is null ? "" : ", " + more) + "}}]}";
 
-        serving = ServeOnceAsync(listener, 200, "{\"success\": true}");
-        await endpoint.UnloadAsync(profile, Token);
-        Assert.Equal("/models/unload", (await serving).Path);
+    private static async Task<List<(string Method, string Path, string Body, string? Authorization)>> ServeAsync(HttpListener listener, params string[] answers)
+    {
+        var seen = new List<(string, string, string, string?)>();
+        foreach (var answer in answers)
+        {
+            seen.Add(await ServeOnceAsync(listener, 200, answer));
+        }
+
+        return seen;
     }
 
     [Fact]

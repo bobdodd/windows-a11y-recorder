@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
@@ -156,8 +157,20 @@ public static class ChatRequest
 /// The model endpoint over HTTP. Before each request, the endpoint's host is
 /// resolved and refused if any address is outside the local network.
 /// </summary>
-public sealed class HttpModelEndpoint(HttpClient client, IApiKeyProtector? keys) : IModelEndpoint
+/// <param name="loadTimeout">How long a locally served model may take to load; 15 minutes when null.</param>
+/// <param name="loadPoll">How often its state is read while it loads; 2 seconds when null.</param>
+public sealed class HttpModelEndpoint(
+    HttpClient client,
+    IApiKeyProtector? keys,
+    TimeSpan? loadTimeout = null,
+    TimeSpan? loadPoll = null) : IModelEndpoint
 {
+    /// <summary>How long a locally served model may take to load, unless set.</summary>
+    public static readonly TimeSpan DefaultLoadTimeout = TimeSpan.FromMinutes(15);
+
+    private readonly TimeSpan _loadTimeout = loadTimeout ?? DefaultLoadTimeout;
+    private readonly TimeSpan _loadPoll = loadPoll ?? TimeSpan.FromSeconds(2);
+
     public async Task<ModelResponse> CompleteAsync(ModelProfile profile, string body, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(profile);
@@ -252,6 +265,78 @@ public sealed class HttpModelEndpoint(HttpClient client, IApiKeyProtector? keys)
             var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             throw new ModelEndpointException($"The model server did not load {profile.Model}: {Shorten(text)}");
         }
+
+        // The router loads the model in the background and answers 503
+        // "Loading model" to requests until it is loaded (target machine,
+        // 2026-10-14), so the worker waits for the model's state in GET
+        // /models to be "loaded" before any request. See
+        // docs/architecture/analysis-runner.md, "Implementation status".
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        string? last = null;
+        while (true)
+        {
+            var (state, failed, exitCode) = await ModelStateAsync(profile, cancellationToken).ConfigureAwait(false);
+            if (state == "loaded")
+            {
+                return;
+            }
+
+            if (failed)
+            {
+                throw new ModelEndpointException(
+                    $"The model server could not load {profile.Model}" +
+                    (exitCode is { } code ? $"; its model process exited with code {code.ToString(CultureInfo.InvariantCulture)}." : ".") +
+                    " Its log is llama-server.log in the analysis folder.");
+            }
+
+            last = state;
+            if (waited.Elapsed >= _loadTimeout)
+            {
+                throw new ModelEndpointException(
+                    $"The model server had not loaded {profile.Model} after {_loadTimeout.TotalMinutes.ToString(CultureInfo.InvariantCulture)} minutes; its state was {last ?? "not given"}.");
+            }
+
+            await Task.Delay(_loadPoll, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    // A model's state in the router's list: its value, such as "loading" or
+    // "loaded", whether loading failed, and the exit code if so.
+    private async Task<(string? State, bool Failed, int? ExitCode)> ModelStateAsync(ModelProfile profile, CancellationToken cancellationToken)
+    {
+        using var response = await SendAsync(profile, HttpMethod.Get, "models", null, cancellationToken).ConfigureAwait(false);
+        var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new ModelEndpointException($"The model server's list of models could not be read: {(int)response.StatusCode} {Shorten(text)}");
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(text);
+            foreach (var model in document.RootElement.GetProperty("data").EnumerateArray())
+            {
+                if (model.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && id.GetString() == profile.Model)
+                {
+                    if (!model.TryGetProperty("status", out var status) || status.ValueKind != JsonValueKind.Object)
+                    {
+                        return (null, false, null);
+                    }
+
+                    var value = status.TryGetProperty("value", out var valueElement) && valueElement.ValueKind == JsonValueKind.String
+                        ? valueElement.GetString()
+                        : null;
+                    var failed = status.TryGetProperty("failed", out var failedElement) && failedElement.ValueKind == JsonValueKind.True;
+                    return (value, failed, Int(status, "exit_code"));
+                }
+            }
+        }
+        catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            throw new ModelEndpointException($"The model server's list of models is not as expected: {Shorten(text)}", exception);
+        }
+
+        throw new ModelEndpointException($"The model server does not list {profile.Model}.");
     }
 
     public async Task UnloadAsync(ModelProfile profile, CancellationToken cancellationToken)

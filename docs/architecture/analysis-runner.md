@@ -328,6 +328,16 @@ machine. The player's controls are step 3, below.
   [recording summary](recording-summary.md). A task of a kind the worker
   does not have fails with "This worker has no task kind". The tests also
   use a stand-in kind.
+- **Loading a model:** llama.cpp's router loads a model in the
+  background after `POST /models/load` and answers other requests with
+  503 "Loading model" until it is loaded. On the first run on the target
+  machine, on 2026-10-14, the worker sent its first request at once, and
+  the three attempts of the first visit failed that way while the 22.1 GB
+  file loaded. The worker now reads the model's state in `GET /models`
+  every 2 seconds and sends nothing until it is "loaded"
+  ([llama.cpp server](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md)).
+  A load the router marks failed, or one not finished after 15 minutes,
+  fails the step, saying which.
 - **A worker killed during an attempt:** the next worker closes the
   attempt as failed, "The worker stopped during the attempt.", and it
   counts against the attempt limit. Steps already accepted are not asked
