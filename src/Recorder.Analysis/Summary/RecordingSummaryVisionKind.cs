@@ -38,6 +38,12 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     public const int TemplateVersion = 1;
 
+    // Version 2 asks for an overview of the screen, after a moment showing
+    // the recorder's own player was answered with every control and time
+    // on it, 128 statements, until the output limit (recording-summary.md,
+    // "Stage 2 implementation status").
+    public const int MomentTemplateVersion = 2;
+
     public static readonly IReadOnlyList<string> MomentSections = ["screen", "change"];
 
     public static readonly IReadOnlyList<string> VisitSections = ["page", "purpose", "activity", "journey"];
@@ -84,6 +90,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "What NVDA had to announce is the recorder's inference from the page, not a recording of speech: never say that NVDA said it or that the participant heard it. " +
         "Assistive technology observed running shows what was running, not what the participant is able to do. " +
         "Typed text is test data from short-lived test accounts and may be quoted as recorded. " +
+        "Summarise what is on the screen as an overview; do not list each control, label, or time shown. " +
         "Answer in JSON with two sections: \"screen\", what was on the screen: the page and its layout, imagery, colour, and emphasis, " +
         "what was open, such as a dialog, a menu, or a popup, which part of the page was in view, and any other window in view; " +
         "and \"change\", what changed at this moment, as the reasons and facts give it, and what the picture shows of it. " +
@@ -210,7 +217,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                 var (input, references) = MomentInput(collation, visit, moment, frameReference, reasonReferences, previous);
                 var step = await context.RunStepAsync(
                     $"{RecordingSummaryKind.VisitStepKey(visit)}-moment-{moment.Number.ToString("D2", CultureInfo.InvariantCulture)}",
-                    new ModelRequest(MomentTemplate, TemplateVersion, MomentInstructions, input,
+                    new ModelRequest(MomentTemplate, MomentTemplateVersion, MomentInstructions, input,
                         [new ModelImage(frameReference, MediaType(frame.AbsolutePath), await ReadFrameAsync(frame, cancellationToken).ConfigureAwait(false))],
                         MomentSections, references),
                     cancellationToken).ConfigureAwait(false);

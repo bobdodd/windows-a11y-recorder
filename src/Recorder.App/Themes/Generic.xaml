@@ -1,0 +1,25 @@
+<!-- The look of the player's own controls, applied whatever style an
+     instance is given. SelectableText looks like a text block: no border,
+     no padding, a clear background, and the foreground, font, and size of
+     what it is in. See SelectableText.cs. -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:local="clr-namespace:Recorder.App">
+  <Style TargetType="{x:Type local:SelectableText}">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type local:SelectableText}">
+          <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+            <!-- A decorator, not a scroll viewer, so the mouse wheel still
+                 scrolls the panel the text is in. -->
+            <Decorator x:Name="PART_ContentHost" />
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+</ResourceDictionary>

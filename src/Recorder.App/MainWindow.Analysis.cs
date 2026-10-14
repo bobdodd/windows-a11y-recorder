@@ -182,7 +182,7 @@ public partial class MainWindow
         AnalysisTasksPanel.Children.Clear();
         if (empty is not null)
         {
-            AnalysisTasksPanel.Children.Add(new TextBlock { Text = empty, TextWrapping = TextWrapping.Wrap });
+            AnalysisTasksPanel.Children.Add(new SelectableText { Text = empty, TextWrapping = TextWrapping.Wrap });
         }
 
         foreach (var task in tasks)
@@ -226,14 +226,17 @@ public partial class MainWindow
         var queued = Local(task.QueuedUtc);
         var state = AnalysisPlayer.StateName(task.State) +
             (task.ReadUtc is null && task.State is AnalysisTaskStates.Done or AnalysisTaskStates.Failed ? ", unread" : "");
-        var profiles = task.StageProfiles.Count == 0 ? "no profile" : string.Join(", ", task.StageProfiles.Values);
+        // Each profile is named once, however many stages it runs.
+        var distinct = task.StageProfiles.Values.Distinct(StringComparer.Ordinal).ToList();
+        var profiles = distinct.Count == 0 ? "no profile" : string.Join(", ", distinct);
+        var profileWord = distinct.Count > 1 ? "Profiles" : "Profile";
         var lines = new StackPanel();
-        lines.Children.Add(new TextBlock { Text = $"{name}: {state}", FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-        var times = $"Profile {profiles}. Queued {queued}" + (task.FinishedUtc is { } finished ? $", ended {Local(finished)}." : ".");
-        lines.Children.Add(new TextBlock { Text = times, TextWrapping = TextWrapping.Wrap });
+        lines.Children.Add(new SelectableText { Text = $"{name}: {state}", FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        var times = $"{profileWord} {profiles}. Queued {queued}" + (task.FinishedUtc is { } finished ? $", ended {Local(finished)}." : ".");
+        lines.Children.Add(new SelectableText { Text = times, TextWrapping = TextWrapping.Wrap });
         if (task.Failure is { Length: > 0 } failure)
         {
-            lines.Children.Add(new TextBlock { Text = "Why: " + failure, TextWrapping = TextWrapping.Wrap });
+            lines.Children.Add(new SelectableText { Text = "Why: " + failure, TextWrapping = TextWrapping.Wrap });
         }
 
         var label = $"{name} queued {queued}";

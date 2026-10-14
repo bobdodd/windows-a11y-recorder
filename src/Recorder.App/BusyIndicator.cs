@@ -29,14 +29,14 @@ internal sealed class BusyIndicator
     private readonly UIElement _announcer;
     private readonly FrameworkElement _panel;
     private readonly ProgressBar _progressBar;
-    private readonly TextBlock _messageTextBlock;
+    private readonly SelectableText _messageTextBlock;
     private int _depth;
 
     public BusyIndicator(
         UIElement announcer,
         FrameworkElement panel,
         ProgressBar progressBar,
-        TextBlock messageTextBlock)
+        SelectableText messageTextBlock)
     {
         _announcer = announcer;
         _panel = panel;

@@ -145,7 +145,7 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Matches(@"On the screen: A statement about screen\. \[E\d+\]", text);
         Assert.Matches(@"What changed: A statement about change\. \[E\d+\]", text);
         Assert.Contains("- Moment limits: 10 moments for each visit; moments less than 2 s apart merged; settled when the layout has not changed for 1 s, or 5 s after the visit starts; a large change is 50 elements or more at once.", text, StringComparison.Ordinal);
-        Assert.Contains($"{RecordingSummaryVisionKind.MomentTemplate} version 1 for each moment", text, StringComparison.Ordinal);
+        Assert.Contains($"{RecordingSummaryVisionKind.MomentTemplate} version 2 for each moment", text, StringComparison.Ordinal);
         Assert.Contains("The captured frame at 00:00:02.500: the whole screen, 1920 by 1080 pixels, file frames/desktop/0000000001.png", text, StringComparison.Ordinal);
         var read = ReportDocument.Parse(text);
         Assert.All(read.Blocks.SelectMany(block => block.References).Distinct(),

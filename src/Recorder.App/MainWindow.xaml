@@ -22,6 +22,9 @@
     <Style TargetType="TextBlock">
       <Setter Property="Foreground" Value="#CDCCCA" />
     </Style>
+    <Style TargetType="local:SelectableText">
+      <Setter Property="Foreground" Value="#CDCCCA" />
+    </Style>
     <Style TargetType="Label">
       <Setter Property="Foreground" Value="#CDCCCA" />
     </Style>
@@ -177,10 +180,10 @@
         </Grid.RowDefinitions>
 
         <StackPanel Grid.Row="0" Margin="0,0,0,14">
-          <TextBlock FontSize="22"
+          <local:SelectableText FontSize="22"
                      FontWeight="SemiBold"
                      Text="Accessibility Recorder" />
-          <TextBlock Margin="0,4,0,0"
+          <local:SelectableText Margin="0,4,0,0"
                      Foreground="{StaticResource MutedText}"
                      TextWrapping="Wrap"
                      Text="Capture a session or open an existing recording." />
@@ -227,7 +230,7 @@
                       Padding="10"
                       Margin="0,0,0,12">
               <StackPanel>
-                <TextBlock Margin="0,0,0,8"
+                <local:SelectableText Margin="0,0,0,8"
                            Foreground="{StaticResource MutedText}"
                            TextWrapping="Wrap"
                            Text="Proof of concept: launch the current instrumented build and record the browser evidence it emits." />
@@ -247,7 +250,7 @@
                          Margin="0,0,0,8"
                          AutomationProperties.Name="Browser profile folder"
                          AutomationProperties.HelpText="Leave empty for a new profile for each recording, removed after it. Choose a prepared profile folder, such as one for a test account, to record with it. Only the listed accessibility preferences are recorded from it, not its browsing data." />
-                <TextBlock Margin="0,0,0,8"
+                <local:SelectableText Margin="0,0,0,8"
                            Foreground="{StaticResource MutedText}"
                            TextWrapping="Wrap"
                            Text="Empty for a new profile for each recording. A prepared folder is kept, and only its accessibility preferences are recorded." />
@@ -365,7 +368,7 @@
                   <Button Content="_Clear all"
                           Click="ClearAllFiltersButton_Click" />
                 </StackPanel>
-                <TextBlock x:Name="FilterSummaryTextBlock"
+                <local:SelectableText x:Name="FilterSummaryTextBlock"
                            Margin="0,6,0,0"
                            Foreground="{StaticResource MutedText}"
                            Text="No recording loaded."
@@ -401,18 +404,18 @@
 
             <GroupBox Header="Current session" Padding="10">
               <StackPanel>
-                <TextBlock x:Name="StatusTextBlock"
+                <local:SelectableText x:Name="StatusTextBlock"
                            FontWeight="SemiBold"
                            Text="Ready to record."
                            TextWrapping="Wrap"
                            AutomationProperties.LiveSetting="Polite" />
-                <TextBlock x:Name="DurationTextBlock"
+                <local:SelectableText x:Name="DurationTextBlock"
                            Margin="0,6,0,0"
                            Text="Duration: 00:00:00" />
-                <TextBlock x:Name="EvidenceTextBlock"
+                <local:SelectableText x:Name="EvidenceTextBlock"
                            Margin="0,4,0,0"
                            Text="Events: 0 accepted, 0 dropped" />
-                <TextBlock Margin="0,8,0,2" Text="Collector status:" />
+                <local:SelectableText Margin="0,8,0,2" Text="Collector status:" />
                 <ListBox x:Name="CollectorStatusListBox"
                          MaxHeight="110"
                          Background="#201F1D"
@@ -420,7 +423,7 @@
                          BorderBrush="{StaticResource PanelBorder}"
                          AutomationProperties.Name="Collector status"
                          IsTabStop="True" />
-                <TextBlock Margin="0,8,0,2" Text="Session folder:" />
+                <local:SelectableText Margin="0,8,0,2" Text="Session folder:" />
                 <TextBox x:Name="SessionFolderTextBox"
                          IsReadOnly="True"
                          TextWrapping="Wrap"
@@ -491,7 +494,7 @@
                  Stretch="Uniform"
                  SnapsToDevicePixels="True"
                  AutomationProperties.Name="Recorded desktop video frame" />
-          <TextBlock x:Name="VideoPlaceholderTextBlock"
+          <local:SelectableText x:Name="VideoPlaceholderTextBlock"
                      HorizontalAlignment="Center"
                      VerticalAlignment="Center"
                      Foreground="#A09F9B"
@@ -513,7 +516,7 @@
                   Padding="4"
                   Header="Properties">
           <DockPanel>
-          <TextBlock DockPanel.Dock="Bottom"
+          <local:SelectableText DockPanel.Dock="Bottom"
                      Margin="2,6,2,0"
                      TextWrapping="Wrap"
                      Foreground="{StaticResource MutedText}"
@@ -545,9 +548,9 @@
               <GroupStyle>
                 <GroupStyle.HeaderTemplate>
                   <DataTemplate>
-                    <TextBlock Margin="0,6,0,2"
+                    <local:SelectableText Margin="0,6,0,2"
                                FontWeight="SemiBold"
-                               Text="{Binding Name}" />
+                               Text="{Binding Name, Mode=OneWay}" />
                   </DataTemplate>
                 </GroupStyle.HeaderTemplate>
               </GroupStyle>
@@ -557,21 +560,21 @@
                 <GridViewColumn Header="Setting" Width="120">
                   <GridViewColumn.CellTemplate>
                     <DataTemplate>
-                      <TextBlock Text="{Binding Setting}" TextWrapping="Wrap" />
+                      <local:SelectableText Text="{Binding Setting, Mode=OneWay}" TextWrapping="Wrap" />
                     </DataTemplate>
                   </GridViewColumn.CellTemplate>
                 </GridViewColumn>
                 <GridViewColumn Header="Value" Width="110">
                   <GridViewColumn.CellTemplate>
                     <DataTemplate>
-                      <TextBlock Text="{Binding Value}" TextWrapping="Wrap" />
+                      <local:SelectableText Text="{Binding Value, Mode=OneWay}" TextWrapping="Wrap" />
                     </DataTemplate>
                   </GridViewColumn.CellTemplate>
                 </GridViewColumn>
                 <GridViewColumn Header="When set" Width="80">
                   <GridViewColumn.CellTemplate>
                     <DataTemplate>
-                      <TextBlock Text="{Binding WhenSetShown}" TextWrapping="Wrap" />
+                      <local:SelectableText Text="{Binding WhenSetShown, Mode=OneWay}" TextWrapping="Wrap" />
                     </DataTemplate>
                   </GridViewColumn.CellTemplate>
                 </GridViewColumn>
@@ -603,10 +606,10 @@
                                 Click="PropertyNextChange_Click"
                                 ToolTip="{Binding NextName}"
                                 AutomationProperties.Name="{Binding NextName}" />
-                        <TextBlock Margin="8,0,0,0"
+                        <local:SelectableText Margin="8,0,0,0"
                                    MinWidth="48"
                                    VerticalAlignment="Center"
-                                   Text="{Binding CountShown}"
+                                   Text="{Binding CountShown, Mode=OneWay}"
                                    ToolTip="{Binding CountSpoken}"
                                    AutomationProperties.Name="{Binding CountSpoken}" />
                       </StackPanel>
@@ -722,7 +725,7 @@
                   IsMoveToPointEnabled="True"
                   ValueChanged="PlaybackSlider_ValueChanged"
                   AutomationProperties.Name="Recording position" />
-          <TextBlock x:Name="PlaybackTimeTextBlock"
+          <local:SelectableText x:Name="PlaybackTimeTextBlock"
                      Grid.Column="7"
                      Margin="12,0,0,0"
                      VerticalAlignment="Center"
@@ -772,7 +775,7 @@
                   IsSnapToTickEnabled="True"
                   ValueChanged="AudioVolumeSlider_ValueChanged"
                   AutomationProperties.Name="Microphone playback gain" />
-          <TextBlock x:Name="MicrophoneVolumeTextBlock"
+          <local:SelectableText x:Name="MicrophoneVolumeTextBlock"
                      Grid.Column="2"
                      Margin="8,0,0,0"
                      MinWidth="52"
@@ -792,7 +795,7 @@
                   IsSnapToTickEnabled="True"
                   ValueChanged="AudioVolumeSlider_ValueChanged"
                   AutomationProperties.Name="System audio playback gain" />
-          <TextBlock x:Name="SystemAudioVolumeTextBlock"
+          <local:SelectableText x:Name="SystemAudioVolumeTextBlock"
                      Grid.Column="6"
                      Margin="8,0,0,0"
                      MinWidth="52"
@@ -840,7 +843,7 @@
                   IsEnabled="False"
                   ValueChanged="TimelineZoomSlider_ValueChanged"
                   AutomationProperties.Name="Timeline zoom" />
-          <TextBlock x:Name="TimelineZoomTextBlock"
+          <local:SelectableText x:Name="TimelineZoomTextBlock"
                      Grid.Column="2"
                      Margin="8,0,12,0"
                      MinWidth="32"
@@ -887,7 +890,7 @@
                 Background="{StaticResource PanelBackground}"
                 BorderBrush="{StaticResource PanelBorder}"
                 BorderThickness="1">
-          <TextBlock x:Name="AllTabsTornOutTextBlock"
+          <local:SelectableText x:Name="AllTabsTornOutTextBlock"
                      Margin="12"
                      TextWrapping="Wrap"
                      Visibility="Collapsed"
@@ -972,7 +975,7 @@
                        Grid.Row="0"
                        Margin="0,0,0,6"
                        AutomationProperties.Name="Navigation kinds to list">
-              <TextBlock Margin="0,0,8,0"
+              <local:SelectableText Margin="0,0,8,0"
                          VerticalAlignment="Center"
                          Text="Show:" />
               <CheckBox x:Name="ShowPageNavigationsCheckBox"
@@ -1043,7 +1046,7 @@
                         Content="Show current step"
                         Click="ShowCurrentStepButton_Click"
                         AutomationProperties.HelpText="Scrolls the list to the step at the playhead. The list does not scroll by itself." />
-                <TextBlock x:Name="ReadingStepsStatusTextBlock"
+                <local:SelectableText x:Name="ReadingStepsStatusTextBlock"
                            Margin="12,0,0,0"
                            VerticalAlignment="Center"
                            TextWrapping="Wrap"
@@ -1090,10 +1093,10 @@
                         <ColumnDefinition Width="3*" />
                       </Grid.ColumnDefinitions>
                       <StackPanel Grid.Column="0" Grid.RowSpan="2" Margin="0,0,10,0">
-                        <TextBlock Text="{Binding Time}" />
-                        <TextBlock Text="at the playhead">
-                          <TextBlock.Style>
-                            <Style TargetType="TextBlock">
+                        <local:SelectableText Text="{Binding Time, Mode=OneWay}" />
+                        <local:SelectableText Text="at the playhead">
+                          <local:SelectableText.Style>
+                            <Style TargetType="local:SelectableText">
                               <Setter Property="Visibility" Value="Collapsed" />
                               <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsCurrent}" Value="True">
@@ -1101,31 +1104,31 @@
                                 </DataTrigger>
                               </Style.Triggers>
                             </Style>
-                          </TextBlock.Style>
-                        </TextBlock>
+                          </local:SelectableText.Style>
+                        </local:SelectableText>
                       </StackPanel>
-                      <TextBlock Grid.Column="1" Margin="0,0,10,0" Text="{Binding State}" />
-                      <TextBlock Grid.Column="2" Margin="0,0,10,0" Text="{Binding Cause}" TextWrapping="Wrap" />
-                      <TextBlock Grid.Column="3" Text="{Binding Value}" TextWrapping="Wrap" />
+                      <local:SelectableText Grid.Column="1" Margin="0,0,10,0" Text="{Binding State, Mode=OneWay}" />
+                      <local:SelectableText Grid.Column="2" Margin="0,0,10,0" Text="{Binding Cause, Mode=OneWay}" TextWrapping="Wrap" />
+                      <local:SelectableText Grid.Column="3" Text="{Binding Value, Mode=OneWay}" TextWrapping="Wrap" />
                       <!-- What NVDA had to announce at the step
                            (screen-reader-activity.md, "What NVDA had to
                            announce"), on a second line. -->
-                      <TextBlock Grid.Row="1"
+                      <local:SelectableText Grid.Row="1"
                                  Grid.Column="1"
                                  Grid.ColumnSpan="3"
                                  Margin="0,4,0,0"
-                                 Text="{Binding Announcement}"
+                                 Text="{Binding Announcement, Mode=OneWay}"
                                  TextWrapping="Wrap">
-                        <TextBlock.Style>
-                          <Style TargetType="TextBlock">
+                        <local:SelectableText.Style>
+                          <Style TargetType="local:SelectableText">
                             <Style.Triggers>
                               <DataTrigger Binding="{Binding Announcement}" Value="">
                                 <Setter Property="Visibility" Value="Collapsed" />
                               </DataTrigger>
                             </Style.Triggers>
                           </Style>
-                        </TextBlock.Style>
-                      </TextBlock>
+                        </local:SelectableText.Style>
+                      </local:SelectableText>
                     </Grid>
                   </DataTemplate>
                 </ListBox.ItemTemplate>
@@ -1165,7 +1168,7 @@
                         Content="Show current step"
                         Click="ShowCurrentAnnouncementButton_Click"
                         AutomationProperties.HelpText="Scrolls the list to the step at the playhead. The list does not scroll by itself." />
-                <TextBlock x:Name="AnnouncementsStatusTextBlock"
+                <local:SelectableText x:Name="AnnouncementsStatusTextBlock"
                            Margin="12,0,0,0"
                            VerticalAlignment="Center"
                            TextWrapping="Wrap"
@@ -1208,10 +1211,10 @@
                         <ColumnDefinition Width="3*" />
                       </Grid.ColumnDefinitions>
                       <StackPanel Grid.Column="0" Margin="0,0,10,0">
-                        <TextBlock Text="{Binding Time}" />
-                        <TextBlock Text="at the playhead">
-                          <TextBlock.Style>
-                            <Style TargetType="TextBlock">
+                        <local:SelectableText Text="{Binding Time, Mode=OneWay}" />
+                        <local:SelectableText Text="at the playhead">
+                          <local:SelectableText.Style>
+                            <Style TargetType="local:SelectableText">
                               <Setter Property="Visibility" Value="Collapsed" />
                               <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsCurrent}" Value="True">
@@ -1219,12 +1222,12 @@
                                 </DataTrigger>
                               </Style.Triggers>
                             </Style>
-                          </TextBlock.Style>
-                        </TextBlock>
+                          </local:SelectableText.Style>
+                        </local:SelectableText>
                       </StackPanel>
-                      <TextBlock Grid.Column="1" Margin="0,0,10,0" Text="{Binding State}" />
-                      <TextBlock Grid.Column="2" Margin="0,0,10,0" Text="{Binding Cause}" TextWrapping="Wrap" />
-                      <TextBlock Grid.Column="3" Text="{Binding Text}" TextWrapping="Wrap" />
+                      <local:SelectableText Grid.Column="1" Margin="0,0,10,0" Text="{Binding State, Mode=OneWay}" />
+                      <local:SelectableText Grid.Column="2" Margin="0,0,10,0" Text="{Binding Cause, Mode=OneWay}" TextWrapping="Wrap" />
+                      <local:SelectableText Grid.Column="3" Text="{Binding Text, Mode=OneWay}" TextWrapping="Wrap" />
                     </Grid>
                   </DataTemplate>
                 </ListBox.ItemTemplate>
@@ -1274,7 +1277,7 @@
                         Click="ShowUnderPointerButton_Click"
                         AutomationProperties.HelpText="Expands the tree down to the object under the pointer at the playhead, and scrolls to it." />
               </WrapPanel>
-              <TextBlock x:Name="AccessibilityTreeStatusTextBlock"
+              <local:SelectableText x:Name="AccessibilityTreeStatusTextBlock"
                          Grid.Row="1"
                          Margin="0,0,0,6"
                          TextWrapping="Wrap"
@@ -1344,19 +1347,19 @@
                 <TreeView.ItemTemplate>
                   <HierarchicalDataTemplate ItemsSource="{Binding Children}">
                     <StackPanel>
-                      <TextBlock Text="{Binding Label}" TextWrapping="Wrap" />
-                      <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" Foreground="#4A4945" />
-                      <TextBlock Text="{Binding Markers}" TextWrapping="Wrap" FontWeight="SemiBold">
-                        <TextBlock.Style>
-                          <Style TargetType="TextBlock">
+                      <local:SelectableText Text="{Binding Label, Mode=OneWay}" TextWrapping="Wrap" />
+                      <local:SelectableText Text="{Binding Detail, Mode=OneWay}" TextWrapping="Wrap" Foreground="#4A4945" />
+                      <local:SelectableText Text="{Binding Markers, Mode=OneWay}" TextWrapping="Wrap" FontWeight="SemiBold">
+                        <local:SelectableText.Style>
+                          <Style TargetType="local:SelectableText">
                             <Style.Triggers>
                               <DataTrigger Binding="{Binding Markers}" Value="">
                                 <Setter Property="Visibility" Value="Collapsed" />
                               </DataTrigger>
                             </Style.Triggers>
                           </Style>
-                        </TextBlock.Style>
-                      </TextBlock>
+                        </local:SelectableText.Style>
+                      </local:SelectableText>
                     </StackPanel>
                   </HierarchicalDataTemplate>
                 </TreeView.ItemTemplate>
@@ -1387,7 +1390,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
               </Grid.RowDefinitions>
-              <TextBlock x:Name="WorkerStatusTextBlock"
+              <local:SelectableText x:Name="WorkerStatusTextBlock"
                          Grid.Row="0"
                          Margin="0,0,0,8"
                          TextWrapping="Wrap"
@@ -1466,21 +1469,20 @@
                        VerticalAlignment="Center"
                        AutomationProperties.Name="Working"
                        AutomationProperties.HelpText="The recorder is busy. Please wait." />
-          <TextBlock x:Name="BusyTextBlock"
+          <local:SelectableText x:Name="BusyTextBlock"
                      VerticalAlignment="Center"
                      FontWeight="SemiBold" />
         </StackPanel>
-        <TextBlock x:Name="PlaybackStatusTextBlock"
+        <local:SelectableText x:Name="PlaybackStatusTextBlock"
                    Grid.Column="1"
                    Foreground="{StaticResource MutedText}"
                    Text="No recording loaded."
-                   TextTrimming="CharacterEllipsis"
                    AutomationProperties.LiveSetting="Polite" />
-        <TextBlock Grid.Column="2"
+        <local:SelectableText Grid.Column="2"
                    Foreground="{StaticResource MutedText}"
                    Text="Keyboard | Mouse | UIA | Window | Frames | Mic | System audio" />
         <!-- The latest analysis task to finish or fail, until the next. -->
-        <TextBlock x:Name="AnalysisStatusTextBlock"
+        <local:SelectableText x:Name="AnalysisStatusTextBlock"
                    Grid.Row="1"
                    Grid.ColumnSpan="3"
                    Margin="0,4,0,0"

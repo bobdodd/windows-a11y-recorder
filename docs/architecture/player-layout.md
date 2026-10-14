@@ -142,6 +142,39 @@ NVDA had to announce, added on 2026-10-12 (screen-reader-activity.md,
 - The player's keyboard commands, such as playback and zoom, work in the
   player's window, not in a tab's own window.
 
+## Selecting and copying text
+
+The owner, 2026-10-14: "Much of the UI does not allow for text selection
+and copying and this is very frustrating", and, asked how it should work,
+"I want to be able to click and drag/use arrow keys to select any text on
+screen, just as I would on websites, and most apps. Control C copies to
+the clipboard", and "The UI is mouse down and drag on text, it shouldn't
+ever affect clickable lists (because they are never clicked)".
+
+- **Text is selectable** (`SelectableText.cs`): press and drag, or click
+  and then Shift with the arrow keys, select it; Ctrl+C copies it, and the
+  right-click menu has Copy. It is a read-only text box made to look like
+  a text block (`Themes/Generic.xaml`): no border, no padding, a clear
+  background, and the colour and font of what it is in. It is not a tab
+  stop, so Tab moves between controls as before. To UI Automation it is
+  text, named by what it says, as a text block is.
+- **Where:** the main window's status lines, the worker line, the
+  analysis task rows and their "Why:" lines, the panels' messages, the
+  rows of the properties panel, the reading position steps, what NVDA had
+  to announce, and the accessibility tree; the report window; the model
+  profiles window; and the capability dialog.
+- **In a list or tree row**, only a press and drag selects text. A click
+  that selects nothing goes to the row, which is selected and does what a
+  click on it did before, for example moving the playhead to a reading
+  step.
+- **Not selectable:** tab names, since a press there drags the tab out;
+  buttons, menus, check boxes, and the labels of fields, since a click
+  there acts or moves to the field; and the timeline's names and times,
+  which are drawn, not laid out as text.
+- **The status line is cut off, not shortened with an ellipsis**, since a
+  text box cannot do that. All of it can still be selected with Ctrl+A
+  and copied.
+
 ## Required tests
 
 - Unit tests of reading and writing the layout file, including a missing,
@@ -154,3 +187,8 @@ NVDA had to announce, added on 2026-10-12 (screen-reader-activity.md,
   announces its name and state and each change of layout is announced.
 - A measurement on the target machine of the video's size in each layout,
   recorded with the result.
+- A check on the target machine that text in a status line, a task row,
+  and the report window can be selected by dragging and copied with
+  Ctrl+C; that a click on a list row still selects it and does what it
+  did; and that a drag on a row's text selects the text without moving
+  the playhead.

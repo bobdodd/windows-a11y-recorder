@@ -282,7 +282,7 @@ public static class SummaryReport
         else
         {
             builder.Append(CultureInfo.InvariantCulture,
-                $"- Prompt templates: {RecordingSummaryVisionKind.MomentTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for each moment, " +
+                $"- Prompt templates: {RecordingSummaryVisionKind.MomentTemplate} version {RecordingSummaryVisionKind.MomentTemplateVersion} for each moment, " +
                 $"{RecordingSummaryVisionKind.VisitTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for each visit, " +
                 $"{RecordingSummaryVisionKind.RecordingTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for the whole recording.\n");
             var moments = vision.Limits;

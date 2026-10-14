@@ -20,7 +20,7 @@ internal sealed class ReportWindow : Window
 {
     private readonly ReportDocument _report;
     private readonly Func<long, string?> _seek;
-    private readonly TextBlock _status;
+    private readonly SelectableText _status;
 
     /// <param name="seek">Moves the playhead to a time; returns why it could not, or null.</param>
     public ReportWindow(string path, ReportDocument report, string? warning, Func<long, string?> seek)
@@ -36,14 +36,14 @@ internal sealed class ReportWindow : Window
 
         var root = new DockPanel { Margin = new Thickness(16) };
         var header = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
-        header.Children.Add(new TextBlock { Text = path, TextWrapping = TextWrapping.Wrap, Foreground = SystemColors.GrayTextBrush });
+        header.Children.Add(new SelectableText { Text = path, TextWrapping = TextWrapping.Wrap, Foreground = SystemColors.GrayTextBrush });
         if (warning is not null)
         {
-            var text = new TextBlock { Text = warning, TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 0) };
+            var text = new SelectableText { Text = warning, TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 0) };
             header.Children.Add(text);
         }
 
-        _status = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) };
+        _status = new SelectableText { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) };
         AutomationProperties.SetName(_status, "Report status");
         header.Children.Add(_status);
         DockPanel.SetDock(header, Dock.Top);
@@ -74,7 +74,7 @@ internal sealed class ReportWindow : Window
         switch (block.Kind)
         {
             case ReportBlockKind.Heading:
-                var heading = new TextBlock
+                var heading = new SelectableText
                 {
                     Text = block.Text,
                     TextWrapping = TextWrapping.Wrap,
@@ -93,7 +93,7 @@ internal sealed class ReportWindow : Window
                 });
                 return heading;
             case ReportBlockKind.ListItem:
-                return new TextBlock { Text = "\u2022 " + block.Text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(12, 2, 0, 2) };
+                return new SelectableText { Text = "\u2022 " + block.Text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(12, 2, 0, 2) };
             case ReportBlockKind.Quote:
                 return new Border
                 {
@@ -101,12 +101,12 @@ internal sealed class ReportWindow : Window
                     BorderThickness = new Thickness(4, 0, 0, 0),
                     Padding = new Thickness(10, 4, 0, 4),
                     Margin = new Thickness(0, 4, 0, 4),
-                    Child = new TextBlock { Text = block.Text, TextWrapping = TextWrapping.Wrap }
+                    Child = new SelectableText { Text = block.Text, TextWrapping = TextWrapping.Wrap }
                 };
             case ReportBlockKind.Table:
                 return Table(block);
             default:
-                return new TextBlock { Text = block.Text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 4) };
+                return new SelectableText { Text = block.Text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 4) };
         }
     }
 
@@ -179,7 +179,7 @@ internal sealed class ReportWindow : Window
                 var text = block.Rows[row][column];
                 UIElement cell = row > 0 && column == 0 && Button(text) is { } button
                     ? button
-                    : new TextBlock
+                    : new SelectableText
                     {
                         Text = text,
                         TextWrapping = TextWrapping.Wrap,

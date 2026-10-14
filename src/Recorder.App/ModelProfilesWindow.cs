@@ -23,7 +23,7 @@ internal sealed class ModelProfilesWindow : Window
     private readonly TextBox _profiles;
     private readonly ComboBox _text;
     private readonly ComboBox _image;
-    private readonly TextBlock _status;
+    private readonly SelectableText _status;
 
     public ModelProfilesWindow(Window owner, string path)
     {
@@ -43,7 +43,7 @@ internal sealed class ModelProfilesWindow : Window
             root.RowDefinitions.Add(new RowDefinition { Height = row == 2 ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
         }
 
-        var file = new TextBlock { Text = "Settings file: " + path, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
+        var file = new SelectableText { Text = "Settings file: " + path, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
         Grid.SetRow(file, 0);
         root.Children.Add(file);
 
@@ -73,7 +73,7 @@ internal sealed class ModelProfilesWindow : Window
         Grid.SetRow(defaults, 3);
         root.Children.Add(defaults);
 
-        _status = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
+        _status = new SelectableText { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
         AutomationProperties.SetName(_status, "Model profiles status");
         Grid.SetRow(_status, 4);
         root.Children.Add(_status);

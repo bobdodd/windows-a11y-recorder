@@ -325,8 +325,10 @@ kind `recording-summary-vision`, version 1, shown in the player as
   labelled inferred, with a fourth section, the participant's journey.
   Then the whole recording is the step `recording`.
 - **The prompt templates** are `recording-summary-vision-moment`,
-  `recording-summary-vision-visit`, and `recording-summary-vision-recording`,
-  version 1.
+  version 2 since 2026-10-14, and `recording-summary-vision-visit` and
+  `recording-summary-vision-recording`, version 1. Version 2 of the moment
+  template adds "Summarise what is on the screen as an overview; do not
+  list each control, label, or time shown." (decision 6 below).
 - **The report** is `analysis\<task>\summary-with-vision.md`, laid out
   as the summary, titled "Summary with vision", with each visit's moments
   under "The moments" and the moment limits under "How this was made".
@@ -504,6 +506,28 @@ building stage 2:
    else 5 s after the visit starts; 6 tiles.
 5. **In step 4b, one request for each tile**, with the tiles' descriptions
    combined by the visit's text request.
+
+From the first run of step 4a on the target machine, the same day:
+
+6. **A moment's screen is summarised, with no limit on the answer.** The
+   run, with "This PC, with images", failed at `visit-0001-moment-09`:
+   "The output stopped at the output limit of 8192 tokens." Moments 1 to
+   8 had used 613 to 1,233 output tokens each. Moment 9's frame showed
+   the recorder's own player, and the model gave a statement for each of
+   its controls and then for each time shown on its timeline, 128
+   statements, for example "The timeline view shows a '00:00:54.926'
+   timestamp in the top-right corner of", where the output stopped. A
+   limit on the number of statements was proposed, which llama.cpp would
+   enforce from the answer's schema
+   ([llama.cpp grammars](https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md)).
+   The owner declined it: "I don't like artificial limits unless
+   absolutely forced by the platform and resources", since a page, such
+   as a digital map, may hold a very large number of elements, "so I do
+   agree that we need, in the first instance to summarize a page, even
+   though we may ask for much more detail of particular areas later". So
+   the moment prompt, version 2, asks for an overview, and the output
+   limit stays at 8,192 tokens. Every answer of that run was indented
+   JSON over many lines, although the prompt asks for one line.
 
 ## Decisions (2026-10-13)
 

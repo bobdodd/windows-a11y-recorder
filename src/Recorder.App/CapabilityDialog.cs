@@ -37,7 +37,7 @@ internal sealed class CapabilityDialog : Window
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var about = new TextBlock
+        var about = new SelectableText
         {
             Text = "What the participant is able to do: for example whether they work by sight, by hearing through a screen reader, " +
                 "by magnification, by voice, by switch, or by head pointer or eye tracking. The model is told this is your statement, " +
