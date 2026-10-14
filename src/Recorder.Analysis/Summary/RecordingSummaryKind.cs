@@ -21,7 +21,7 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
 
     public const string RecordingTemplate = "recording-summary-recording";
 
-    public const int TemplateVersion = 1;
+    public const int TemplateVersion = 2;
 
     public static readonly IReadOnlyList<string> VisitSections = ["page", "purpose", "activity"];
 
@@ -69,9 +69,13 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
         "Answer in JSON with three sections: \"page\", what the page is and what it holds; \"purpose\", what the page appears to be for; " +
         "and \"activity\", what the participant did there, in order. " +
         "Each section is a list of paragraphs, and each paragraph a list of statements. " +
+        "Each section holds only its own paragraphs: what the page is for goes only in \"purpose\", and what the participant did only in \"activity\". " +
+        "In \"activity\", summarise what the participant did, such as moving through the headings or reading down the page, " +
+        "and group repeated actions into one statement citing each of their references, rather than one statement for each fact. " +
         "A statement is {\"kind\": \"claim\", \"text\": ..., \"evidence\": [...]} for something the facts support, citing every reference it rests on, " +
         "or {\"kind\": \"unknown\", \"text\": ..., \"evidence\": []} for something the facts leave open. " +
-        "Cite only references that appear in the facts. Write plain sentences without Markdown.";
+        "Cite only references that appear in the facts. Write plain sentences without Markdown. " +
+        "Write the JSON on one line, with no indentation and no line breaks.";
 
     public const string RecordingInstructions =
         "You describe a whole accessibility test recording, for an accessibility auditor. " +
@@ -83,8 +87,10 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
         "Answer in JSON with three sections: \"site\", the site or application tested; \"audience\", who it appears to be for; " +
         "and \"session\", the course of the session from visit to visit. " +
         "Each section is a list of paragraphs, and each paragraph a list of statements. " +
+        "Each section holds only its own paragraphs. " +
         "A statement is {\"kind\": \"claim\", \"text\": ..., \"evidence\": [...]} citing every reference it rests on, " +
-        "or {\"kind\": \"unknown\", \"text\": ..., \"evidence\": []}. Cite only references that appear in the input. Write plain sentences without Markdown.";
+        "or {\"kind\": \"unknown\", \"text\": ..., \"evidence\": []}. Cite only references that appear in the input. Write plain sentences without Markdown. " +
+        "Write the JSON on one line, with no indentation and no line breaks.";
 
     public async Task RunAsync(AnalysisTaskContext context, CancellationToken cancellationToken)
     {

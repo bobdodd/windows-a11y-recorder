@@ -212,6 +212,17 @@ attempts stay in the catalog with their reasons. Output is never
 completed, trimmed, or patched to look finished. After three failures, the
 task is marked failed with the reasons shown.
 
+Results are to be repeatable (owner, 2026-10-14). At temperature 0 the same
+request gives the same output, so output the checks refuse is not asked for
+again: the step fails at once, saying so. Only a failure that gave no
+output, such as a server error or a server that could not be reached, is
+run again at temperature 0. On the first run on the target machine the
+same 7,107 characters came back three times, cut off at the output limit,
+so the two reruns took 2.5 minutes and could not succeed. A profile with a
+temperature above 0 has its refused output run again, up to the limit, as
+above. To try again with different settings, change the profile and choose
+Run again.
+
 ### 9. Results are inferred
 
 Every model claim is shown as inferred, with the profile that made it, and
@@ -481,6 +492,28 @@ reading the catalog every 3 seconds while a recording is open; a
 capability dialog showing when the current text was written and the
 earlier versions; and the player starting the worker when a task is
 queued, and when it opens with tasks still waiting.
+
+## Decisions (2026-10-14)
+
+From the first run of the recording summary on the target machine, where
+the first visit's output stopped at 2,048 tokens three times with the same
+text:
+
+1. **Refused output is not rerun at temperature 0**, as the owner chose
+   from three proposals: results are to be repeatable, if not
+   deterministic. See "8. Failed output is rerun, not repaired". The two
+   not chosen were a rerun with the next seed and a higher temperature,
+   which is not repeatable from the settings, and a rerun told why the last
+   output was refused, which comes close to repairing it.
+2. **The profile on this PC writes up to 8,192 tokens**, set in its
+   `generation`, not by a new default. Its 2,228-token input and 8,192
+   tokens of output fit the 16,384-token context set in its arguments.
+3. **The summary's prompts are version 2:** each section holds only its own
+   paragraphs, the activity is summarised with repeated actions grouped,
+   and the JSON is written on one line. The output had put the purpose and
+   the activity inside "page", stated each recorded key one at a time, and
+   spent 2,169 of its 7,098 characters on indentation and line breaks. See
+   [recording summary](recording-summary.md).
 
 ## Decisions (2026-10-13)
 

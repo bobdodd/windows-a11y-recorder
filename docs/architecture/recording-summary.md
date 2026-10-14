@@ -73,7 +73,12 @@ while building it:
 - **Other windows** are the front window records whose process is not the
   browser's.
 - **The prompt templates** are `recording-summary-visit` and
-  `recording-summary-recording`, version 1. Each visit is a step,
+  `recording-summary-recording`, version 2 since 2026-10-14. Version 2
+  tells the model that each section holds only its own paragraphs, to
+  summarise the activity with repeated actions grouped rather than one
+  statement for each fact, and to write the JSON on one line; see
+  "Decisions (2026-10-14)" in [analysis runner](analysis-runner.md). Each
+  visit is a step,
   `visit-0001` upward, and the whole recording the step `recording`. A
   recording with no page visits asks no model and says so.
 - **The report** is `analysis\<task>\summary.md` in the session folder.

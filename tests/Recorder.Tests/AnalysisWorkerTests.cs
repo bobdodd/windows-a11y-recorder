@@ -113,6 +113,11 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
             GenerationSettings.Default,
             null);
 
+    // A profile whose output can differ from one request to the next, so
+    // refused output is asked for again.
+    private static ModelProfile Varying() =>
+        Profile("This PC", "qwen") with { Generation = GenerationSettings.Default with { Temperature = 0.3 } };
+
     private static AnalysisSettings SettingsWith(int maxAttempts = 3, params ModelProfile[] profiles) =>
         new(profiles.Length == 0 ? [Profile("This PC", "qwen")] : profiles, new Dictionary<string, string>(), null, maxAttempts);
 
@@ -242,7 +247,7 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
     }
 
     [Fact]
-    public async Task Output_cut_off_at_the_limit_is_run_again_whole_and_the_failed_attempt_kept()
+    public async Task Output_cut_off_at_the_limit_is_run_again_whole_where_output_can_differ()
     {
         var catalog = await CatalogAsync();
         var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
@@ -254,7 +259,7 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
                 : StandInEndpoint.Valid("E1"))
         };
 
-        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+        await new AnalysisWorker(catalog, SettingsWith(3, Varying()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
 
         Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
         var attempts = await AttemptsAsync(task);
@@ -271,7 +276,7 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
         var endpoint = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(StandInEndpoint.Valid("E7")) };
 
-        await new AnalysisWorker(catalog, SettingsWith(maxAttempts: 2), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+        await new AnalysisWorker(catalog, SettingsWith(2, Varying()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
 
         Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
         var failure = await FailureAsync(task);
@@ -281,6 +286,45 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Assert.Equal(2, attempts.Count);
         Assert.All(attempts, attempt => Assert.Equal(AttemptOutcomes.Failed, attempt["outcome"]));
         Assert.Empty(await RowsAsync("SELECT 1 FROM analysis_claims c JOIN analysis_attempts a ON a.attempt_id = c.attempt_id WHERE a.task_id = $1", task));
+    }
+
+    [Fact]
+    public async Task Refused_output_at_temperature_0_is_not_asked_for_again()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var calls = 0;
+        var endpoint = new StandInEndpoint
+        {
+            Answer = (_, _, _) => Task.FromResult(++calls == 1
+                ? StandInEndpoint.Valid("E1", "length") with { Content = "{ \"description\": [ [ { \"kind\"" }
+                : StandInEndpoint.Valid("E1"))
+        };
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(1, calls);
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
+        Assert.Equal(
+            "Step visit-1 failed: The output stopped at the output limit of 2048 tokens. " +
+            "At temperature 0 the same request gives the same output, so it was not asked for again.",
+            await FailureAsync(task));
+        var attempt = Assert.Single(await AttemptsAsync(task));
+        Assert.Equal("{ \"description\": [ [ { \"kind\"", attempt["raw_output"]);
+    }
+
+    [Fact]
+    public async Task Output_that_fails_its_citation_check_at_temperature_0_is_not_asked_for_again()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var calls = 0;
+        var endpoint = new StandInEndpoint { Answer = (_, _, _) => { calls++; return Task.FromResult(StandInEndpoint.Valid("E7")); } };
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(1, calls);
+        Assert.Contains("cites E7, which was not in the input", await FailureAsync(task), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -300,6 +344,7 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
 
         var attempts = await AttemptsAsync(task);
         Assert.Equal("The model server answered 500 Internal Server Error: out of memory", attempts[0]["failure"]);
+        // At temperature 0 too: a server failure gave no output, so the request is sent again.
         Assert.Equal(AttemptOutcomes.Accepted, attempts[1]["outcome"]);
     }
 

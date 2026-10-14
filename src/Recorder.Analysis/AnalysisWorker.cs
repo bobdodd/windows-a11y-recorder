@@ -343,6 +343,19 @@ public sealed class AnalysisWorker
                     attemptId,
                     new AttemptEnd(AttemptOutcomes.Failed, failure, response, null, []),
                     cancellationToken).ConfigureAwait(false);
+
+                // At temperature 0 the same request gives the same output, so
+                // output the checks refused is not asked for again; a failure
+                // of the server, with no output, is (owner, 2026-10-14). See
+                // analysis-runner.md, "8. Failed output is rerun, not
+                // repaired".
+                if (response is not null && Repeatable(profile))
+                {
+                    throw new StepFailedException(
+                        $"Step {stepKey} failed: {failure} At temperature 0 the same request gives the same output, " +
+                        "so it was not asked for again.");
+                }
+
                 continue;
             }
 
@@ -352,6 +365,13 @@ public sealed class AnalysisWorker
                 cancellationToken).ConfigureAwait(false);
             return new AcceptedStep(attemptId, inputSha, output, claims);
         }
+    }
+
+    /// <summary>Whether a profile's output is repeatable: the same request gives the same output.</summary>
+    public static bool Repeatable(ModelProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        return profile.Generation.Temperature == 0;
     }
 
     private sealed record RequestResult(ModelResponse? Response, string? Failure, string? Interruption);
