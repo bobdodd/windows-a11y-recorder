@@ -29,6 +29,10 @@ internal sealed class FakeMomentEvidence : IMomentEvidence
 
     public IReadOnlyList<NvdaWindowFact> NvdaWindows => WindowList;
 
+    public List<LiveRegionFact> LiveList { get; } = [];
+
+    public IReadOnlyList<LiveRegionFact> LiveRegions => LiveList;
+
     public double? Viewport { get; set; } = 800;
 
     public double? ViewportHeightAt(string documentToken, long time) => Viewport;
@@ -138,6 +142,38 @@ public sealed class MomentChooserTests
         Assert.Equal("click-4", moments.Moments[1].Reasons.Single().EventId);
         Assert.Equal(7, moments.LeftOut);
         Assert.True(moments.Moments.Select(moment => moment.Frame.Time).SequenceEqual(moments.Moments.Select(moment => moment.Frame.Time).Order()));
+    }
+
+    [Fact]
+    public void By_default_a_visit_has_every_moment_chosen()
+    {
+        var evidence = new FakeMomentEvidence().EveryHalfSecond(1, 30);
+        evidence.WindowList.Add(new NvdaWindowFact("NVDA Settings", 27 * Second, "window-1", 28_500 * Milli, null));
+        var summary = new FakeSummaryEvidence();
+        for (var seconds = 4L; seconds <= 25; seconds += 3)
+        {
+            summary.ClickList.Add(new TimedFact(seconds * Second, $"click-{seconds}", "Left click."));
+        }
+
+        var moments = Choose(evidence, summary);
+
+        Assert.Null(MomentLimits.Default.PerVisit);
+        Assert.Equal(11, moments.Moments.Count);
+        Assert.Equal(0, moments.LeftOut);
+    }
+
+    [Fact]
+    public void A_change_to_a_live_region_of_the_visit_is_a_moment_and_one_of_another_document_is_not()
+    {
+        var evidence = new FakeMomentEvidence().EveryHalfSecond(1, 30);
+        evidence.LiveList.Add(new LiveRegionFact(12 * Second, "dom-1", "doc-1", "a div element with role \"status\", polite by its role", "polite", "changed", "Saved"));
+        evidence.LiveList.Add(new LiveRegionFact(20 * Second, "dom-2", "doc-2", "a div element with role \"alert\", assertive by its role", "assertive", "alert", "Elsewhere"));
+
+        var moments = Choose(evidence);
+
+        var reason = Assert.Single(moments.Moments.SelectMany(moment => moment.Reasons), item => item.Kind == MomentKinds.LiveRegion);
+        Assert.Equal((12 * Second, "dom-1"), (reason.Time, reason.EventId));
+        Assert.Equal("The page changed text in a live region, a div element with role \"status\", polite by its role, to \"Saved\".", reason.Text);
     }
 
     [Fact]

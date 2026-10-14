@@ -70,15 +70,29 @@ public static class SummaryReport
                 return;
             }
 
-            builder.Append("Chosen by the recorder from the recorded evidence, each with a captured frame of the whole screen.\n\n");
+            builder.Append("Chosen by the recorder from the recorded evidence, each with a captured frame of the whole screen and its page as the recorder rebuilt it at that frame, pictured whole in tiles.\n\n");
             foreach (var moment in part.Moments)
             {
                 var reasons = string.Join(" ", moment.Moment.Reasons.Select((reason, index) => OneLine(reason.Text) + Refs([moment.ReasonReferences[index]])));
                 builder.Append(CultureInfo.InvariantCulture, $"Moment {moment.Moment.Number}, {Clock(moment.Moment.Frame.Time)}: {reasons} Captured frame{Refs([moment.FrameReference])}.\n\n");
-                foreach (var section in RecordingSummaryVisionKind.MomentSections)
+                if (moment.Combined)
+                {
+                    var page = moment.Page!;
+                    var tiles = string.Join(", ", page.Tiles.Select(tile =>
+                        $"{tile.Number}{Refs([moment.TileReferences![tile.Number - 1]])}{(RecordingSummaryVisionKind.InView(page, tile) ? " (on the screen)" : "")}"));
+                    builder.Append(CultureInfo.InvariantCulture,
+                        $"Recreated page: {page.Width:0} by {page.Height:0} CSS pixels, scrolled to {page.ScrollY:0}, in {page.Tiles.Count} tiles: {tiles}. ");
+                    builder.Append(RecordingSummaryVisionKind.RecreationNotes(page)).Append("\n\n");
+                }
+                else if (moment.Page?.NotRecreated is { } why)
+                {
+                    builder.Append("The page was not recreated, as ").Append(OneLine(why)).Append(", so this moment is described from its captured frame alone.\n\n");
+                }
+
+                foreach (var section in moment.Combined ? RecordingSummaryVisionKind.CombinedSections : RecordingSummaryVisionKind.MomentSections)
                 {
                     var claims = moment.Step.Claims.Where(claim => claim.Section == section).OrderBy(claim => claim.Paragraph).ThenBy(claim => claim.Ordinal).ToList();
-                    builder.Append(SectionHeadings[section]).Append(": ");
+                    builder.Append(section == "page" ? "The page as recreated" : SectionHeadings[section]).Append(": ");
                     builder.Append(claims.Count == 0
                         ? "the model gave nothing for this part."
                         : string.Join(' ', claims.Select(claim => OneLine(claim.Text) + Refs(claim.Evidence))));
@@ -129,7 +143,7 @@ public static class SummaryReport
             builder.Append(CultureInfo.InvariantCulture,
                 $"This adds what captured frames of the screen show to the summary of task {vision.SummaryTaskId:D}, whose descriptions from the facts alone were given to the model with them. ");
             builder.Append("The moments of each visit are chosen by the recorder. A captured frame shows what was on the screen, not what the participant saw. ");
-            builder.Append("Recreated pages are not yet used.\n\n");
+            builder.Append("A recreated page is the page as the recorder rebuilt it from the recorded evidence at the moment's frame, not the page itself: what the recording lacks, such as an image, it lacks too.\n\n");
         }
         else
         {
@@ -282,15 +296,20 @@ public static class SummaryReport
         else
         {
             builder.Append(CultureInfo.InvariantCulture,
-                $"- Prompt templates: {RecordingSummaryVisionKind.MomentTemplate} version {RecordingSummaryVisionKind.MomentTemplateVersion} for each moment, " +
+                $"- Prompt templates: {RecordingSummaryVisionKind.MomentTemplate} version {RecordingSummaryVisionKind.MomentTemplateVersion} for each moment's captured frame, " +
+                $"{RecordingSummaryVisionKind.PageTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for each group of its page's tiles, " +
+                $"{RecordingSummaryVisionKind.CombinedTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for each moment's description from both, " +
                 $"{RecordingSummaryVisionKind.VisitTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for each visit, " +
                 $"{RecordingSummaryVisionKind.RecordingTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for the whole recording.\n");
             var moments = vision.Limits;
             builder.Append(CultureInfo.InvariantCulture,
-                $"- Moment limits: {moments.PerVisit} moments for each visit; moments less than {Seconds(moments.MergeNanoseconds)} apart merged; " +
+                $"- Moment limits: {(moments.PerVisit is { } most ? $"{most} moments for each visit" : "no limit on the moments of a visit")}; moments less than {Seconds(moments.MergeNanoseconds)} apart merged; " +
                 $"settled when the layout has not changed for {Seconds(moments.SettleQuietNanoseconds)}, or {Seconds(moments.SettleFallbackNanoseconds)} after the visit starts; " +
                 $"a large change is {moments.LargeChangeNodes} elements or more at once.\n");
-            builder.Append("- Each picture is the captured frame as recorded, sent to the model whole.\n");
+            builder.Append("- Each captured frame is sent to the model whole, as recorded. ");
+            builder.Append("Each moment's page is rebuilt at its frame in the instrumented Chromium without a window, and pictured whole in tiles the height of its viewport, each sent at full size; ");
+            builder.Append(CultureInfo.InvariantCulture,
+                $"each request holds as many tiles as fit {vision.ImageTokensPerRequest} image tokens, counted as one token for each 32 by 32 pixels, and at least one.\n");
         }
         builder.Append(CultureInfo.InvariantCulture,
             $"- Collation limits: {limits.Landmarks} landmarks, {limits.Headings} headings, {limits.Fields} form fields, {limits.Buttons} buttons, " +

@@ -728,34 +728,60 @@ public sealed class RecreationControl : IAsyncDisposable
         return false;
     }
 
-    // A picture of the whole recreated page, beyond the viewport, through
-    // Page.captureScreenshot with captureBeyondViewport, clipped to the
-    // page's CSS content size from Page.getLayoutMetrics, as a PNG; and what
-    // the page held when it was taken: its images, those not loaded, those
-    // loaded lazily, its scroll position, and its viewport.
-    public async Task<RecreationPicture> CaptureWholePageAsync(CancellationToken cancellationToken)
+    // What the recreated page holds now: its CSS content size, from
+    // Page.getLayoutMetrics; its scroll position and viewport; and its
+    // images, with the address of each that is not loaded and how many are
+    // loaded lazily.
+    public async Task<RecreationPageInfo> PageInfoAsync(CancellationToken cancellationToken)
     {
         var session = _recreationSession ?? throw new InvalidOperationException("The recreation's tab is not attached.");
         var page = await _connection.SendAsync("Runtime.evaluate", new
         {
-            expression = "JSON.stringify({ images: document.images.length, imagesNotLoaded: [...document.images].filter(i => !i.complete || i.naturalWidth === 0).length, imagesLazy: [...document.images].filter(i => i.loading === 'lazy').length, scrollX, scrollY, innerWidth, innerHeight, devicePixelRatio })",
+            expression = "JSON.stringify({ images: document.images.length, notLoaded: [...document.images].filter(i => !i.complete || i.naturalWidth === 0).map(i => i.currentSrc || i.src || ''), lazy: [...document.images].filter(i => i.loading === 'lazy').length, scrollX, scrollY, innerWidth, innerHeight, devicePixelRatio })",
             returnByValue = true
         }, session, cancellationToken);
+        var json = page.GetProperty("result").GetProperty("value").GetString()!;
         var metrics = await _connection.SendAsync("Page.getLayoutMetrics", null, session, cancellationToken);
         var content = metrics.GetProperty("cssContentSize");
-        var width = content.GetProperty("width").GetDouble();
-        var height = content.GetProperty("height").GetDouble();
+        using var read = JsonDocument.Parse(json);
+        var root = read.RootElement;
+        return new RecreationPageInfo(
+            content.GetProperty("width").GetDouble(),
+            content.GetProperty("height").GetDouble(),
+            root.GetProperty("scrollX").GetDouble(),
+            root.GetProperty("scrollY").GetDouble(),
+            root.GetProperty("innerWidth").GetDouble(),
+            root.GetProperty("innerHeight").GetDouble(),
+            root.GetProperty("devicePixelRatio").GetDouble(),
+            root.GetProperty("images").GetInt32(),
+            [.. root.GetProperty("notLoaded").EnumerateArray().Select(item => item.GetString() ?? "")],
+            root.GetProperty("lazy").GetInt32(),
+            json);
+    }
+
+    // A picture of part of the recreated page, in the page's CSS pixels from
+    // its top left, beyond the viewport, through Page.captureScreenshot with
+    // captureBeyondViewport, as a PNG
+    // (https://chromedevtools.github.io/devtools-protocol/tot/Page/).
+    public async Task<byte[]> CaptureAsync(double x, double y, double width, double height, CancellationToken cancellationToken)
+    {
+        var session = _recreationSession ?? throw new InvalidOperationException("The recreation's tab is not attached.");
         var shot = await _connection.SendAsync("Page.captureScreenshot", new
         {
             format = "png",
             captureBeyondViewport = true,
-            clip = new { x = 0, y = 0, width, height, scale = 1 }
+            clip = new { x, y, width, height, scale = 1 }
         }, session, cancellationToken);
-        return new RecreationPicture(
-            Convert.FromBase64String(shot.GetProperty("data").GetString()!),
-            width,
-            height,
-            page.GetProperty("result").GetProperty("value").GetString()!);
+        return Convert.FromBase64String(shot.GetProperty("data").GetString()!);
+    }
+
+    // A picture of the whole recreated page, clipped to its CSS content
+    // size, and what the page held when it was taken.
+    public async Task<RecreationPicture> CaptureWholePageAsync(CancellationToken cancellationToken)
+    {
+        var info = await PageInfoAsync(cancellationToken);
+        var png = await CaptureAsync(0, 0, info.ContentWidth, info.ContentHeight, cancellationToken);
+        return new RecreationPicture(png, info.ContentWidth, info.ContentHeight, info.Json);
     }
 
     public async ValueTask DisposeAsync()
@@ -844,6 +870,22 @@ public sealed record RecreationViewport(double Width, double Height, double Devi
 // A picture of the whole recreated page: the PNG, the page's CSS content
 // size it was clipped to, and what the page held when it was taken, as JSON.
 public sealed record RecreationPicture(byte[] Png, double ContentWidth, double ContentHeight, string Page);
+
+// What a recreated page holds: its CSS content size, scroll position,
+// viewport, and device pixel ratio; its images, the address of each not
+// loaded, and how many are loaded lazily; and all of it as JSON.
+public sealed record RecreationPageInfo(
+    double ContentWidth,
+    double ContentHeight,
+    double ScrollX,
+    double ScrollY,
+    double ViewportWidth,
+    double ViewportHeight,
+    double DevicePixelRatio,
+    int Images,
+    IReadOnlyList<string> ImagesNotLoaded,
+    int ImagesLazy,
+    string Json);
 
 public sealed record RecreationWindowFit(double NeededWidth, double NeededHeight, double AreaWidth, double AreaHeight, bool Emulated, double Scale)
 {

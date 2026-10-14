@@ -293,22 +293,21 @@ design.
 - Built 2026-10-14: text in the player can be selected and copied; see
   [player layout](player-layout.md), "Selecting and copying text". Not
   yet tested on the target machine.
-- To do: step 4b, the recreated pages, as revised by the owner on
-  2026-10-14 (the summary design's decision 7): the whole page recreated
-  at every moment, the page's announcements as moments, and no limit on
-  moments or tiles. The check that the recreation browser can run without
-  a window passed on the target machine on 2026-10-14 (the summary
-  design's "The check of the recreation without a window"); the recorded
-  page attributes and text changes give alerts, status messages, and live
-  regions, and no recorded event says that one changed.
+- Built 2026-10-14: step 4b, the recreated pages, as revised by the owner
+  on 2026-10-14 (the summary design's decision 7, and its "Step 4b"): the
+  whole page recreated at every moment without a window and pictured in
+  tiles at full size, the page's changes to live regions as moments, read
+  from the recorded DOM, and no limit on moments or tiles. The check that
+  the recreation browser can run without a window passed on the target
+  machine on 2026-10-14. Not yet tested on the target machine.
 
 ## Recording summary
 
 Designed in [recording summary](recording-summary.md), proposed and agreed
 2026-10-13. Stage 1 built the same day, and passed its system test on
 the target machine on 2026-10-14. Stage 2's step 4a, the moments and their
-captured frames, built on 2026-10-14; step 4b, the recreated pages, not
-built. The first task kind for the analysis runner, chosen by
+captured frames, built on 2026-10-14; step 4b, the recreated pages,
+built the same day. The first task kind for the analysis runner, chosen by
 the owner: a summary of each page visited and of the site tested, from the
 recorder's collation and a model's text analysis, then enhanced with vision
 analysis of recreated pages and captured frames at the moments of each

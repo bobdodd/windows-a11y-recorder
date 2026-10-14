@@ -275,6 +275,11 @@ public partial class MainWindow
 
     private string? SelectedProfile => (ProfileComboBox.SelectedItem as ComboBoxItem)?.Tag as string;
 
+    // A task is queued for the version of its kind this build has, as the
+    // worker runs only that version.
+    private static int KindVersion(string kind) =>
+        AnalysisTaskKinds.All.FirstOrDefault(item => item.Kind == kind)?.Version ?? 1;
+
     private async Task QueueAsync(string kind, IReadOnlyDictionary<string, string> profiles, Guid? afterTaskId = null)
     {
         if (AnalysisCatalogOrNull is not { } catalog || _analysisRecordingId is not { } recording || _analysisSessionDirectory is null)
@@ -285,7 +290,7 @@ public partial class MainWindow
 
         try
         {
-            await catalog.QueueTaskAsync(recording, kind, 1, profiles, afterTaskId: afterTaskId, sessionDirectory: _analysisSessionDirectory, cancellationToken: CancellationToken.None);
+            await catalog.QueueTaskAsync(recording, kind, KindVersion(kind), profiles, afterTaskId: afterTaskId, sessionDirectory: _analysisSessionDirectory, cancellationToken: CancellationToken.None);
             ShowAnalysisStatus($"{AnalysisPlayer.KindName(kind)} queued with {string.Join(", ", profiles.Values.Distinct())}.");
             _busy.AnnounceCompleted(AnalysisStatusTextBlock.Text);
             StartWorker();

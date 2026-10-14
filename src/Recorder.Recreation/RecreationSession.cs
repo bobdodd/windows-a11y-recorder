@@ -50,6 +50,12 @@ public sealed class RecreationSession : IAsyncDisposable
     public Task<RecreationPicture> CaptureWholePageAsync(CancellationToken cancellationToken) =>
         _control.CaptureWholePageAsync(cancellationToken);
 
+    public Task<RecreationPageInfo> PageInfoAsync(CancellationToken cancellationToken) =>
+        _control.PageInfoAsync(cancellationToken);
+
+    public Task<byte[]> CaptureAsync(double x, double y, double width, double height, CancellationToken cancellationToken) =>
+        _control.CaptureAsync(x, y, width, height, cancellationToken);
+
     // The directory is a new folder of its own for this recreation.
     public static async Task<RecreationSession> OpenAsync(
         string executablePath,

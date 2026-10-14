@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using Recorder.Analysis.Summary;
 using Recorder.Recreation;
 using Recorder.Session;
 
@@ -384,6 +385,56 @@ public sealed class RecordedPageTests : IDisposable
         Assert.Equal((int)Math.Round(picture.ContentHeight), height);
         Assert.NotNull(session.WindowFit);
         Assert.False(session.WindowFit!.Emulated, $"The window's page area was {session.WindowFit.AreaWidth} by {session.WindowFit.AreaHeight}.");
+    }
+
+    // Step 4b's tiles: without a window, the page is pictured in tiles the
+    // height of its viewport, each at full size, covering the whole page.
+    [Fact]
+    public async Task TheRecreatedPageIsPicturedInTilesTheHeightOfItsViewport()
+    {
+        if (Environment.GetEnvironmentVariable("RECORDER_RECREATION_CHROMIUM") is not { } chromium)
+        {
+            return;
+        }
+        var token = TestContext.Current.CancellationToken;
+        var tree = new DomDocumentTree();
+        void Add(long id, long? parent, string type, string name, string? data = null)
+        {
+            tree.Nodes.Add(id, new DomNode(id) { ParentId = parent, NodeType = type, NodeName = name, Data = data });
+            if (parent is { } parentId)
+            {
+                tree.Nodes[parentId].Children.Add(id);
+            }
+        }
+        Add(1, null, "document", "#document");
+        Add(2, 1, "other", "html");
+        Add(3, 1, "element", "HTML");
+        Add(4, 3, "element", "HEAD");
+        Add(5, 3, "element", "BODY");
+        for (var line = 0; line < 200; line++)
+        {
+            Add(10 + (line * 2), 5, "element", "DIV");
+            Add(11 + (line * 2), 10 + (line * 2), "text", "#text", $"Line {line + 1}");
+        }
+        var state = new BrowserDocumentState("token-a dom-document-1") { Dom = tree, DomCompleteness = BrowserStateCompleteness.Complete };
+        var content = RecordedPage.Content(state, "https://example.test/", 4_000_000_000, 4_000_000_000, "presented") with
+        {
+            Viewport = new RecreationViewport(1600, 925, 1, 1),
+        };
+        await using var session = await RecreationSession.OpenAsync(chromium, Path.Combine(_directory, "tiles"), content, token, ["--headless"]);
+
+        Assert.True(await session.WaitForBuildAsync(TimeSpan.FromSeconds(60), token));
+        var info = await session.PageInfoAsync(token);
+        var tiles = RecordedMomentPages.Tiles(info.ContentHeight, info.ViewportHeight).ToList();
+
+        Assert.Equal(925, info.ViewportHeight);
+        Assert.True(tiles.Count > 1, $"The page is {info.ContentHeight} high.");
+        Assert.Equal(info.ContentHeight, tiles.Sum(tile => tile.Height), 3);
+        foreach (var (top, height) in tiles)
+        {
+            var png = await session.CaptureAsync(0, top, info.ContentWidth, height, token);
+            Assert.Equal(((int)Math.Round(info.ContentWidth), (int)Math.Round(height)), RecreationCheck.PngSize(png));
+        }
     }
 
     // Stage 3, with RECORDER_RECREATION_CHROMIUM set to the instrumented

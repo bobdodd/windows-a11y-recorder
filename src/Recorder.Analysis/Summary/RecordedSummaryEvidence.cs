@@ -195,6 +195,34 @@ public sealed class RecordedSummaryEvidence : ISummaryEvidence, IMomentEvidence
         return _moments.Value;
     }
 
+    private List<LiveRegionFact>? _liveRegions;
+
+    // One pass over the DOM records, rebuilding each document's tree, read
+    // the first time it is asked for.
+    public IReadOnlyList<LiveRegionFact> LiveRegions
+    {
+        get
+        {
+            if (_liveRegions is { } read)
+            {
+                return read;
+            }
+
+            var changes = new LiveRegionChanges();
+            if (_recordingFile is not null)
+            {
+                RecordingFilePlayback.ReadBrowserEvents(
+                    _recordingFile,
+                    new HashSet<string>(StringComparer.Ordinal) { BrowserEvidenceChannels.Dom },
+                    item => changes.Add(item.MonotonicNanoseconds, item.EventId, item.EventType, item.Payload),
+                    CancellationToken.None);
+            }
+
+            _liveRegions = [.. changes.Facts];
+            return _liveRegions;
+        }
+    }
+
     public IReadOnlyList<TimedFact> PopupsClosed { get; }
 
     public IReadOnlyList<NvdaWindowFact> NvdaWindows { get; }

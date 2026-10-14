@@ -35,6 +35,9 @@ public interface IMomentEvidence
 
     IReadOnlyList<NvdaWindowFact> NvdaWindows { get; }
 
+    /// <summary>The page's changes to its live regions; see <see cref="LiveRegionChanges"/>.</summary>
+    IReadOnlyList<LiveRegionFact> LiveRegions { get; }
+
     /// <summary>The document's viewport height in CSS pixels at a time; null where not recorded.</summary>
     double? ViewportHeightAt(string documentToken, long time);
 }
@@ -44,13 +47,17 @@ public interface IMomentEvidence
 /// 2026-10-14 as starting values; see recording-summary.md, "Decisions
 /// (2026-10-14)".
 /// </summary>
-/// <param name="PerVisit">The most moments a visit has; the number left out is stated.</param>
+/// <param name="PerVisit">
+/// The most moments a visit has, the number left out stated; null, the
+/// default, for no limit (owner, 2026-10-14: no artificial limits unless
+/// the platform forces them).
+/// </param>
 /// <param name="MergeNanoseconds">Moments closer together than this are one moment.</param>
 /// <param name="SettleQuietNanoseconds">The page is settled when its layout has not changed for this long.</param>
 /// <param name="SettleFallbackNanoseconds">If it never settles, the first moment is this long after the visit starts.</param>
 /// <param name="LargeChangeNodes">A layout change set of at least this many elements, after the page settles, is a large change.</param>
 public sealed record MomentLimits(
-    int PerVisit = 10,
+    int? PerVisit = null,
     long MergeNanoseconds = 2_000_000_000,
     long SettleQuietNanoseconds = 1_000_000_000,
     long SettleFallbackNanoseconds = 5_000_000_000,
@@ -65,6 +72,7 @@ public static class MomentKinds
     public const string Settled = "settled";
     public const string NvdaWindow = "nvda-window";
     public const string Popup = "popup";
+    public const string LiveRegion = "live-region";
     public const string Typed = "typed";
     public const string Click = "click";
     public const string LargeChange = "large-change";
@@ -74,11 +82,11 @@ public static class MomentKinds
 
     // Which moments are kept first when a visit has more than its limit:
     // the first settled moment and the last frame always, then dialogs and
-    // popups, typing, clicks, large changes, animations, and scrolls.
+    // popups and live region changes, typing, clicks, large changes, animations, and scrolls.
     internal static int Priority(string kind) => kind switch
     {
         Settled or Last => 0,
-        NvdaWindow or Popup => 1,
+        NvdaWindow or Popup or LiveRegion => 1,
         Typed => 2,
         Click => 3,
         LargeChange => 4,
@@ -99,7 +107,7 @@ public sealed record VisitMoments(IReadOnlyList<Moment> Moments, int LeftOut);
 /// <summary>
 /// Chooses the moments of a visit from the recorded evidence, as derived
 /// facts: the first settled moment, NVDA's windows and the page's popups
-/// opening and closing, each animation's start, middle, and end, each large
+/// opening and closing, each change to a live region, each animation's start, middle, and end, each large
 /// layout change, each click, each scroll to a new part of the page, each
 /// field typed into, and the last frame. Moments close together are merged.
 /// See docs/architecture/recording-summary.md, "The moments of a visit".
@@ -152,6 +160,14 @@ public static class MomentChooser
         foreach (var popup in evidence.PopupsClosed.Where(fact => Within(fact.Time)))
         {
             reasons.Add(new MomentReason(MomentKinds.Popup, popup.Time, popup.Text, popup.EventId));
+        }
+
+        if (token is not null)
+        {
+            foreach (var change in evidence.LiveRegions.Where(fact => fact.DocumentToken == token && Within(fact.Time)))
+            {
+                reasons.Add(new MomentReason(MomentKinds.LiveRegion, change.Time, LiveRegionChanges.Reason(change), change.EventId));
+            }
         }
 
         foreach (var animation in evidence.Animations.Where(item => Within(item.Start)))
@@ -221,7 +237,7 @@ public static class MomentChooser
             .Select((item, index) => (item.Frame, item.Reasons, Index: index, Priority: item.Reasons.Min(reason => MomentKinds.Priority(reason.Kind))))
             .OrderBy(item => item.Priority)
             .ThenBy(item => item.Index)
-            .Take(Math.Max(1, limits.PerVisit))
+            .Take(limits.PerVisit is { } most ? Math.Max(1, most) : int.MaxValue)
             .OrderBy(item => item.Index)
             .ToList();
         var moments = kept.Select((item, index) => new Moment(index + 1, item.Frame, item.Reasons)).ToList();

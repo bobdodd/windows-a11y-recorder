@@ -13,8 +13,9 @@ is built in two steps, agreed by the owner on 2026-10-14: 4a, the moments
 and their captured frames, built the same day, which passed on the
 target machine on 2026-10-14 with build f1b2229, on the cnib.ca
 recording, all 12 of its steps accepted at the first attempt; and 4b,
-the recreated pages, not built, its design revised by the owner the same
-day (decision 7). See "Stage 2 implementation status" and "Decisions
+the recreated pages, its design revised by the owner the same day
+(decision 7), built the same day and not yet tested on the target
+machine. See "Stage 2 implementation status" and "Decisions
 (2026-10-14)".
 The first task kind for the [analysis runner](analysis-runner.md), chosen
 by the owner the same day: a summary of the recording that describes each
@@ -335,13 +336,100 @@ kind `recording-summary-vision`, version 1, shown in the player as
 - **The report** is `analysis\<task>\summary-with-vision.md`, laid out
   as the summary, titled "Summary with vision", with each visit's moments
   under "The moments" and the moment limits under "How this was made".
-  It says that recreated pages are not yet used.
+  In step 4a it said that recreated pages were not yet used; step 4b
+  replaced that (below).
 - **Image profiles on this PC** are served with llama.cpp's multimodal
   projector, the image add-on, given with `--mmproj`
   ([llama.cpp multimodal](https://github.com/ggml-org/llama.cpp/blob/master/docs/multimodal.md)).
   The local server knows each profile by its model name, one section of
   its preset each, so the settings file reports two local profiles with
   the same model name as a problem.
+
+### Step 4b
+
+Built on 2026-10-14, as decision 7, after the check of the recreation
+without a window passed on the target machine. The owner confirmed the
+same day that the player's Inspect page at this frame still opened
+normally after its code was moved to `Recorder.Recreation` for the check.
+The task kind `recording-summary-vision` is version 2; the player now
+queues each task for the version of its kind that the build has, as the
+worker runs only that version. These decisions were made while building
+it:
+
+- **No limit on moments.** The moment limit is a setting that is null by
+  default, for no limit, and the report says so. A limit, where set, keeps
+  moments in the order of step 4a, with changes to live regions kept with
+  NVDA's windows and popups.
+- **Changes to live regions are moments,** read from the recorded DOM,
+  since the recorder keeps no accessibility events for live regions. One
+  more pass over the recording file's `browser.dom` records rebuilds each
+  document's tree with the player's own `DomTreeRebuilder`. A live region
+  is the nearest element, at or above the changed node, with an
+  `aria-live` attribute or a live region role, alert, log, marquee,
+  status, or timer
+  ([WAI-ARIA 1.2, live region roles](https://www.w3.org/TR/wai-aria-1.2/#live_region_roles)),
+  or an `output` element, whose role is status
+  ([HTML-AAM, output](https://www.w3.org/TR/html-aam-1.0/#el-output)). Its
+  politeness is its `aria-live` value, or its role's implicit value:
+  assertive for alert, polite for log and status, and off for marquee and
+  timer ([WAI-ARIA 1.2, aria-live](https://www.w3.org/TR/wai-aria-1.2/#aria-live)).
+  Only polite and assertive regions count, and only the changes of
+  `aria-relevant`'s default, additions and text: nodes inserted into a
+  region with text, text changed in a region, and an alert inserted with
+  its text. Removals, and content shown by changing an attribute such as
+  `hidden` or a class, are not counted. The reason gives the region and
+  the text verbatim, and says the page changed the region, never that
+  NVDA announced it.
+- **The page at each moment** is rebuilt at the moment's frame, as Inspect
+  page at this frame rebuilds it, for the visit's own document, the page
+  recorded at the frame whose key holds the visit's document token. It is
+  opened in the instrumented Chromium found as the player finds it, with
+  `--headless`, given 120 s to report itself built, measured, and pictured
+  in tiles the height of its viewport from the top, the last cut at the
+  page's foot, each at full size, through `Page.captureScreenshot` with a
+  clip and `captureBeyondViewport`. The tiles are written to
+  `analysis\<task>\pages\visit-0001-moment-01-tile-01.png` upward, so
+  that an auditor can open them. The recreation's own folder, under the
+  worker's folder, is removed after each moment.
+- **Where the page cannot be recreated,** as when Chromium is not found,
+  the visit's document is not among the pages at the frame, or the
+  recreation fails, the moment is described from its captured frame
+  alone, and the report says why.
+- **Tiles are grouped by their image tokens.** llama.cpp's image add-on
+  counts one token for each 32 by 32 pixels of a Qwen-VL picture, a patch
+  of 16 pixels merged two by two, and does not make a picture of up to
+  4,096 tokens smaller
+  ([llama.cpp clip.cpp](https://raw.githubusercontent.com/ggml-org/llama.cpp/master/tools/mtmd/clip.cpp):
+  `set_limit_image_tokens(8, 4096)` and `n_merge` 2 for `QWEN3VL`). In
+  step 4a a frame of 1920 by 1080 was about 2,040 image tokens, which
+  agrees, so frames and tiles are not made smaller. Each request holds as
+  many tiles as fit 4,096 image tokens, and at least one; this is a
+  setting, chosen because the context on this PC is 16,384 tokens with
+  answers of up to 8,192. A tile of 922 by 925 is 841 tokens, so four go
+  in one request, and the cnib.ca page of 7,197 CSS pixels is 8 tiles in
+  2 requests.
+- **The steps of a moment** are `visit-0001-moment-01`, the captured
+  frame as in step 4a; `visit-0001-moment-01-page-01` upward, one for each
+  group of tiles; and `visit-0001-moment-01-described`, a text-only
+  request that combines them. Each tile is an entry in the evidence list,
+  giving its place on the page, whether any of it was on the screen, and
+  its file, and saying that it is a recreation, not the page. A tile's
+  request is given the reasons for the moment, the part of the page on the
+  screen, from the recreation's scroll position and viewport, which are
+  the recorded ones, the magnification, and what the recreation lacked:
+  whether it was reported built, the address of each image not loaded,
+  and how many requests were refused. Why an image is not loaded is still
+  unknown.
+- **The prompt templates** added are `recording-summary-vision-page`,
+  version 1, with one section, the page; and
+  `recording-summary-vision-moment-combined`, version 1, with three: on
+  the screen, the page as recreated, and what changed, in view or not.
+  The visit's request is given each moment's combined description.
+- **The report** lists under each moment its recreated page's size,
+  scroll position, and tiles, marking those on the screen, and what the
+  recreation lacked, then the three parts. "How this was made" gives the
+  templates, that there is no limit on moments, the image token budget,
+  and that frames and tiles are sent at full size.
 
 ## Stage 2: the summary with vision
 
@@ -363,10 +451,10 @@ recorded evidence:
   checkpoints;
 - each click, each scroll to a new part of the page, and each field the
   participant typed into;
-- each announcement the page makes to assistive technology, whether or not
-  it is in view: an alert, a status message, or a live region appearing or
-  changing (decision 7, from step 4b; what the recorded accessibility
-  events give for these is to be checked before it is built);
+- each change the page makes to a live region, whether or not it is in
+  view: an alert inserted, or text added to or changed in a status
+  message or other live region (decision 7, from step 4b; read from the
+  recorded DOM, as described under "Step 4b");
 - the last captured frame before the visit ends.
 
 Each moment is labelled derived, with what chose it. Moments close
@@ -393,9 +481,8 @@ moments in a visit (decision 7); step 4a has a limit of 10.
 
 The recreated picture is cut into viewport-sized tiles, all of them, with
 no limit on their number, and the tiles are not scaled down, so that a
-small toast is as legible in its tile as on the screen. Whether the
-model's image add-on reduces a tile's resolution itself is to be checked
-when this is built. Every captured frame and every tile has its own
+small toast is as legible in its tile as on the screen. The model's image
+add-on does not reduce them either (see "Step 4b"). Every captured frame and every tile has its own
 evidence reference, giving the frame, the moment, and for a tile its
 position on the page. Each tile is labelled with its position, and the
 model is told which part of the page was in view in the captured frame,
@@ -421,8 +508,7 @@ saw. The journey says the participant saw something only where the
 participant's capabilities say they work by sight; otherwise, whether
 they saw it is unknown. See "The participant's capabilities".
 
-Whether the recreation browser can be run by the worker without showing a
-window is to be checked when this is built.
+The recreation browser runs without a window, as the check below showed.
 
 ### The check of the recreation without a window
 
