@@ -2,8 +2,8 @@
 
 ## Status
 
-Proposed on 2026-10-13, not built, for the owner to agree before building.
-The owner set three requirements the same day:
+Proposed on 2026-10-13 and agreed by the owner the same day, to be tried as
+it stands. Not built. The owner set three requirements the same day:
 
 - Analysis runs detached from the player. Tasks are queued, and the player
   announces each completed task and report as it becomes available.
@@ -13,7 +13,10 @@ The owner set three requirements the same day:
 - The model is a setting. The PC is expected to be upgraded, and a server
   on the local network is expected within a few weeks.
 
-Listed in [outstanding work](analysis-outstanding-work.md).
+The answers to the questions raised with the design are under
+"Decisions (2026-10-13)". The first task kind, the recording summary, is
+designed in [recording summary](recording-summary.md). Listed in
+[outstanding work](analysis-outstanding-work.md).
 
 ## The problem
 
@@ -125,6 +128,7 @@ images in the same request
   For Qwen3.6-35B-A3B that is the trial's best layout, `-ngl 99 -ncmoe 36
   -fa on`.
 - **The network server, later.** The same request to another address.
+  Its security is deferred; see "Decisions (2026-10-13)".
   llama.cpp's server can require an API key (`--api-key`) and serve over
   TLS (`--ssl-key-file`, `--ssl-cert-file`)
   ([llama.cpp server README](https://github.com/ggml-org/llama.cpp/blob/b11607/tools/server/README.md)).
@@ -215,6 +219,11 @@ stay labelled inferred.
 
 ### 10. The player
 
+The player gains a menu bar with an Analysis menu. Its items queue each
+task kind for the open recording, open the Analysis tab, and open the model
+profiles. Each menu item is at least 44 pixels high and opens with a single
+click, with no submenu that has to be held open.
+
 An Analysis tab, detachable like the other tabs, lists the session's tasks
 with their state, the profile used, and when each finished. It has:
 
@@ -233,6 +242,22 @@ are unread, and the player raises a UI Automation notification so screen
 readers announce it. The player does not need to be open: results waiting
 when it opens are shown as unread.
 
+### 11. Reports are Markdown files
+
+A task's output is one or more Markdown files, written by the recorder's
+own code from the accepted, checked model output, not taken from the model
+as written. They are kept in an `analysis` folder in the session folder,
+one folder per task, and listed in the catalog with their SHA-256. A rerun
+writes new files; the earlier ones stay until the task is deleted.
+
+Each claim in a report ends with its evidence references, such as
+`[E12]`, and the report ends with an evidence list giving, for each
+reference, the time in the recording and what the evidence is. The
+Analysis tab opens a report in a reading view in the player, where each
+reference is a button that moves the playhead to that evidence. The file
+can also be opened outside the player, where the references read as plain
+text.
+
 ## Required tests
 
 - **Unit tests:** queue order and grouping by model; profile reading,
@@ -243,6 +268,9 @@ when it opens are shown as unread.
   server and a stand-in endpoint that gives set answers, slow answers,
   truncated answers, and errors; the queue surviving the worker being
   killed; stopping for a recording and running again after it.
+- **Report tests:** a report written from checked output lists every
+  reference it cites, and in the reading view each reference moves the
+  playhead to its evidence.
 - **System test on the target machine:** one task end to end with the
   llama.cpp server and Qwen3.6-35B-A3B, checking on screen that the player
   shows the task finishing, the result labelled inferred, and its
@@ -255,16 +283,28 @@ when it opens are shown as unread.
 - Comparing models. That becomes one of the first uses of the runner,
   once there are real tasks to compare on.
 - The threat model. Its trust boundaries gain the worker and the model
-  endpoint when this is built.
+  endpoint once the network server's security is settled; see
+  "Decisions (2026-10-13)".
 
-## Questions to settle
+## Decisions (2026-10-13)
 
-1. Which task kind comes first, as the pilot for the runner.
-2. For the network server: whether TLS is required as well as an API key,
-   and whether any address on the private network is allowed or only one
-   configured server.
-3. Whether the worker should keep running with the player closed, as
-   proposed, or stop when the player closes.
-4. Whether the worker should start the local llama.cpp server itself, as
-   proposed, or expect it to be running.
-5. Whether two reruns, three attempts in all, is the right limit.
+The owner's answers to the questions raised with the design:
+
+1. **The first task kind** is a summary of the recording: a description of
+   each page visited and of the site or application tested, from the
+   recorder's own collation of the recorded data and a model's text
+   analysis, then enhanced with vision analysis of the rendered pages.
+   Each stage writes a Markdown file. The task needs the Analysis menu and
+   the reporting proposed here. Designed in
+   [recording summary](recording-summary.md).
+2. **Security of the network server is deferred.** The server will be a
+   machine on the owner's home network, behind the router, and the local
+   model work is experimental. A network profile may therefore have no API
+   key and use plain HTTP for now. Encryption in transit, authentication,
+   and the threat model's trust boundaries are to be settled once the
+   architecture is one the owner is happy with. Refusing endpoints outside
+   the local network (rule 4) stays.
+3. **The worker keeps running with the player closed**, as proposed.
+4. **The worker starts the local llama.cpp server itself**, as proposed.
+5. **Three attempts per stage** is a starting point, to be judged from
+   use. The limit is a setting, so it can change without a new build.

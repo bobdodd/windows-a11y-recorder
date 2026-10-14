@@ -256,12 +256,22 @@ What is known so far:
 
 ## Analysis runner
 
-Designed in [analysis runner](analysis-runner.md), proposed 2026-10-13, not
-agreed or built. The owner decided the same day that analysis runs
-detached from the player with completed tasks announced, that stages may
-use specialised models, and that the model is a setting, since the PC is
-expected to be upgraded and a server on the local network is expected
-within a few weeks. A trial on the target machine the same day ran
-Qwen3.6-35B-A3B at 4-bit in llama.cpp b11607 at 25 to 29 tokens per second
-writing; the results are in the design. Five questions are open there,
-starting with which task kind is the pilot.
+Designed in [analysis runner](analysis-runner.md), proposed 2026-10-13 and
+agreed by the owner the same day, to be tried as it stands. Not built. The
+owner decided that analysis runs detached from the player with completed
+tasks announced, that stages may use specialised models, and that the
+model is a setting, since the PC is expected to be upgraded and a server
+on the local network is expected within a few weeks. The network server's
+security is deferred until the architecture is settled. A trial on the
+target machine the same day ran Qwen3.6-35B-A3B at 4-bit in llama.cpp
+b11607 at 25 to 29 tokens per second writing; the results are in the
+design.
+
+## Recording summary
+
+Designed in [recording summary](recording-summary.md), proposed 2026-10-13,
+not agreed or built. The first task kind for the analysis runner, chosen by
+the owner: a summary of each page visited and of the site tested, from the
+recorder's collation and a model's text analysis, then enhanced with vision
+analysis of recreated pages, each stage writing a Markdown file. Four
+questions are open there.
