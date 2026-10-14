@@ -4,6 +4,17 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Recorder.Analysis/Recorder.Analysis.csproj" />
+    <!-- The worker runs from the player's folder, so it uses the same
+         frameworks as the player, whose files the player does not copy to
+         its folder. The player is a WPF program, which takes
+         System.Security.Cryptography.ProtectedData from the Windows Desktop
+         framework, and uses ASP.NET Core, which gives Npgsql's
+         Microsoft.Extensions abstractions. Without these references the
+         worker looked for those files in the folder and stopped (target
+         machine, 2026-10-14). The worker shows no windows and serves
+         nothing. -->
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
   <!-- The same PostgreSQL server the app runs, copied to pgsql in the
        output folder. See Recorder.App.csproj. -->

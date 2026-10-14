@@ -390,7 +390,14 @@ player (2026-10-13)". Not yet run on the target machine.
   folder (`AppContext.BaseDirectory`); the player's project references it,
   so it is built beside the player. The player starts it, hidden, when a
   task is queued and when the database starts with tasks still waiting.
-  A second worker exits at once.
+  A second worker exits at once. Because it runs from the player's
+  folder, the worker uses the same frameworks as the player: .NET, Windows
+  Desktop, and ASP.NET Core. The player takes some files from those
+  frameworks rather than copying them to its folder. On the first run on
+  the target machine, on 2026-10-14, the worker had only .NET and stopped
+  at once: "Could not load file or assembly
+  'System.Security.Cryptography.ProtectedData, Version=10.0.0.0'". The
+  player showed this in the worker's line, and the task stayed queued.
 - **The capability dialog** shows the current description and when it was
   written, and the earlier versions read only. Saving unchanged text adds
   no version, and an empty text is refused.
