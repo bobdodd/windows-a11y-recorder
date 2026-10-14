@@ -186,6 +186,8 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Contains("The moment as a model described it from the captured frame and the recorder's facts. These are inferences, not facts:", combined, StringComparison.Ordinal);
         Assert.Contains("The recreated page as a model described it from tile 5 [", combined, StringComparison.Ordinal);
         Assert.DoesNotContain("image_url", bodies[3], StringComparison.Ordinal);
+        // Both groups of tiles gave the same statement, which is given once.
+        Assert.Single(Regex.Matches(combined, Regex.Escape("(page, inferred) A statement about page.")));
         var visit = Input(bodies[8]);
         Assert.Contains("The visit as a model described it from the recorder's facts alone. These are inferences, not facts:", visit, StringComparison.Ordinal);
         Assert.Contains("(page, inferred) A statement about page.", visit, StringComparison.Ordinal);
@@ -208,7 +210,7 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Matches(@"On the screen: A statement about screen\. \[E\d+\]", text);
         Assert.Matches(@"What changed: A statement about change\. \[E\d+\]", text);
         Assert.Contains("- Moment limits: no limit on the moments of a visit; moments less than 2 s apart merged; settled when the layout has not changed for 1 s, or 5 s after the visit starts; a large change is 50 elements or more at once.", text, StringComparison.Ordinal);
-        Assert.Contains($"{RecordingSummaryVisionKind.MomentTemplate} version 2 for each moment's captured frame, {RecordingSummaryVisionKind.PageTemplate} version 1 for each group of its page's tiles", text, StringComparison.Ordinal);
+        Assert.Contains($"{RecordingSummaryVisionKind.MomentTemplate} version 2 for each moment's captured frame, {RecordingSummaryVisionKind.PageTemplate} version 2 for each group of its page's tiles", text, StringComparison.Ordinal);
         Assert.Contains("each request holds as many tiles as fit 4096 image tokens", text, StringComparison.Ordinal);
         Assert.Contains("The captured frame at 00:00:02.500: the whole screen, 1920 by 1080 pixels, file frames/desktop/0000000001.png", text, StringComparison.Ordinal);
         Assert.Matches($@"Tile 3 of 5 of the page as the recorder rebuilt it .* file analysis/{vision:D}/pages/visit-0001-moment-01-tile-03\.png", text);
@@ -216,6 +218,38 @@ public sealed partial class RecordingSummaryTaskTests
         var read = ReportDocument.Parse(text);
         Assert.All(read.Blocks.SelectMany(block => block.References).Distinct(),
             reference => Assert.True(read.Evidence.ContainsKey(reference), reference));
+    }
+
+    [Fact]
+    public void A_statement_given_twice_to_the_combined_description_is_given_once_with_the_references_of_both()
+    {
+        Claim Statement(string text, params string[] evidence) => new("page", 0, 0, Claim.ClaimKind, text, evidence);
+        IReadOnlyList<IReadOnlyList<Claim>> blocks =
+        [
+            [Statement("The page is titled Home | CNIB.", "E1"), Statement("A hero image.", "E27")],
+            [Statement("The page is titled Home | CNIB.", "E1", "E31"), Statement("The footer.", "E34")],
+        ];
+
+        var given = RecordingSummaryVisionKind.Distinct(blocks);
+
+        Assert.Equal(["The page is titled Home | CNIB.", "A hero image."], given[0].Select(claim => claim.Text));
+        Assert.Equal(["E1", "E31"], given[0][0].Evidence);
+        Assert.Equal(["The footer."], given[1].Select(claim => claim.Text));
+    }
+
+    [Fact]
+    public void The_templates_of_version_2_say_what_the_first_run_of_step_4b_showed_was_needed()
+    {
+        Assert.Equal(2, RecordingSummaryVisionKind.TemplateVersion);
+        Assert.Contains("Do not restate the facts you are given", RecordingSummaryVisionKind.PageInstructions, StringComparison.Ordinal);
+        Assert.Contains("Combine the descriptions; do not copy them. State each thing once", RecordingSummaryVisionKind.CombinedInstructions, StringComparison.Ordinal);
+        Assert.Contains("not tile by tile", RecordingSummaryVisionKind.CombinedInstructions, StringComparison.Ordinal);
+        foreach (var instructions in new[] { RecordingSummaryVisionKind.CombinedInstructions, RecordingSummaryVisionKind.VisitInstructions, RecordingSummaryVisionKind.RecordingInstructions })
+        {
+            Assert.Contains("Cite each reference as it is written without its brackets, such as \"E3\".", instructions, StringComparison.Ordinal);
+        }
+
+        Assert.DoesNotContain("without its brackets", RecordingSummaryKind.RecordingInstructions, StringComparison.Ordinal);
     }
 
     [Fact]

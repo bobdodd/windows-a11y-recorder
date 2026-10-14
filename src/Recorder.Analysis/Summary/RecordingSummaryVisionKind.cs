@@ -52,7 +52,20 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     public const string RecordingTemplate = "recording-summary-vision-recording";
 
-    public const int TemplateVersion = 1;
+    // Version 2 of the page, combined, visit, and recording templates, from
+    // the first run of step 4b on the target machine, 2026-10-14: each
+    // group of tiles restated the facts it was given before describing its
+    // tiles, the combined description copied both groups' statements in
+    // order and was stopped at the second group's first, the same as the
+    // first's, and it cited "[E24]" with its brackets. The page template
+    // now describes only what the tiles show; the combined one states each
+    // thing once, as an overview; and the combined, visit, and recording
+    // templates say to cite a reference without its brackets (agreed with
+    // the owner, 2026-10-14; recording-summary.md, "Step 4b").
+    public const int TemplateVersion = 2;
+
+    /// <summary>How a reference is cited, said in the templates of version 2.</summary>
+    public const string CiteWithoutBrackets = "Cite each reference as it is written without its brackets, such as \"E3\". ";
 
     // Version 2 asks for an overview of the screen, after a moment showing
     // the recorder's own player was answered with every control and time
@@ -158,6 +171,8 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "why the recorder chose the moment; and the recorder's facts about it, each beginning with an evidence reference such as [E3]. " +
         "A tile is a recreation, not the page itself: where the recording lacks something, such as an image that was not loaded, the tile lacks it too, " +
         "so say that it is missing in the recreation, not that the page lacked it. " +
+        "Describe only what the tiles show. Do not restate the facts you are given, such as the page's address, title, or size, its scroll position, " +
+        "which tiles were on the screen, the images not loaded, or the requests refused: the moment's description is given them directly. " +
         "Describe the page in these tiles as an overview, top to bottom: its regions, headings, imagery, colour, and emphasis, " +
         "and every message, notice, alert, toast, error, dialog, or popup, however small, whether or not it was in the part on the screen. " +
         "For each, say where it is on the page and whether it was in the part on the screen. " +
@@ -181,6 +196,8 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "and what the recreation lacked. Both descriptions are inferences, not facts. " +
         "The captured frame is the screen as recorded; the tiles are a recreation of the page, which may lack what the recording lacks, such as images. " +
         "Where the two disagree, say so, citing both, and do not settle it. " +
+        "Combine the descriptions; do not copy them. State each thing once: where statements say the same thing, write one statement citing all their references. " +
+        "Describe the page as an overview of its regions from top to bottom, not tile by tile, and do not list each control, link, or line of text. " +
         "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
         "A captured frame shows what was on the screen, not what the participant saw: say that the participant saw something only if the participant's capabilities, " +
         "as given, say that they work by sight; otherwise do not say what the participant saw. " +
@@ -191,7 +208,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
         "A statement is {\"kind\": \"claim\", \"text\": ..., \"evidence\": [...]} citing every reference it rests on, " +
         "with a statement from a description citing the picture or the tiles that description cites, " +
-        "or {\"kind\": \"unknown\", \"text\": ..., \"evidence\": []}. Cite only references that appear in the input. Write plain sentences without Markdown. " +
+        "or {\"kind\": \"unknown\", \"text\": ..., \"evidence\": []}. Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown. " +
         "Write the JSON on one line, with no indentation and no line breaks.";
 
     public const string VisitInstructions =
@@ -212,12 +229,15 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
         "A statement is {\"kind\": \"claim\", \"text\": ..., \"evidence\": [...]} citing every reference it rests on, " +
         "with a statement from a moment's description citing the picture or tiles it cites, " +
-        "or {\"kind\": \"unknown\", \"text\": ..., \"evidence\": []}. Cite only references that appear in the input. Write plain sentences without Markdown. " +
+        "or {\"kind\": \"unknown\", \"text\": ..., \"evidence\": []}. Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown. " +
         "Write the JSON on one line, with no indentation and no line breaks.";
 
     public static readonly string RecordingInstructions = RecordingSummaryKind.RecordingInstructions.Replace(
         "and a model's descriptions of each visit, which are inferences and not facts.",
         "and a model's descriptions of each visit, from the recorder's facts, from captured frames of the screen, and from the pages as the recorder rebuilt them, which are inferences and not facts.",
+        StringComparison.Ordinal).Replace(
+        "Cite only references that appear in the input. ",
+        "Cite only references that appear in the input. " + CiteWithoutBrackets,
         StringComparison.Ordinal);
 
     [GeneratedRegex(@"^\[(E\d+)\] (\d\d):(\d\d):(\d\d)\.(\d\d\d) ")]
@@ -527,21 +547,54 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             input.Append(CultureInfo.InvariantCulture, $"[{reasonReferences[index]}] {SummaryCollator.Time(moment.Reasons[index].Time)} {moment.Reasons[index].Text}\n");
         }
 
+        // A statement the same, word for word, as an earlier one in any of
+        // the descriptions is given once, with the references of both
+        // (agreed with the owner, 2026-10-14).
+        var blocks = new List<IReadOnlyList<Claim>> { frameStep.Claims };
+        blocks.AddRange(pageSteps.Select(item => item.Step.Claims));
+        var given = Distinct(blocks);
         input.Append(CultureInfo.InvariantCulture, $"\nThe captured frame: [{frameReference}] {FrameText(moment.Frame)}.\n")
             .Append("The moment as a model described it from the captured frame and the recorder's facts. These are inferences, not facts:\n");
-        RecordingSummaryKind.AppendClaims(input, frameStep.Claims, references);
+        RecordingSummaryKind.AppendClaims(input, given[0], references);
         input.Append(CultureInfo.InvariantCulture,
                 $"\nThe page as the recorder rebuilt it at this moment, {page.Width:0} by {page.Height:0} CSS pixels, pictured whole in {page.Tiles.Count} tiles. ")
             .Append(InViewText(moment, page, tileReferences)).Append('\n')
             .Append(RecreationNotes(page)).Append('\n');
-        foreach (var (tiles, step) in pageSteps)
+        for (var index = 0; index < pageSteps.Count; index++)
         {
+            var tiles = pageSteps[index].Tiles;
             var named = string.Join(", ", tiles.Select(tile => $"tile {tile.Number} [{tileReferences[tile.Number - 1]}], CSS pixels {tile.Top.ToString("0", CultureInfo.InvariantCulture)} to {(tile.Top + tile.Height).ToString("0", CultureInfo.InvariantCulture)}"));
             input.Append(CultureInfo.InvariantCulture, $"\nThe recreated page as a model described it from {named}. These are inferences, not facts:\n");
-            RecordingSummaryKind.AppendClaims(input, step.Claims, references);
+            RecordingSummaryKind.AppendClaims(input, given[index + 1], references);
         }
 
         return (input.ToString(), references);
+    }
+
+    // Each block's statements without those whose kind and text are the
+    // same as an earlier statement's in any block, the first given the
+    // references of all of them, in order.
+    internal static List<List<Claim>> Distinct(IReadOnlyList<IReadOnlyList<Claim>> blocks)
+    {
+        var result = blocks.Select(_ => new List<Claim>()).ToList();
+        var first = new Dictionary<(string Kind, string Text), (int Block, int Index)>();
+        for (var block = 0; block < blocks.Count; block++)
+        {
+            foreach (var claim in blocks[block])
+            {
+                if (first.TryGetValue((claim.Kind, claim.Text), out var at))
+                {
+                    var earlier = result[at.Block][at.Index];
+                    result[at.Block][at.Index] = earlier with { Evidence = [.. earlier.Evidence.Union(claim.Evidence, StringComparer.Ordinal)] };
+                    continue;
+                }
+
+                first[(claim.Kind, claim.Text)] = (block, result[block].Count);
+                result[block].Add(claim);
+            }
+        }
+
+        return result;
     }
 
     // A moment's request: the capabilities, the visit's address and title,

@@ -421,10 +421,33 @@ it:
   and how many requests were refused. Why an image is not loaded is still
   unknown.
 - **The prompt templates** added are `recording-summary-vision-page`,
-  version 1, with one section, the page; and
-  `recording-summary-vision-moment-combined`, version 1, with three: on
+  version 1, then 2 (below), with one section, the page; and
+  `recording-summary-vision-moment-combined`, version 1, then 2, with three: on
   the screen, the page as recreated, and what changed, in view or not.
   The visit's request is given each moment's combined description.
+- **The first run on the target machine,** 2026-10-14, build 9759ceb,
+  failed at `visit-0001-moment-01-described`. The page was rebuilt and
+  pictured in 8 tiles of 922 by 925, about 3 s each, and the frame and
+  both groups of tiles were accepted: the groups took 59 and 55 s to read
+  their prompts of 4,999 and 4,830 tokens, and 65 and 56 s to write 1,756
+  and 1,501 tokens. Each group restated the facts it was given before
+  describing its tiles, 7 of its 25 statements and 9 of its 23, both
+  beginning with the page's title and address. The combined description
+  copied the groups' statements in order, so its statement 32, the
+  second group's first, was the same as its first, and the answer was
+  stopped as a repeat. It also cited "[E24]" with its brackets, which the
+  reference check rejects. The owner agreed three changes the same day:
+  - version 2 of the page template describes only what the tiles show,
+    and does not restate the facts given;
+  - version 2 of the combined template states each thing once, merging
+    statements that say the same thing with all their references, and
+    describes the page as an overview of its regions, not tile by tile;
+    it, and version 2 of the vision visit and recording templates, say to
+    cite a reference without its brackets, such as "E3". The summary's
+    own templates are not changed;
+  - a statement given to the combined description that is the same, word
+    for word, as an earlier one in any of its descriptions is given once,
+    with the references of both. This changes the input, not an answer.
 - **The report** lists under each moment its recreated page's size,
   scroll position, and tiles, marking those on the screen, and what the
   recreation lacked, then the three parts. "How this was made" gives the
