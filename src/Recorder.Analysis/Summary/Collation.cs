@@ -286,9 +286,11 @@ public static class SummaryCollator
             lines.Add("No key or click was recorded in the 3 seconds before it.");
         }
 
+        // Observed running, with a reference like every other fact, so that a
+        // statement resting on it can cite it (target machine, 2026-10-14).
         foreach (var running in evidence.AssistiveTechnologyAt(start.Time))
         {
-            lines.Add($"Observed running at the visit's start: {running}.");
+            Line(start.Time, $"Observed running at the visit's start: {running}.", null, $"running:{start.Time}:{running}");
         }
 
         // The page at the end of the visit: its title, structure, and text.
@@ -494,11 +496,17 @@ public static class SummaryCollator
             lines.Add("The participant's capabilities are unknown: no description was given. Do not say what the participant saw or heard; say what was on the screen and what NVDA had to announce.");
         }
 
+        // Observed running, with a reference like every other fact, so that a
+        // statement resting on it can cite it. Without one, the whole
+        // recording's step failed on the target machine on 2026-10-14: "NVDA
+        // 2026.2 was observed running at the start of the recording" was a
+        // true claim with nothing it could cite.
         var running = evidence.AssistiveTechnologyAt(0);
         if (running.Count > 0)
         {
-            lines.Add("Observed running at the start of the recording: " + string.Join("; ", running) +
-                ". This shows what was running, not what the participant is able to do.");
+            var observed = "Observed running at the start of the recording: " + string.Join("; ", running);
+            var reference = register.Add(0, observed, null, "running:start");
+            lines.Add($"[{reference}] {observed}. This shows what was running, not what the participant is able to do.");
         }
 
         return lines;

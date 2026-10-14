@@ -427,13 +427,18 @@ public sealed class RecordingSummaryTests
     {
         var evidence = new FakeSummaryEvidence();
         evidence.Running.Add("NVDA 2026.2");
+        evidence.CommitList.Add(Commit(1, "https://example.test/a"));
 
         var collation = SummaryCollator.Collate(evidence, ParticipantCapabilities.Unknown);
 
         Assert.StartsWith("The participant's capabilities are unknown", collation.CapabilityLines[0], StringComparison.Ordinal);
-        Assert.Contains("NVDA 2026.2", collation.CapabilityLines[1], StringComparison.Ordinal);
-        Assert.Contains("not what the participant is able to do", collation.CapabilityLines[1], StringComparison.Ordinal);
-        Assert.Empty(collation.Evidence.Entries);
+        // Observed running is a fact with a reference, at the start of the
+        // recording, so a statement resting on it can cite it.
+        Assert.Equal(
+            "[E1] Observed running at the start of the recording: NVDA 2026.2. This shows what was running, not what the participant is able to do.",
+            collation.CapabilityLines[1]);
+        Assert.Equal(0, collation.Evidence.Of("E1")!.Time);
+        Assert.Contains("] 00:00:01.000 Observed running at the visit's start: NVDA 2026.2.", collation.Visits[0].Text, StringComparison.Ordinal);
     }
 
     [Fact]

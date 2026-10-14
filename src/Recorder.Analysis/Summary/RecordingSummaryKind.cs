@@ -21,7 +21,7 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
 
     public const string RecordingTemplate = "recording-summary-recording";
 
-    public const int TemplateVersion = 2;
+    public const int TemplateVersion = 3;
 
     public static readonly IReadOnlyList<string> VisitSections = ["page", "purpose", "activity"];
 
@@ -87,7 +87,8 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
         "Answer in JSON with three sections: \"site\", the site or application tested; \"audience\", who it appears to be for; " +
         "and \"session\", the course of the session from visit to visit. " +
         "Each section is a list of paragraphs, and each paragraph a list of statements. " +
-        "Each section holds only its own paragraphs. " +
+        "Each section holds only its own paragraphs: what the site or application is goes only in \"site\", who it is for only in \"audience\", " +
+        "and what the participant did, visit by visit, only in \"session\". Do not repeat a visit's description; say what it adds to the whole. " +
         "A statement is {\"kind\": \"claim\", \"text\": ..., \"evidence\": [...]} citing every reference it rests on, " +
         "or {\"kind\": \"unknown\", \"text\": ..., \"evidence\": []}. Cite only references that appear in the input. Write plain sentences without Markdown. " +
         "Write the JSON on one line, with no indentation and no line breaks.";

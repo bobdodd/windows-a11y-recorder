@@ -73,14 +73,23 @@ while building it:
 - **Other windows** are the front window records whose process is not the
   browser's.
 - **The prompt templates** are `recording-summary-visit` and
-  `recording-summary-recording`, version 2 since 2026-10-14. Version 2
+  `recording-summary-recording`, version 3 since 2026-10-14. Version 2
   tells the model that each section holds only its own paragraphs, to
   summarise the activity with repeated actions grouped rather than one
   statement for each fact, and to write the JSON on one line; see
-  "Decisions (2026-10-14)" in [analysis runner](analysis-runner.md). Each
+  "Decisions (2026-10-14)" in [analysis runner](analysis-runner.md).
+  Version 3 names what goes in each of the whole recording's sections, and
+  tells the model not to repeat a visit's description there: in its second
+  run on the target machine, the whole recording's "site" held the visit's
+  page, purpose, and activity, and "session" repeated the activity. Each
   visit is a step,
   `visit-0001` upward, and the whole recording the step `recording`. A
   recording with no page visits asks no model and says so.
+- **Observed running** at the start of the recording, and at each visit's
+  start, is a fact with an evidence reference at that time, like every
+  other fact. Without one, the whole recording's step failed on the target
+  machine on 2026-10-14: "NVDA 2026.2 was observed running at the start of
+  the recording" was a true claim with nothing to cite.
 - **The report** is `analysis\<task>\summary.md` in the session folder.
   The evidence list gives only the references the report cites. The
   auditor's description is listed as not in the recording.
