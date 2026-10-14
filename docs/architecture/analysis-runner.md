@@ -57,7 +57,9 @@ is why the model is a setting.
 
 ### 1. A separate worker process
 
-A new program, `Recorder.Analysis.exe`, runs the queue. It is not part of
+A new program, `Recorder.AnalysisWorker.exe`, runs the queue. Its logic is
+in a library, `Recorder.Analysis`, which the player also uses to queue
+tasks and read their state. It is not part of
 the player or the capture host, so a slow or failed model never holds up
 playback or capture. The player starts it when a task is queued. It keeps
 running until the queue is empty, whether or not the player is open, and
@@ -199,9 +201,11 @@ fails the check fails the attempt; it is not dropped quietly.
 
 ### 8. Failed output is rerun, not repaired
 
-An attempt fails if the server reports an error, if the output stops at
-the output limit, if it does not parse, or if a citation check fails. The
-worker runs the whole stage again from the start, up to two more times,
+A stage may make several requests, such as one for each page visit. Each
+request is one step, and the attempts are kept for each step. An attempt
+fails if the server reports an error, if the output stops at the output
+limit, if it does not parse, or if a citation check fails. The worker runs
+the whole step again from the start, up to two more times by default,
 and the accepted attempt replaces the failed ones in the result. Failed
 attempts stay in the catalog with their reasons. Output is never
 completed, trimmed, or patched to look finished. After three failures, the
@@ -257,6 +261,32 @@ Analysis tab opens a report in a reading view in the player, where each
 reference is a button that moves the playhead to that evidence. The file
 can also be opened outside the player, where the references read as plain
 text.
+
+### 12. The database server
+
+The player starts the catalog's PostgreSQL server and stops it when it
+closes, if it was the one that started it; a program that attaches to a
+running server leaves it running. The worker does the same: it starts the
+server, or attaches to the one running. If the player closes and stops
+the server while the worker is running, the worker's next use of the
+catalog fails; the worker then starts the server again, and repeats the
+write that failed. A model request in progress is not affected, because
+it does not use the catalog until its output is saved.
+
+## Build order
+
+Agreed by the owner on 2026-10-13, with the recording summary:
+
+1. The runner: the catalog tables, model profiles, the endpoint client,
+   the local server, and the worker, with no player changes and a stand-in
+   task kind used only by the tests.
+2. The recording summary's stage 1: dividing visits, the collation, the
+   model requests, and the Markdown report.
+3. The player: the Analysis menu, the Analysis tab, the reading view, the
+   notifications, and the capability description. The system test on the
+   target machine follows this step.
+4. The recording summary's stage 2: the moments of a visit, the pictures,
+   and the vision requests.
 
 ## Required tests
 

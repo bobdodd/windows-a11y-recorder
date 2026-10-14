@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed on 2026-10-13, for the owner to agree before building. Not built.
+Proposed on 2026-10-13 and agreed by the owner the same day. Not built.
+It is built after the analysis runner, stage 1 first; see "Build order"
+in [analysis runner](analysis-runner.md).
 The first task kind for the [analysis runner](analysis-runner.md), chosen
 by the owner the same day: a summary of the recording that describes each
 page visited and the site or application being tested. It is built from
@@ -342,5 +344,4 @@ Two further answers, the same day:
 
 ## Questions to settle
 
-None at present. The proposal waits for the owner's agreement before it
-is built.
+None at present.
