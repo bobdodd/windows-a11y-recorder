@@ -273,5 +273,6 @@ Designed in [recording summary](recording-summary.md), proposed 2026-10-13,
 not agreed or built. The first task kind for the analysis runner, chosen by
 the owner: a summary of each page visited and of the site tested, from the
 recorder's collation and a model's text analysis, then enhanced with vision
-analysis of recreated pages, each stage writing a Markdown file. Four
-questions are open there.
+analysis of recreated pages and captured frames at the moments of each
+visit, each stage writing a Markdown file. The owner answered its four
+questions the same day; two smaller ones are open there.
