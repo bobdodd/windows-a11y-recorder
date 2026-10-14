@@ -170,3 +170,61 @@ public static class ClaimCheck
         }
     }
 }
+
+/// <summary>
+/// Watches an answer as it arrives, and stops it at the first statement
+/// whose text repeats an earlier one word for word (owner, 2026-10-14).
+/// A model can fall into repeating the same few statements until its
+/// output limit; this ends the attempt at the first repeat instead. See
+/// docs/architecture/analysis-runner.md, "Sampling options".
+/// </summary>
+public sealed class RepeatWatch
+{
+    // A statement's text, once its closing quote has arrived. A quote
+    // inside a JSON string is escaped, so the match cannot start inside one.
+    private static readonly System.Text.RegularExpressions.Regex StatementText = new(
+        "\"text\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
+    private int _scanned;
+
+    /// <summary>The number of statements seen so far.</summary>
+    public int Statements { get; private set; }
+
+    /// <summary>Why the answer should stop, or null to let it go on.</summary>
+    public string? Check(string content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        while (StatementText.Match(content, _scanned) is { Success: true } match)
+        {
+            _scanned = match.Index + match.Length;
+            var text = Unescape(match.Groups[1].Value);
+            if (text.Length == 0)
+            {
+                continue;
+            }
+
+            Statements++;
+            if (!_seen.Add(text))
+            {
+                return $"The model repeated statement {Statements.ToString(System.Globalization.CultureInfo.InvariantCulture)} " +
+                    $"word for word from earlier in its answer, so the answer was stopped there: \"{text}\"";
+            }
+        }
+
+        return null;
+    }
+
+    private static string Unescape(string escaped)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<string>("\"" + escaped + "\"") ?? escaped;
+        }
+        catch (JsonException)
+        {
+            return escaped;
+        }
+    }
+}

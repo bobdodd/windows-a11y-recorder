@@ -8,9 +8,45 @@ using Recorder.Database;
 
 [assembly: SupportedOSPlatform("windows")]
 
+// With --trial TASK STEP FILE [OPTION=VALUE ...], the worker instead tries
+// one step of a task that has run, with the sampling options given, and
+// writes what it gave to FILE; nothing is written to the catalog. See
+// docs/architecture/analysis-runner.md, "Trying a step with other sampling
+// options".
+(Guid Task, string Step, string File, Dictionary<string, double> Sampling)? trial = null;
+if (args.Length > 0 && args[0] == "--trial")
+{
+    var sampling = new Dictionary<string, double>(StringComparer.Ordinal);
+    if (args.Length < 4 || !Guid.TryParse(args[1], out var trialTask))
+    {
+        Console.Error.WriteLine("Give: --trial TASK STEP FILE [OPTION=VALUE ...], for example --trial 01a13a7e-... visit-0001-moment-10 C:\\Users\\Public\\Downloads\\trial.txt presence_penalty=1.5");
+        return 2;
+    }
+
+    foreach (var pair in args.Skip(4))
+    {
+        var parts = pair.Split('=', 2);
+        if (parts.Length != 2 || !double.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value))
+        {
+            Console.Error.WriteLine($"Not an option and a number: {pair}");
+            return 2;
+        }
+
+        sampling[parts[0]] = value;
+    }
+
+    trial = (trialTask, args[2], args[3], sampling);
+}
+
 using var mutex = new Mutex(initiallyOwned: true, AnalysisLocation.WorkerMutexName, out var createdNew);
 if (!createdNew)
 {
+    if (trial is not null)
+    {
+        Console.Error.WriteLine("The analysis worker is running. Try again when the player says it is stopped.");
+        return 2;
+    }
+
     return 0;
 }
 
@@ -61,6 +97,16 @@ worker = new AnalysisWorker(
 var exitCode = 0;
 try
 {
+    if (trial is { } plan)
+    {
+        Console.WriteLine($"Trying step {plan.Step}. This can take some minutes.");
+        var result = await worker.TrialAsync(plan.Task, plan.Step, plan.Sampling, shutdown.Token).ConfigureAwait(false);
+        await File.WriteAllTextAsync(plan.File, result.Describe(), new System.Text.UTF8Encoding(false), shutdown.Token).ConfigureAwait(false);
+        Console.WriteLine($"Written: {plan.File}");
+        Status("Stopped: the trial has run.");
+        return 0;
+    }
+
     await worker.RunUntilEmptyAsync(shutdown.Token).ConfigureAwait(false);
 }
 catch (OperationCanceledException) when (shutdown.IsCancellationRequested)
@@ -72,6 +118,11 @@ catch (Exception exception)
 {
     loaded = null;
     Status($"Stopped with an error: {exception.Message}");
+    if (trial is not null)
+    {
+        Console.Error.WriteLine($"The trial stopped with an error: {exception.Message}");
+    }
+
     exitCode = 1;
 }
 finally

@@ -463,6 +463,52 @@ on 2026-10-14; see "Stage 2 implementation status" in
   suite passed, 1,707 tests, with the Chromium launcher and browser
   receiver tests left out as before.
 
+### Sampling options
+
+Built on 2026-10-14, after decision 4 below.
+
+- **A profile may give the server's other sampling options**, in its
+  `generation`, as `sampling`: names and numbers, by the server's own
+  names, for example `"sampling": { "presence_penalty": 1.5 }` for
+  llama.cpp. They are sent with every request, recorded with each attempt
+  under `sampling` in its parameters, and listed with the profile. The
+  fields the worker sets itself, such as `temperature`, `seed`, and
+  `max_tokens`, are refused there, and so is a value that is not a number.
+- **The server's defaults are recorded with each attempt**, under
+  `server_defaults` in its parameters: the model's default generation
+  settings as llama.cpp's `/props` gives them, so that each attempt records
+  how it was sampled, including the options it did not send. Before this,
+  only the temperature, seed, and output limit were recorded.
+- **Answers are streamed**, with `stream` and `stream_options` set, and
+  the content, finish reason, usage, and timings are read from the
+  stream's chunks, as llama.cpp sends them
+  ([server-task.cpp](https://raw.githubusercontent.com/ggml-org/llama.cpp/master/tools/server/server-task.cpp)).
+- **An answer that repeats a statement is stopped**: as the answer
+  arrives, each statement's text is compared with those before it, and at
+  the first that is the same word for word, the worker closes the request
+  and the attempt fails, saying which statement and its text. At
+  temperature 0 it is not asked for again, as for any refused output.
+
+### Trying a step with other sampling options
+
+Built on 2026-10-14, so that one step can be tried with other sampling
+options without running its task again. The worker program, run as
+
+`Recorder.AnalysisWorker.exe --trial TASK STEP FILE [OPTION=VALUE ...]`
+
+runs the task's code again, giving back the task's accepted steps before
+STEP, sends STEP's request with the options given on top of its profile's,
+and writes what it gave to FILE: the outcome and why it would fail, the
+number of statements, the tokens and times, the settings sent with the
+server's defaults, and the answer as it arrived. Nothing is written to the
+catalog. It does not run while the worker is running.
+
+- **Tests:** the sampling options read, sent, recorded, and refused; the
+  repeat watch; a streamed answer read whole and stopped where the watch
+  says; the server's defaults read from its properties; an answer that
+  repeats a statement failing without being asked for again; and a trial
+  of one step that writes nothing to the catalog.
+
 ## Required tests
 
 - **Unit tests:** queue order and grouping by model; profile reading,
@@ -543,6 +589,35 @@ text:
    the activity inside "page", stated each recorded key one at a time, and
    spent 2,169 of its 7,098 characters on indentation and line breaks. See
    [recording summary](recording-summary.md).
+
+From the second run of the summary with vision on the target machine, the
+same day, where the moment prompt was version 2 (decision 6 in
+[recording summary](recording-summary.md)): moments 1 to 9 of the first
+visit were accepted, using 576 to 1,038 output tokens each, and moment 10,
+the visit's last frame, showing the recorder at the end of the recording,
+stopped at the output limit of 8,192 tokens. Its 136 statements described
+the recorder's controls one by one; statement 40 was the first to repeat an
+earlier one word for word, and 90 were repeats, cycling through the same
+three at the end.
+
+4. **Repetition is met with a presence penalty, and an answer that repeats
+   a statement is stopped**, as the owner chose from three proposals ("A
+   with C"), to be tried first on moment 10 alone. The model's card
+   suggests, for its non-thinking mode, `presence_penalty=1.5`, and says
+   that it may be adjusted "between 0 and 2 to reduce endless
+   repetitions. However, using a higher value may occasionally result in
+   language mixing and a slight decrease in model performance"
+   ([Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)). The
+   temperature stays 0 and the seed 1. Not chosen: llama.cpp's DRY
+   penalty, which penalises a repeated sequence rather than a repeated
+   token ([llama.cpp server](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md)).
+   In llama.cpp, the penalties look back over `repeat_last_n` tokens, 64
+   by default (the same page), and the tokens counted include the
+   prompt's as well as the answer's
+   ([server-context.cpp](https://raw.githubusercontent.com/ggml-org/llama.cpp/master/tools/server/server-context.cpp)),
+   so the window is tried as well as the penalty. The penalty and window
+   for the profile are to be chosen from the trials. See "Sampling
+   options" and "Trying a step with other sampling options".
 
 ## Decisions (2026-10-13)
 

@@ -283,7 +283,10 @@ design.
   status". Its first run on the target machine, on 2026-10-14, stopped at
   the ninth moment of the first visit, at the output limit; the moment
   prompt was changed to version 2 the same day (the summary design's
-  decision 6). Not yet passed on the target machine.
+  decision 6). Its second run stopped at the tenth moment, the model
+  repeating its statements; sampling options, a stop at the first repeated
+  statement, and trials of one step were built the same day (the runner
+  design's decision 4). Not yet passed on the target machine.
 - Built 2026-10-14: text in the player can be selected and copied; see
   [player layout](player-layout.md), "Selecting and copying text". Not
   yet tested on the target machine.

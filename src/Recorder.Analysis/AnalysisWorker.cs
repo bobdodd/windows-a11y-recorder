@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json.Nodes;
 
 namespace Recorder.Analysis;
 
@@ -62,6 +63,14 @@ internal sealed class ModelSwitchNeededException(string profile) : Exception($"T
 
 internal sealed class StoppedForRecordingException() : Exception("A recording started.");
 
+internal sealed record TrialPlan(string StepKey, IReadOnlyDictionary<string, double> Sampling);
+
+internal sealed class TrialFinishedException(StepTrial trial) : Exception("The trial step has run.")
+{
+    public StepTrial Trial { get; } = trial;
+}
+
+
 internal sealed class TaskCancelledException() : Exception("The task was cancelled.");
 
 /// <summary>
@@ -83,6 +92,7 @@ public sealed class AnalysisWorker
     private readonly Dictionary<Guid, string> _waitingFor = [];
     private IReadOnlyList<AnalysisTask> _runnable = [];
     private ModelProfile? _loaded;
+    private TrialPlan? _trial;
 
     public AnalysisWorker(
         AnalysisCatalog catalog,
@@ -235,19 +245,12 @@ public sealed class AnalysisWorker
         ModelRequest request,
         CancellationToken cancellationToken)
     {
-        var capability = request.Capability;
-        if (!task.StageProfiles.TryGetValue(capability, out var profileName))
+        if (_trial is { } trial)
         {
-            throw new StepFailedException($"No model profile was chosen for {capability} when the task was queued.");
+            return await TrialStepAsync(task, stepKey, request, trial, cancellationToken).ConfigureAwait(false);
         }
 
-        var profile = _settings.Profile(profileName) ??
-            throw new StepFailedException($"The model profile \"{profileName}\" is not in the analysis settings.");
-        if (!profile.Supports(capability))
-        {
-            throw new StepFailedException($"The model profile \"{profileName}\" cannot take {capability}.");
-        }
-
+        var profile = StepProfile(task, request);
         var body = ChatRequest.Build(profile, request);
         var inputSha = ChatRequest.Sha256(body);
         var accepted = await Catalog.AcceptedStepAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false);
@@ -280,6 +283,11 @@ public sealed class AnalysisWorker
         var (modelSha, basis) = await ModelHashAsync(profile, cancellationToken).ConfigureAwait(false);
         await EnsureLoadedAsync(profile, cancellationToken).ConfigureAwait(false);
         var build = await _endpoint.ServerBuildAsync(profile, cancellationToken).ConfigureAwait(false);
+
+        // The settings sent, with the server's defaults for those not sent,
+        // so that each attempt records how it was sampled.
+        var parameters = ChatRequest.Parameters(profile, request);
+        parameters["server_defaults"] = await _endpoint.ServerSamplingAsync(profile, cancellationToken).ConfigureAwait(false);
         string? lastFailure = null;
         while (true)
         {
@@ -300,7 +308,7 @@ public sealed class AnalysisWorker
                     modelSha,
                     basis,
                     build,
-                    ChatRequest.Parameters(profile, request),
+                    (JsonObject)parameters.DeepClone(),
                     request.PromptTemplate,
                     request.PromptTemplateVersion,
                     inputSha,
@@ -326,7 +334,11 @@ public sealed class AnalysisWorker
             string? failure = stop.Failure;
             IReadOnlyList<Claim> claims = [];
             System.Text.Json.JsonElement output = default;
-            if (failure is null && response!.FinishReason == "length")
+            if (failure is null && response!.StoppedBecause is { } stopped)
+            {
+                failure = stopped;
+            }
+            else if (failure is null && response!.FinishReason == "length")
             {
                 failure = $"The output stopped at the output limit of {profile.Generation.MaxTokens} tokens.";
             }
@@ -367,6 +379,120 @@ public sealed class AnalysisWorker
         }
     }
 
+    private ModelProfile StepProfile(AnalysisTask task, ModelRequest request)
+    {
+        var capability = request.Capability;
+        if (!task.StageProfiles.TryGetValue(capability, out var profileName))
+        {
+            throw new StepFailedException($"No model profile was chosen for {capability} when the task was queued.");
+        }
+
+        var profile = _settings.Profile(profileName) ??
+            throw new StepFailedException($"The model profile \"{profileName}\" is not in the analysis settings.");
+        if (!profile.Supports(capability))
+        {
+            throw new StepFailedException($"The model profile \"{profileName}\" cannot take {capability}.");
+        }
+
+        return profile;
+    }
+
+    /// <summary>
+    /// A trial of one step of a task that has run: the task's code runs
+    /// again, with its steps before that one given back as accepted, and
+    /// that step's request is sent with the sampling options given, on top
+    /// of its profile's. Nothing is written to the catalog: the result is
+    /// only returned. See docs/architecture/analysis-runner.md, "Trying a
+    /// step with other sampling options".
+    /// </summary>
+    public async Task<StepTrial> TrialAsync(
+        Guid taskId,
+        string stepKey,
+        IReadOnlyDictionary<string, double> sampling,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(stepKey);
+        ArgumentNullException.ThrowIfNull(sampling);
+        var task = await Catalog.TaskAsync(taskId, cancellationToken).ConfigureAwait(false) ??
+            throw new StepFailedException($"There is no task {taskId}.");
+        if (!_kinds.TryGetValue(task.Kind, out var kind) || kind.Version != task.KindVersion)
+        {
+            throw new StepFailedException($"This worker cannot run version {task.KindVersion} of \"{task.Kind}\".");
+        }
+
+        _trial = new TrialPlan(stepKey, sampling);
+        try
+        {
+            await kind.RunAsync(new AnalysisTaskContext(this, task), cancellationToken).ConfigureAwait(false);
+        }
+        catch (TrialFinishedException finished)
+        {
+            return finished.Trial;
+        }
+        finally
+        {
+            _trial = null;
+            await UnloadAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        throw new StepFailedException($"The task ran to its end without a step {stepKey}.");
+    }
+
+    private async Task<AcceptedStep> TrialStepAsync(
+        AnalysisTask task,
+        string stepKey,
+        ModelRequest request,
+        TrialPlan trial,
+        CancellationToken cancellationToken)
+    {
+        if (stepKey != trial.StepKey)
+        {
+            return await Catalog.AcceptedStepAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false) ??
+                throw new StepFailedException(
+                    $"Step {stepKey} has no accepted attempt in this task, so the trial cannot reach step {trial.StepKey}.");
+        }
+
+        var given = StepProfile(task, request);
+        var options = given.Generation.Sampling.ToBuilder();
+        foreach (var (option, value) in trial.Sampling)
+        {
+            if (GenerationSettings.ReservedFields.Contains(option))
+            {
+                throw new StepFailedException($"The sampling option \"{option}\" is one the worker sets itself.");
+            }
+
+            options[option] = value;
+        }
+
+        var profile = given with { Generation = given.Generation with { Sampling = options.ToImmutable() } };
+        var body = ChatRequest.Build(profile, request);
+        await EnsureLoadedAsync(given, cancellationToken).ConfigureAwait(false);
+        var build = await _endpoint.ServerBuildAsync(profile, cancellationToken).ConfigureAwait(false);
+        var parameters = ChatRequest.Parameters(profile, request);
+        parameters["server_defaults"] = await _endpoint.ServerSamplingAsync(profile, cancellationToken).ConfigureAwait(false);
+        _status($"Trying step {stepKey} of {task.Kind} with {profile.Name}.");
+
+        var watch = new RepeatWatch();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        ModelResponse? response = null;
+        string? failure;
+        try
+        {
+            response = await _endpoint.CompleteAsync(profile, body, watch.Check, cancellationToken).ConfigureAwait(false);
+            failure = response.StoppedBecause ??
+                (response.FinishReason == "length" ? $"The output stopped at the output limit of {profile.Generation.MaxTokens} tokens." : null) ??
+                ClaimCheck.Check(response.Content, request.Sections, request.InputReferences).Failure;
+        }
+        catch (ModelEndpointException exception)
+        {
+            failure = exception.Message;
+        }
+
+        clock.Stop();
+        throw new TrialFinishedException(new StepTrial(
+            task.TaskId, task.Kind, stepKey, profile.Name, parameters, build, response, failure, watch.Statements, clock.Elapsed));
+    }
+
     /// <summary>Whether a profile's output is repeatable: the same request gives the same output.</summary>
     public static bool Repeatable(ModelProfile profile)
     {
@@ -389,7 +515,7 @@ public sealed class AnalysisWorker
         Task<ModelResponse> request;
         try
         {
-            request = _endpoint.CompleteAsync(profile, body, stop.Token);
+            request = _endpoint.CompleteAsync(profile, body, new RepeatWatch().Check, stop.Token);
         }
         catch (ModelEndpointException exception)
         {

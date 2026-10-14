@@ -255,6 +255,54 @@ public sealed class AnalysisRulesTests
     }
 
     [Fact]
+    public void Sampling_options_are_read_sent_and_recorded_and_the_worker_s_own_fields_refused()
+    {
+        var sampled = LocalProfile.Replace(
+            "\"generation\": { \"maxTokens\": 4096, \"temperature\": 0, \"seed\": 7 }",
+            "\"generation\": { \"maxTokens\": 4096, \"temperature\": 0, \"seed\": 7, \"sampling\": { \"presence_penalty\": 1.5, \"repeat_last_n\": 64 } }",
+            StringComparison.Ordinal);
+        var (settings, problems) = AnalysisSettingsFile.Parse(Settings(sampled));
+
+        Assert.Empty(problems);
+        var profile = Assert.Single(settings.Profiles);
+        Assert.Equal(1.5, profile.Generation.Sampling["presence_penalty"]);
+        var request = new ModelRequest("t", 1, "Describe.", "E1: a fact", [], ["description"], References);
+        using (var document = JsonDocument.Parse(ChatRequest.Build(profile, request)))
+        {
+            Assert.Equal(1.5, document.RootElement.GetProperty("presence_penalty").GetDouble());
+            Assert.Equal(64, document.RootElement.GetProperty("repeat_last_n").GetInt32());
+        }
+
+        Assert.Equal("{\"presence_penalty\":1.5,\"repeat_last_n\":64}", ChatRequest.Parameters(profile, request)["sampling"]!.ToJsonString());
+        Assert.Equal("{\"presence_penalty\":1.5,\"repeat_last_n\":64}", AnalysisSettingsFile.Describe(profile)["generation"]!["sampling"]!.ToJsonString());
+
+        var reserved = LocalProfile.Replace("\"seed\": 7 }", "\"seed\": 7, \"sampling\": { \"temperature\": 1 } }", StringComparison.Ordinal);
+        Assert.Contains(
+            "Profile \"This PC\" gives the sampling option \"temperature\", which the worker sets itself.",
+            AnalysisSettingsFile.Parse(Settings(reserved)).Problems);
+        var text = LocalProfile.Replace("\"seed\": 7 }", "\"seed\": 7, \"sampling\": { \"top_k\": \"20\" } }", StringComparison.Ordinal);
+        Assert.Contains(
+            "Profile \"This PC\" gives the sampling option \"top_k\" a value that is not a number.",
+            AnalysisSettingsFile.Parse(Settings(text)).Problems);
+    }
+
+    [Fact]
+    public void The_repeat_watch_stops_at_the_first_statement_said_again_word_for_word()
+    {
+        var watch = new RepeatWatch();
+        Assert.Null(watch.Check("{ \"screen\": [ [ { \"kind\": \"claim\", \"text\": \"The page is open.\""));
+        Assert.Null(watch.Check("{ \"screen\": [ [ { \"kind\": \"claim\", \"text\": \"The page is open.\", \"evidence\": [\"E1\"] }, { \"kind\": \"claim\", \"text\": \"The page"));
+        var content = "{ \"screen\": [ [ { \"kind\": \"claim\", \"text\": \"The page is open.\", \"evidence\": [\"E1\"] }, " +
+            "{ \"kind\": \"claim\", \"text\": \"The page is \\\"open\\\".\", \"evidence\": [\"E1\"] }, " +
+            "{ \"kind\": \"unknown\", \"text\": \"\", \"evidence\": [] }, " +
+            "{ \"kind\": \"claim\", \"text\": \"The page is open.\"";
+        Assert.Equal(
+            "The model repeated statement 3 word for word from earlier in its answer, so the answer was stopped there: \"The page is open.\"",
+            watch.Check(content));
+        Assert.Equal(3, watch.Statements);
+    }
+
+    [Fact]
     public void The_request_asks_for_repeatable_output_held_to_the_schema()
     {
         var (settings, _) = AnalysisSettingsFile.Parse(Settings(LocalProfile));
@@ -277,7 +325,8 @@ public sealed class AnalysisRulesTests
         Assert.Equal(7, root.GetProperty("seed").GetInt64());
         Assert.Equal(4096, root.GetProperty("max_tokens").GetInt32());
         Assert.False(root.GetProperty("cache_prompt").GetBoolean());
-        Assert.False(root.GetProperty("stream").GetBoolean());
+        Assert.True(root.GetProperty("stream").GetBoolean());
+        Assert.True(root.GetProperty("stream_options").GetProperty("include_usage").GetBoolean());
         Assert.False(root.GetProperty("chat_template_kwargs").GetProperty("enable_thinking").GetBoolean());
         Assert.Equal("json_object", root.GetProperty("response_format").GetProperty("type").GetString());
         Assert.Equal("description", root.GetProperty("response_format").GetProperty("schema").GetProperty("required")[0].GetString());

@@ -183,15 +183,26 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
 
     /// <summary>The queued and running tasks, oldest first.</summary>
     public Task<IReadOnlyList<AnalysisTask>> OpenTasksAsync(CancellationToken cancellationToken) =>
+        ReadTasksAsync("WHERE t.state IN ('queued', 'running') ORDER BY t.queued_utc, t.task_id", null, cancellationToken);
+
+    /// <summary>One task, in whatever state, or null where there is none.</summary>
+    public async Task<AnalysisTask?> TaskAsync(Guid taskId, CancellationToken cancellationToken) =>
+        (await ReadTasksAsync("WHERE t.task_id = $1", taskId, cancellationToken).ConfigureAwait(false)).FirstOrDefault();
+
+    private Task<IReadOnlyList<AnalysisTask>> ReadTasksAsync(string where, Guid? taskId, CancellationToken cancellationToken) =>
         UseAsync<IReadOnlyList<AnalysisTask>>(async connection =>
         {
             await using var command = new NpgsqlCommand(
                 "SELECT t.task_id, t.recording_id, t.kind, t.kind_version, t.scope_start_nanoseconds, " +
                 "t.scope_end_nanoseconds, t.after_task_id, a.state, t.stage_profiles::text, t.state, " +
                 "t.cancel_requested, t.queued_utc, t.session_directory FROM analysis_tasks t " +
-                "LEFT JOIN analysis_tasks a ON a.task_id = t.after_task_id " +
-                "WHERE t.state IN ('queued', 'running') ORDER BY t.queued_utc, t.task_id",
+                "LEFT JOIN analysis_tasks a ON a.task_id = t.after_task_id " + where,
                 connection);
+            if (taskId is { } id)
+            {
+                command.Parameters.AddWithValue(id);
+            }
+
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             var tasks = new List<AnalysisTask>();
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))

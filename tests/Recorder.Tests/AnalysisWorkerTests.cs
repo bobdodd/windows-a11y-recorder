@@ -27,8 +27,24 @@ internal sealed class StandInEndpoint : IModelEndpoint
         return Answer(profile, body, cancellationToken);
     }
 
+    // The answer is given to the watch whole, as one piece of a stream.
+    public async Task<ModelResponse> CompleteAsync(
+        ModelProfile profile,
+        string body,
+        Func<string, string?>? watch,
+        CancellationToken cancellationToken)
+    {
+        var response = await CompleteAsync(profile, body, cancellationToken);
+        return response.Content is { } content && watch?.Invoke(content) is { } stop
+            ? new ModelResponse(content, null, null, null, null, null, stop)
+            : response;
+    }
+
     public Task<string?> ServerBuildAsync(ModelProfile profile, CancellationToken cancellationToken) =>
         Task.FromResult<string?>("b11607-ff026f8c0");
+
+    public Task<System.Text.Json.Nodes.JsonObject?> ServerSamplingAsync(ModelProfile profile, CancellationToken cancellationToken) =>
+        Task.FromResult<System.Text.Json.Nodes.JsonObject?>(new() { ["repeat_last_n"] = 64, ["presence_penalty"] = 0.0 });
 
     public Task LoadAsync(ModelProfile profile, CancellationToken cancellationToken)
     {
@@ -237,6 +253,7 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Assert.Equal("stop", first["finish_reason"]);
         Assert.Equal(StandInEndpoint.Valid("E1").Content, first["raw_output"]);
         Assert.Contains("\"cache_prompt\": false", (string)first["parameters"]!, StringComparison.Ordinal);
+        Assert.Contains("\"server_defaults\": {\"repeat_last_n\": 64, \"presence_penalty\": 0}", (string)first["parameters"]!, StringComparison.Ordinal);
         var claims = await RowsAsync(
             "SELECT c.section, c.claim_kind, c.text, c.evidence FROM analysis_claims c " +
             "JOIN analysis_attempts a ON a.attempt_id = c.attempt_id WHERE a.task_id = $1",
@@ -311,6 +328,77 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
             await FailureAsync(task));
         var attempt = Assert.Single(await AttemptsAsync(task));
         Assert.Equal("{ \"description\": [ [ { \"kind\"", attempt["raw_output"]);
+    }
+
+    [Fact]
+    public async Task An_answer_that_repeats_a_statement_is_stopped_and_fails_without_being_asked_for_again()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var repeated = """{ "description": [ [ { "kind": "claim", "text": "A fact.", "evidence": ["E1"] }, { "kind": "claim", "text": "A fact.", "evidence": ["E1"] } ] ] }""";
+        var calls = 0;
+        var endpoint = new StandInEndpoint
+        {
+            Answer = (_, _, _) => { calls++; return Task.FromResult(StandInEndpoint.Valid("E1") with { Content = repeated }); }
+        };
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(1, calls);
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
+        Assert.Equal(
+            "Step visit-1 failed: The model repeated statement 2 word for word from earlier in its answer, " +
+            "so the answer was stopped there: \"A fact.\" " +
+            "At temperature 0 the same request gives the same output, so it was not asked for again.",
+            await FailureAsync(task));
+        var attempt = Assert.Single(await AttemptsAsync(task));
+        Assert.Equal(AttemptOutcomes.Failed, attempt["outcome"]);
+        Assert.Equal(repeated, attempt["raw_output"]);
+        Assert.Null(attempt["finish_reason"]);
+    }
+
+    [Fact]
+    public async Task A_trial_reruns_one_step_with_other_sampling_options_and_writes_nothing()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var calls = 0;
+        var endpoint = new StandInEndpoint
+        {
+            Answer = (_, _, _) => Task.FromResult(++calls == 1 ? StandInEndpoint.Valid("E1") : StandInEndpoint.Valid("E1", "length"))
+        };
+        var kind = new StandInKind("visit-1", "visit-2", "visit-3");
+        await new AnalysisWorker(catalog, SettingsWith(), [kind], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
+        var before = await AttemptsAsync(task);
+
+        endpoint.Answer = (_, _, _) => Task.FromResult(StandInEndpoint.Valid("E1"));
+        while (endpoint.Bodies.TryDequeue(out _))
+        {
+        }
+
+        var trial = await new AnalysisWorker(catalog, SettingsWith(), [kind], endpoint, options: Fast)
+            .TrialAsync(task, "visit-2", new Dictionary<string, double> { ["presence_penalty"] = 1.5 }, Token);
+
+        Assert.Equal("visit-2", trial.StepKey);
+        Assert.Null(trial.Failure);
+        Assert.Equal(1, trial.Statements);
+        var body = Assert.Single(endpoint.Bodies);
+        using (var document = JsonDocument.Parse(body))
+        {
+            Assert.Equal(1.5, document.RootElement.GetProperty("presence_penalty").GetDouble());
+        }
+
+        Assert.Equal(1.5, trial.Parameters["sampling"]!["presence_penalty"]!.GetValue<double>());
+        Assert.Equal(64, trial.Parameters["server_defaults"]!["repeat_last_n"]!.GetValue<int>());
+        Assert.Contains("Outcome: passes the checks.", trial.Describe(), StringComparison.Ordinal);
+        Assert.Equal(before.Count, (await AttemptsAsync(task)).Count);
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
+
+        var unreachable = await Assert.ThrowsAsync<StepFailedException>(() =>
+            new AnalysisWorker(catalog, SettingsWith(), [kind], endpoint, options: Fast)
+                .TrialAsync(task, "visit-3", new Dictionary<string, double>(), Token));
+        Assert.Equal("Step visit-2 has no accepted attempt in this task, so the trial cannot reach step visit-3.", unreachable.Message);
     }
 
     [Fact]
@@ -638,7 +726,8 @@ public sealed class HttpModelEndpointTests
     private static async Task<(string Method, string Path, string Body, string? Authorization)> ServeOnceAsync(
         HttpListener listener,
         int status,
-        string answer)
+        string answer,
+        string contentType = "application/json")
     {
         var context = await listener.GetContextAsync();
         using var reader = new StreamReader(context.Request.InputStream, Encoding.UTF8);
@@ -646,7 +735,7 @@ public sealed class HttpModelEndpointTests
         var seen = (context.Request.HttpMethod, context.Request.Url!.PathAndQuery, body, context.Request.Headers["Authorization"]);
         context.Response.StatusCode = status;
         var bytes = Encoding.UTF8.GetBytes(answer);
-        context.Response.ContentType = "application/json";
+        context.Response.ContentType = contentType;
         await context.Response.OutputStream.WriteAsync(bytes);
         context.Response.Close();
         return seen;
@@ -692,6 +781,98 @@ public sealed class HttpModelEndpointTests
         serving = ServeOnceAsync(listener, 200, "{\"build_info\": \"b11607-ff026f8c0\"}");
         Assert.Equal("b11607-ff026f8c0", await endpoint.ServerBuildAsync(profile, Token));
         Assert.Equal("/props?model=qwen&autoload=false", (await serving).Path);
+    }
+
+    private static ModelProfile Server(int port) =>
+        new(
+            "Server",
+            new Uri($"http://127.0.0.1:{port}"),
+            "qwen",
+            [ModelCapabilities.Text],
+            new ModelFile(null, null, null, null),
+            null,
+            GenerationSettings.Default,
+            null);
+
+    // A streamed answer as llama.cpp gives it: the deltas, the chunk with
+    // the finish reason, then the usage chunk with the timings.
+    private static string Stream(params string[] pieces)
+    {
+        var text = new StringBuilder();
+        foreach (var piece in pieces)
+        {
+            text.Append("data: ").Append(new System.Text.Json.Nodes.JsonObject
+            {
+                ["choices"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject
+                {
+                    ["index"] = 0,
+                    ["delta"] = new System.Text.Json.Nodes.JsonObject { ["content"] = piece }
+                })
+            }.ToJsonString()).Append("\n\n");
+        }
+
+        text.Append("data: {\"choices\": [ { \"index\": 0, \"delta\": {}, \"finish_reason\": \"stop\" } ]}\n\n");
+        text.Append("data: {\"choices\": [], \"usage\": { \"prompt_tokens\": 2965, \"completion_tokens\": 3 }, ");
+        text.Append("\"timings\": { \"prompt_ms\": 9000.5, \"predicted_ms\": 120.25 }}\n\n");
+        text.Append("data: [DONE]\n\n");
+        return text.ToString();
+    }
+
+    [Fact]
+    public async Task A_streamed_answer_is_read_whole_with_its_finish_reason_usage_and_timings()
+    {
+        var port = FreePort();
+        using var listener = new HttpListener();
+        listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+        listener.Start();
+        using var client = new HttpClient();
+        var endpoint = new HttpModelEndpoint(client, null);
+        var seen = new List<string>();
+
+        var serving = ServeOnceAsync(listener, 200, Stream("{\"descr", "iption\": ", "[]}"), "text/event-stream");
+        var response = await endpoint.CompleteAsync(Server(port), "{}", content => { seen.Add(content); return null; }, Token);
+        await serving;
+
+        Assert.Equal(new ModelResponse("{\"description\": []}", "stop", 2965, 3, 9000.5, 120.25), response);
+        Assert.Equal(["{\"descr", "{\"description\": ", "{\"description\": []}"], seen);
+    }
+
+    [Fact]
+    public async Task A_streamed_answer_is_stopped_where_the_watch_says()
+    {
+        var port = FreePort();
+        using var listener = new HttpListener();
+        listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+        listener.Start();
+        using var client = new HttpClient();
+        var endpoint = new HttpModelEndpoint(client, null);
+
+        var serving = ServeOnceAsync(listener, 200, Stream("one ", "two ", "three"), "text/event-stream");
+        var response = await endpoint.CompleteAsync(
+            Server(port), "{}", content => content.EndsWith("two ", StringComparison.Ordinal) ? "Stopped at two." : null, Token);
+        await serving;
+
+        Assert.Equal(new ModelResponse("one two ", null, null, null, null, null, "Stopped at two."), response);
+    }
+
+    [Fact]
+    public async Task The_server_default_sampling_settings_are_read_from_its_properties()
+    {
+        var port = FreePort();
+        using var listener = new HttpListener();
+        listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+        listener.Start();
+        using var client = new HttpClient();
+        var endpoint = new HttpModelEndpoint(client, null);
+
+        var serving = ServeOnceAsync(
+            listener,
+            200,
+            "{\"default_generation_settings\": { \"params\": { \"repeat_last_n\": 64, \"presence_penalty\": 0.0 } }, \"build_info\": \"b1\"}");
+        var defaults = await endpoint.ServerSamplingAsync(Server(port), Token);
+        Assert.Equal("/props?model=qwen&autoload=false", (await serving).Path);
+
+        Assert.Equal("{\"repeat_last_n\":64,\"presence_penalty\":0.0}", defaults!.ToJsonString());
     }
 
     [Fact]

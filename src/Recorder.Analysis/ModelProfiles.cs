@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -33,7 +34,28 @@ public sealed record GenerationSettings(
     long Seed,
     bool Thinking)
 {
+    // One empty instance, so settings without sampling options are equal.
+    // Declared first, since static fields are set in order.
+    private static readonly ImmutableSortedDictionary<string, double> NoSampling =
+        ImmutableSortedDictionary<string, double>.Empty.WithComparers(StringComparer.Ordinal);
+
     public static GenerationSettings Default { get; } = new(2048, 0, 1, false);
+
+    /// <summary>
+    /// The server's other sampling options, by the server's own names, such
+    /// as llama.cpp's <c>presence_penalty</c> and <c>repeat_last_n</c>,
+    /// sent with every request as given. Options not given take the
+    /// server's defaults, which are recorded with each attempt. See
+    /// docs/architecture/analysis-runner.md, "Sampling options".
+    /// </summary>
+    public ImmutableSortedDictionary<string, double> Sampling { get; init; } = NoSampling;
+
+    /// <summary>The request fields the worker sets itself, which sampling options may not.</summary>
+    public static readonly IReadOnlySet<string> ReservedFields = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "model", "messages", "temperature", "seed", "max_tokens", "stream", "stream_options",
+        "cache_prompt", "response_format", "chat_template_kwargs"
+    };
 }
 
 /// <summary>
@@ -351,6 +373,35 @@ public static class AnalysisSettingsFile
                 return null;
             }
 
+            if (generationObject["sampling"] is { } samplingNode)
+            {
+                if (samplingNode is not JsonObject sampling)
+                {
+                    problems.Add($"Profile \"{name}\" has sampling options that are not a list of names and numbers.");
+                    return null;
+                }
+
+                var options = ImmutableSortedDictionary.CreateBuilder<string, double>(StringComparer.Ordinal);
+                foreach (var (option, value) in sampling)
+                {
+                    if (GenerationSettings.ReservedFields.Contains(option))
+                    {
+                        problems.Add($"Profile \"{name}\" gives the sampling option \"{option}\", which the worker sets itself.");
+                        return null;
+                    }
+
+                    if (value?.GetValueKind() != JsonValueKind.Number)
+                    {
+                        problems.Add($"Profile \"{name}\" gives the sampling option \"{option}\" a value that is not a number.");
+                        return null;
+                    }
+
+                    options[option] = value.GetValue<double>();
+                }
+
+                generation = generation with { Sampling = options.ToImmutable() };
+            }
+
             if (generation.MaxTokens < 1 || generation.Temperature < 0)
             {
                 problems.Add($"Profile \"{name}\" needs maxTokens of at least 1 and a temperature of at least 0.");
@@ -367,6 +418,19 @@ public static class AnalysisSettingsFile
             local,
             generation,
             String(profile, "protectedApiKey"));
+    }
+
+    /// <summary>A profile's sampling options, as sent and recorded.</summary>
+    public static JsonObject GenerationSampling(GenerationSettings generation)
+    {
+        ArgumentNullException.ThrowIfNull(generation);
+        var sampling = new JsonObject();
+        foreach (var (option, value) in generation.Sampling)
+        {
+            sampling[option] = value;
+        }
+
+        return sampling;
     }
 
     private static string? String(JsonObject node, string name) =>
@@ -397,7 +461,8 @@ public static class AnalysisSettingsFile
                 ["maxTokens"] = profile.Generation.MaxTokens,
                 ["temperature"] = profile.Generation.Temperature,
                 ["seed"] = profile.Generation.Seed,
-                ["thinking"] = profile.Generation.Thinking
+                ["thinking"] = profile.Generation.Thinking,
+                ["sampling"] = GenerationSampling(profile.Generation)
             },
             ["hasApiKey"] = profile.ProtectedApiKey is not null
         };

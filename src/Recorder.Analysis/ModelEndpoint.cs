@@ -28,14 +28,19 @@ public sealed record ModelRequest(
     public string Capability => Images.Count > 0 ? ModelCapabilities.Image : ModelCapabilities.Text;
 }
 
-/// <summary>What the server answered.</summary>
+/// <summary>
+/// What the server answered. <see cref="StoppedBecause"/> is set where the
+/// worker stopped the answer as it arrived, saying why; the answer is then
+/// what had arrived, with no finish reason, token counts, or timings.
+/// </summary>
 public sealed record ModelResponse(
     string? Content,
     string? FinishReason,
     int? PromptTokens,
     int? CompletionTokens,
     double? PromptMilliseconds,
-    double? CompletionMilliseconds);
+    double? CompletionMilliseconds,
+    string? StoppedBecause = null);
 
 /// <summary>A failure reported by, or in reaching, a model server.</summary>
 public sealed class ModelEndpointException(string message, Exception? inner = null) : Exception(message, inner);
@@ -48,6 +53,25 @@ public sealed class ModelEndpointException(string message, Exception? inner = nu
 public interface IModelEndpoint
 {
     Task<ModelResponse> CompleteAsync(ModelProfile profile, string body, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Sends the request, giving the output to <paramref name="watch"/> as
+    /// it arrives; where the watch gives a reason, the answer is stopped
+    /// there. An endpoint that cannot watch its output gives it whole.
+    /// </summary>
+    Task<ModelResponse> CompleteAsync(
+        ModelProfile profile,
+        string body,
+        Func<string, string?>? watch,
+        CancellationToken cancellationToken) =>
+        CompleteAsync(profile, body, cancellationToken);
+
+    /// <summary>
+    /// The server's default sampling settings for the profile's model, as
+    /// it reports them, or null where it does not say.
+    /// </summary>
+    Task<JsonObject?> ServerSamplingAsync(ModelProfile profile, CancellationToken cancellationToken) =>
+        Task.FromResult<JsonObject?>(null);
 
     /// <summary>The server's build, or null where it does not say.</summary>
     Task<string?> ServerBuildAsync(ModelProfile profile, CancellationToken cancellationToken);
@@ -116,7 +140,10 @@ public static class ChatRequest
             ["temperature"] = profile.Generation.Temperature,
             ["seed"] = profile.Generation.Seed,
             ["max_tokens"] = profile.Generation.MaxTokens,
-            ["stream"] = false,
+            // Streamed, so that the worker can stop an answer that repeats
+            // itself (analysis-runner.md, "Sampling options").
+            ["stream"] = true,
+            ["stream_options"] = new JsonObject { ["include_usage"] = true },
             ["cache_prompt"] = false,
             ["response_format"] = new JsonObject
             {
@@ -127,6 +154,11 @@ public static class ChatRequest
         if (!profile.Generation.Thinking)
         {
             body["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false };
+        }
+
+        foreach (var (option, value) in profile.Generation.Sampling)
+        {
+            body[option] = value;
         }
 
         return body.ToJsonString();
@@ -144,6 +176,7 @@ public static class ChatRequest
             ["max_tokens"] = profile.Generation.MaxTokens,
             ["cache_prompt"] = false,
             ["thinking"] = profile.Generation.Thinking,
+            ["sampling"] = AnalysisSettingsFile.GenerationSampling(profile.Generation),
             ["sections"] = new JsonArray([.. request.Sections.Select(section => JsonValue.Create(section))]),
             ["images"] = request.Images.Count
         };
@@ -171,11 +204,23 @@ public sealed class HttpModelEndpoint(
     private readonly TimeSpan _loadTimeout = loadTimeout ?? DefaultLoadTimeout;
     private readonly TimeSpan _loadPoll = loadPoll ?? TimeSpan.FromSeconds(2);
 
-    public async Task<ModelResponse> CompleteAsync(ModelProfile profile, string body, CancellationToken cancellationToken)
+    public Task<ModelResponse> CompleteAsync(ModelProfile profile, string body, CancellationToken cancellationToken) =>
+        CompleteAsync(profile, body, null, cancellationToken);
+
+    public async Task<ModelResponse> CompleteAsync(
+        ModelProfile profile,
+        string body,
+        Func<string, string?>? watch,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(profile);
         using var response = await SendAsync(profile, HttpMethod.Post, "v1/chat/completions", body, cancellationToken)
             .ConfigureAwait(false);
+        if (response.IsSuccessStatusCode && response.Content.Headers.ContentType?.MediaType == "text/event-stream")
+        {
+            return await StreamedAsync(response, watch, cancellationToken).ConfigureAwait(false);
+        }
+
         var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
@@ -214,6 +259,115 @@ public sealed class HttpModelEndpoint(
         catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException or IndexOutOfRangeException)
         {
             throw new ModelEndpointException($"The model server's answer is not a chat completion: {Shorten(text)}", exception);
+        }
+    }
+
+    // A streamed answer: server-sent events, each "data: " and a chunk,
+    // ending with "data: [DONE]". The content is the chunks' deltas in
+    // order; the finish reason, usage, and timings come from the last
+    // chunks (llama.cpp's server-task.cpp).
+    private static async Task<ModelResponse> StreamedAsync(
+        HttpResponseMessage response,
+        Func<string, string?>? watch,
+        CancellationToken cancellationToken)
+    {
+        var content = new StringBuilder();
+        string? finish = null;
+        int? promptTokens = null, completionTokens = null;
+        double? promptMs = null, completionMs = null;
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+        {
+            if (!line.StartsWith("data:", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var data = line[5..].Trim();
+            if (data == "[DONE]")
+            {
+                break;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(data);
+                var root = document.RootElement;
+                if (root.TryGetProperty("error", out var error))
+                {
+                    throw new ModelEndpointException($"The model server reported an error: {Shorten(error.ToString())}");
+                }
+
+                var added = false;
+                if (root.TryGetProperty("choices", out var choices) && choices.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var choice in choices.EnumerateArray())
+                    {
+                        if (choice.TryGetProperty("delta", out var delta) &&
+                            delta.TryGetProperty("content", out var piece) && piece.ValueKind == JsonValueKind.String)
+                        {
+                            content.Append(piece.GetString());
+                            added = true;
+                        }
+
+                        if (choice.TryGetProperty("finish_reason", out var reason) && reason.ValueKind == JsonValueKind.String)
+                        {
+                            finish = reason.GetString();
+                        }
+                    }
+                }
+
+                if (root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
+                {
+                    promptTokens = Int(usage, "prompt_tokens");
+                    completionTokens = Int(usage, "completion_tokens");
+                }
+
+                if (root.TryGetProperty("timings", out var timings) && timings.ValueKind == JsonValueKind.Object)
+                {
+                    promptMs = Double(timings, "prompt_ms");
+                    completionMs = Double(timings, "predicted_ms");
+                }
+
+                if (added && watch?.Invoke(content.ToString()) is { } stop)
+                {
+                    // Closing the response stops the server generating.
+                    return new ModelResponse(content.ToString(), null, null, null, null, null, stop);
+                }
+            }
+            catch (JsonException exception)
+            {
+                throw new ModelEndpointException($"The model server's answer is not a streamed chat completion: {Shorten(data)}", exception);
+            }
+        }
+
+        return new ModelResponse(content.ToString(), finish, promptTokens, completionTokens, promptMs, completionMs);
+    }
+
+    public async Task<JsonObject?> ServerSamplingAsync(ModelProfile profile, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        try
+        {
+            using var response = await SendAsync(
+                profile,
+                HttpMethod.Get,
+                "props?model=" + Uri.EscapeDataString(profile.Model) + "&autoload=false",
+                null,
+                cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var root = JsonNode.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+            var settings = root?["default_generation_settings"];
+            return (settings?["params"] ?? settings) is JsonObject found ? (JsonObject)found.DeepClone() : null;
+        }
+        catch (Exception exception) when (exception is JsonException or HttpRequestException or ModelEndpointException)
+        {
+            return null;
         }
     }
 
@@ -394,7 +548,8 @@ public sealed class HttpModelEndpoint(
 
         try
         {
-            return await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            // Headers first, so that a streamed answer is read as it arrives.
+            return await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         }
         catch (HttpRequestException exception)
         {
