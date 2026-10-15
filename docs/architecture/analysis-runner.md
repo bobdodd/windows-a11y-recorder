@@ -858,7 +858,14 @@ cannot reach their looped steps:
   the loops back;
 - for each that loops, three answers at temperature 0.7, `top_p` 0.8,
   and `top_k` 20, at seeds 1, 2, and 3, and seed 1 again to show that
-  the same seed gives the same answer.
+  the same seed gives the same answer. These too have `presence_penalty`
+  0, as the loop had, so that what they show is the temperature's doing
+  and not the penalty's, which alone ended moment 10's loop in the trials
+  of 2026-10-14.
+
+The script `Run-LoopTrials.ps1` runs them in turn, each writing one file
+to `C:\Users\Public\Downloads\loop-trials`, and skips a trial whose
+file is there already, so that run again it carries on where it stopped.
 
 ## Decisions (2026-10-14)
 
