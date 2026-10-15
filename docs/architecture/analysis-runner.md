@@ -583,6 +583,13 @@ number of statements, the tokens and times, the settings sent with the
 server's defaults, and the answer as it arrived. Nothing is written to the
 catalog. It does not run while the worker is running.
 
+- **It may set the temperature and the seed:** `temperature=0.7` and
+  `seed=2`, for example, are sent in place of the profile's, and recorded
+  with the trial's settings; the other fields the worker sets itself are
+  refused as before. A task's own steps keep the profile's temperature and
+  seed. Added on 2026-10-15 so that answers sampled above temperature 0
+  can be tried before they are used to recover from a loop (owner, the
+  same day; see "Decisions (2026-10-15)", "Recovering from a loop").
 - **Its pictures are its own:** pictures the task's code takes for the
   trial, such as the tiles of recreated pages, are kept in the
   recording's folder under `analysis/trials/TASK-TIME/pages`, never in
@@ -797,6 +804,61 @@ reading the catalog every 3 seconds while a recording is open; a
 capability dialog showing when the current text was written and the
 earlier versions; and the player starting the worker when a task is
 queued, and when it opens with tasks still waiting.
+
+## Decisions (2026-10-15)
+
+### Recovering from a loop
+
+Agreed by the owner on 2026-10-15, to be tried before it is built. Until
+then, a step whose answer is caught in a loop fails, and running the task
+again sends the same request, which at temperature 0 gives the same loop.
+
+1. **Three answers are sampled above temperature 0, with fixed seeds.**
+   When a step's answer is stopped as a loop, the step is asked for three
+   more times, at seeds 1, 2, and 3, each recorded with its attempt.
+   llama.cpp takes a seed with each request
+   ([llama.cpp server](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)),
+   so the same request and seed should give the same answer on the same
+   machine and server build, and running the task again gives the same
+   three answers and the same vote; the trials are to show this. The
+   temperature starts from the model card's settings for its
+   non-thinking mode, `temperature=0.7`, `top_p=0.80`, `top_k=20`
+   ([Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)),
+   and is to be chosen from the trials: a higher temperature leaves a
+   loop more readily, and the answers agree less.
+2. **Two or more that are very close are an acceptable answer.** This
+   follows self-consistency, which samples several answers and keeps the
+   one most of them agree on
+   ([Wang et al.](https://arxiv.org/html/2203.11171v1)). Only an answer
+   that passes the checks and is not stopped as a loop has a vote. Answers
+   of many statements cannot be counted like a single final answer, and
+   the model is not asked to choose among them as in
+   ([Chen et al.](https://arxiv.org/abs/2311.17311)), since its choice could
+   fail as well. The answers are compared statement by statement: two
+   statements match when they are in the same section, cite the same
+   evidence, and share most of their word trigrams, the measure oh-my-pi
+   uses for near-copies
+   ([thinking-loop.ts](https://github.com/can1357/oh-my-pi/blob/6d8552d7/packages/ai/src/utils/thinking-loop.ts));
+   two answers are very close when most statements of each match one in
+   the other. The thresholds are to be chosen from the trials. Of answers
+   that are very close, the one that matches the others most is kept, the
+   lower seed first when they match equally.
+3. **Under two, the answer up to the loop is kept, and says so.** The
+   loop's first answer is kept up to where its copies began, with an
+   unknown saying that the answer was cut short by a loop and what it
+   would have said next is unknown; sections it did not reach are given
+   as unknown, and the report says that the step was cut short.
+
+The trials, on the target machine, with the run queued 2026-10-14 18:05:24,
+the one run with every step up to moment 10 accepted; the runs whose
+answers looped, at 10:43 and 11:47, came before the page steps, so a trial
+cannot reach their looped steps:
+
+- moments 9 and 10 at temperature 0 with `presence_penalty` 0, to bring
+  the loops back;
+- for each that loops, three answers at temperature 0.7, `top_p` 0.8,
+  and `top_k` 20, at seeds 1, 2, and 3, and seed 1 again to show that
+  the same seed gives the same answer.
 
 ## Decisions (2026-10-14)
 

@@ -501,8 +501,34 @@ public sealed class AnalysisWorker
 
         var given = StepProfile(task, request);
         var options = given.Generation.Sampling.ToBuilder();
+        var generation = given.Generation;
         foreach (var (option, value) in trial.Sampling)
         {
+            // A trial may set the temperature and the seed, so that answers
+            // sampled above temperature 0 can be tried before they are used
+            // (owner, 2026-10-15). A task's own steps keep its profile's.
+            if (option == "temperature")
+            {
+                if (value < 0)
+                {
+                    throw new StepFailedException("The temperature must be at least 0.");
+                }
+
+                generation = generation with { Temperature = value };
+                continue;
+            }
+
+            if (option == "seed")
+            {
+                if (value != Math.Floor(value))
+                {
+                    throw new StepFailedException("The seed must be a whole number.");
+                }
+
+                generation = generation with { Seed = (long)value };
+                continue;
+            }
+
             if (GenerationSettings.ReservedFields.Contains(option))
             {
                 throw new StepFailedException($"The sampling option \"{option}\" is one the worker sets itself.");
@@ -511,7 +537,7 @@ public sealed class AnalysisWorker
             options[option] = value;
         }
 
-        var profile = given with { Generation = given.Generation with { Sampling = options.ToImmutable() } };
+        var profile = given with { Generation = generation with { Sampling = options.ToImmutable() } };
         var body = ChatRequest.Build(profile, request);
 
         // The request as the task itself would send it, without the trial's

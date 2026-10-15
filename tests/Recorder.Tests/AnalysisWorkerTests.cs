@@ -415,6 +415,44 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
     }
 
     [Fact]
+    public async Task A_trial_may_set_the_temperature_and_the_seed_but_not_the_other_fields_the_worker_sets()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var endpoint = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(StandInEndpoint.Valid("E1")) };
+        var kind = new StandInKind("visit-1");
+
+        var trial = await new AnalysisWorker(catalog, SettingsWith(), [kind], endpoint, options: Fast)
+            .TrialAsync(task, "visit-1", new Dictionary<string, double> { ["temperature"] = 0.7, ["seed"] = 3, ["top_k"] = 20 }, Token);
+
+        Assert.Null(trial.Failure);
+        var body = Assert.Single(endpoint.Bodies);
+        using (var document = JsonDocument.Parse(body))
+        {
+            Assert.Equal(0.7, document.RootElement.GetProperty("temperature").GetDouble());
+            Assert.Equal(3, document.RootElement.GetProperty("seed").GetInt64());
+            Assert.Equal(20, document.RootElement.GetProperty("top_k").GetDouble());
+        }
+
+        Assert.Equal(0.7, trial.Parameters["temperature"]!.GetValue<double>());
+        Assert.Equal(3, trial.Parameters["seed"]!.GetValue<long>());
+        Assert.NotEqual(trial.RequestSha256, trial.SentSha256);
+
+        foreach (var (option, value, message) in new[]
+        {
+            ("seed", 1.5, "The seed must be a whole number."),
+            ("temperature", -1.0, "The temperature must be at least 0."),
+            ("max_tokens", 10.0, "The sampling option \"max_tokens\" is one the worker sets itself.")
+        })
+        {
+            var refused = await Assert.ThrowsAsync<StepFailedException>(() =>
+                new AnalysisWorker(catalog, SettingsWith(), [kind], endpoint, options: Fast)
+                    .TrialAsync(task, "visit-1", new Dictionary<string, double> { [option] = value }, Token));
+            Assert.Equal(message, refused.Message);
+        }
+    }
+
+    [Fact]
     public async Task Output_that_fails_its_citation_check_at_temperature_0_is_not_asked_for_again()
     {
         var catalog = await CatalogAsync();

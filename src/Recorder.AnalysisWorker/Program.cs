@@ -10,7 +10,8 @@ using Recorder.Database;
 
 // With --trial TASK STEP FILE [OPTION=VALUE ...], the worker instead tries
 // one step of a task that has run, with the sampling options given, and
-// writes what it gave to FILE; nothing is written to the catalog. See
+// writes what it gave to FILE; nothing is written to the catalog. The
+// options may include temperature and seed. See
 // docs/architecture/analysis-runner.md, "Trying a step with other sampling
 // options".
 (Guid Task, string Step, string File, Dictionary<string, double> Sampling)? trial = null;
