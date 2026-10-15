@@ -388,9 +388,12 @@ it:
   in tiles the height of its viewport from the top, the last cut at the
   page's foot, each at full size, through `Page.captureScreenshot` with a
   clip and `captureBeyondViewport`. The tiles are written to
-  `analysis\<task>\pages\visit-0001-moment-01-tile-01.png` upward, so
-  that an auditor can open them. The recreation's own folder, under the
-  worker's folder, is removed after each moment.
+  `analysis\<task>\pages\visit-0001-moment-01-tile-01.png` upward, and
+  from 2026-10-15 each is then kept in the store of unique images,
+  `analysis\images\<key>.png`, and removed from the task's folder (see
+  "Unique images across the recording"), so that an auditor can open
+  each picture from the evidence list. The recreation's own folder, under
+  the worker's folder, is removed after each moment.
 - **Where the page cannot be recreated,** as when Chromium is not found,
   the visit's document is not among the pages at the frame, or the
   recreation fails, the moment is described from its captured frame
@@ -808,6 +811,35 @@ tokens, at the others 554 to 1,043.
   report giving the understanding as the visit's page; and a task run
   again reusing every moment's steps.
 
+### The page so far at moment 10 (to be reworked, not settled)
+
+Task 01a1407c, a fresh run of the summary with vision on the cnib.ca
+recording on the target machine, 2026-10-15, build 3a11d5e, accepted 57
+steps and failed at `visit-0001-moment-10-page-so-far`: "The output
+stopped at the output limit of 8192 tokens." The page so far is written
+again whole at each moment, and its answers grew at every moment: 2,773,
+3,294, 3,729, 4,205, 4,998, 6,135, 6,209, 6,941, 7,534, and 8,192 output
+tokens. Counted with the model's own tokenizer, which gives the cut
+answer as exactly 8,192 tokens, the cut answer was:
+
+- 2,636 tokens (32%) of line breaks and indentation: the answer was
+  indented JSON over 905 lines, although the template asks for one line,
+  as were the answers of every other step of the run;
+- 2,333 tokens in 38 statements that repeat the recorder's own facts,
+  such as focus moves, scrolls, animations, and the comparison of tiles;
+- 3,223 tokens of the page's description with its evidence lists, which
+  grow by one reference at each moment for each statement that holds,
+  under decision 5 above.
+
+The answer never reached its "changes" section: the facts of the visit
+were being written into the "page" section instead. Ways offered were to
+hold the answer to JSON on one line through the answer's grammar, not to
+repeat the recorder's facts, and to have the model write only what is
+added, corrected, or removed, applied by the recorder. The owner's
+decision, the same day: "The change will be more radical, but it has to
+wait until after our current optimization of images" (see "Unique images
+across the recording").
+
 ### The recreated page at the recorded viewport and scroll
 
 The owner's decision, from a review of what the tiles are for.
@@ -845,9 +877,11 @@ The owner's decision, from a review of what the tiles are for.
    arise: at moment 10 the participant was scrolled into tiles 5 and 6,
    and both were the same files as at moment 1.
 
-### Unique images across the recording (agreed, not built)
+### Unique images across the recording (built)
 
-Agreed by the owner on 2026-10-15; not built. Most of a visit's model
+Agreed by the owner on 2026-10-15 and built the same day; not yet
+tested on the target machine. How it was built is under "As built",
+after the decisions. Most of a visit's model
 time is in describing tiles whose pictures are the same as tiles already
 described, and in real use a participant goes back to the same page
 more than once. In task 01a13fd9, the 20 requests for groups of tiles
@@ -954,7 +988,51 @@ moments where its pictures were those of moment 1.
   - **System test on the target machine:** Run again on the cnib.ca
     recording, checking on screen that the status line shows no tile
     step for group 2 after moment 1, and that "How this was made" in the
-    report lists 16 groups not sent.
+    report lists 16 groups not sent. The report is written only if the
+    run reaches its end; task 01a1407c failed at moment 10's page so far
+    ("The page so far at moment 10" above), so until that is reworked
+    the store and the index are checked in the recording's folder
+    instead.
+
+As built:
+
+- **The key** (`PngKey` in `ImageStore.cs`) reads the PNG itself, with
+  no other library: its chunks, its compressed data inflated, and each
+  row's filter undone, as the PNG specification gives them
+  ([PNG, third edition](https://www.w3.org/TR/png-3/)). Colour types 0,
+  2, 3, 4, and 6 are read, at every bit depth the specification allows
+  for each, with the palette and the transparency chunk. A picture of 16
+  bits a sample is keyed at 16 bits, so that no difference in the low
+  bits is lost, and so never has the key of an 8-bit picture. The colour
+  chunks counted are iCCP, by the profile decompressed, not its name or
+  its compression, and sRGB, gAMA, cHRM, and cICP as written. A PNG the
+  recorder cannot read, such as an interlaced one, is keyed by its bytes,
+  with a different prefix, so that it can only match the same file; the
+  index says which. The key was checked against PNGs written by another
+  library, Pillow 12.3.0, in each colour type, 1-bit gray and 4-bit
+  palette with transparency among them: each gave the key of the same
+  pixels written as 8-bit red, green, blue, and alpha.
+- **The store** is written to a temporary file and then moved into
+  place, so that a stopped run never leaves part of a picture under a
+  key. The tiles' bytes sent to the model are the stored file's, which
+  for the same pixels may be another run's file.
+- **The derived fact** that a tile is the same picture as an earlier
+  moment's is written in that tile's own entry in the evidence list,
+  citing the earlier tile, rather than as an entry of its own, so that
+  the evidence list's numbering is as it was. A new entry would number
+  every later entry one higher, so that every later step's request would
+  change and none could be reused on Run again. The combined request
+  says the same, naming both moments' tiles.
+- **The index** is `analysis\<task>\images.json`, written again whole
+  after each moment, so that it is there for a run that stops; a trial
+  writes its own, with its own store, beside its pictures.
+- **A trial** of a group's step that is not sent fails, saying which
+  group's answer it uses, as there is no request of the task's to try.
+- **The page so far** still compares tiles file by file (decision 4
+  above). With the store, two tiles with the same key are the same file,
+  so the comparison is that of the stored pictures. The page so far is to
+  be changed, more radically, after this work (owner, 2026-10-15), so it
+  was not changed here.
 
 ## Decisions (2026-10-14)
 

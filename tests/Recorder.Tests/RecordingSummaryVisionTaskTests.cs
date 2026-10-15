@@ -102,6 +102,121 @@ public sealed partial class RecordingSummaryTaskTests
         }
     }
 
+    // Recreates each moment's page from a plan: for each moment in turn,
+    // "-" for a page not recreated, or a letter for each tile's picture,
+    // each letter a picture of its own colour, with "@" and the viewport's
+    // height where it is not 925, such as "ABCDE" or "ABCDEF@900".
+    private sealed class PlannedPages(params string[] plan) : IMomentPages
+    {
+        private int _asked;
+
+        public async Task<RecreatedPage> RecreateAsync(Visit visit, Moment moment, string folder, string relativeFolder, string prefix, CancellationToken cancellationToken)
+        {
+            var step = plan[_asked++];
+            if (step == "-")
+            {
+                return RecreatedPage.Not("the plan has no page at this moment");
+            }
+
+            var parts = step.Split('@');
+            var viewport = parts.Length > 1 ? int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture) : 925;
+            var letters = parts[0];
+            Directory.CreateDirectory(folder);
+            var tiles = new List<PageTile>();
+            foreach (var (top, height) in RecordedMomentPages.Tiles(viewport * letters.Length, viewport))
+            {
+                var letter = (byte)letters[tiles.Count];
+                var name = $"{prefix}-tile-{tiles.Count + 1:D2}.png";
+                await File.WriteAllBytesAsync(Path.Combine(folder, name), TestPng.Rgba(1, 1, [letter, (byte)(255 - letter), 7, 255]), cancellationToken);
+                tiles.Add(new PageTile(tiles.Count + 1, top, height, 922, relativeFolder + "/" + name, Path.Combine(folder, name), 922, viewport));
+            }
+
+            return new RecreatedPage(tiles, 922, viewport * letters.Length, 0, 0, 922, viewport, 0, [], 0, true, null);
+        }
+    }
+
+    private async Task<IReadOnlyList<string>> TileStepsSentAsync(params string[] plan)
+    {
+        var (catalog, _, vision) = await QueueBothAsync();
+        var planned = new PlannedPages(plan);
+        await new AnalysisWorker(catalog, VisionSettings(), [new RecordingSummaryKind(), new RecordingSummaryVisionKind { Pages = (_, _) => planned }], VisionEndpoint(), options: Fast)
+            .RunUntilEmptyAsync(Token);
+        Assert.Equal((AnalysisTaskStates.Done, (string?)null), await StateAsync(vision));
+        var rows = await RowsAsync("SELECT step_key FROM analysis_attempts WHERE task_id = $1 AND step_key ~ '-page-[0-9]+$' ORDER BY started_utc", vision);
+        return [.. rows.Select(row => (string)row["step_key"]!)];
+    }
+
+    // A group of tiles is sent only where no group before it in the
+    // recording had the same pictures at the same places: recording-
+    // summary.md, "Unique images across the recording", decision 4. The
+    // test recording has two visits of two moments each; five tiles of 925
+    // are sent in groups of four and one.
+    [Fact]
+    public async Task A_group_the_same_pictures_as_at_the_moment_before_is_not_sent() =>
+        Assert.Equal(["visit-0001-moment-01-page-01", "visit-0001-moment-01-page-02"], await TileStepsSentAsync("ABCDE", "ABCDE", "-", "-"));
+
+    [Fact]
+    public async Task A_group_with_one_tile_different_is_sent() =>
+        Assert.Equal(["visit-0001-moment-01-page-01", "visit-0001-moment-01-page-02", "visit-0001-moment-02-page-01"],
+            await TileStepsSentAsync("ABCDE", "ABXDE", "-", "-"));
+
+    [Fact]
+    public async Task Content_moved_below_the_first_group_sends_the_second_group_only() =>
+        Assert.Equal(["visit-0001-moment-01-page-01", "visit-0001-moment-01-page-02", "visit-0001-moment-02-page-02"],
+            await TileStepsSentAsync("ABCDE", "ABCDX", "-", "-"));
+
+    [Fact]
+    public async Task A_group_the_same_as_at_a_moment_of_an_earlier_visit_with_other_pictures_between_is_not_sent() =>
+        Assert.Equal(["visit-0001-moment-01-page-01", "visit-0001-moment-01-page-02", "visit-0001-moment-02-page-01", "visit-0001-moment-02-page-02"],
+            await TileStepsSentAsync("ABCDE", "FGHIJ", "ABCDE", "-"));
+
+    [Fact]
+    public async Task A_group_the_same_as_before_a_moment_not_recreated_is_not_sent() =>
+        Assert.Equal(["visit-0001-moment-01-page-01", "visit-0001-moment-01-page-02"], await TileStepsSentAsync("ABCDE", "-", "ABCDE", "-"));
+
+    [Fact]
+    public async Task The_same_pictures_at_other_places_are_sent() =>
+        Assert.Equal(["visit-0001-moment-01-page-01", "visit-0001-moment-01-page-02", "visit-0001-moment-02-page-01", "visit-0001-moment-02-page-02"],
+            await TileStepsSentAsync("ABCDE", "ABCDE@900", "-", "-"));
+
+    // The integration test of the store: the same unchanging page at every
+    // moment of both visits, its tiles sent at the first moment only, each
+    // picture kept once, and a run again keeping no new picture.
+    [Fact]
+    public async Task The_same_page_at_every_moment_of_two_visits_is_sent_once_and_its_pictures_kept_once()
+    {
+        var (catalog, summary, vision) = await QueueBothAsync();
+        var endpoint = VisionEndpoint();
+        await new AnalysisWorker(catalog, VisionSettings(),
+                [new RecordingSummaryKind(), new RecordingSummaryVisionKind { Pages = (_, _) => new PlannedPages("ABCDE", "ABCDE", "ABCDE", "ABCDE") }], endpoint, options: Fast)
+            .RunUntilEmptyAsync(Token);
+        Assert.Equal((AnalysisTaskStates.Done, (string?)null), await StateAsync(vision));
+
+        Assert.Equal(2, endpoint.Bodies.Count(body => body.Contains("You describe part of a web page", StringComparison.Ordinal)));
+        var store = Path.Combine(_session, "analysis", "images");
+        var kept = Directory.GetFiles(store).ToDictionary(path => path, File.GetLastWriteTimeUtc);
+        Assert.Equal(5, kept.Count);
+        var report = Assert.Single(await catalog.ReportsAsync(vision, Token));
+        var text = await File.ReadAllTextAsync(Path.Combine(_session, report.RelativePath), Token);
+        Assert.Contains("6 groups of tiles were not sent", text, StringComparison.Ordinal);
+        Assert.Contains("visit 2 moment 2 group 2 (tile 5), the answer of group 2 at moment 1 of visit 1", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("moment-02-page-0", text, StringComparison.Ordinal);
+
+        var recording = (Guid)(await RowsAsync("SELECT recording_id FROM analysis_tasks WHERE task_id = $1", vision))[0]["recording_id"]!;
+        var again = await catalog.QueueTaskAsync(recording, RecordingSummaryVisionKind.Name, VisionVersion,
+            new Dictionary<string, string> { [ModelCapabilities.Text] = WithImages, [ModelCapabilities.Image] = WithImages },
+            afterTaskId: summary, sessionDirectory: _session, rerunOfTaskId: vision, cancellationToken: Token);
+        var once = VisionEndpoint();
+        await new AnalysisWorker(catalog, VisionSettings(),
+                [new RecordingSummaryKind(), new RecordingSummaryVisionKind { Pages = (_, _) => new PlannedPages("ABCDE", "ABCDE", "ABCDE", "ABCDE") }], once, options: Fast)
+            .RunUntilEmptyAsync(Token);
+
+        Assert.Equal((AnalysisTaskStates.Done, (string?)null), await StateAsync(again));
+        Assert.Empty(once.Bodies);
+        Assert.Equal(kept, Directory.GetFiles(store).ToDictionary(path => path, File.GetLastWriteTimeUtc));
+        Assert.Equal(20, ImageIndex.Read(Path.Combine(_session, "analysis", again.ToString("D"), "images.json")).Count);
+    }
+
     private async Task<(AnalysisCatalog Catalog, Guid Summary, Guid Vision)> QueueBothAsync(bool frames = true)
     {
         WriteRecording(frames);
@@ -149,7 +264,9 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Equal(
             [
                 "visit-0001-moment-01", "visit-0001-moment-01-page-01", "visit-0001-moment-01-page-02", "visit-0001-moment-01-described", "visit-0001-moment-01-page-so-far",
-                "visit-0001-moment-02", "visit-0001-moment-02-page-01", "visit-0001-moment-02-page-02", "visit-0001-moment-02-described", "visit-0001-moment-02-page-so-far",
+                // Moment 2's tiles are the same pictures at the same places
+                // as moment 1's, so its groups are not sent.
+                "visit-0001-moment-02", "visit-0001-moment-02-described", "visit-0001-moment-02-page-so-far",
                 "visit-0001", "visit-0002-moment-01", "visit-0002-moment-01-page-so-far", "visit-0002-moment-02", "visit-0002-moment-02-page-so-far", "visit-0002", "recording"
             ],
             attempts.Select(row => (string)row["step_key"]!));
@@ -160,17 +277,17 @@ public sealed partial class RecordingSummaryTaskTests
                 RecordingSummaryVisionKind.CombinedTemplate, RecordingSummaryVisionKind.PageSoFarTemplate, RecordingSummaryVisionKind.MomentTemplate
             ],
             attempts.Take(6).Select(row => (string)row["prompt_template"]!));
-        Assert.Equal(RecordingSummaryVisionKind.VisitTemplate, attempts[10]["prompt_template"]);
+        Assert.Equal(RecordingSummaryVisionKind.VisitTemplate, attempts[8]["prompt_template"]);
         Assert.Equal(RecordingSummaryVisionKind.RecordingTemplate, attempts[^1]["prompt_template"]);
 
         // Each frame's request carries its picture, and each group of tiles
         // as many tiles of 841 image tokens as fit 4,096: four, then one.
         var bodies = endpoint.Bodies.Skip(3).ToList();
-        Assert.Equal(17, bodies.Count);
+        Assert.Equal(15, bodies.Count);
         var picture = "data:image/png;base64," + Convert.ToBase64String(FramePicture);
         int Pictures(string body) => (body.Length - body.Replace(picture, "", StringComparison.Ordinal).Length) / picture.Length;
-        Assert.Equal([1, 4, 1, 0, 0, 1, 4, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0], bodies.Select(Pictures));
-        foreach (var index in new[] { 0, 5, 11, 13 })
+        Assert.Equal([1, 4, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0], bodies.Select(Pictures));
+        foreach (var index in new[] { 0, 5, 9, 11 })
         {
             var reference = PictureReference().Match(Input(bodies[index])).Groups[1].Value;
             Assert.Contains($"Picture {reference}:", bodies[index], StringComparison.Ordinal);
@@ -205,17 +322,29 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Contains("This moment as a model described it from its captured frame and its recreated page. These are inferences, not facts:", firstSoFar, StringComparison.Ordinal);
         Assert.Contains("(page, inferred) A statement about page.", firstSoFar, StringComparison.Ordinal);
         Assert.DoesNotContain("image_url", bodies[4], StringComparison.Ordinal);
-        var secondSoFar = Input(bodies[9]);
+        var secondSoFar = Input(bodies[7]);
         Assert.Contains("The understanding of the page so far, as a model wrote it after moment 1, at 00:00:02.500. These are inferences, not facts:", secondSoFar, StringComparison.Ordinal);
         Assert.Contains("(changes, inferred) A statement about changes.", secondSoFar, StringComparison.Ordinal);
         Assert.Matches(@"Compared by the recorder, file by file, with the tiles of the page as rebuilt at moment 1, at 00:00:02\.500, when the page was 922 by 4625 CSS pixels; it is 922 by 4625 now\. " +
             @"The same file, byte for byte, as the tile at the same place then, so that part of the recreated page did not change: tile 1 \[E\d+\], as tile 1 \[E\d+\] then; .*tile 5 \[E\d+\], as tile 5 \[E\d+\] then\.", secondSoFar);
-        Assert.Contains("The page was not recreated at this moment, because the visit's page is not among the pages recorded at the frame", Input(bodies[12]), StringComparison.Ordinal);
-        Assert.DoesNotContain("Compared by the recorder", Input(bodies[12]), StringComparison.Ordinal);
+        Assert.Contains("The page was not recreated at this moment, because the visit's page is not among the pages recorded at the frame", Input(bodies[10]), StringComparison.Ordinal);
+        Assert.DoesNotContain("Compared by the recorder", Input(bodies[10]), StringComparison.Ordinal);
+
+        // Moment 2's combined request is given moment 1's descriptions of
+        // the same pictures, saying when they were written, with moment 1's
+        // tiles to cite, and its own part on the screen.
+        var reused = Input(bodies[6]);
+        Assert.Matches(@"The recreated page at tile 1 \[E\d+\], CSS pixels 0 to 925, .*tile 4 \[E\d+\], CSS pixels 2775 to 3700: derived by the recorder, the same pictures, pixel for pixel, at the same places, as tile 1 \[E\d+\], .*tile 4 \[E\d+\] of the page as rebuilt at moment 1 of visit 1, at 00:00:02\.500\. " +
+            @"So they were not sent again, and this is the description a model wrote of them at that moment, citing that moment's tiles; what it says was on the screen is of that moment\.", reused);
+        Assert.Contains("The recreated page at tile 5 [", reused, StringComparison.Ordinal);
+        Assert.Contains("so the part on the screen was CSS pixels 1850 to 2775:", reused, StringComparison.Ordinal);
+        var momentOneTiles = Regex.Matches(Input(bodies[3]), @"tile \d \[(E\d+)\]").Select(match => match.Groups[1].Value).Distinct().ToList();
+        Assert.Equal(5, momentOneTiles.Count);
+        Assert.All(momentOneTiles, reference => Assert.Contains(reference, (string[])attempts[6]["input_references"]!));
 
         // The visit is given the page as understood after its last moment,
         // and each moment's screen and change, not its page again.
-        var visit = Input(bodies[10]);
+        var visit = Input(bodies[8]);
         Assert.Contains("The visit as a model described it from the recorder's facts alone. These are inferences, not facts:", visit, StringComparison.Ordinal);
         Assert.Contains("The page through the visit as a model understood it, moment by moment, after the last moment, 2. These are inferences, not facts:", visit, StringComparison.Ordinal);
         Assert.Contains("(changes, inferred) A statement about changes.", visit, StringComparison.Ordinal);
@@ -225,7 +354,7 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.DoesNotContain("(page, inferred)", moments, StringComparison.Ordinal);
         Assert.Contains(", the recreated page in tiles [E", visit, StringComparison.Ordinal);
         Assert.Contains("The last captured frame before the visit ended.", visit, StringComparison.Ordinal);
-        Assert.Contains("the page not recreated because the visit's page is not among the pages recorded at the frame", Input(bodies[15]), StringComparison.Ordinal);
+        Assert.Contains("the page not recreated because the visit's page is not among the pages recorded at the frame", Input(bodies[13]), StringComparison.Ordinal);
 
         var report = Assert.Single(await catalog.ReportsAsync(vision, Token));
         Assert.Equal(RecordingSummaryVisionKind.FileName, report.FileName);
@@ -244,13 +373,33 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Matches(@"What changed: A statement about change\. \[E\d+\]", text);
         Assert.Contains("- Moment limits: no limit on the moments of a visit; moments less than 2 s apart merged; settled when the layout has not changed for 1 s, or 5 s after the visit starts; a large change is 50 elements or more at once.", text, StringComparison.Ordinal);
         Assert.Contains($"{RecordingSummaryVisionKind.MomentTemplate} version 3 for each moment's captured frame, {RecordingSummaryVisionKind.PageTemplate} version 4 for each group of its page's tiles, " +
-            $"{RecordingSummaryVisionKind.CombinedTemplate} version 4 for each moment's description from both, " +
+            $"{RecordingSummaryVisionKind.CombinedTemplate} version 5 for each moment's description from both, " +
             $"{RecordingSummaryVisionKind.PageSoFarTemplate} version 1 for the page as understood after each moment, {RecordingSummaryVisionKind.VisitTemplate} version 4 for each visit", text, StringComparison.Ordinal);
         Assert.Contains("each request holds as many tiles as fit 4096 image tokens", text, StringComparison.Ordinal);
         Assert.Contains("The captured frame at 00:00:02.500: the whole screen, 1920 by 1080 pixels, file frames/desktop/0000000001.png", text, StringComparison.Ordinal);
         Assert.Contains("part of it on the screen at the frame, file ", text, StringComparison.Ordinal);
-        Assert.Matches($@"Tile 3 of 5 of the page as the recorder rebuilt it .* file analysis/{vision:D}/pages/visit-0001-moment-01-tile-03\.png", text);
-        Assert.True(File.Exists(Path.Combine(_session, "analysis", vision.ToString("D"), "pages", "visit-0001-moment-02-tile-05.png")));
+        // Every tile is the same picture, kept once in the store, which the
+        // evidence list gives; the recreation's own files are removed.
+        var stored = Assert.Single(Directory.GetFiles(Path.Combine(_session, "analysis", "images")));
+        var key = Path.GetFileNameWithoutExtension(stored);
+        Assert.Equal(PngKey.Of(FramePicture).Key, key);
+        Assert.Matches($@"Tile 3 of 5 of the page as the recorder rebuilt it .* file analysis/images/{key}\.png", text);
+        Assert.False(Directory.Exists(Path.Combine(_session, "analysis", vision.ToString("D"), "pages")));
+        Assert.Matches(@"\| E\d+ \| [0-9:.]+ \| Tile 2 of 5 .*Derived by the recorder: the same picture, pixel for pixel, as tile 2 \[E\d+\] of the page as rebuilt at moment 1 of visit 1, at 00:00:02\.500", text);
+
+        // The task's index gives every tile of every moment recreated.
+        var entries = ImageIndex.Read(Path.Combine(_session, "analysis", vision.ToString("D"), "images.json"));
+        Assert.Equal(10, entries.Count);
+        Assert.Equal(new ImageIndexEntry(1, 1, 2_500_000_000L, "00:00:02.500", 1, 0, 925, 922, 922, 925, key, "pixels", $"analysis/images/{key}.png"), entries[0]);
+        Assert.Equal((1, 2, 3, 1850.0), (entries[7].Visit, entries[7].Moment, entries[7].Tile, entries[7].Top));
+        Assert.True(entries[7].FrameTime > entries[0].FrameTime);
+
+        // The report lists the groups not sent, with the answer each uses.
+        Assert.Contains(
+            "- Each tile's picture is kept once for the recording, in analysis/images, named by the SHA-256 of its size, its pixels, and its colour profile. " +
+            "2 groups of tiles were not sent, as their tiles were the same pictures, pixel for pixel, at the same places as a group already described, whose answer each uses unchanged: " +
+            "visit 1 moment 2 group 1 (tiles 1 to 4), the answer of group 1 at moment 1 of visit 1, at 00:00:02, step visit-0001-moment-01-page-01; " +
+            "visit 1 moment 2 group 2 (tile 5), the answer of group 2 at moment 1 of visit 1, at 00:00:02, step visit-0001-moment-01-page-02.\n", text, StringComparison.Ordinal);
         var read = ReportDocument.Parse(text);
         Assert.All(read.Blocks.SelectMany(block => block.References).Distinct(),
             reference => Assert.True(read.Evidence.ContainsKey(reference), reference));
@@ -353,7 +502,7 @@ public sealed partial class RecordingSummaryTaskTests
     [Fact]
     public void Every_template_shows_a_statement_with_its_text_before_its_kind()
     {
-        Assert.Equal((4, 3, 4, 3, 4, 4, 1), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+        Assert.Equal((4, 3, 4, 3, 5, 4, 1), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
             RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.TemplateVersion, RecordingSummaryVisionKind.CombinedTemplateVersion,
             RecordingSummaryVisionKind.VisitTemplateVersion, RecordingSummaryVisionKind.PageSoFarTemplateVersion));
         foreach (var instructions in new[]
@@ -403,7 +552,7 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.DoesNotContain(sent, body => body.Contains("Moment 1 of the visit", StringComparison.Ordinal) && body.Contains("Page visit 1,", StringComparison.Ordinal));
         var visitOne = await RowsAsync(
             "SELECT step_key, reused_from_attempt_id FROM analysis_attempts WHERE task_id = $1 AND step_key LIKE 'visit-0001-moment-%'", second);
-        Assert.Equal(10, visitOne.Count);
+        Assert.Equal(8, visitOne.Count);
         Assert.All(visitOne, row => Assert.NotNull(row["reused_from_attempt_id"]));
 
         var third = await catalog.QueueTaskAsync(recording, RecordingSummaryVisionKind.Name, VisionVersion, profiles,
@@ -444,7 +593,9 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Equal(AnalysisTaskStates.Done, (await StateAsync(vision)).State);
         var taskFolder = Path.Combine(_session, "analysis", vision.ToString("D"), "pages");
         Assert.All(pages.Folders, folder => Assert.Equal(taskFolder, folder));
-        var before = Directory.GetFiles(taskFolder).ToDictionary(path => path, File.GetLastWriteTimeUtc);
+        var store = Path.Combine(_session, "analysis", "images");
+        var index = Path.Combine(_session, "analysis", vision.ToString("D"), "images.json");
+        var before = Directory.GetFiles(store).Append(index).ToDictionary(path => path, File.GetLastWriteTimeUtc);
 
         var trialPages = new StandInPages();
         var trial = await new AnalysisWorker(catalog, VisionSettings(), [new RecordingSummaryKind(), new RecordingSummaryVisionKind { Pages = (_, _) => trialPages }], VisionEndpoint(), options: Fast)
@@ -456,13 +607,37 @@ public sealed partial class RecordingSummaryTaskTests
             Assert.StartsWith(Path.Combine(_session, "analysis", "trials", vision.ToString("D") + "-"), folder, StringComparison.Ordinal);
             Assert.EndsWith(Path.DirectorySeparatorChar + "pages", folder, StringComparison.Ordinal);
         });
-        Assert.Equal(before, Directory.GetFiles(taskFolder).ToDictionary(path => path, File.GetLastWriteTimeUtc));
+        Assert.Equal(before, Directory.GetFiles(store).Append(index).ToDictionary(path => path, File.GetLastWriteTimeUtc));
+        var trialFolder = Path.GetDirectoryName(trialPages.Folders[0])!;
+        Assert.Single(Directory.GetFiles(Path.Combine(trialFolder, "images")));
+        Assert.True(File.Exists(Path.Combine(trialFolder, "images.json")));
         Assert.Equal(trial.RequestSha256, trial.SentSha256);
         var attempt = Assert.Single(trial.TaskAttempts);
         Assert.Equal(trial.RequestSha256, attempt.InputSha256);
         var described = trial.Describe();
         Assert.Contains($"The task's attempt 1, accepted: SHA-256 {trial.RequestSha256}, the same request.", described, StringComparison.Ordinal);
         Assert.Contains("analysis/trials/" + vision.ToString("D") + "-", described, StringComparison.Ordinal);
+    }
+
+    // A group of tiles not sent at a moment has no request to try, so a
+    // trial of it says so (recording-summary.md, "Unique images across the
+    // recording").
+    [Fact]
+    public async Task Vision_trial_of_a_group_of_tiles_not_sent_says_whose_answer_it_uses()
+    {
+        var (catalog, _, vision) = await QueueBothAsync();
+        await RunAsync(catalog, VisionEndpoint());
+        Assert.Equal(AnalysisTaskStates.Done, (await StateAsync(vision)).State);
+
+        var pages = new StandInPages();
+        var failure = await Assert.ThrowsAsync<StepFailedException>(() =>
+            new AnalysisWorker(catalog, VisionSettings(), [new RecordingSummaryKind(), new RecordingSummaryVisionKind { Pages = (_, _) => pages }], VisionEndpoint(), options: Fast)
+                .TrialAsync(vision, "visit-0001-moment-02-page-01", new Dictionary<string, double>(), Token));
+
+        Assert.Equal(
+            "Step visit-0001-moment-02-page-01 is not sent in this task: its tiles are the same pictures at the same places as group 1 at moment 1 of visit 1, at 00:00:02.500, " +
+            "so that group's answer, step visit-0001-moment-01-page-01, is used.",
+            failure.Message);
     }
 
     [Fact]

@@ -592,8 +592,9 @@ catalog. It does not run while the worker is running.
   same day; see "Decisions (2026-10-15)", "Recovering from a loop").
 - **Its pictures are its own:** pictures the task's code takes for the
   trial, such as the tiles of recreated pages, are kept in the
-  recording's folder under `analysis/trials/TASK-TIME/pages`, never in
-  the task's own folder. Until 2026-10-14 a trial kept them in the task's
+  recording's folder under `analysis/trials/TASK-TIME`, with a store of
+  unique images and an index of its own, never in the task's own folder
+  or the recording's store. Until 2026-10-14 a trial kept them in the task's
   folder, and a trial on the target machine that day replaced the tiles
   that a run's descriptions had been written from (owner, the same day).
 - **It says whether it sends what the task sent:** the file gives the

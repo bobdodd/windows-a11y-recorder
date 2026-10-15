@@ -18,11 +18,31 @@ public sealed record MomentDescription(
     IReadOnlyList<string> ReasonReferences,
     AcceptedStep Step,
     RecreatedPage? Page = null,
-    IReadOnlyList<string>? TileReferences = null)
+    IReadOnlyList<string>? TileReferences = null,
+    IReadOnlyList<GroupNotSent>? NotSent = null)
 {
     /// <summary>Whether <see cref="Step"/> is the combined description, with its three sections.</summary>
     public bool Combined => Page is { Tiles.Count: > 0 };
 }
+
+/// <summary>
+/// A group of a moment's tiles not sent to the model, as its tiles are the
+/// same pictures at the same places as those of a group already described
+/// at an earlier moment of the recording, whose answer it uses unchanged:
+/// the group's number and tiles, and that group's visit, moment, frame
+/// time, number, and step (recording-summary.md, "Unique images across the
+/// recording", decisions 4, 5, and 9).
+/// </summary>
+public sealed record GroupNotSent(int Group, int FirstTile, int LastTile, int FromVisit, int FromMoment, long FromTime, int FromGroup, string FromStep);
+
+/// <summary>
+/// A group of tiles described: the moment whose request was sent, the
+/// group's number, step, tiles, and their references, and the answer.
+/// </summary>
+internal sealed record DescribedGroup(int Visit, int Moment, long Time, int Group, string StepKey, IReadOnlyList<PageTile> Tiles, IReadOnlyList<string> TileReferences, AcceptedStep Step);
+
+/// <summary>A group of a moment's tiles with its description, and the earlier group it was the same as, where it was not sent.</summary>
+internal sealed record PageGroupDescription(IReadOnlyList<PageTile> Tiles, AcceptedStep Step, DescribedGroup? Earlier = null);
 
 /// <summary>
 /// A visit's part of the vision stage: its moments as described, how many
@@ -32,7 +52,12 @@ public sealed record MomentDescription(
 public sealed record VisitVision(IReadOnlyList<MomentDescription> Moments, int MomentsLeftOut, AcceptedStep? PageSoFar = null);
 
 /// <summary>What the report adds for the vision stage.</summary>
-public sealed record VisionReportParts(IReadOnlyDictionary<int, VisitVision> Visits, MomentLimits Limits, Guid SummaryTaskId, int ImageTokensPerRequest = RecordingSummaryVisionKind.DefaultImageTokensPerRequest);
+public sealed record VisionReportParts(
+    IReadOnlyDictionary<int, VisitVision> Visits,
+    MomentLimits Limits,
+    Guid SummaryTaskId,
+    int ImageTokensPerRequest = RecordingSummaryVisionKind.DefaultImageTokensPerRequest,
+    string ImagesFolder = "analysis/images");
 
 /// <summary>
 /// The recording summary's second stage: each visit's moments, chosen by
@@ -96,8 +121,17 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // steps' requests are unchanged and a run again can reuse them (agreed
     // with the owner, 2026-10-14; recording-summary.md, "Step 4b").
     // Version 4 puts the statement's fields in the order text, kind,
-    // evidence, as TemplateVersion above.
-    public const int CombinedTemplateVersion = 4;
+    // evidence, as TemplateVersion above. Version 5 says how to read a
+    // group's description written at an earlier moment, where the tiles
+    // were the same pictures (recording-summary.md, "Unique images across
+    // the recording", decision 6).
+    public const int CombinedTemplateVersion = 5;
+
+    /// <summary>How the combined template, from version 5, reads a description written at an earlier moment.</summary>
+    public const string EarlierDescription =
+        "A group of tiles may be described as a model described the same pictures at an earlier moment, where the recorder found them the same, pixel for pixel, at the same places: " +
+        "that description cites the earlier moment's tiles, which are the same pictures as this moment's, and what it says was on the screen is of that moment, not this one; " +
+        "take what was on the screen at this moment from the part on the screen given for this moment. ";
 
     /// <summary>What kind a statement of what is unknown is, said in the combined template from version 3.</summary>
     public const string UnknownIsUnknown =
@@ -256,7 +290,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "combining two descriptions of it into one. You are given why the recorder chose the moment, with its facts, each beginning with an evidence reference such as [E3]; " +
         "a model's description of the captured frame, a picture of the whole screen at the moment, with the picture's reference; " +
         "and a model's descriptions of the page as the recorder rebuilt it at the moment and pictured it whole in tiles, with each tile's reference; " +
-        "and what the recreation lacked. Both descriptions are inferences, not facts. " +
+        "and what the recreation lacked. Both descriptions are inferences, not facts. " + EarlierDescription +
         "The captured frame is the screen as recorded; the tiles are a recreation of the page, which may lack what the recording lacks, such as images. " +
         "Where the two disagree, say so, citing both, and do not settle it. " +
         "Combine the descriptions; do not copy them. State each thing once: where statements say the same thing, write one statement citing all their references. " +
@@ -405,6 +439,15 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
         var register = collation.Evidence;
         var parts = new Dictionary<int, VisitVision>();
+
+        // Each unique picture kept once for the recording, the task's index
+        // of its tiles' pictures, and each group of tiles described so far
+        // in the recording, by its tiles' places and keys
+        // (recording-summary.md, "Unique images across the recording").
+        var store = new ImageStore(session, context.ImagesFolder);
+        var index = new List<ImageIndexEntry>();
+        var indexFile = Path.Combine([session, .. context.ImageIndexFile.Split('/')]);
+        var groupsDescribed = new Dictionary<string, DescribedGroup>(StringComparer.Ordinal);
         var enhanced = new List<(VisitCollation Visit, AcceptedStep Step)>();
         var forRecording = new List<(VisitCollation Visit, AcceptedStep Step)>();
         foreach (var (visit, summary) in described)
@@ -441,6 +484,17 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                     visit.Visit, moment, Path.Combine([session, .. relativeFolder.Split('/')]), relativeFolder, key, cancellationToken).ConfigureAwait(false);
                 MomentDescription momentDescribed;
                 IReadOnlyList<string> hashes = [];
+                IReadOnlyList<StoredImage> images = [];
+                if (page.Tiles.Count > 0)
+                {
+                    (page, images) = await StoreTilesAsync(store, page, cancellationToken).ConfigureAwait(false);
+                    var tiles = page.Tiles;
+                    index.AddRange(tiles.Select((tile, at) => new ImageIndexEntry(
+                        visit.Visit.Number, moment.Number, frame.Time, ImageIndex.Clock(frame.Time), tile.Number, tile.Top, tile.Height, tile.Width,
+                        tile.PixelWidth, tile.PixelHeight, images[at].Key, images[at].Basis, images[at].Path)));
+                    await ImageIndex.WriteAsync(indexFile, index, cancellationToken).ConfigureAwait(false);
+                }
+
                 if (page.Tiles.Count == 0)
                 {
                     momentDescribed = new MomentDescription(moment, frameReference, reasonReferences, frameStep, page, []);
@@ -448,7 +502,8 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                 else
                 {
                     (momentDescribed, hashes) = await DescribePageAsync(
-                        context, collation, visit, moment, key, frameReference, reasonReferences, frameStep, page, cancellationToken).ConfigureAwait(false);
+                        context, collation, visit, moment, key, frameReference, reasonReferences, frameStep, page,
+                        [.. images.Select(image => image.Key)], groupsDescribed, cancellationToken).ConfigureAwait(false);
                 }
 
                 descriptions.Add(momentDescribed);
@@ -504,13 +559,81 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             attempts,
             Limits,
             DateTime.UtcNow,
-            new VisionReportParts(parts, Moments, summaryTask, ImageTokensPerRequest));
+            new VisionReportParts(parts, Moments, summaryTask, ImageTokensPerRequest, context.ImagesFolder));
         await RecordingSummaryKind.WriteReportAsync(context, session, FileName, report, cancellationToken).ConfigureAwait(false);
     }
 
-    // A moment's recreated page described in groups of tiles, then the
-    // frame's and the tiles' descriptions combined (decision 7), with each
-    // tile file's SHA-256.
+    // A recreated page's tiles kept in the store, each file the recreation
+    // wrote removed once its picture is kept, so that the evidence list and
+    // the requests give the store's file (decisions 1 and 3).
+    private static async Task<(RecreatedPage Page, IReadOnlyList<StoredImage> Images)> StoreTilesAsync(
+        ImageStore store, RecreatedPage page, CancellationToken cancellationToken)
+    {
+        var tiles = new List<PageTile>();
+        var images = new List<StoredImage>();
+        var folders = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var tile in page.Tiles)
+        {
+            var png = await ReadFileAsync(tile.AbsolutePath, "tile", cancellationToken).ConfigureAwait(false);
+            var image = await store.KeepAsync(png, cancellationToken).ConfigureAwait(false);
+            if (!string.Equals(Path.GetFullPath(tile.AbsolutePath), Path.GetFullPath(image.AbsolutePath), StringComparison.Ordinal))
+            {
+                Remove(tile.AbsolutePath);
+                if (Path.GetDirectoryName(tile.AbsolutePath) is { } folder)
+                {
+                    folders.Add(folder);
+                }
+            }
+
+            images.Add(image);
+            tiles.Add(tile with { Path = image.Path, AbsolutePath = image.AbsolutePath });
+        }
+
+        foreach (var folder in folders)
+        {
+            try
+            {
+                if (Directory.Exists(folder) && !Directory.EnumerateFileSystemEntries(folder).Any())
+                {
+                    Directory.Delete(folder);
+                }
+            }
+#pragma warning disable CA1031 // A folder the recreation wrote is left if it cannot be removed.
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+#pragma warning restore CA1031
+            {
+            }
+        }
+
+        return (page with { Tiles = tiles }, images);
+
+        static void Remove(string path)
+        {
+            try
+            {
+                File.Delete(path);
+            }
+#pragma warning disable CA1031 // A tile the recreation wrote is left if it cannot be removed; its picture is in the store.
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+#pragma warning restore CA1031
+            {
+            }
+        }
+    }
+
+    /// <summary>
+    /// A group of tiles as it is known across the recording: each tile's
+    /// place, size, and image key, in order (decision 4).
+    /// </summary>
+    internal static string GroupKey(IReadOnlyList<PageTile> group, IReadOnlyList<string> keys) =>
+        string.Join(';', group.Select(tile => string.Create(CultureInfo.InvariantCulture,
+            $"{tile.Top:R},{tile.Height:R},{tile.Width:R},{tile.PixelWidth},{tile.PixelHeight},{keys[tile.Number - 1]}")));
+
+    // A moment's recreated page described in groups of tiles, each group the
+    // same pictures at the same places as a group described at an earlier
+    // moment of the recording given that group's answer instead of being
+    // sent (decisions 4 and 5), then the frame's and the tiles'
+    // descriptions combined (decision 7), with each tile file's SHA-256.
     private async Task<(MomentDescription Described, IReadOnlyList<string> Hashes)> DescribePageAsync(
         AnalysisTaskContext context,
         RecordingCollation collation,
@@ -521,12 +644,36 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         IReadOnlyList<string> reasonReferences,
         AcceptedStep frameStep,
         RecreatedPage page,
+        IReadOnlyList<string> keys,
+        Dictionary<string, DescribedGroup> groupsDescribed,
         CancellationToken cancellationToken)
     {
         var frame = moment.Frame;
         var register = collation.Evidence;
+        var groups = TileGroups.Group(page.Tiles, ImageTokensPerRequest);
+        var earlier = groups.Select(group => groupsDescribed.GetValueOrDefault(GroupKey(group, keys))).ToList();
+
+        // The derived fact that a tile is the same picture as an earlier
+        // moment's is in the tile's own entry, citing the earlier tile, so
+        // that the evidence list's numbering, and so the requests of the
+        // steps after it, are as they were (decision 5).
+        var sameAs = new Dictionary<int, string>();
+        for (var index = 0; index < groups.Count; index++)
+        {
+            if (earlier[index] is not { } match)
+            {
+                continue;
+            }
+
+            for (var at = 0; at < groups[index].Count; at++)
+            {
+                sameAs[groups[index][at].Number] = string.Create(CultureInfo.InvariantCulture,
+                    $"Derived by the recorder: the same picture, pixel for pixel, as tile {match.Tiles[at].Number} [{match.TileReferences[at]}] of the page as rebuilt at moment {match.Moment} of visit {match.Visit}, at {SummaryCollator.Time(match.Time)}");
+            }
+        }
+
         var tileReferences = page.Tiles.Select(tile => register.Add(
-            frame.Time, TileText(moment, page, tile), null,
+            frame.Time, TileText(moment, page, tile) + (sameAs.TryGetValue(tile.Number, out var same) ? ". " + same : ""), null,
             $"tile:{frame.Time.ToString(CultureInfo.InvariantCulture)}:{tile.Number.ToString(CultureInfo.InvariantCulture)}")).ToList();
         var files = new Dictionary<int, byte[]>();
         foreach (var tile in page.Tiles)
@@ -534,11 +681,21 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             files[tile.Number] = await ReadFileAsync(tile.AbsolutePath, "tile", cancellationToken).ConfigureAwait(false);
         }
 
-        var groups = TileGroups.Group(page.Tiles, ImageTokensPerRequest);
-        var pageSteps = new List<(IReadOnlyList<PageTile> Tiles, AcceptedStep Step)>();
+        var pageSteps = new List<PageGroupDescription>();
+        var notSent = new List<GroupNotSent>();
         for (var index = 0; index < groups.Count; index++)
         {
             var group = groups[index];
+            var stepKey = $"{key}-page-{(index + 1).ToString("D2", CultureInfo.InvariantCulture)}";
+            if (earlier[index] is { } match)
+            {
+                context.StepNotSent(stepKey, string.Create(CultureInfo.InvariantCulture,
+                    $"its tiles are the same pictures at the same places as group {match.Group} at moment {match.Moment} of visit {match.Visit}, at {SummaryCollator.Time(match.Time)}, so that group's answer, step {match.StepKey}, is used."));
+                pageSteps.Add(new PageGroupDescription(group, match.Step, match));
+                notSent.Add(new GroupNotSent(index + 1, group[0].Number, group[^1].Number, match.Visit, match.Moment, match.Time, match.Group, match.StepKey));
+                continue;
+            }
+
             var (pageInput, pageReferences) = PageInput(collation, visit, moment, page, group, tileReferences, reasonReferences, index + 1, groups.Count);
             var images = new List<ModelImage>();
             foreach (var tile in group)
@@ -547,10 +704,12 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             }
 
             var pageStep = await context.RunStepAsync(
-                $"{key}-page-{(index + 1).ToString("D2", CultureInfo.InvariantCulture)}",
+                stepKey,
                 new ModelRequest(PageTemplate, PageTemplateVersion, PageInstructions, pageInput, images, PageSections, pageReferences),
                 cancellationToken).ConfigureAwait(false);
-            pageSteps.Add((group, pageStep));
+            pageSteps.Add(new PageGroupDescription(group, pageStep));
+            groupsDescribed.TryAdd(GroupKey(group, keys), new DescribedGroup(
+                visit.Visit.Number, moment.Number, frame.Time, index + 1, stepKey, group, [.. group.Select(tile => tileReferences[tile.Number - 1])], pageStep));
         }
 
         var (combinedInput, combinedReferences) = CombinedInput(collation, visit, moment, frameReference, reasonReferences, frameStep, page, tileReferences, pageSteps);
@@ -559,7 +718,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             new ModelRequest(CombinedTemplate, CombinedTemplateVersion, CombinedInstructions, combinedInput, [], CombinedSections, combinedReferences),
             cancellationToken).ConfigureAwait(false);
         return (
-            new MomentDescription(moment, frameReference, reasonReferences, combined, page, tileReferences),
+            new MomentDescription(moment, frameReference, reasonReferences, combined, page, tileReferences, notSent),
             [.. page.Tiles.Select(tile => Convert.ToHexString(SHA256.HashData(files[tile.Number])))]);
     }
 
@@ -576,10 +735,11 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     /// <summary>
     /// A tile of a recreated page as the evidence list gives it, with its
-    /// file. A model's request gives it without the file, as the file is in
-    /// the task's own folder and would make the request differ at every run
-    /// (owner, 2026-10-14; analysis-runner.md, "Reusing steps when run
-    /// again").
+    /// file in the store of unique images. A model's request gives it
+    /// without the file, as the file was in the task's own folder and would
+    /// have made the request differ at every run (owner, 2026-10-14;
+    /// analysis-runner.md, "Reusing steps when run again"), and the request
+    /// stays as it was.
     /// </summary>
     public static string TileText(Moment moment, RecreatedPage page, PageTile tile, bool withFile = true)
     {
@@ -685,7 +845,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         AcceptedStep frameStep,
         RecreatedPage page,
         IReadOnlyList<string> tileReferences,
-        IReadOnlyList<(IReadOnlyList<PageTile> Tiles, AcceptedStep Step)> pageSteps)
+        IReadOnlyList<PageGroupDescription> pageSteps)
     {
         var references = new HashSet<string>(RecordingSummaryKind.CapabilityReferences(collation), StringComparer.Ordinal) { frameReference };
         references.UnionWith(tileReferences);
@@ -718,7 +878,23 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         {
             var tiles = pageSteps[index].Tiles;
             var named = string.Join(", ", tiles.Select(tile => $"tile {tile.Number} [{tileReferences[tile.Number - 1]}], CSS pixels {tile.Top.ToString("0", CultureInfo.InvariantCulture)} to {(tile.Top + tile.Height).ToString("0", CultureInfo.InvariantCulture)}"));
-            input.Append(CultureInfo.InvariantCulture, $"\nThe recreated page as a model described it from {named}. These are inferences, not facts:\n");
+            if (pageSteps[index].Earlier is { } earlier)
+            {
+                // A group not sent: its tiles are the same pictures as an
+                // earlier moment's, whose description is given, citing that
+                // moment's tiles (decisions 5 and 6).
+                references.UnionWith(earlier.TileReferences);
+                var then = string.Join(", ", earlier.Tiles.Select((tile, at) => $"tile {tile.Number} [{earlier.TileReferences[at]}]"));
+                input.Append(CultureInfo.InvariantCulture,
+                    $"\nThe recreated page at {named}: derived by the recorder, the same pictures, pixel for pixel, at the same places, as {then} of the page as rebuilt at moment {earlier.Moment} of visit {earlier.Visit}, at {SummaryCollator.Time(earlier.Time)}. ")
+                    .Append(CultureInfo.InvariantCulture,
+                    $"So they were not sent again, and this is the description a model wrote of them at that moment, citing that moment's tiles; what it says was on the screen is of that moment. These are inferences, not facts:\n");
+            }
+            else
+            {
+                input.Append(CultureInfo.InvariantCulture, $"\nThe recreated page as a model described it from {named}. These are inferences, not facts:\n");
+            }
+
             RecordingSummaryKind.AppendClaims(input, given[index + 1], references);
         }
 

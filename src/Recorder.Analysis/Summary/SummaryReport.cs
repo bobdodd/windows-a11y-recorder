@@ -326,6 +326,21 @@ public static class SummaryReport
             builder.Append("Each moment's page is rebuilt at its frame in the instrumented Chromium without a window, and pictured whole in tiles the height of its viewport, each sent at full size; ");
             builder.Append(CultureInfo.InvariantCulture,
                 $"each request holds as many tiles as fit {vision.ImageTokensPerRequest} image tokens, counted as one token for each 32 by 32 pixels, and at least one.\n");
+
+            // The groups of tiles not sent, each with the answer it uses
+            // (recording-summary.md, "Unique images across the recording",
+            // decision 9).
+            var notSent = vision.Visits.OrderBy(pair => pair.Key).SelectMany(pair => pair.Value.Moments.SelectMany(moment =>
+                (moment.NotSent ?? []).Select(group => (Visit: pair.Key, Moment: moment.Moment.Number, Group: group)))).ToList();
+            builder.Append(CultureInfo.InvariantCulture,
+                $"- Each tile's picture is kept once for the recording, in {vision.ImagesFolder}, named by the SHA-256 of its size, its pixels, and its colour profile. ");
+            builder.Append(notSent.Count == 0
+                ? "No group of tiles was the same pictures at the same places as a group already described, so every group was sent.\n"
+                : string.Create(CultureInfo.InvariantCulture,
+                      $"{notSent.Count} {(notSent.Count == 1 ? "group of tiles was" : "groups of tiles were")} not sent, as their tiles were the same pictures, pixel for pixel, at the same places as a group already described, whose answer each uses unchanged: ") +
+                  string.Join("; ", notSent.Select(item => string.Create(CultureInfo.InvariantCulture,
+                      $"visit {item.Visit} moment {item.Moment} group {item.Group.Group} ({TileRange(item.Group.FirstTile, item.Group.LastTile)}), the answer of group {item.Group.FromGroup} at moment {item.Group.FromMoment} of visit {item.Group.FromVisit}, at {Clock(item.Group.FromTime)}, step {item.Group.FromStep}"))) +
+                  ".\n");
         }
         builder.Append(CultureInfo.InvariantCulture,
             $"- Collation limits: {limits.Landmarks} landmarks, {limits.Headings} headings, {limits.Fields} form fields, {limits.Buttons} buttons, " +
@@ -382,6 +397,9 @@ public static class SummaryReport
 
     /// <summary>A time as hours, minutes, and seconds.</summary>
     public static string Clock(long nanoseconds) => SummaryCollator.Time(nanoseconds)[..8];
+
+    private static string TileRange(int first, int last) =>
+        first == last ? string.Create(CultureInfo.InvariantCulture, $"tile {first}") : string.Create(CultureInfo.InvariantCulture, $"tiles {first} to {last}");
 
     private static string OneLine(string text) =>
         string.Join(' ', text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));

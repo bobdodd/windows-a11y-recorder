@@ -28,6 +28,9 @@ public sealed class AnalysisTaskContext
         _worker = worker;
         Task = task;
         PicturesFolder = picturesFolder ?? $"analysis/{task.TaskId:D}/pages";
+        var own = PicturesFolder[..PicturesFolder.LastIndexOf('/')];
+        ImagesFolder = picturesFolder is null ? "analysis/images" : own + "/images";
+        ImageIndexFile = own + "/images.json";
     }
 
     public AnalysisTask Task { get; }
@@ -39,6 +42,23 @@ public sealed class AnalysisTaskContext
     /// pictures a task's descriptions were written from (owner, 2026-10-14).
     /// </summary>
     public string PicturesFolder { get; }
+
+    /// <summary>
+    /// Where in the recording's folder the store of unique images is, with
+    /// forward slashes: one store for every task on the recording, or for a
+    /// trial a store of the trial's own, beside its pictures
+    /// (recording-summary.md, "Unique images across the recording").
+    /// </summary>
+    public string ImagesFolder { get; }
+
+    /// <summary>The task's index of the images of its tiles, beside its pictures' folder, with forward slashes.</summary>
+    public string ImageIndexFile { get; }
+
+    /// <summary>
+    /// Says that a step is not sent at this run, and why. A trial of that
+    /// step fails saying so, as there is no request of the task's to try.
+    /// </summary>
+    public void StepNotSent(string stepKey, string reason) => _worker.StepNotSent(stepKey, reason);
 
     public AnalysisCatalog Catalog => _worker.Catalog;
 
@@ -737,6 +757,14 @@ public sealed class AnalysisWorker
         }
 
         throw new StepFailedException($"The task ran to its end without a step {stepKey}.");
+    }
+
+    internal void StepNotSent(string stepKey, string reason)
+    {
+        if (_trial is { } trial && trial.StepKey == stepKey)
+        {
+            throw new StepFailedException($"Step {stepKey} is not sent in this task: {reason}");
+        }
     }
 
     private async Task<AcceptedStep> TrialStepAsync(
