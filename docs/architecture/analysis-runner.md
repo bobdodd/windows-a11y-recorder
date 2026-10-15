@@ -546,6 +546,17 @@ Built on 2026-10-14, after decision 4 below.
     ([Xu et al., 2022](https://arxiv.org/abs/2206.02369)); a restatement
     said once does not. The rule is vLLM's, counted in statements rather
     than tokens, with three copies, agreed by the owner on 2026-10-14.
+  - **Checked against every stored answer:** on 2026-10-14 the rule was
+    run over all 194 attempts in the target machine's catalog, 173
+    accepted, 19 failed, and 2 cancelled, as the worker would run it while
+    each answer arrived. It stopped two answers, both of which had run to
+    the output limit: moment 10's frame step of the 11:47 run, cycling
+    through 3 statements, stopped at statement 75 of 136, and moment 9's
+    of the 10:43 run, cycling through 10 statements, stopped at statement
+    81 of 127. It stopped no other answer. No other answer had even one
+    block of statements said twice in a row, so the closest any came to
+    the rule was one copy against the three that stop an answer (owner,
+    the same day).
   - **What it replaced:** until the first build of 2026-10-14 the answer
     was stopped at its first repeat; that run's description of moment 1's
     first tiles was stopped at its second "Below the description is a
