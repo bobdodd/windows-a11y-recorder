@@ -89,6 +89,9 @@ public sealed record AttemptEnd(
     IReadOnlyList<Claim> Claims);
 
 /// <summary>An attempt as a report describes it.</summary>
+/// <summary>One attempt at a step: its number, outcome, and request's SHA-256.</summary>
+public sealed record StepRequest(int AttemptNumber, string Outcome, string InputSha256);
+
 public sealed record AttemptRecord(
     string StepKey,
     int AttemptNumber,
@@ -536,6 +539,25 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             "failure = 'Its input changed, so the step ran again.' WHERE attempt_id = $1",
             cancellationToken,
             attemptId);
+
+    /// <summary>A task's attempts at a step: each one's number, outcome, and request's SHA-256, in order.</summary>
+    public Task<IReadOnlyList<StepRequest>> StepRequestsAsync(Guid taskId, string stepKey, CancellationToken cancellationToken) =>
+        UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT attempt_number, outcome, input_sha256 FROM analysis_attempts WHERE task_id = $1 AND step_key = $2 ORDER BY attempt_number",
+                connection);
+            command.Parameters.AddWithValue(taskId);
+            command.Parameters.AddWithValue(stepKey);
+            var requests = new List<StepRequest>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                requests.Add(new StepRequest(reader.GetInt32(0), reader.GetString(1), reader.GetString(2)));
+            }
+
+            return (IReadOnlyList<StepRequest>)requests;
+        }, cancellationToken);
 
     public Task<int> AttemptCountAsync(Guid taskId, string stepKey, CancellationToken cancellationToken) =>
         UseAsync(async connection =>

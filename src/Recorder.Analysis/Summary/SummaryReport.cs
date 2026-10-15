@@ -297,7 +297,7 @@ public static class SummaryReport
         {
             builder.Append(CultureInfo.InvariantCulture,
                 $"- Prompt templates: {RecordingSummaryVisionKind.MomentTemplate} version {RecordingSummaryVisionKind.MomentTemplateVersion} for each moment's captured frame, " +
-                $"{RecordingSummaryVisionKind.PageTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for each group of its page's tiles, " +
+                $"{RecordingSummaryVisionKind.PageTemplate} version {RecordingSummaryVisionKind.PageTemplateVersion} for each group of its page's tiles, " +
                 $"{RecordingSummaryVisionKind.CombinedTemplate} version {RecordingSummaryVisionKind.CombinedTemplateVersion} for each moment's description from both, " +
                 $"{RecordingSummaryVisionKind.VisitTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for each visit, " +
                 $"{RecordingSummaryVisionKind.RecordingTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for the whole recording.\n");

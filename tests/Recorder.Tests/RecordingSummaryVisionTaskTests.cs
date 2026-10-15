@@ -77,9 +77,12 @@ public sealed partial class RecordingSummaryTaskTests
     {
         public List<(int Visit, int Moment, string Prefix)> Asked { get; } = [];
 
+        public List<string> Folders { get; } = [];
+
         public async Task<RecreatedPage> RecreateAsync(Visit visit, Moment moment, string folder, string relativeFolder, string prefix, CancellationToken cancellationToken)
         {
             Asked.Add((visit.Number, moment.Number, prefix));
+            Folders.Add(folder);
             if (visit.Number != 1)
             {
                 return RecreatedPage.Not("the visit's page is not among the pages recorded at the frame");
@@ -213,7 +216,7 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Matches(@"On the screen: A statement about screen\. \[E\d+\]", text);
         Assert.Matches(@"What changed: A statement about change\. \[E\d+\]", text);
         Assert.Contains("- Moment limits: no limit on the moments of a visit; moments less than 2 s apart merged; settled when the layout has not changed for 1 s, or 5 s after the visit starts; a large change is 50 elements or more at once.", text, StringComparison.Ordinal);
-        Assert.Contains($"{RecordingSummaryVisionKind.MomentTemplate} version 3 for each moment's captured frame, {RecordingSummaryVisionKind.PageTemplate} version 3 for each group of its page's tiles, " +
+        Assert.Contains($"{RecordingSummaryVisionKind.MomentTemplate} version 3 for each moment's captured frame, {RecordingSummaryVisionKind.PageTemplate} version 4 for each group of its page's tiles, " +
             $"{RecordingSummaryVisionKind.CombinedTemplate} version 4 for each moment's description from both", text, StringComparison.Ordinal);
         Assert.Contains("each request holds as many tiles as fit 4096 image tokens", text, StringComparison.Ordinal);
         Assert.Contains("The captured frame at 00:00:02.500: the whole screen, 1920 by 1080 pixels, file frames/desktop/0000000001.png", text, StringComparison.Ordinal);
@@ -274,8 +277,8 @@ public sealed partial class RecordingSummaryTaskTests
     [Fact]
     public void Every_template_shows_a_statement_with_its_text_before_its_kind()
     {
-        Assert.Equal((4, 3, 3, 4), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
-            RecordingSummaryVisionKind.TemplateVersion, RecordingSummaryVisionKind.CombinedTemplateVersion));
+        Assert.Equal((4, 3, 4, 3, 4), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+            RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.TemplateVersion, RecordingSummaryVisionKind.CombinedTemplateVersion));
         foreach (var instructions in new[]
                  {
                      RecordingSummaryKind.VisitInstructions, RecordingSummaryKind.RecordingInstructions,
@@ -333,6 +336,55 @@ public sealed partial class RecordingSummaryTaskTests
 
         Assert.Equal((AnalysisTaskStates.Done, (string?)null), await StateAsync(third));
         Assert.Empty(once.Bodies);
+    }
+
+    // Version 4 of the page template only: each statement says which of
+    // like items it is about (owner, 2026-10-14).
+    [Fact]
+    public void The_page_template_asks_that_each_statement_name_the_item_it_is_about()
+    {
+        Assert.Contains(RecordingSummaryVisionKind.ItemNamed, RecordingSummaryVisionKind.PageInstructions, StringComparison.Ordinal);
+        foreach (var instructions in new[]
+                 {
+                     RecordingSummaryVisionKind.MomentInstructions, RecordingSummaryVisionKind.CombinedInstructions,
+                     RecordingSummaryVisionKind.VisitInstructions, RecordingSummaryVisionKind.RecordingInstructions
+                 })
+        {
+            Assert.DoesNotContain(RecordingSummaryVisionKind.ItemNamed, instructions, StringComparison.Ordinal);
+        }
+    }
+
+    // A trial keeps the pictures it takes in a folder of its own, never in
+    // the task's, and says whether it sends the request the task sent
+    // (owner, 2026-10-14, after a trial replaced a run's tiles).
+    [Fact]
+    public async Task Vision_trial_keeps_its_pictures_apart_from_the_tasks_and_says_whether_its_request_is_the_tasks()
+    {
+        var (catalog, _, vision) = await QueueBothAsync();
+        var pages = new StandInPages();
+        await RunAsync(catalog, VisionEndpoint(), pages);
+        Assert.Equal(AnalysisTaskStates.Done, (await StateAsync(vision)).State);
+        var taskFolder = Path.Combine(_session, "analysis", vision.ToString("D"), "pages");
+        Assert.All(pages.Folders, folder => Assert.Equal(taskFolder, folder));
+        var before = Directory.GetFiles(taskFolder).ToDictionary(path => path, File.GetLastWriteTimeUtc);
+
+        var trialPages = new StandInPages();
+        var trial = await new AnalysisWorker(catalog, VisionSettings(), [new RecordingSummaryKind(), new RecordingSummaryVisionKind { Pages = (_, _) => trialPages }], VisionEndpoint(), options: Fast)
+            .TrialAsync(vision, "visit-0001-moment-02-described", new Dictionary<string, double>(), Token);
+
+        Assert.NotEmpty(trialPages.Folders);
+        Assert.All(trialPages.Folders, folder =>
+        {
+            Assert.StartsWith(Path.Combine(_session, "analysis", "trials", vision.ToString("D") + "-"), folder, StringComparison.Ordinal);
+            Assert.EndsWith(Path.DirectorySeparatorChar + "pages", folder, StringComparison.Ordinal);
+        });
+        Assert.Equal(before, Directory.GetFiles(taskFolder).ToDictionary(path => path, File.GetLastWriteTimeUtc));
+        Assert.Equal(trial.RequestSha256, trial.SentSha256);
+        var attempt = Assert.Single(trial.TaskAttempts);
+        Assert.Equal(trial.RequestSha256, attempt.InputSha256);
+        var described = trial.Describe();
+        Assert.Contains($"The task's attempt 1, accepted: SHA-256 {trial.RequestSha256}, the same request.", described, StringComparison.Ordinal);
+        Assert.Contains("analysis/trials/" + vision.ToString("D") + "-", described, StringComparison.Ordinal);
     }
 
     [Fact]

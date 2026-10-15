@@ -23,13 +23,22 @@ public sealed class AnalysisTaskContext
 {
     private readonly AnalysisWorker _worker;
 
-    internal AnalysisTaskContext(AnalysisWorker worker, AnalysisTask task)
+    internal AnalysisTaskContext(AnalysisWorker worker, AnalysisTask task, string? picturesFolder = null)
     {
         _worker = worker;
         Task = task;
+        PicturesFolder = picturesFolder ?? $"analysis/{task.TaskId:D}/pages";
     }
 
     public AnalysisTask Task { get; }
+
+    /// <summary>
+    /// Where in the recording's folder the task's code keeps the pictures it
+    /// takes, with forward slashes: the task's own folder, or for a trial a
+    /// folder of the trial's own, so that a trial never replaces the
+    /// pictures a task's descriptions were written from (owner, 2026-10-14).
+    /// </summary>
+    public string PicturesFolder { get; }
 
     public AnalysisCatalog Catalog => _worker.Catalog;
 
@@ -63,7 +72,7 @@ internal sealed class ModelSwitchNeededException(string profile) : Exception($"T
 
 internal sealed class StoppedForRecordingException() : Exception("A recording started.");
 
-internal sealed record TrialPlan(string StepKey, IReadOnlyDictionary<string, double> Sampling);
+internal sealed record TrialPlan(string StepKey, IReadOnlyDictionary<string, double> Sampling, string PicturesFolder);
 
 internal sealed class TrialFinishedException(StepTrial trial) : Exception("The trial step has run.")
 {
@@ -457,10 +466,11 @@ public sealed class AnalysisWorker
             throw new StepFailedException($"This worker cannot run version {task.KindVersion} of \"{task.Kind}\".");
         }
 
-        _trial = new TrialPlan(stepKey, sampling);
+        var pictures = $"analysis/trials/{task.TaskId:D}-{DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture)}/pages";
+        _trial = new TrialPlan(stepKey, sampling, pictures);
         try
         {
-            await kind.RunAsync(new AnalysisTaskContext(this, task), cancellationToken).ConfigureAwait(false);
+            await kind.RunAsync(new AnalysisTaskContext(this, task, pictures), cancellationToken).ConfigureAwait(false);
         }
         catch (TrialFinishedException finished)
         {
@@ -503,6 +513,12 @@ public sealed class AnalysisWorker
 
         var profile = given with { Generation = given.Generation with { Sampling = options.ToImmutable() } };
         var body = ChatRequest.Build(profile, request);
+
+        // The request as the task itself would send it, without the trial's
+        // options, beside the task's attempts at the step, so that the trial
+        // says whether it sends what the task sent (owner, 2026-10-14).
+        var asTask = ChatRequest.Sha256(ChatRequest.Build(given, request));
+        var attempts = await Catalog.StepRequestsAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false);
         await EnsureLoadedAsync(given, cancellationToken).ConfigureAwait(false);
         var build = await _endpoint.ServerBuildAsync(profile, cancellationToken).ConfigureAwait(false);
         var parameters = ChatRequest.Parameters(profile, request);
@@ -527,7 +543,13 @@ public sealed class AnalysisWorker
 
         clock.Stop();
         throw new TrialFinishedException(new StepTrial(
-            task.TaskId, task.Kind, stepKey, profile.Name, parameters, build, response, failure, watch.Statements, clock.Elapsed));
+            task.TaskId, task.Kind, stepKey, profile.Name, parameters, build, response, failure, watch.Statements, clock.Elapsed)
+        {
+            RequestSha256 = asTask,
+            SentSha256 = ChatRequest.Sha256(body),
+            TaskAttempts = attempts,
+            PicturesFolder = trial.PicturesFolder
+        });
     }
 
     /// <summary>Whether a profile's output is repeatable: the same request gives the same output.</summary>

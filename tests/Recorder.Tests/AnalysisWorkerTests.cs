@@ -340,7 +340,7 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
     {
         var catalog = await CatalogAsync();
         var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
-        var repeated = """{ "description": [ [ { "kind": "claim", "text": "A fact.", "evidence": ["E1"] }, { "kind": "claim", "text": "A fact.", "evidence": ["E1"] } ] ] }""";
+        var repeated = """{ "description": [ [ { "kind": "claim", "text": "A fact.", "evidence": ["E1"] }, { "kind": "claim", "text": "A fact.", "evidence": ["E1"] }, { "kind": "claim", "text": "A fact.", "evidence": ["E1"] } ] ] }""";
         var calls = 0;
         var endpoint = new StandInEndpoint
         {
@@ -352,7 +352,7 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Assert.Equal(1, calls);
         Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
         Assert.Equal(
-            "Step visit-1 failed: The model repeated statement 2 word for word from earlier in its answer, " +
+            "Step visit-1 failed: The model said statement 3 word for word for the third time in its answer, " +
             "so the answer was stopped there: \"A fact.\" " +
             "At temperature 0 the same request gives the same output, so it was not asked for again.",
             await FailureAsync(task));
@@ -397,6 +397,14 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Assert.Equal(1.5, trial.Parameters["sampling"]!["presence_penalty"]!.GetValue<double>());
         Assert.Equal(64, trial.Parameters["server_defaults"]!["repeat_last_n"]!.GetValue<int>());
         Assert.Contains("Outcome: passes the checks.", trial.Describe(), StringComparison.Ordinal);
+        // The trial says whether it sends the request the task sent: here
+        // with an option on top, and as the task would send it, the same as
+        // its failed attempt.
+        Assert.NotEqual(trial.RequestSha256, trial.SentSha256);
+        var failed = Assert.Single(trial.TaskAttempts);
+        Assert.Equal((1, AttemptOutcomes.Failed, trial.RequestSha256), (failed.AttemptNumber, failed.Outcome, failed.InputSha256));
+        Assert.Contains($"The task's attempt 1, failed: SHA-256 {trial.RequestSha256}, the same request.", trial.Describe(), StringComparison.Ordinal);
+        Assert.Contains($"The request the trial sent: SHA-256 {trial.SentSha256}, with the trial's options.", trial.Describe(), StringComparison.Ordinal);
         Assert.Equal(before.Count, (await AttemptsAsync(task)).Count);
         Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
 

@@ -488,6 +488,13 @@ it:
   tokens. The owner agreed the same day to raise the image profile's
   context to 32,768 tokens and to restart where it failed, reusing the
   moments' steps (the runner design's "Reusing steps when run again").
+- **Version 4 of the page template,** 2026-10-14: when several items are
+  alike, such as cards that each end with the same button, each statement
+  says which item it is about, by its heading, its label, or its place,
+  so that no two statements are the same word for word. A description of
+  moment 1's first tiles had been stopped at its second "Below the
+  description is a yellow button labeled Read more." (agreed with the
+  owner the same day). The other templates are unchanged.
 - **The report** lists under each moment its recreated page's size,
   scroll position, and tiles, marking those on the screen, and what the
   recreation lacked, then the three parts. "How this was made" gives the

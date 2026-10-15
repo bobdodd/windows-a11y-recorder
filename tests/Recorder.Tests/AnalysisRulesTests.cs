@@ -295,20 +295,30 @@ public sealed class AnalysisRulesTests
             AnalysisSettingsFile.Parse(Settings(text)).Problems);
     }
 
+    private static string Statements(params string[] texts) =>
+        "{ \"page\": [ [ " + string.Join(", ", texts.Select(text => $"{{ \"text\": {JsonSerializer.Serialize(text)}, \"kind\": \"claim\", \"evidence\": [\"E1\"] }}")) + " ] ] }";
+
+    // Since 2026-10-14 a statement said once again is let through, as two
+    // like things can be described in the same words; an answer is stopped
+    // at a statement said a third time, or at two repeats in a row.
     [Fact]
-    public void The_repeat_watch_stops_at_the_first_statement_said_again_word_for_word()
+    public void The_repeat_watch_lets_a_statement_said_once_again_through_and_stops_at_two_repeats_in_a_row()
     {
         var watch = new RepeatWatch();
-        Assert.Null(watch.Check("{ \"screen\": [ [ { \"kind\": \"claim\", \"text\": \"The page is open.\""));
-        Assert.Null(watch.Check("{ \"screen\": [ [ { \"kind\": \"claim\", \"text\": \"The page is open.\", \"evidence\": [\"E1\"] }, { \"kind\": \"claim\", \"text\": \"The page"));
-        var content = "{ \"screen\": [ [ { \"kind\": \"claim\", \"text\": \"The page is open.\", \"evidence\": [\"E1\"] }, " +
-            "{ \"kind\": \"claim\", \"text\": \"The page is \\\"open\\\".\", \"evidence\": [\"E1\"] }, " +
-            "{ \"kind\": \"unknown\", \"text\": \"\", \"evidence\": [] }, " +
-            "{ \"kind\": \"claim\", \"text\": \"The page is open.\"";
-        Assert.Equal(
-            "The model repeated statement 3 word for word from earlier in its answer, so the answer was stopped there: \"The page is open.\"",
-            watch.Check(content));
+        Assert.Null(watch.Check(Statements("The page is open.", "The page is \"open\".", "", "The page is open.")));
         Assert.Equal(3, watch.Statements);
+
+        var twice = new RepeatWatch();
+        Assert.Equal(
+            "The model repeated statements 3 and 4, one after the other, word for word from earlier in its answer, so the answer was stopped there: \"The page is \"open\".\"",
+            twice.Check(Statements("The page is open.", "The page is \"open\".", "", "The page is open.", "The page is \"open\".")));
+        Assert.Equal(4, twice.Statements);
+
+        var third = new RepeatWatch();
+        Assert.Equal(
+            "The model said statement 5 word for word for the third time in its answer, so the answer was stopped there: \"A button labeled Read more.\"",
+            third.Check(Statements("A button labeled Read more.", "A card.", "A button labeled Read more.", "Another card.", "A button labeled Read more.")));
+        Assert.Equal(5, third.Statements);
     }
 
     [Fact]

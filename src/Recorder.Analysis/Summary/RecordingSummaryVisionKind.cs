@@ -70,6 +70,19 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // (agreed with the owner; analysis-runner.md, decision 7).
     public const int TemplateVersion = 3;
 
+    // Version 4 of the page template, from the fourth run again on the
+    // target machine, 2026-10-14: a description of moment 1's first tiles
+    // was stopped at its second "Below the description is a yellow button
+    // labeled Read more.", true of each of several cards. Each statement now
+    // says which item it is about (agreed with the owner; recording-summary.md,
+    // "Step 4b"). The other templates are unchanged.
+    public const int PageTemplateVersion = 4;
+
+    /// <summary>Which item a statement is about, said in the page template from version 4.</summary>
+    public const string ItemNamed =
+        "When several items are alike, such as cards that each end with the same button, say in each statement which item it is about, " +
+        "by its heading, its label, or its place, so that no two statements are the same word for word. ";
+
     // Version 3 of the combined template, from the second run of step 4b on
     // the target machine, 2026-10-14: moments 1 to 8 were accepted, and
     // moment 9's combined description was refused for a statement that
@@ -203,6 +216,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Where they do not settle something, say that it is unknown; do not guess. " +
         "Never say what the participant saw, heard, or did from the tiles: they show the page, not the participant. " +
         "Do not list each control, link, or line of text. " +
+        ItemNamed +
         "Answer in JSON with one section: \"page\", what these tiles show of the page. " +
         "The section is a list of paragraphs, and each paragraph a list of statements. " +
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
@@ -364,9 +378,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                 // The page at the moment's frame, recreated and pictured
                 // whole, then described in groups of tiles, then the two
                 // descriptions combined (decision 7).
-                var relativeFolder = $"analysis/{task.TaskId:D}/pages";
+                var relativeFolder = context.PicturesFolder;
                 var page = await pages.RecreateAsync(
-                    visit.Visit, moment, Path.Combine(session, "analysis", task.TaskId.ToString("D"), "pages"), relativeFolder, key, cancellationToken).ConfigureAwait(false);
+                    visit.Visit, moment, Path.Combine([session, .. relativeFolder.Split('/')]), relativeFolder, key, cancellationToken).ConfigureAwait(false);
                 if (page.Tiles.Count == 0)
                 {
                     descriptions.Add(new MomentDescription(moment, frameReference, reasonReferences, frameStep, page, []));
@@ -391,7 +405,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
                     var pageStep = await context.RunStepAsync(
                         $"{key}-page-{(index + 1).ToString("D2", CultureInfo.InvariantCulture)}",
-                        new ModelRequest(PageTemplate, TemplateVersion, PageInstructions, pageInput, images, PageSections, pageReferences),
+                        new ModelRequest(PageTemplate, PageTemplateVersion, PageInstructions, pageInput, images, PageSections, pageReferences),
                         cancellationToken).ConfigureAwait(false);
                     pageSteps.Add((group, pageStep));
                 }

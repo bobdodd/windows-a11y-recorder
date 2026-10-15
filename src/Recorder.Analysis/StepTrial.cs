@@ -22,13 +22,50 @@ public sealed record StepTrial(
     int Statements,
     TimeSpan Elapsed)
 {
+    /// <summary>The SHA-256 of the step's request as the task itself would send it, without the trial's options.</summary>
+    public string? RequestSha256 { get; init; }
+
+    /// <summary>The SHA-256 of the request the trial sent.</summary>
+    public string? SentSha256 { get; init; }
+
+    /// <summary>The task's attempts at the step.</summary>
+    public IReadOnlyList<StepRequest> TaskAttempts { get; init; } = [];
+
+    /// <summary>Where the trial kept the pictures it took, in the recording's folder.</summary>
+    public string? PicturesFolder { get; init; }
+
     /// <summary>The trial as a text file for the owner to read.</summary>
     public string Describe()
     {
         var text = new StringBuilder();
         var indented = new JsonSerializerOptions { WriteIndented = true };
         text.Append(CultureInfo.InvariantCulture, $"Trial of step {StepKey} of task {TaskId} ({Kind}), with profile {Profile}.\n");
-        text.Append("Nothing was written to the catalog.\n\n");
+        text.Append("Nothing was written to the catalog.\n");
+        if (PicturesFolder is { } pictures)
+        {
+            text.Append("Pictures taken for the trial, if any, are in the recording's folder under ").Append(pictures).Append(", not in the task's.\n");
+        }
+
+        text.Append('\n');
+        if (RequestSha256 is { } asTask)
+        {
+            text.Append("The step's request as the task would send it, without the trial's options: SHA-256 ").Append(asTask).Append('\n');
+            text.Append("The request the trial sent: SHA-256 ").Append(SentSha256 ?? "not given")
+                .Append(SentSha256 == asTask ? ", the same.\n" : ", with the trial's options.\n");
+            if (TaskAttempts.Count == 0)
+            {
+                text.Append("The task has no attempt at this step.\n");
+            }
+
+            foreach (var attempt in TaskAttempts)
+            {
+                text.Append(CultureInfo.InvariantCulture, $"The task's attempt {attempt.AttemptNumber}, {attempt.Outcome}: SHA-256 {attempt.InputSha256}, ")
+                    .Append(attempt.InputSha256 == asTask ? "the same request.\n" : "not the same request.\n");
+            }
+
+            text.Append('\n');
+        }
+
         text.Append("Outcome: ").Append(Failure is null ? "passes the checks." : "fails: " + Failure).Append("\n");
         text.Append(CultureInfo.InvariantCulture, $"Statements: {Statements}\n");
         text.Append(CultureInfo.InvariantCulture, $"Time taken, as the worker measured it: {Elapsed.TotalSeconds:0.0} s\n");

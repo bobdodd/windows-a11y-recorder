@@ -508,11 +508,19 @@ Built on 2026-10-14, after decision 4 below.
   the content, finish reason, usage, and timings are read from the
   stream's chunks, as llama.cpp sends them
   ([server-task.cpp](https://raw.githubusercontent.com/ggml-org/llama.cpp/master/tools/server/server-task.cpp)).
-- **An answer that repeats a statement is stopped**: as the answer
-  arrives, each statement's text is compared with those before it, and at
-  the first that is the same word for word, the worker closes the request
-  and the attempt fails, saying which statement and its text. At
-  temperature 0 it is not asked for again, as for any refused output.
+- **An answer that repeats itself is stopped**: as the answer arrives,
+  each statement's text is compared with those before it, and the worker
+  closes the request and the attempt fails, saying which statement and
+  its text, at a statement the same word for word as earlier ones for the
+  third time, or at the second of two statements in a row that each
+  repeat an earlier one. A statement said once again is let through, as
+  two like things can be described in the same words. At temperature 0
+  it is not asked for again, as for any refused output. Until the fourth
+  run again on the target machine, 2026-10-14, the answer was stopped at
+  the first repeat; that run's description of moment 1's first tiles was
+  stopped at its second "Below the description is a yellow button labeled
+  Read more.", true of each of several cards, and at temperature 0 such an
+  answer could never pass (owner, the same day).
 
 ### Trying a step with other sampling options
 
@@ -527,6 +535,20 @@ and writes what it gave to FILE: the outcome and why it would fail, the
 number of statements, the tokens and times, the settings sent with the
 server's defaults, and the answer as it arrived. Nothing is written to the
 catalog. It does not run while the worker is running.
+
+- **Its pictures are its own:** pictures the task's code takes for the
+  trial, such as the tiles of recreated pages, are kept in the
+  recording's folder under `analysis/trials/TASK-TIME/pages`, never in
+  the task's own folder. Until 2026-10-14 a trial kept them in the task's
+  folder, and a trial on the target machine that day replaced the tiles
+  that a run's descriptions had been written from (owner, the same day).
+- **It says whether it sends what the task sent:** the file gives the
+  SHA-256 of the step's request as the task would send it, without the
+  trial's options, the SHA-256 of the request the trial sent, and each of
+  the task's attempts at the step with its request's SHA-256 and whether
+  it is the same request. On the target machine on 2026-10-14 a trial of a
+  step that had repeated a statement passed, and nothing showed whether
+  it had sent the same request (owner, the same day).
 
 - **Tests:** the sampling options read, sent, recorded, and refused; the
   repeat watch; a streamed answer read whole and stopped where the watch
@@ -626,6 +648,23 @@ attempts marks each one reused.
   same run then stopped at moment 8's combined description, which
   repeated a statement word for word; its first tile had not held the
   size, so the same request would fail again at temperature 0.
+- **The third run again, with build 974f1b4,** 2026-10-14, sent moment
+  1's first group of tiles again, and its answer was stopped at a second
+  "Below the description is a yellow button labeled Read more.", true of
+  each of several cards. The size had been painted in the second tile of
+  every earlier run as well, in the same place, so that tile was the same
+  file in every run, and the check for the size had looked at the first
+  tile only. Without DevTools, the second tile changed for every moment,
+  so every moment's first group of tiles is sent again once. The tiles of
+  moment 1 were the same, byte for byte, in a trial and in this run, both
+  without DevTools. The owner agreed the same day to four changes: the
+  page template asks that each statement say which of like items it is
+  about (recording-summary.md, "Step 4b"); the repeat watch stops an
+  answer only when it is repeating itself; a trial keeps its pictures in
+  a folder of its own; and a trial says whether it sends the request the
+  task sent. The page template's version is raised, but every first
+  group of tiles, and so every combined description, is sent again in
+  any case; the frames' steps are reused.
   The owner agreed the same day to three trials of that step alone, at
   temperature 0 and seed 1, on top of the profile's `presence_penalty`
   1.5: as it is, to show that the trial gives the same repeat;

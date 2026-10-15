@@ -177,11 +177,16 @@ public static class ClaimCheck
 }
 
 /// <summary>
-/// Watches an answer as it arrives, and stops it at the first statement
-/// whose text repeats an earlier one word for word (owner, 2026-10-14).
-/// A model can fall into repeating the same few statements until its
-/// output limit; this ends the attempt at the first repeat instead. See
-/// docs/architecture/analysis-runner.md, "Sampling options".
+/// Watches an answer as it arrives, and stops it once the model is
+/// repeating itself: at a statement said word for word a third time, or at
+/// the second of two statements in a row that each repeat an earlier one
+/// (owner, 2026-10-14). A model can fall into repeating the same few
+/// statements until its output limit; this ends the attempt early instead.
+/// A statement said once again is let through, since two like things, such
+/// as cards that each end with the same button, can each be described in
+/// the same words: on the target machine a description of a page's tiles
+/// was stopped at "Below the description is a yellow button labeled Read
+/// more." See docs/architecture/analysis-runner.md, "Sampling options".
 /// </summary>
 public sealed class RepeatWatch
 {
@@ -191,8 +196,9 @@ public sealed class RepeatWatch
         "\"text\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"",
         System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
-    private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> _seen = new(StringComparer.Ordinal);
     private int _scanned;
+    private bool _previousRepeated;
 
     /// <summary>The number of statements seen so far.</summary>
     public int Statements { get; private set; }
@@ -211,11 +217,21 @@ public sealed class RepeatWatch
             }
 
             Statements++;
-            if (!_seen.Add(text))
+            var times = _seen.TryGetValue(text, out var before) ? before + 1 : 1;
+            _seen[text] = times;
+            var number = Statements.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (times >= 3)
             {
-                return $"The model repeated statement {Statements.ToString(System.Globalization.CultureInfo.InvariantCulture)} " +
+                return $"The model said statement {number} word for word for the third time in its answer, so the answer was stopped there: \"{text}\"";
+            }
+
+            if (times == 2 && _previousRepeated)
+            {
+                return $"The model repeated statements {(Statements - 1).ToString(System.Globalization.CultureInfo.InvariantCulture)} and {number}, one after the other, " +
                     $"word for word from earlier in its answer, so the answer was stopped there: \"{text}\"";
             }
+
+            _previousRepeated = times == 2;
         }
 
         return null;
