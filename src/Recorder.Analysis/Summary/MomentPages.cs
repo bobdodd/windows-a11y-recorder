@@ -94,7 +94,7 @@ public sealed class RecordedMomentPages(
             var timings = new List<RecreationTiming>();
             var content = RecordedPageAtFrame.Content(documents, archive.BrowserPreferences, choice, time, RecreationCheck.FormatTime, timings, cancellationToken);
             await using var session = await RecreationSession.OpenAsync(
-                chromium, directory, content, cancellationToken, [RecreationCheck.WithoutWindowArgument], timings).ConfigureAwait(false);
+                chromium, directory, content, cancellationToken, [RecreationCheck.WithoutWindowArgument], timings, devTools: false).ConfigureAwait(false);
             var built = await session.WaitForBuildAsync(BuildTimeout, cancellationToken).ConfigureAwait(false);
             var info = await session.PageInfoAsync(cancellationToken).ConfigureAwait(false);
             if (info.ContentWidth <= 0 || info.ContentHeight <= 0 || info.ViewportHeight <= 0)

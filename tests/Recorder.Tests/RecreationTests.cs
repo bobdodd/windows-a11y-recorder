@@ -289,6 +289,21 @@ public sealed class RecreationTests : IDisposable
         Assert.DoesNotContain(arguments, argument => argument.StartsWith("--a11y-recorder-bootstrap", StringComparison.Ordinal));
     }
 
+    // The analysis's pictures are taken without DevTools, whose front end
+    // paints the viewport's size over the page after a resize (target
+    // machine, 2026-10-14); the player's recreation keeps it.
+    [Fact]
+    public void TheAnalysissRecreationBrowserOpensWithoutDevTools()
+    {
+        Assert.Contains("--auto-open-devtools-for-tabs", RecreationBrowser.CreateStartInfo("chrome.exe", "profile", "extension").ArgumentList);
+        var arguments = RecreationBrowser.CreateStartInfo("chrome.exe", "profile", "extension", ["--headless"], devTools: false).ArgumentList.ToArray();
+        Assert.DoesNotContain("--auto-open-devtools-for-tabs", arguments);
+        Assert.Contains("--headless", arguments);
+        Assert.Contains("--remote-debugging-port=0", arguments);
+        Assert.Contains("--a11y-recorder-recreation", arguments);
+        Assert.Equal("about:blank", arguments[^1]);
+    }
+
     [Fact]
     public void TheRecreationBrowsersLogIsKeptBesideItsDirectory()
     {

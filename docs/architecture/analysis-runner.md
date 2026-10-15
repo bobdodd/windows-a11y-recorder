@@ -605,6 +605,27 @@ attempts marks each one reused.
   be reused and the visit's request to be the same, byte for byte, and a
   run again once done to send nothing. With the old order it fails, with
   7 requests sent where 5 are expected.
+- **The second run again, with build 91a51a1,** 2026-10-14, reused
+  moments 1 to 5 whole and sent moment 6's first group of tiles again.
+  Only the first tile of a page differed between runs, and in it only its
+  top right corner, about 97 by 25 pixels: some pictures held the
+  viewport's size, "929px × 925px", painted over the page, and others did
+  not. The recreation browser opens DevTools for each tab, and the
+  DevTools front end turns on the viewport's size painted after each
+  resize
+  ([DevTools front end, OverlayModel.ts](https://raw.githubusercontent.com/ChromeDevTools/devtools-frontend/main/front_end/core/sdk/OverlayModel.ts)),
+  which fades on a timer, so whether a picture held it depended on timing.
+  Of the 10 first tiles of the run being run again, 3 held it; of the 8
+  of the run again, 1. The owner agreed the same day that the analysis's
+  recreation browser opens without DevTools; the player's recreation
+  keeps DevTools and its evidence panel. Nothing in the analysis uses
+  DevTools: the build is waited for and the pictures taken over the
+  browser's own DevTools protocol connection. A moment whose stored first
+  tile held the size is sent again once; whether DevTools changed anything
+  else in the pictures is unknown until two runs' files are compared. The
+  same run then stopped at moment 8's combined description, which
+  repeated a statement word for word; its first tile had not held the
+  size, so the same request would fail again at temperature 0.
 - **Tests:** integration tests with the catalog in a real PostgreSQL
   server and a stand-in endpoint: a step reused, with its answer and
   statements, and one run again because its request changed; nothing

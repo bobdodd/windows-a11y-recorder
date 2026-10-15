@@ -63,7 +63,8 @@ public sealed class RecreationSession : IAsyncDisposable
         RecreationContent content,
         CancellationToken cancellationToken,
         IEnumerable<string>? extraArguments = null,
-        IEnumerable<RecreationTiming>? earlierTimings = null)
+        IEnumerable<RecreationTiming>? earlierTimings = null,
+        bool devTools = true)
     {
         RecreationServer server;
         try
@@ -85,7 +86,7 @@ public sealed class RecreationSession : IAsyncDisposable
         try
         {
             var clock = System.Diagnostics.Stopwatch.StartNew();
-            browser = RecreationBrowser.Open(executablePath, directory, server, extraArguments, content.BrowserTheme);
+            browser = RecreationBrowser.Open(executablePath, directory, server, extraArguments, content.BrowserTheme, devTools);
             var address = await browser.DevToolsAddressAsync(cancellationToken);
             server.AddTiming("Starting the recreation browser, to its DevTools port", clock.Elapsed);
             clock.Restart();

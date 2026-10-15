@@ -421,7 +421,7 @@ public sealed class RecordedPageTests : IDisposable
         {
             Viewport = new RecreationViewport(1600, 925, 1, 1),
         };
-        await using var session = await RecreationSession.OpenAsync(chromium, Path.Combine(_directory, "tiles"), content, token, ["--headless"]);
+        await using var session = await RecreationSession.OpenAsync(chromium, Path.Combine(_directory, "tiles"), content, token, ["--headless"], devTools: false);
 
         Assert.True(await session.WaitForBuildAsync(TimeSpan.FromSeconds(60), token));
         var info = await session.PageInfoAsync(token);

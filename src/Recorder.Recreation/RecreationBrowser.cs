@@ -208,7 +208,8 @@ public sealed class RecreationBrowser : IAsyncDisposable
         string profileDirectory,
         string extensionDirectory,
         IEnumerable<string>? extraArguments = null,
-        string? logPath = null)
+        string? logPath = null,
+        bool devTools = true)
     {
         var result = new ProcessStartInfo
         {
@@ -223,7 +224,17 @@ public sealed class RecreationBrowser : IAsyncDisposable
         result.ArgumentList.Add("--disable-sync");
         result.ArgumentList.Add($"--disable-extensions-except={Path.GetFullPath(extensionDirectory)}");
         result.ArgumentList.Add($"--load-extension={Path.GetFullPath(extensionDirectory)}");
-        result.ArgumentList.Add("--auto-open-devtools-for-tabs");
+        // DevTools, with the evidence panel, opens for a person to inspect
+        // the recreation. The analysis's pictures are taken without it: its
+        // front end turns on the viewport's size painted over the page after
+        // each resize, which fades on a timer, so the first tile of a page
+        // held it in some runs and not in others, and a step run again was
+        // not the same (target machine, 2026-10-14; DevTools front end,
+        // https://raw.githubusercontent.com/ChromeDevTools/devtools-frontend/main/front_end/core/sdk/OverlayModel.ts).
+        if (devTools)
+        {
+            result.ArgumentList.Add("--auto-open-devtools-for-tabs");
+        }
         result.ArgumentList.Add("--new-window");
         // Port 0 lets the browser choose a free port, which it writes to the
         // profile. It listens on the loopback interface only.
@@ -258,7 +269,8 @@ public sealed class RecreationBrowser : IAsyncDisposable
         string directory,
         RecreationServer server,
         IEnumerable<string>? extraArguments = null,
-        IReadOnlyList<Recorder.Session.BrowserThemeValue>? theme = null)
+        IReadOnlyList<Recorder.Session.BrowserThemeValue>? theme = null,
+        bool devTools = true)
     {
         if (!File.Exists(executablePath))
         {
@@ -278,7 +290,7 @@ public sealed class RecreationBrowser : IAsyncDisposable
         WriteProfile(profile, theme);
         WriteExtension(extension, server.EvidenceAddress);
         var log = LogPathFor(directory);
-        var process = Process.Start(CreateStartInfo(executablePath, profile, extension, extraArguments, log))
+        var process = Process.Start(CreateStartInfo(executablePath, profile, extension, extraArguments, log, devTools))
             ?? throw new InvalidOperationException("The instrumented Chromium did not start.");
         return new RecreationBrowser(process, directory);
     }
