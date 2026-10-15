@@ -867,6 +867,40 @@ The script `Run-LoopTrials.ps1` runs them in turn, each writing one file
 to `C:\Users\Public\Downloads\loop-trials`, and skips a trial whose
 file is there already, so that run again it carries on where it stopped.
 
+The trials ran on the target machine on 2026-10-15, with server build
+b11607-ff026f8c0:
+
+| Trial | Outcome | Statements | Time |
+|---|---|---|---|
+| Moment 10, temperature 0, `presence_penalty` 0 | Stopped as a loop: statements 4 to 6 the same | 6 | 115.8 s |
+| Moment 9, temperature 0, `presence_penalty` 0 | Passes the checks; no loop | 10 | 77.7 s |
+| Moment 10, temperature 0.7, seed 1 | Passes the checks | 9 | 87.4 s |
+| Moment 10, temperature 0.7, seed 2 | Passes the checks | 8 | 91.9 s |
+| Moment 10, temperature 0.7, seed 3 | Passes the checks | 7 | 66.0 s |
+| Moment 10, temperature 0.7, seed 1 again | Passes the checks; the same answer as seed 1, byte for byte, from the same request | 9 | 71.4 s |
+
+- **The loop came back only at moment 10.** Moment 9 did not loop
+  without the penalty, so one loop, not two, was tried.
+- **Each of the three answers left the loop and passed the checks.**
+- **The same seed gave the same answer**, and the trial sent the same
+  request both times, so answers sampled at fixed seeds are repeatable
+  on this machine and server build.
+- **The three answers agree on the facts but not on their wording.**
+  Each says that the recorder's window is open with its timeline, that
+  NVDA's Speech Viewer is open listing windows, and that the moment is
+  the last captured frame before the visit ended; two of them give the
+  taskbar's time and date, 1:32 PM on 10/13/2026, and two that the
+  recorder was stopping the recording. They differ in what else they
+  mention, and none contradicts another. Of the statements of one answer
+  matched with those of another in the same section and with the same
+  evidence, all but one or two in each pair shared fewer than 0.25 of
+  their word trigrams, against the 0.8 of oh-my-pi's near-copies, and
+  the same fact told twice shared 0.19 to 0.64 of its words apart from
+  the commonest, while different facts shared 0.06 to 0.15. A measure of
+  shared wording therefore cannot say which answers are very close, and
+  decision 2's comparison is not built as written; the owner is to
+  choose how answers are compared, or whether they are.
+
 ## Decisions (2026-10-14)
 
 From the first run of the recording summary on the target machine, where
