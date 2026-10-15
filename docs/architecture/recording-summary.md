@@ -808,6 +808,91 @@ tokens, at the others 554 to 1,043.
   report giving the understanding as the visit's page; and a task run
   again reusing every moment's steps.
 
+### Identical tiles described once (proposed)
+
+Not built; for the owner's review. Most of a visit's model time is in
+describing tiles that are the same files as tiles already described. In
+task 01a13fd9, the 20 requests for groups of tiles took 35.2 of the 62
+minutes of model time, and the recorder's comparison of the tile files
+(decision 4 above) found:
+
+| Group | Tiles | The same files as an earlier moment's group |
+| --- | --- | --- |
+| 1 | 1 to 4 | At moments 2 and 3, as at moment 1; at moments 6 to 10, as at moment 4. New files at moments 4 and 5. |
+| 2 | 5 to 8 | At every moment from 2 to 10, as at moment 1. |
+
+So 16 of the 20 requests sent pictures already described, and took 27.7
+minutes. The four answers of about 10 tokens were all for group 2 at
+moments where its files were those of moment 1.
+
+1. **A group of tiles the same files as a group already described is not
+   sent again.** The same group means the same number of tiles, each at
+   the same place and size (top, height, width, and pixel size) and with
+   the same SHA-256 of its file. Files the same byte for byte are the
+   same pixels, so nothing in them, however small or far from the screen,
+   goes undescribed. Files that differ in their bytes but not in their
+   pixels are sent, so the rule can only describe a picture more often
+   than needed, never less.
+2. **The group's description is the earlier answer, unchanged.** It is
+   not written again, edited, or cited anew: it stays the model's answer
+   at the earlier moment, citing that moment's tiles. The recorder adds a
+   derived fact for the later moment: that its tiles are the same files
+   as the earlier moment's, citing both.
+3. **The earlier moment is the one, in the same visit, whose request
+   for those files was sent.** It need not be the moment just before: at
+   moment 6 above, group 1 is the same files as at moment 4, after being
+   different at moment 5, and moments 7 to 10 use moment 4's answer too.
+   A group is not matched across visits.
+4. **What depends on the moment comes from the recorder.** The tiles'
+   instructions ask whether each message was in the part on the screen,
+   which is true of the moment the answer was written for. The combined
+   step for the later moment is told that the group's description was
+   written at the earlier moment, with that moment's time, and is given
+   the part on the screen at its own moment from the recording, as it is
+   now. The tiles' template is unchanged, so its steps already accepted
+   are still reused on Run again.
+5. **Nothing else is skipped.** The captured frame, the combined step,
+   and the page so far run at every moment, as the frame shows the
+   screen at that moment, and what a moment brings that is new cannot be
+   known without them.
+6. **The report says which groups were not sent.** In "How this was
+   made", each group not sent is listed with the moment whose answer it
+   uses, and the attempts table has no row for it, as no request was
+   made.
+
+- **Templates:** the combined template's instructions say how to read a
+  description written at an earlier moment, so its version goes from 4
+  to 5, and each moment's combined step runs again once. The frame and
+  tile templates are unchanged.
+- **Estimated effect** on the cnib.ca recording: 4 tile requests instead
+  of 20, and about 28 fewer minutes of model time, an estimate from the
+  times in task 01a13fd9.
+- **Tests:**
+  - **Unit tests:** a group the same files as at the moment before, and
+    as at a moment before that with a different moment between; one tile
+    of the group a different file; a group the same files at another
+    place or size; the first moment of a visit; a moment whose page was
+    not recreated, between two that were; the same files in another
+    visit; the derived fact citing both moments' tiles; the combined
+    request given the earlier moment's time and its own part on the
+    screen; the report's list of groups not sent.
+  - **Integration test:** the vision task on a recording built by the
+    tests whose page does not change, with a stand-in endpoint that
+    counts requests: tile requests at the first moment only, and the
+    report listing the rest as not sent.
+  - **System test on the target machine:** Run again on the cnib.ca
+    recording, checking on screen that the status line shows no tile
+    step for group 2 after moment 1, and that "How this was made" in the
+    report lists 16 groups not sent.
+
+Questions for the owner:
+
+- Whether to match only the moment just before, as the comparison in
+  decision 4 does (5 requests of 20 instead of 4), or any earlier moment
+  of the visit, as proposed.
+- Whether to match across visits, for a page visited again; proposed
+  not, for now.
+
 ## Decisions (2026-10-14)
 
 1. **The recorder's own windows stay in "Other windows"**, and in the
