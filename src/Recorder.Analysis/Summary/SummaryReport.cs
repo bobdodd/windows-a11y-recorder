@@ -22,7 +22,8 @@ public static class SummaryReport
         ["session"] = "The session",
         ["journey"] = "The participant's journey",
         ["screen"] = "On the screen",
-        ["change"] = "What changed"
+        ["change"] = "What changed",
+        ["changes"] = "How the page changed"
     };
 
     public static string Write(
@@ -233,6 +234,20 @@ public static class SummaryReport
             }
             else
             {
+                // With vision, the visit's page is as understood moment by
+                // moment, and the visit's own description follows it.
+                if (vision is not null)
+                {
+                    if (vision.Visits.TryGetValue(visit.Visit.Number, out var seen) && seen.PageSoFar is { } soFar)
+                    {
+                        Claims(soFar, RecordingSummaryVisionKind.PageSoFarSections, "####");
+                    }
+                    else
+                    {
+                        builder.Append("#### The page\n\nNo captured frames were recorded during this visit, so its page was not understood from them.\n\n");
+                    }
+                }
+
                 Claims(described.Step, vision is null ? RecordingSummaryKind.VisitSections : RecordingSummaryVisionKind.VisitSections, "####");
             }
 
@@ -299,7 +314,8 @@ public static class SummaryReport
                 $"- Prompt templates: {RecordingSummaryVisionKind.MomentTemplate} version {RecordingSummaryVisionKind.MomentTemplateVersion} for each moment's captured frame, " +
                 $"{RecordingSummaryVisionKind.PageTemplate} version {RecordingSummaryVisionKind.PageTemplateVersion} for each group of its page's tiles, " +
                 $"{RecordingSummaryVisionKind.CombinedTemplate} version {RecordingSummaryVisionKind.CombinedTemplateVersion} for each moment's description from both, " +
-                $"{RecordingSummaryVisionKind.VisitTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for each visit, " +
+                $"{RecordingSummaryVisionKind.PageSoFarTemplate} version {RecordingSummaryVisionKind.PageSoFarTemplateVersion} for the page as understood after each moment, " +
+                $"{RecordingSummaryVisionKind.VisitTemplate} version {RecordingSummaryVisionKind.VisitTemplateVersion} for each visit, " +
                 $"{RecordingSummaryVisionKind.RecordingTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for the whole recording.\n");
             var moments = vision.Limits;
             builder.Append(CultureInfo.InvariantCulture,

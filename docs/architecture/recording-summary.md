@@ -661,9 +661,16 @@ From step 4b, each moment is several requests, then one for each visit
 - **The moment's description:** a text-only request is given the frame's
   and the tiles' descriptions, labelled inferred, and writes the moment's
   description, each statement citing the frame or tile it rests on.
+- **The page so far:** a text-only request is given the understanding of
+  the page after the moment before, none at the first moment; the
+  recorder's facts since the moment before; which tiles are the same
+  file as at the moment before; and the moment's description, labelled
+  inferred, and writes the understanding again, whole, as it stands after
+  this moment (decisions of 2026-10-15).
 - **Each visit:** a text-only request is given the visit's description from
-  the summary and its moments' descriptions, labelled inferred, and writes
-  the visit's enhanced description and its part of the journey.
+  the summary, the page as understood after its last moment, and each
+  moment's screen and change, labelled inferred, and writes what the page
+  is for, what the participant did, and the journey.
 
 Visual claims cite the frame or tile they rest on. The recording's overall description is
 then written again with the enhanced visit descriptions. The default
@@ -705,9 +712,10 @@ cited after it. Page visits are derived by the recorder.
 template versions, and each attempt's outcome)
 ```
 
-The summary with vision adds, under each visit, the participant's
-journey through its moments, with the frames and tiles used, and says
-which pictures are recreations.
+The summary with vision adds, under each visit, the page as understood
+through the visit and how it changed, the participant's journey through
+its moments, and each moment's description, with the frames and tiles
+used, and says which pictures are recreations.
 
 ## Required tests
 
@@ -729,6 +737,76 @@ which pictures are recreations.
   recording of 2026-10-13 with Qwen3.6-35B-A3B, checking on screen that
   both reports appear in the Analysis tab, open in the reading view, and
   move the playhead from a reference.
+
+## Decisions (2026-10-15)
+
+### The page understood moment by moment
+
+The owner's decisions, from the first run of the summary with vision to
+finish on the target machine (task 01a13fd9 on the cnib.ca recording of
+2026-10-13, every step accepted at its first attempt). Its visit's page
+section held four paragraphs, the last three copied word for word as
+its other three sections, and its session repeated the visit. The
+recreated page was the same file at most moments: of its 8 tiles, 5 were
+the same file at all 10 moments, one changed once, between moments 3 and
+4, and two differed at moment 5 only. Yet each moment described the
+whole page again, and the visit was given all 10 descriptions to
+summarise. Two descriptions of tiles that were the same file also
+disagreed: at four moments the description of tiles 5 to 8 was about 10
+tokens, at the others 554 to 1,043.
+
+1. **A visit's moments are of one page in time.** At the first moment
+   nothing is known of it; each later moment adds to and corrects what
+   is known, as content changes and moves and dialogs come and go
+   (owner).
+2. **Each moment's description stays as it was, clean and new.** The
+   moment's frame, tiles, and description are not given what earlier
+   moments found, so that each says what that moment's pictures show
+   (owner).
+3. **The page so far is a step of its own after each moment, text only.**
+   It is given the understanding after the moment before, the recorder's
+   facts since then, the recorder's comparison of the tiles, and the
+   moment's description, and writes the understanding again, whole, in
+   two sections: the page as understood after the moment, and what
+   appeared, went, moved, or changed, and when. It is not given the
+   pictures again (owner).
+4. **The recorder compares the tiles, file by file.** Each tile is
+   compared with the tile at the same place, of the same size, at the
+   last moment before whose page was recreated: the same file, byte for
+   byte, means that part of the recreated page did not change, so a
+   different description of it is a difference between descriptions, not
+   a change of the page. Where descriptions conflict, the understanding
+   says so, citing both, and does not settle it.
+5. **What the page itself repeats is not merged.** A page may be badly
+   written; where it has the same link, heading, or text more than once,
+   the understanding says so. Only descriptions of the same thing from
+   different moments are merged, into one statement citing the
+   references of all of them (owner).
+6. **The visit summary uses the understanding.** The visit is given the
+   understanding after its last moment and each moment's screen and
+   change, not each moment's page again, and writes what the page is
+   for, what the participant did, and the journey, each thing in the one
+   section it belongs to. The report gives the understanding as the
+   visit's page, then the visit's description, then each moment's
+   description. The visit's request no longer grows by the whole page at
+   each moment.
+7. **No check refuses an answer for repeating itself across sections**
+   (owner: the process is to be improved instead, and such a check may
+   refuse what is right).
+8. **The session is left as it is for now** (owner). It is given each
+   visit's understanding with its description, as it was given the
+   visit's page section before.
+
+- **Templates:** `recording-summary-vision-page-so-far` version 1, and
+  the visit template version 4. The frame, tile, and combined templates
+  are unchanged, so a task run again reuses those steps.
+- **Tests:** the page so far at the first moment, with no understanding
+  and no comparison, and at the next, given the first's; the comparison
+  of tiles the same file, a different file, and with no tile at the same
+  place; a moment whose page was not recreated; the visit given the
+  understanding and each moment's screen and change, not its page; the
+  report giving the understanding as the visit's page; and a task run
+  again reusing every moment's steps.
 
 ## Decisions (2026-10-14)
 

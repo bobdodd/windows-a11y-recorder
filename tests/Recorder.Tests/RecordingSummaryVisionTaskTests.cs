@@ -46,7 +46,8 @@ public sealed partial class RecordingSummaryTaskTests
             var input = Input(body);
             var picture = PictureReference().Match(input);
             var reference = picture.Success ? picture.Groups[1].Value : Reference().Match(input).Groups[1].Value;
-            var sections = body.Contains("combining two descriptions", StringComparison.Ordinal) ? RecordingSummaryVisionKind.CombinedSections
+            var sections = body.Contains("You keep an understanding of one web page", StringComparison.Ordinal) ? RecordingSummaryVisionKind.PageSoFarSections
+                : body.Contains("combining two descriptions", StringComparison.Ordinal) ? RecordingSummaryVisionKind.CombinedSections
                 : body.Contains("You describe part of a web page", StringComparison.Ordinal) ? RecordingSummaryVisionKind.PageSections
                 : body.Contains("\"screen\"", StringComparison.Ordinal) ? RecordingSummaryVisionKind.MomentSections
                 : body.Contains("\"journey\"", StringComparison.Ordinal) ? RecordingSummaryVisionKind.VisitSections
@@ -147,29 +148,29 @@ public sealed partial class RecordingSummaryTaskTests
             "SELECT step_key, outcome, prompt_template, input_references FROM analysis_attempts WHERE task_id = $1 ORDER BY started_utc", vision);
         Assert.Equal(
             [
-                "visit-0001-moment-01", "visit-0001-moment-01-page-01", "visit-0001-moment-01-page-02", "visit-0001-moment-01-described",
-                "visit-0001-moment-02", "visit-0001-moment-02-page-01", "visit-0001-moment-02-page-02", "visit-0001-moment-02-described",
-                "visit-0001", "visit-0002-moment-01", "visit-0002-moment-02", "visit-0002", "recording"
+                "visit-0001-moment-01", "visit-0001-moment-01-page-01", "visit-0001-moment-01-page-02", "visit-0001-moment-01-described", "visit-0001-moment-01-page-so-far",
+                "visit-0001-moment-02", "visit-0001-moment-02-page-01", "visit-0001-moment-02-page-02", "visit-0001-moment-02-described", "visit-0001-moment-02-page-so-far",
+                "visit-0001", "visit-0002-moment-01", "visit-0002-moment-01-page-so-far", "visit-0002-moment-02", "visit-0002-moment-02-page-so-far", "visit-0002", "recording"
             ],
             attempts.Select(row => (string)row["step_key"]!));
         Assert.All(attempts, row => Assert.Equal(AttemptOutcomes.Accepted, row["outcome"]));
         Assert.Equal(
             [
                 RecordingSummaryVisionKind.MomentTemplate, RecordingSummaryVisionKind.PageTemplate, RecordingSummaryVisionKind.PageTemplate,
-                RecordingSummaryVisionKind.CombinedTemplate, RecordingSummaryVisionKind.MomentTemplate
+                RecordingSummaryVisionKind.CombinedTemplate, RecordingSummaryVisionKind.PageSoFarTemplate, RecordingSummaryVisionKind.MomentTemplate
             ],
-            attempts.Take(5).Select(row => (string)row["prompt_template"]!));
-        Assert.Equal(RecordingSummaryVisionKind.VisitTemplate, attempts[8]["prompt_template"]);
+            attempts.Take(6).Select(row => (string)row["prompt_template"]!));
+        Assert.Equal(RecordingSummaryVisionKind.VisitTemplate, attempts[10]["prompt_template"]);
         Assert.Equal(RecordingSummaryVisionKind.RecordingTemplate, attempts[^1]["prompt_template"]);
 
         // Each frame's request carries its picture, and each group of tiles
         // as many tiles of 841 image tokens as fit 4,096: four, then one.
         var bodies = endpoint.Bodies.Skip(3).ToList();
-        Assert.Equal(13, bodies.Count);
+        Assert.Equal(17, bodies.Count);
         var picture = "data:image/png;base64," + Convert.ToBase64String(FramePicture);
         int Pictures(string body) => (body.Length - body.Replace(picture, "", StringComparison.Ordinal).Length) / picture.Length;
-        Assert.Equal([1, 4, 1, 0, 1, 4, 1, 0, 0, 1, 1, 0, 0], bodies.Select(Pictures));
-        foreach (var index in new[] { 0, 4, 9, 10 })
+        Assert.Equal([1, 4, 1, 0, 0, 1, 4, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0], bodies.Select(Pictures));
+        foreach (var index in new[] { 0, 5, 11, 13 })
         {
             var reference = PictureReference().Match(Input(bodies[index])).Groups[1].Value;
             Assert.Contains($"Picture {reference}:", bodies[index], StringComparison.Ordinal);
@@ -194,13 +195,37 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.DoesNotContain("image_url", bodies[3], StringComparison.Ordinal);
         // Both groups of tiles gave the same statement, which is given once.
         Assert.Single(Regex.Matches(combined, Regex.Escape("(page, inferred) A statement about page.")));
-        var visit = Input(bodies[8]);
+
+        // The page understood so far: none at the first moment, then the
+        // first's, with the recorder's comparison of the tiles, which are
+        // the same picture at both moments.
+        var firstSoFar = Input(bodies[4]);
+        Assert.Contains("There is no understanding of the page yet: this is the first moment of the visit.", firstSoFar, StringComparison.Ordinal);
+        Assert.Contains("This is the first moment of the visit whose page was recreated, so its tiles are compared with none.", firstSoFar, StringComparison.Ordinal);
+        Assert.Contains("This moment as a model described it from its captured frame and its recreated page. These are inferences, not facts:", firstSoFar, StringComparison.Ordinal);
+        Assert.Contains("(page, inferred) A statement about page.", firstSoFar, StringComparison.Ordinal);
+        Assert.DoesNotContain("image_url", bodies[4], StringComparison.Ordinal);
+        var secondSoFar = Input(bodies[9]);
+        Assert.Contains("The understanding of the page so far, as a model wrote it after moment 1, at 00:00:02.500. These are inferences, not facts:", secondSoFar, StringComparison.Ordinal);
+        Assert.Contains("(changes, inferred) A statement about changes.", secondSoFar, StringComparison.Ordinal);
+        Assert.Matches(@"Compared by the recorder, file by file, with the tiles of the page as rebuilt at moment 1, at 00:00:02\.500, when the page was 922 by 4625 CSS pixels; it is 922 by 4625 now\. " +
+            @"The same file, byte for byte, as the tile at the same place then, so that part of the recreated page did not change: tile 1 \[E\d+\], as tile 1 \[E\d+\] then; .*tile 5 \[E\d+\], as tile 5 \[E\d+\] then\.", secondSoFar);
+        Assert.Contains("The page was not recreated at this moment, because the visit's page is not among the pages recorded at the frame", Input(bodies[12]), StringComparison.Ordinal);
+        Assert.DoesNotContain("Compared by the recorder", Input(bodies[12]), StringComparison.Ordinal);
+
+        // The visit is given the page as understood after its last moment,
+        // and each moment's screen and change, not its page again.
+        var visit = Input(bodies[10]);
         Assert.Contains("The visit as a model described it from the recorder's facts alone. These are inferences, not facts:", visit, StringComparison.Ordinal);
-        Assert.Contains("(page, inferred) A statement about page.", visit, StringComparison.Ordinal);
+        Assert.Contains("The page through the visit as a model understood it, moment by moment, after the last moment, 2. These are inferences, not facts:", visit, StringComparison.Ordinal);
+        Assert.Contains("(changes, inferred) A statement about changes.", visit, StringComparison.Ordinal);
         Assert.Contains("(screen, inferred) A statement about screen.", visit, StringComparison.Ordinal);
+        Assert.Contains("(change, inferred) A statement about change.", visit, StringComparison.Ordinal);
+        var moments = visit[visit.IndexOf("Moments of the visit chosen by the recorder", StringComparison.Ordinal)..];
+        Assert.DoesNotContain("(page, inferred)", moments, StringComparison.Ordinal);
         Assert.Contains(", the recreated page in tiles [E", visit, StringComparison.Ordinal);
         Assert.Contains("The last captured frame before the visit ended.", visit, StringComparison.Ordinal);
-        Assert.Contains("the page not recreated because the visit's page is not among the pages recorded at the frame", Input(bodies[11]), StringComparison.Ordinal);
+        Assert.Contains("the page not recreated because the visit's page is not among the pages recorded at the frame", Input(bodies[15]), StringComparison.Ordinal);
 
         var report = Assert.Single(await catalog.ReportsAsync(vision, Token));
         Assert.Equal(RecordingSummaryVisionKind.FileName, report.FileName);
@@ -208,6 +233,8 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.StartsWith($"# Summary with vision of recording {Path.GetFileName(_session)}", text, StringComparison.Ordinal);
         Assert.Contains($"This adds what captured frames of the screen show to the summary of task {summary:D}", text, StringComparison.Ordinal);
         Assert.Contains("#### The participant's journey", text, StringComparison.Ordinal);
+        Assert.Matches(@"#### The page\n\nA statement about page\. \[E\d+\]\n\n#### How the page changed\n\nA statement about changes\. \[E\d+\]\n\n#### What it is for\n\n", text);
+        Assert.Equal(2, Regex.Matches(text, "#### The page\n").Count);
         Assert.Contains("#### The moments", text, StringComparison.Ordinal);
         Assert.Matches(@"Moment 1, 00:00:02: No change in the page's layout .* \[E\d+\] Captured frame \[E\d+\]\.", text);
         Assert.Matches(@"Recreated page: 922 by 4625 CSS pixels, scrolled to 1850, in 5 tiles: 1 \[E\d+\], 2 \[E\d+\], 3 \[E\d+\] \(on the screen\), 4 \[E\d+\], 5 \[E\d+\]\.", text);
@@ -217,7 +244,8 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Matches(@"What changed: A statement about change\. \[E\d+\]", text);
         Assert.Contains("- Moment limits: no limit on the moments of a visit; moments less than 2 s apart merged; settled when the layout has not changed for 1 s, or 5 s after the visit starts; a large change is 50 elements or more at once.", text, StringComparison.Ordinal);
         Assert.Contains($"{RecordingSummaryVisionKind.MomentTemplate} version 3 for each moment's captured frame, {RecordingSummaryVisionKind.PageTemplate} version 4 for each group of its page's tiles, " +
-            $"{RecordingSummaryVisionKind.CombinedTemplate} version 4 for each moment's description from both", text, StringComparison.Ordinal);
+            $"{RecordingSummaryVisionKind.CombinedTemplate} version 4 for each moment's description from both, " +
+            $"{RecordingSummaryVisionKind.PageSoFarTemplate} version 1 for the page as understood after each moment, {RecordingSummaryVisionKind.VisitTemplate} version 4 for each visit", text, StringComparison.Ordinal);
         Assert.Contains("each request holds as many tiles as fit 4096 image tokens", text, StringComparison.Ordinal);
         Assert.Contains("The captured frame at 00:00:02.500: the whole screen, 1920 by 1080 pixels, file frames/desktop/0000000001.png", text, StringComparison.Ordinal);
         Assert.Contains("part of it on the screen at the frame, file ", text, StringComparison.Ordinal);
@@ -226,6 +254,53 @@ public sealed partial class RecordingSummaryTaskTests
         var read = ReportDocument.Parse(text);
         Assert.All(read.Blocks.SelectMany(block => block.References).Distinct(),
             reference => Assert.True(read.Evidence.ContainsKey(reference), reference));
+    }
+
+    // The page understood moment by moment: decisions of 2026-10-15,
+    // recording-summary.md.
+    private static MomentDescription Recreated(int number, IReadOnlyList<(double Top, double Height)> places, int firstReference)
+    {
+        var frame = new CapturedFrame(number * 1_000_000_000L, $"frames/desktop/{number}.png", $"/frames/{number}.png", 1920, 1080, null);
+        var tiles = places.Select((place, index) => new PageTile(index + 1, place.Top, place.Height, 922, $"t{index + 1}.png", $"/t{index + 1}.png", 922, 925)).ToList();
+        var page = new RecreatedPage(tiles, 922, places[^1].Top + places[^1].Height, 0, 0, 922, 925, 0, [], 0, true, null);
+        return new MomentDescription(
+            new Moment(number, frame, []), $"E{firstReference}", [],
+            new AcceptedStep(Guid.Empty, "", default, []), page,
+            [.. tiles.Select(tile => $"E{firstReference + tile.Number}")]);
+    }
+
+    [Fact]
+    public void The_recorder_compares_each_tile_with_the_tile_at_the_same_place_at_the_moment_before_file_by_file()
+    {
+        var before = Recreated(1, [(0, 925), (925, 925), (1850, 925)], 10);
+        var now = Recreated(2, [(0, 925), (925, 925), (1850, 925), (2775, 925)], 20);
+
+        var (text, references) = RecordingSummaryVisionKind.Comparison(now, ["A", "B", "Z", "D"], (before, ["A", "B", "C"]));
+
+        Assert.Equal(
+            "Compared by the recorder, file by file, with the tiles of the page as rebuilt at moment 1, at 00:00:01.000, when the page was 922 by 2775 CSS pixels; it is 922 by 3700 now. " +
+            "The same file, byte for byte, as the tile at the same place then, so that part of the recreated page did not change: tile 1 [E21], as tile 1 [E11] then; tile 2 [E22], as tile 2 [E12] then. " +
+            "A different file from the tile at the same place then, so that part of the recreated page changed or was pictured differently: tile 3 [E23], as tile 3 [E13] then. " +
+            "With no tile at the same place then: tile 4 [E24].",
+            text);
+        Assert.Equal(["E11", "E12", "E13"], references);
+        Assert.Equal(
+            "This is the first moment of the visit whose page was recreated, so its tiles are compared with none.",
+            RecordingSummaryVisionKind.Comparison(before, ["A", "B", "C"], null).Text);
+    }
+
+    [Fact]
+    public void The_page_so_far_template_keeps_one_understanding_merging_descriptions_and_not_what_the_page_repeats()
+    {
+        var instructions = RecordingSummaryVisionKind.PageSoFarInstructions;
+        Assert.Contains("Write the understanding again, whole, as it stands after this moment", instructions, StringComparison.Ordinal);
+        Assert.Contains("a different description of it is a difference between descriptions, not a change of the page", instructions, StringComparison.Ordinal);
+        Assert.Contains("where they conflict, say that they disagree, citing both, and do not settle it", instructions, StringComparison.Ordinal);
+        Assert.Contains("Do not merge what the page itself repeats: a page may be badly written", instructions, StringComparison.Ordinal);
+        Assert.Contains("A statement kept from the understanding so far keeps its references.", instructions, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"page\"", RecordingSummaryVisionKind.VisitInstructions, StringComparison.Ordinal);
+        Assert.Contains("Do not describe the page again", RecordingSummaryVisionKind.VisitInstructions, StringComparison.Ordinal);
+        Assert.Equal(["purpose", "activity", "journey"], RecordingSummaryVisionKind.VisitSections);
     }
 
     [Fact]
@@ -260,10 +335,11 @@ public sealed partial class RecordingSummaryTaskTests
     }
 
     [Fact]
-    public void The_combined_template_from_version_3_says_a_statement_of_what_is_unknown_is_of_kind_unknown_and_no_other_template_does()
+    public void The_combined_and_page_so_far_templates_say_a_statement_of_what_is_unknown_is_of_kind_unknown_and_no_other_template_does()
     {
         const string Sentence = "A statement that says something is unknown, or that cites no reference, is of kind unknown; every claim cites at least one reference.";
         Assert.Contains(Sentence, RecordingSummaryVisionKind.CombinedInstructions, StringComparison.Ordinal);
+        Assert.Contains(Sentence, RecordingSummaryVisionKind.PageSoFarInstructions, StringComparison.Ordinal);
         foreach (var instructions in new[]
                  {
                      RecordingSummaryVisionKind.MomentInstructions, RecordingSummaryVisionKind.PageInstructions,
@@ -277,14 +353,15 @@ public sealed partial class RecordingSummaryTaskTests
     [Fact]
     public void Every_template_shows_a_statement_with_its_text_before_its_kind()
     {
-        Assert.Equal((4, 3, 4, 3, 4), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
-            RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.TemplateVersion, RecordingSummaryVisionKind.CombinedTemplateVersion));
+        Assert.Equal((4, 3, 4, 3, 4, 4, 1), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+            RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.TemplateVersion, RecordingSummaryVisionKind.CombinedTemplateVersion,
+            RecordingSummaryVisionKind.VisitTemplateVersion, RecordingSummaryVisionKind.PageSoFarTemplateVersion));
         foreach (var instructions in new[]
                  {
                      RecordingSummaryKind.VisitInstructions, RecordingSummaryKind.RecordingInstructions,
                      RecordingSummaryVisionKind.MomentInstructions, RecordingSummaryVisionKind.PageInstructions,
                      RecordingSummaryVisionKind.CombinedInstructions, RecordingSummaryVisionKind.VisitInstructions,
-                     RecordingSummaryVisionKind.RecordingInstructions,
+                     RecordingSummaryVisionKind.RecordingInstructions, RecordingSummaryVisionKind.PageSoFarInstructions,
                  })
         {
             Assert.Contains("{\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]}", instructions, StringComparison.Ordinal);
@@ -321,12 +398,12 @@ public sealed partial class RecordingSummaryTaskTests
 
         Assert.Equal((AnalysisTaskStates.Done, (string?)null), await StateAsync(second));
         var sent = again.Bodies.ToList();
-        Assert.Equal(5, sent.Count);
+        Assert.Equal(7, sent.Count);
         Assert.Equal(refused, sent[0]);
         Assert.DoesNotContain(sent, body => body.Contains("Moment 1 of the visit", StringComparison.Ordinal) && body.Contains("Page visit 1,", StringComparison.Ordinal));
         var visitOne = await RowsAsync(
             "SELECT step_key, reused_from_attempt_id FROM analysis_attempts WHERE task_id = $1 AND step_key LIKE 'visit-0001-moment-%'", second);
-        Assert.Equal(8, visitOne.Count);
+        Assert.Equal(10, visitOne.Count);
         Assert.All(visitOne, row => Assert.NotNull(row["reused_from_attempt_id"]));
 
         var third = await catalog.QueueTaskAsync(recording, RecordingSummaryVisionKind.Name, VisionVersion, profiles,
@@ -347,7 +424,8 @@ public sealed partial class RecordingSummaryTaskTests
         foreach (var instructions in new[]
                  {
                      RecordingSummaryVisionKind.MomentInstructions, RecordingSummaryVisionKind.CombinedInstructions,
-                     RecordingSummaryVisionKind.VisitInstructions, RecordingSummaryVisionKind.RecordingInstructions
+                     RecordingSummaryVisionKind.VisitInstructions, RecordingSummaryVisionKind.RecordingInstructions,
+                     RecordingSummaryVisionKind.PageSoFarInstructions
                  })
         {
             Assert.DoesNotContain(RecordingSummaryVisionKind.ItemNamed, instructions, StringComparison.Ordinal);
