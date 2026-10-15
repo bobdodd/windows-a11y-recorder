@@ -808,6 +808,43 @@ tokens, at the others 554 to 1,043.
   report giving the understanding as the visit's page; and a task run
   again reusing every moment's steps.
 
+### The recreated page at the recorded viewport and scroll
+
+The owner's decision, from a review of what the tiles are for.
+
+1. **The tiles serve the model; the player's view is the live
+   recreation.** Opened from the player, the recreation is a live page
+   rebuilt from the recording, so fixed and sticky content behaves as it
+   does in a browser as it is scrolled. The tiles are for the model's
+   understanding of the page from a visual perspective: its layout in
+   white space, the relations shown by relative position, and its use of
+   imagery and colour.
+2. **The page is laid out at the recorded viewport and scroll position,
+   and pictured whole beyond it.** The viewport is not enlarged to the
+   page's height: viewport-relative lengths such as `vh` are relative to
+   the viewport's size
+   ([CSS Values and Units Level 4, viewport-relative units](https://www.w3.org/TR/css-values-4/#viewport-relative-units)),
+   and a fixed box with no ancestor that contains it is placed in the
+   layout viewport
+   ([CSS Positioned Layout Level 3, containing blocks](https://www.w3.org/TR/css-position-3/#containing-blocks-of-positioned-boxes)),
+   so a viewport as high as the page would lay out a page the
+   participant never had.
+3. **Fixed and sticky content is drawn where it was in the participant's
+   viewport, matching the captured frame.** A fixed box does not move
+   when the document is scrolled, and a sticky box is offset in reference
+   to its nearest scrollport
+   ([CSS Positioned Layout Level 3, sticky positioning](https://www.w3.org/TR/css-position-3/#sticky-positioning)).
+   So a dialog, toast, or banner fixed to the viewport is drawn in the
+   part that was on the screen: the tiles show the whole page and also
+   what was in the participant's viewport at that moment (owner).
+4. **A fixed header drawn part way down the page is left as it is.** It
+   covers what is under it in that tile, and a model could take it for
+   part of the page's structure there. A fact from the recorder naming
+   the fixed and sticky elements and their boxes is added only if a
+   recording shows a model misreading one. In task 01a13fd9 it did not
+   arise: at moment 10 the participant was scrolled into tiles 5 and 6,
+   and both were the same files as at moment 1.
+
 ### Identical tiles described once (proposed)
 
 Not built; for the owner's review. Most of a visit's model time is in
