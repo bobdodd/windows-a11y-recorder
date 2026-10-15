@@ -298,27 +298,61 @@ public sealed class AnalysisRulesTests
     private static string Statements(params string[] texts) =>
         "{ \"page\": [ [ " + string.Join(", ", texts.Select(text => $"{{ \"text\": {JsonSerializer.Serialize(text)}, \"kind\": \"claim\", \"evidence\": [\"E1\"] }}")) + " ] ] }";
 
-    // Since 2026-10-14 a statement said once again is let through, as two
-    // like things can be described in the same words; an answer is stopped
-    // at a statement said a third time, or at two repeats in a row.
+    // Since 2026-10-14 an answer is stopped only at a loop: a block of one
+    // or more statements said word for word three times in a row. Any other
+    // repeat is let through.
     [Fact]
-    public void The_repeat_watch_lets_a_statement_said_once_again_through_and_stops_at_two_repeats_in_a_row()
+    public void The_repeat_watch_lets_repeats_through_that_are_not_three_copies_in_a_row()
+    {
+        // Moment 8 on the target machine: a conclusion restated in a later
+        // section.
+        var restated = new RepeatWatch();
+        Assert.Null(restated.Check(Statements("The page is open.", "The page is \"open\".", "", "A card.", "The page is open.")));
+        Assert.Equal(4, restated.Statements);
+
+        // Moment 6: two statements in a row, each repeating an earlier one.
+        var twoInARow = new RepeatWatch();
+        Assert.Null(twoInARow.Check(Statements("The page is open.", "The page is \"open\".", "A card.", "The page is open.", "The page is \"open\".")));
+
+        // Cards that each end with the same button.
+        var cards = new RepeatWatch();
+        Assert.Null(cards.Check(Statements("A button labeled Read more.", "A card.", "A button labeled Read more.", "Another card.", "A button labeled Read more.")));
+
+        // A block said twice in a row is not yet three copies.
+        var twice = new RepeatWatch();
+        Assert.Null(twice.Check(Statements("A.", "B.", "C.", "A.", "B.", "C.")));
+    }
+
+    [Fact]
+    public void The_repeat_watch_stops_a_statement_said_three_times_in_a_row()
     {
         var watch = new RepeatWatch();
-        Assert.Null(watch.Check(Statements("The page is open.", "The page is \"open\".", "", "The page is open.")));
-        Assert.Equal(3, watch.Statements);
-
-        var twice = new RepeatWatch();
         Assert.Equal(
-            "The model repeated statements 3 and 4, one after the other, word for word from earlier in its answer, so the answer was stopped there: \"The page is \"open\".\"",
-            twice.Check(Statements("The page is open.", "The page is \"open\".", "", "The page is open.", "The page is \"open\".")));
-        Assert.Equal(4, twice.Statements);
+            "The model said the same statement word for word three times in a row, as statements 2 to 4, so the answer was stopped there: \"The page is \"open\".\"",
+            watch.Check(Statements("A card.", "The page is \"open\".", "The page is \"open\".", "The page is \"open\".", "Never read.")));
+        Assert.Equal(4, watch.Statements);
+    }
 
-        var third = new RepeatWatch();
+    [Fact]
+    public void The_repeat_watch_stops_a_block_of_statements_said_three_times_in_a_row()
+    {
+        // Moment 10 on the target machine cycled through three statements.
+        var watch = new RepeatWatch();
+        Assert.Null(watch.Check(Statements("Intro.", "A.", "B.", "C.", "A.", "B.", "C.", "A.", "B.")));
         Assert.Equal(
-            "The model said statement 5 word for word for the third time in its answer, so the answer was stopped there: \"A button labeled Read more.\"",
-            third.Check(Statements("A button labeled Read more.", "A card.", "A button labeled Read more.", "Another card.", "A button labeled Read more.")));
-        Assert.Equal(5, third.Statements);
+            "The model said the same 3 statements word for word three times in a row, as statements 2 to 10, so the answer was stopped there. The repeated statements begin: \"A.\"",
+            watch.Check(Statements("Intro.", "A.", "B.", "C.", "A.", "B.", "C.", "A.", "B.", "C.")));
+        Assert.Equal(10, watch.Statements);
+    }
+
+    [Fact]
+    public void The_loop_rule_finds_the_smallest_block_at_the_end_and_nothing_elsewhere()
+    {
+        Assert.Equal(1, RepeatWatch.Loop(["A.", "A.", "A."]));
+        Assert.Equal(2, RepeatWatch.Loop(["A.", "B.", "A.", "B.", "A.", "B."]));
+        Assert.Null(RepeatWatch.Loop(["A.", "A.", "A.", "B."]));
+        Assert.Null(RepeatWatch.Loop(["A.", "B.", "A.", "C.", "A.", "B."]));
+        Assert.Null(RepeatWatch.Loop([]));
     }
 
     [Fact]

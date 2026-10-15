@@ -177,31 +177,35 @@ public static class ClaimCheck
 }
 
 /// <summary>
-/// Watches an answer as it arrives, and stops it once the model is
-/// repeating itself: at a statement said word for word a third time, or at
-/// the second of two statements in a row that each repeat an earlier one
-/// (owner, 2026-10-14). A model can fall into repeating the same few
-/// statements until its output limit; this ends the attempt early instead.
-/// A statement said once again is let through, since two like things, such
-/// as cards that each end with the same button, can each be described in
-/// the same words: on the target machine a description of a page's tiles
-/// was stopped at "Below the description is a yellow button labeled Read
-/// more." See docs/architecture/analysis-runner.md, "Sampling options".
+/// Watches an answer as it arrives, and stops it once the model is caught in
+/// a loop: when its last statements are a block of one or more statements
+/// said word for word three times in a row (owner, 2026-10-14). A model can
+/// fall into repeating the same few statements until its output limit; this
+/// ends the attempt early instead, and the output limit stays the backstop.
+/// A statement said again elsewhere in the answer is not a loop and is let
+/// through: two like things, such as cards that each end with the same
+/// button, can each be described in the same words, and a model may restate
+/// a conclusion in a later section. The rule follows the repetition checks
+/// of other model tools, which all look for the same text repeated back to
+/// back several times rather than for any repeat. See
+/// docs/architecture/analysis-runner.md, "Sampling options".
 /// </summary>
 public sealed class RepeatWatch
 {
+    /// <summary>How many copies in a row make a loop.</summary>
+    public const int Copies = 3;
+
     // A statement's text, once its closing quote has arrived. A quote
     // inside a JSON string is escaped, so the match cannot start inside one.
     private static readonly System.Text.RegularExpressions.Regex StatementText = new(
         "\"text\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"",
         System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
-    private readonly Dictionary<string, int> _seen = new(StringComparer.Ordinal);
+    private readonly List<string> _texts = [];
     private int _scanned;
-    private bool _previousRepeated;
 
     /// <summary>The number of statements seen so far.</summary>
-    public int Statements { get; private set; }
+    public int Statements => _texts.Count;
 
     /// <summary>Why the answer should stop, or null to let it go on.</summary>
     public string? Check(string content)
@@ -216,22 +220,48 @@ public sealed class RepeatWatch
                 continue;
             }
 
-            Statements++;
-            var times = _seen.TryGetValue(text, out var before) ? before + 1 : 1;
-            _seen[text] = times;
-            var number = Statements.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            if (times >= 3)
+            _texts.Add(text);
+            if (Loop(_texts) is { } block)
             {
-                return $"The model said statement {number} word for word for the third time in its answer, so the answer was stopped there: \"{text}\"";
+                var count = _texts.Count;
+                var first = count - (Copies * block) + 1;
+                var culture = System.Globalization.CultureInfo.InvariantCulture;
+                return block == 1
+                    ? $"The model said the same statement word for word three times in a row, as statements {first.ToString(culture)} to {count.ToString(culture)}, " +
+                      $"so the answer was stopped there: \"{text}\""
+                    : $"The model said the same {block.ToString(culture)} statements word for word three times in a row, as statements {first.ToString(culture)} to {count.ToString(culture)}, " +
+                      $"so the answer was stopped there. The repeated statements begin: \"{_texts[count - block]}\"";
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The size of the block of statements that the given statements end with
+    /// three copies of, back to back, or null when they end with no such
+    /// block. Any block size is looked for, the smallest first.
+    /// </summary>
+    public static int? Loop(IReadOnlyList<string> texts)
+    {
+        ArgumentNullException.ThrowIfNull(texts);
+        var count = texts.Count;
+        for (var block = 1; block * Copies <= count; block++)
+        {
+            var repeated = true;
+            for (var offset = 1; offset <= block && repeated; offset++)
+            {
+                var last = texts[count - offset];
+                for (var copy = 1; copy < Copies && repeated; copy++)
+                {
+                    repeated = string.Equals(texts[count - offset - (copy * block)], last, StringComparison.Ordinal);
+                }
             }
 
-            if (times == 2 && _previousRepeated)
+            if (repeated)
             {
-                return $"The model repeated statements {(Statements - 1).ToString(System.Globalization.CultureInfo.InvariantCulture)} and {number}, one after the other, " +
-                    $"word for word from earlier in its answer, so the answer was stopped there: \"{text}\"";
+                return block;
             }
-
-            _previousRepeated = times == 2;
         }
 
         return null;

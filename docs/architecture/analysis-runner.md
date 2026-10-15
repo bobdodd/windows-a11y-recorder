@@ -508,19 +508,55 @@ Built on 2026-10-14, after decision 4 below.
   the content, finish reason, usage, and timings are read from the
   stream's chunks, as llama.cpp sends them
   ([server-task.cpp](https://raw.githubusercontent.com/ggml-org/llama.cpp/master/tools/server/server-task.cpp)).
-- **An answer that repeats itself is stopped**: as the answer arrives,
-  each statement's text is compared with those before it, and the worker
-  closes the request and the attempt fails, saying which statement and
-  its text, at a statement the same word for word as earlier ones for the
-  third time, or at the second of two statements in a row that each
-  repeat an earlier one. A statement said once again is let through, as
-  two like things can be described in the same words. At temperature 0
-  it is not asked for again, as for any refused output. Until the fourth
-  run again on the target machine, 2026-10-14, the answer was stopped at
-  the first repeat; that run's description of moment 1's first tiles was
-  stopped at its second "Below the description is a yellow button labeled
-  Read more.", true of each of several cards, and at temperature 0 such an
-  answer could never pass (owner, the same day).
+- **An answer caught in a loop is stopped**: as the answer arrives, the
+  worker keeps the statements' texts in order, and when the last of them
+  are a block of one or more statements said word for word three times in
+  a row, it closes the request and the attempt fails, saying which
+  statements and how the block begins. Any other repeat is let through: a
+  statement said again elsewhere in the answer, or two repeats in a row
+  that do not make three copies of a block. At temperature 0 a stopped
+  answer is not asked for again, as for any refused output. The output
+  limit stays the backstop: an answer that reaches it fails as before.
+  - **Why only a loop:** a loop is the one kind of repeat that breaks a
+    step. The answer runs on to the output limit, where its JSON is cut
+    off and cannot be read, minutes of writing are spent on nothing, and
+    at temperature 0 the same request gives the same loop. A repeat in an
+    answer that finishes breaks nothing: the checks of citations and form
+    do not compare statements with each other, and the combining step's
+    input already keeps one copy of identical statements. It is at most a
+    redundant line, a question of the answer's quality.
+  - **Why three copies in a row:** other model tools identify a loop the
+    same way, by text repeated back to back several times, not by any
+    repeat. vLLM checks only the end of the answer for the same stretch
+    of tokens repeated back to back, as many times as asked
+    ([vLLM utils](https://docs.vllm.ai/en/latest/api/vllm/v1/core/sched/utils/),
+    [vLLM sampling parameters](https://docs.vllm.ai/en/latest/api/vllm/sampling_params/)).
+    Gemini CLI wants the same 50-character piece of text ten times, on
+    average no more than 250 characters apart, and lets it through when
+    the text between the copies keeps changing, as in a list of distinct
+    items that start alike
+    ([loopDetectionService.ts](https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/services/loopDetectionService.ts)).
+    oh-my-pi wants a cycle at the end of the text three or four times, or
+    four near-copies of a paragraph among the last sixteen, thresholds it
+    calibrated against 13,500 answers that were not loops with no false
+    alarms
+    ([thinking-loop.ts](https://github.com/can1357/oh-my-pi/blob/6d8552d7/packages/ai/src/utils/thinking-loop.ts)).
+    A loop keeps going because each copy of a sentence makes the next more
+    likely, most of all with greedy decoding, as at temperature 0
+    ([Xu et al., 2022](https://arxiv.org/abs/2206.02369)); a restatement
+    said once does not. The rule is vLLM's, counted in statements rather
+    than tokens, with three copies, agreed by the owner on 2026-10-14.
+  - **What it replaced:** until the first build of 2026-10-14 the answer
+    was stopped at its first repeat; that run's description of moment 1's
+    first tiles was stopped at its second "Below the description is a
+    yellow button labeled Read more.", true of each of several cards.
+    The next build stopped a statement said a third time, or two repeats
+    in a row, and its run's description of moment 6 was stopped at two
+    statements in a row about the volunteer photograph, each said once
+    before. The run before that had stopped moment 8's description at a
+    conclusion said again in a later section, 13 statements on. Neither
+    was a loop; each answer would likely have finished, and at
+    temperature 0 neither could ever pass (owner, 2026-10-14).
 
 ### Trying a step with other sampling options
 
@@ -551,9 +587,12 @@ catalog. It does not run while the worker is running.
   it had sent the same request (owner, the same day).
 
 - **Tests:** the sampling options read, sent, recorded, and refused; the
-  repeat watch; a streamed answer read whole and stopped where the watch
-  says; the server's defaults read from its properties; an answer that
-  repeats a statement failing without being asked for again; and a trial
+  repeat watch, letting through a conclusion restated later, two repeats
+  in a row, and like cards, and stopping a statement or a block of three
+  statements said three times in a row; a streamed answer read whole and
+  stopped where the watch says; the server's defaults read from its
+  properties; an answer caught in a loop failing without being asked for
+  again; and a trial
   of one step that writes nothing to the catalog.
 
 ### Reusing steps when run again

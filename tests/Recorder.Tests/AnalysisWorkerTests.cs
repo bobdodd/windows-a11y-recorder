@@ -336,7 +336,7 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
     }
 
     [Fact]
-    public async Task An_answer_that_repeats_a_statement_is_stopped_and_fails_without_being_asked_for_again()
+    public async Task An_answer_caught_in_a_loop_is_stopped_and_fails_without_being_asked_for_again()
     {
         var catalog = await CatalogAsync();
         var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
@@ -352,7 +352,7 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Assert.Equal(1, calls);
         Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
         Assert.Equal(
-            "Step visit-1 failed: The model said statement 3 word for word for the third time in its answer, " +
+            "Step visit-1 failed: The model said the same statement word for word three times in a row, as statements 1 to 3, " +
             "so the answer was stopped there: \"A fact.\" " +
             "At temperature 0 the same request gives the same output, so it was not asked for again.",
             await FailureAsync(task));
