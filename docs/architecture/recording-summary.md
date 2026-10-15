@@ -845,90 +845,116 @@ The owner's decision, from a review of what the tiles are for.
    arise: at moment 10 the participant was scrolled into tiles 5 and 6,
    and both were the same files as at moment 1.
 
-### Identical tiles described once (proposed)
+### Unique images across the recording (agreed, not built)
 
-Not built; for the owner's review. Most of a visit's model time is in
-describing tiles that are the same files as tiles already described. In
-task 01a13fd9, the 20 requests for groups of tiles took 35.2 of the 62
-minutes of model time, and the recorder's comparison of the tile files
-(decision 4 above) found:
+Agreed by the owner on 2026-10-15; not built. Most of a visit's model
+time is in describing tiles whose pictures are the same as tiles already
+described, and in real use a participant goes back to the same page
+more than once. In task 01a13fd9, the 20 requests for groups of tiles
+took 35.2 of the 62 minutes of model time, and the recorder's comparison
+of the tile files (decision 4 above) found:
 
-| Group | Tiles | The same files as an earlier moment's group |
+| Group | Tiles | The same pictures as an earlier moment's group |
 | --- | --- | --- |
-| 1 | 1 to 4 | At moments 2 and 3, as at moment 1; at moments 6 to 10, as at moment 4. New files at moments 4 and 5. |
+| 1 | 1 to 4 | At moments 2 and 3, as at moment 1; at moments 6 to 10, as at moment 4. New pictures at moments 4 and 5. |
 | 2 | 5 to 8 | At every moment from 2 to 10, as at moment 1. |
 
 So 16 of the 20 requests sent pictures already described, and took 27.7
 minutes. The four answers of about 10 tokens were all for group 2 at
-moments where its files were those of moment 1.
+moments where its pictures were those of moment 1.
 
-1. **A group of tiles the same files as a group already described is not
-   sent again.** The same group means the same number of tiles, each at
-   the same place and size (top, height, width, and pixel size) and with
-   the same SHA-256 of its file. Files the same byte for byte are the
-   same pixels, so nothing in them, however small or far from the screen,
-   goes undescribed. Files that differ in their bytes but not in their
-   pixels are sent, so the rule can only describe a picture more often
-   than needed, never less.
-2. **The group's description is the earlier answer, unchanged.** It is
-   not written again, edited, or cited anew: it stays the model's answer
-   at the earlier moment, citing that moment's tiles. The recorder adds a
-   derived fact for the later moment: that its tiles are the same files
-   as the earlier moment's, citing both.
-3. **The earlier moment is the one, in the same visit, whose request
-   for those files was sent.** It need not be the moment just before: at
-   moment 6 above, group 1 is the same files as at moment 4, after being
-   different at moment 5, and moments 7 to 10 use moment 4's answer too.
-   A group is not matched across visits.
-4. **What depends on the moment comes from the recorder.** The tiles'
+1. **Each unique image is kept once, for the whole recording** (owner).
+   The images are kept in one store in the recording's analysis folder,
+   `analysis\images\<key>.png`, shared by every task on the recording,
+   so that Run again and later tasks do not keep the same image again.
+   A recreation that changes, from a change to the recorder, gives new
+   pictures and so new keys. Captured frames are not kept in the store:
+   they are in the recording already, and are rarely the same as each
+   other, as the pointer and focus move.
+2. **An image's key is its pixels** (owner). The key is the SHA-256 of
+   its width, its height, its pixels as 8-bit red, green, blue, and
+   alpha, and any colour profile it carries. Images the same in all of
+   these are the same picture, so nothing in them, however small or far
+   from the screen, goes undescribed. Two files that differ in their
+   bytes but not in their pixels have the same key; two pictures that
+   differ in one pixel, or in their colour profile, do not. The first
+   file with a key is the one kept.
+3. **An index builds over the recording** (owner). Each task writes, in
+   its own folder, an index of every tile of every moment: the visit,
+   the moment and its frame's time, the tile's number, its place and
+   size (top, height, width, and pixel size), and its image's key. The
+   evidence list's entry for a tile gives the file in the store.
+4. **The model describes groups of tiles, as now, and a group is known
+   by its tiles' keys** (owner). A group is the same as one already
+   described when it has the same number of tiles, each at the same
+   place and size with the same key. A group is matched against every
+   moment before it in the recording, in any visit, not only the moment
+   just before: at moment 6 above, group 1 is the same as at moment 4,
+   after being different at moment 5, and moments 7 to 10 use moment 4's
+   answer too. Describing each tile alone would match more, but would
+   repeat the instructions and facts in every request and lose the
+   regions that run across a tile's edge.
+5. **A group the same as one already described is not sent again; its
+   description is the earlier answer, unchanged.** The answer is not
+   written again, edited, or cited anew: it stays the model's answer at
+   the moment whose request was sent, citing that moment's tiles. The
+   recorder adds a derived fact for the later moment: that its tiles are
+   the same pictures as those of that moment, citing both.
+6. **What depends on the moment comes from the recorder.** The tiles'
    instructions ask whether each message was in the part on the screen,
    which is true of the moment the answer was written for. The combined
-   step for the later moment is told that the group's description was
-   written at the earlier moment, with that moment's time, and is given
-   the part on the screen at its own moment from the recording, as it is
-   now. The tiles' template is unchanged, so its steps already accepted
-   are still reused on Run again.
-5. **Nothing else is skipped.** The captured frame, the combined step,
+   step for the later moment is told the visit and time at which the
+   group's description was written, and is given the part on the screen
+   at its own moment from the recording, as it is now. The tiles'
+   template is unchanged, so its steps already accepted are still reused
+   on Run again.
+7. **Nothing else is skipped.** The captured frame, the combined step,
    and the page so far run at every moment, as the frame shows the
    screen at that moment, and what a moment brings that is new cannot be
    known without them.
-6. **The report says which groups were not sent.** In "How this was
-   made", each group not sent is listed with the moment whose answer it
-   uses, and the attempts table has no row for it, as no request was
-   made.
+8. **Content that has only moved is described again.** Where a banner
+   closes at the top of the page and what is below moves up, the tiles
+   below are different pictures, though their content is the same.
+   Finding such a move would not be an exact match, so it is not done.
+9. **The report says which groups were not sent.** In "How this was
+   made", each group not sent is listed with the visit and moment whose
+   answer it uses, and the attempts table has no row for it, as no
+   request was made.
 
 - **Templates:** the combined template's instructions say how to read a
   description written at an earlier moment, so its version goes from 4
   to 5, and each moment's combined step runs again once. The frame and
   tile templates are unchanged.
-- **Estimated effect** on the cnib.ca recording: 4 tile requests instead
-  of 20, and about 28 fewer minutes of model time, an estimate from the
-  times in task 01a13fd9.
+- **Estimated effect** on the cnib.ca recording, which has one visit: 4
+  tile requests instead of 20, and about 28 fewer minutes of model time,
+  an estimate from the times in task 01a13fd9. A recording that goes
+  back to a page saves more.
+- **Not settled:** removing images from the store that no task's index
+  refers to any longer is left for later.
 - **Tests:**
-  - **Unit tests:** a group the same files as at the moment before, and
-    as at a moment before that with a different moment between; one tile
-    of the group a different file; a group the same files at another
-    place or size; the first moment of a visit; a moment whose page was
-    not recreated, between two that were; the same files in another
-    visit; the derived fact citing both moments' tiles; the combined
-    request given the earlier moment's time and its own part on the
-    screen; the report's list of groups not sent.
+  - **Unit tests:** the key the same for two files of the same pixels
+    written with different compression, and different for one pixel
+    changed and for a different colour profile; the store keeping the
+    first file with a key; the index's entries; a group the same as at
+    the moment before, as at a moment before that with a different
+    moment between, and as at a moment of an earlier visit; one tile of
+    the group different; a group the same pictures at another place or
+    size; the first moment of the recording; a moment whose page was not
+    recreated; a page whose content moved down by a few pixels, matched
+    for the tiles above the move only; the derived fact citing both
+    moments' tiles; the combined request given the earlier visit and
+    time and its own part on the screen; the report's list of groups not
+    sent.
   - **Integration test:** the vision task on a recording built by the
-    tests whose page does not change, with a stand-in endpoint that
-    counts requests: tile requests at the first moment only, and the
-    report listing the rest as not sent.
+    tests that visits the same unchanging page twice, with a stand-in
+    endpoint that counts requests: tile requests at the first moment of
+    the first visit only, one image in the store for each tile, and the
+    report listing the rest as not sent. Run again on it keeps no new
+    image.
   - **System test on the target machine:** Run again on the cnib.ca
     recording, checking on screen that the status line shows no tile
     step for group 2 after moment 1, and that "How this was made" in the
     report lists 16 groups not sent.
-
-Questions for the owner:
-
-- Whether to match only the moment just before, as the comparison in
-  decision 4 does (5 requests of 20 instead of 4), or any earlier moment
-  of the visit, as proposed.
-- Whether to match across visits, for a page visited again; proposed
-  not, for now.
 
 ## Decisions (2026-10-14)
 
