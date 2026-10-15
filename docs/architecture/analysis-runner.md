@@ -626,6 +626,22 @@ attempts marks each one reused.
   same run then stopped at moment 8's combined description, which
   repeated a statement word for word; its first tile had not held the
   size, so the same request would fail again at temperature 0.
+  The owner agreed the same day to three trials of that step alone, at
+  temperature 0 and seed 1, on top of the profile's `presence_penalty`
+  1.5: as it is, to show that the trial gives the same repeat;
+  `repeat_last_n` 2,048, so that the penalty looks back further than its
+  default of 64 tokens; and llama.cpp's DRY penalty, `dry_multiplier` 0.8
+  with `dry_penalty_last_n` 2,048, which penalises a repeated sequence of
+  tokens
+  ([llama.cpp server](https://raw.githubusercontent.com/ggml-org/llama.cpp/master/tools/server/README.md)).
+  Both look at the request's tokens as well as the answer's, so either may
+  keep the model from repeating the names and labels it is given; the
+  trials' answers show whether it does. The owner agreed that an option
+  that passes is set for the combined description's step only, not for
+  the whole profile: a profile's settings are part of every step's, so
+  changing them would send every frame's and tiles' step again, while
+  set for that step only, those are reused and only the combined
+  descriptions are sent again, once.
 - **Tests:** integration tests with the catalog in a real PostgreSQL
   server and a stand-in endpoint: a step reused, with its answer and
   statements, and one run again because its request changed; nothing
