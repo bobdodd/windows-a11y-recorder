@@ -589,6 +589,22 @@ attempts marks each one reused.
   unknown until it runs. A visit's request grows by about 2,400 tokens a
   moment, so a longer visit would not fit in any set context; what the
   visit step is given is to be designed separately.
+- **The first run again with build ba4eacf,** 2026-10-14, reused moment
+  1's frame and tiles' steps and sent its combined description again,
+  which then repeated a statement and failed. A reused step's statements
+  were read back sorted by the name of their section, so the frame's came
+  back as "change" before "screen", not in the order the model wrote
+  them, and the combined description's request was not the same. The
+  check before delivery had compared two runs that reused nothing, so it
+  did not show this. A step's statements are now read back in the order
+  of its sections as the request gives them, then by paragraph and
+  statement, as the checks give them when the step runs; the summary's
+  visit descriptions given to the vision visit step are read the same
+  way. The integration test now runs the vision task, fails it at its
+  first visit's step, runs it again, and requires every moment's step to
+  be reused and the visit's request to be the same, byte for byte, and a
+  run again once done to send nothing. With the old order it fails, with
+  7 requests sent where 5 are expected.
 - **Tests:** integration tests with the catalog in a real PostgreSQL
   server and a stand-in endpoint: a step reused, with its answer and
   statements, and one run again because its request changed; nothing

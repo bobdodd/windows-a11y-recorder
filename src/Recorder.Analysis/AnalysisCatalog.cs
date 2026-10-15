@@ -343,8 +343,18 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }, cancellationToken);
 
-    public Task<AcceptedStep?> AcceptedStepAsync(Guid taskId, string stepKey, CancellationToken cancellationToken) =>
-        UseAsync(async connection =>
+    /// <summary>
+    /// A step's accepted attempt, with its statements in the order the
+    /// model wrote them: by the step's sections in the order given, then by
+    /// paragraph and statement. A later step built from them is then given
+    /// them in the same order whether the step ran or was reused, so that
+    /// its request is the same (owner, 2026-10-14; analysis-runner.md,
+    /// "Reusing steps when run again").
+    /// </summary>
+    public Task<AcceptedStep?> AcceptedStepAsync(Guid taskId, string stepKey, IReadOnlyList<string> sections, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(sections);
+        return UseAsync(async connection =>
         {
             Guid attemptId;
             string inputSha;
@@ -371,10 +381,11 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             var claims = new List<Claim>();
             await using (var command = new NpgsqlCommand(
                 "SELECT section, paragraph, ordinal, claim_kind, text, evidence FROM analysis_claims " +
-                "WHERE attempt_id = $1 ORDER BY section, paragraph, ordinal",
+                "WHERE attempt_id = $1 ORDER BY array_position($2::text[], section), section, paragraph, ordinal",
                 connection))
             {
                 command.Parameters.AddWithValue(attemptId);
+                command.Parameters.AddWithValue(sections.ToArray());
                 await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
                 while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                 {
@@ -390,6 +401,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
 
             return (AcceptedStep?)new AcceptedStep(attemptId, inputSha, output, claims);
         }, cancellationToken);
+    }
 
     /// <summary>
     /// The evidence references given to a step's accepted attempt, in order,

@@ -290,6 +290,51 @@ public sealed partial class RecordingSummaryTaskTests
         }
     }
 
+    // Run again, as on the target machine on 2026-10-14: a vision task
+    // that failed at its first visit's step is run again, and must restart
+    // there, every moment's step reused and the visit's request the same,
+    // byte for byte; and run again once done, it sends nothing. See
+    // analysis-runner.md, "Reusing steps when run again".
+    [Fact]
+    public async Task Vision_run_again_after_failing_at_a_visit_restarts_there_with_the_same_request_and_run_again_once_done_sends_nothing()
+    {
+        var (catalog, summary, first) = await QueueBothAsync();
+        const string VisitStart = "You describe one page visit from an accessibility test recording, for an accessibility auditor, adding what captured frames";
+        var refusing = VisionEndpoint();
+        var answer = refusing.Answer;
+        refusing.Answer = (profile, body, cancellationToken) => body.Contains(VisitStart, StringComparison.Ordinal)
+            ? throw new ModelEndpointException("The model server answered 400 Bad Request: exceeds the available context size", refused: true)
+            : answer(profile, body, cancellationToken);
+        await RunAsync(catalog, refusing);
+        Assert.Equal(AnalysisTaskStates.Failed, (await StateAsync(first)).State);
+        var refused = Assert.Single(refusing.Bodies, body => body.Contains(VisitStart, StringComparison.Ordinal));
+        var recording = (Guid)(await RowsAsync("SELECT recording_id FROM analysis_tasks WHERE task_id = $1", first))[0]["recording_id"]!;
+        var profiles = new Dictionary<string, string> { [ModelCapabilities.Text] = WithImages, [ModelCapabilities.Image] = WithImages };
+
+        var second = await catalog.QueueTaskAsync(recording, RecordingSummaryVisionKind.Name, VisionVersion, profiles,
+            afterTaskId: summary, sessionDirectory: _session, rerunOfTaskId: first, cancellationToken: Token);
+        var again = VisionEndpoint();
+        await RunAsync(catalog, again);
+
+        Assert.Equal((AnalysisTaskStates.Done, (string?)null), await StateAsync(second));
+        var sent = again.Bodies.ToList();
+        Assert.Equal(5, sent.Count);
+        Assert.Equal(refused, sent[0]);
+        Assert.DoesNotContain(sent, body => body.Contains("Moment 1 of the visit", StringComparison.Ordinal) && body.Contains("Page visit 1,", StringComparison.Ordinal));
+        var visitOne = await RowsAsync(
+            "SELECT step_key, reused_from_attempt_id FROM analysis_attempts WHERE task_id = $1 AND step_key LIKE 'visit-0001-moment-%'", second);
+        Assert.Equal(8, visitOne.Count);
+        Assert.All(visitOne, row => Assert.NotNull(row["reused_from_attempt_id"]));
+
+        var third = await catalog.QueueTaskAsync(recording, RecordingSummaryVisionKind.Name, VisionVersion, profiles,
+            afterTaskId: summary, sessionDirectory: _session, rerunOfTaskId: second, cancellationToken: Token);
+        var once = VisionEndpoint();
+        await RunAsync(catalog, once);
+
+        Assert.Equal((AnalysisTaskStates.Done, (string?)null), await StateAsync(third));
+        Assert.Empty(once.Bodies);
+    }
+
     [Fact]
     public async Task Vision_named_after_no_summary_fails_saying_why()
     {

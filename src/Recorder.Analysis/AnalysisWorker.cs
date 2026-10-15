@@ -253,7 +253,7 @@ public sealed class AnalysisWorker
         var profile = StepProfile(task, request);
         var body = ChatRequest.Build(profile, request);
         var inputSha = ChatRequest.Sha256(body);
-        var accepted = await Catalog.AcceptedStepAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false);
+        var accepted = await Catalog.AcceptedStepAsync(task.TaskId, stepKey, request.Sections, cancellationToken).ConfigureAwait(false);
         if (accepted is not null)
         {
             if (accepted.InputSha256 == inputSha)
@@ -302,7 +302,7 @@ public sealed class AnalysisWorker
                 var number = await Catalog.AttemptCountAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false) + 1;
                 await Catalog.ReuseAttemptAsync(reusable, task.TaskId, number, cancellationToken).ConfigureAwait(false);
                 _status($"Running {task.Kind}, step {stepKey} reused from task {source}.");
-                return await Catalog.AcceptedStepAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false) ??
+                return await Catalog.AcceptedStepAsync(task.TaskId, stepKey, request.Sections, cancellationToken).ConfigureAwait(false) ??
                     throw new StepFailedException($"Step {stepKey} was reused from task {source}, but its answer could not be read back.");
             }
 
@@ -484,7 +484,7 @@ public sealed class AnalysisWorker
     {
         if (stepKey != trial.StepKey)
         {
-            return await Catalog.AcceptedStepAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false) ??
+            return await Catalog.AcceptedStepAsync(task.TaskId, stepKey, request.Sections, cancellationToken).ConfigureAwait(false) ??
                 throw new StepFailedException(
                     $"Step {stepKey} has no accepted attempt in this task, so the trial cannot reach step {trial.StepKey}.");
         }

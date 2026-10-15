@@ -313,7 +313,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         {
             var key = RecordingSummaryKind.VisitStepKey(visit);
             var given = await context.Catalog.AcceptedInputReferencesAsync(summaryTask, key, cancellationToken).ConfigureAwait(false);
-            var step = await context.Catalog.AcceptedStepAsync(summaryTask, key, cancellationToken).ConfigureAwait(false);
+            var step = await context.Catalog.AcceptedStepAsync(summaryTask, key, RecordingSummaryKind.VisitSections, cancellationToken).ConfigureAwait(false);
             if (given is null || step is null)
             {
                 throw new StepFailedException($"The summary has no accepted description of visit {visit.Visit.Number}, so vision cannot be added to it.");
