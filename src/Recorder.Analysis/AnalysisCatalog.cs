@@ -123,8 +123,12 @@ public sealed record AttemptRecord(
 /// </summary>
 public sealed record StepIdentity(string InputSha256, string ModelSha256, string ServerBuild, JsonObject Parameters);
 
-/// <summary>A failed attempt at a step, for a rerun to say why it was not asked again.</summary>
-public sealed record FailedStep(Guid AttemptId, string? Failure);
+/// <summary>
+/// A failed attempt at a step, for a rerun to say why it was not asked
+/// again, with the output it failed, so that a loop can be told from other
+/// failures.
+/// </summary>
+public sealed record FailedStep(Guid AttemptId, string? Failure, string? RawOutput = null);
 
 /// <summary>A step's accepted attempt.</summary>
 public sealed record AcceptedStep(Guid AttemptId, string InputSha256, JsonElement Output, IReadOnlyList<Claim> Claims);
@@ -462,7 +466,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
         return UseAsync(async connection =>
         {
             await using var command = new NpgsqlCommand(
-                "SELECT attempt_id, failure FROM analysis_attempts WHERE task_id = $1 AND step_key = $2 AND outcome = 'failed' " +
+                "SELECT attempt_id, failure, raw_output FROM analysis_attempts WHERE task_id = $1 AND step_key = $2 AND outcome = 'failed' " +
                 "AND input_sha256 = $3 AND model_sha256 = $4 AND server_build = $5 AND parameters = $6 " +
                 "AND failure IS DISTINCT FROM 'Its input changed, so the step ran again.' " +
                 "AND failure IS DISTINCT FROM 'The worker stopped during the attempt.' " +
@@ -477,7 +481,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             command.Parameters.Add(new NpgsqlParameter { Value = identity.Parameters.ToJsonString(), NpgsqlDbType = NpgsqlDbType.Jsonb });
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
-                ? new FailedStep(reader.GetGuid(0), reader.IsDBNull(1) ? null : reader.GetString(1))
+                ? new FailedStep(reader.GetGuid(0), reader.IsDBNull(1) ? null : reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2))
                 : null;
         }, cancellationToken);
     }

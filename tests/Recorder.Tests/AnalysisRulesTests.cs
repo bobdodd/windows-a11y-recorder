@@ -355,6 +355,73 @@ public sealed class AnalysisRulesTests
         Assert.Null(RepeatWatch.Loop([]));
     }
 
+    private static string Said(string text) => $"{{ \"text\": {JsonSerializer.Serialize(text)}, \"kind\": \"claim\", \"evidence\": [\"E1\"] }}";
+
+    private static List<(string Section, int Paragraph, string Kind, string Text)> Kept(string json)
+    {
+        var (claims, _, failure) = ClaimCheck.Check(json, ["screen", "change"], new HashSet<string> { "E1" });
+        Assert.Null(failure);
+        return [.. claims.Select(claim => (claim.Section, claim.Paragraph, claim.Kind, claim.Text))];
+    }
+
+    [Fact]
+    public void An_answer_cut_at_a_loop_keeps_one_copy_says_it_was_cut_short_and_gives_the_sections_not_reached_as_unknown()
+    {
+        // As the worker stops it: part way through the copy after the third.
+        var stopped = "{ \"screen\": [ [ " + string.Join(", ", Said("A window."), Said("A button."), Said("A button."), Said("A button.")) +
+            ", { \"text\": \"A butt";
+        Assert.Equal(
+            [
+                ("screen", 0, Claim.ClaimKind, "A window."),
+                ("screen", 0, Claim.ClaimKind, "A button."),
+                ("screen", 0, Claim.UnknownKind, LoopRecovery.CutText),
+                ("change", 0, Claim.UnknownKind, LoopRecovery.NotReachedText)
+            ],
+            Kept(LoopRecovery.CutAtLoop(stopped, ["screen", "change"])!));
+    }
+
+    [Fact]
+    public void An_answer_cut_at_a_loop_in_a_later_section_keeps_the_sections_before_it_whole()
+    {
+        var stopped = "{ \"screen\": [ [ " + Said("A window.") + " ], [ " + Said("A taskbar.") + " ] ], \"change\": [ [ " +
+            string.Join(", ", Said("It changed."), Said("X."), Said("Y."), Said("X."), Said("Y."), Said("X."), Said("Y.")) + ", ";
+        Assert.Equal(
+            [
+                ("screen", 0, Claim.ClaimKind, "A window."),
+                ("screen", 1, Claim.ClaimKind, "A taskbar."),
+                ("change", 0, Claim.ClaimKind, "It changed."),
+                ("change", 0, Claim.ClaimKind, "X."),
+                ("change", 0, Claim.ClaimKind, "Y."),
+                ("change", 0, Claim.UnknownKind, LoopRecovery.CutText)
+            ],
+            Kept(LoopRecovery.CutAtLoop(stopped, ["screen", "change"])!));
+        Assert.True(LoopRecovery.IsLoop(stopped));
+    }
+
+    [Fact]
+    public void An_answer_with_no_loop_is_not_cut()
+    {
+        var answer = "{ \"screen\": [ [ " + string.Join(", ", Said("A."), Said("B."), Said("A.")) + " ] ], \"change\": [] }";
+        Assert.Null(LoopRecovery.CutAtLoop(answer, ["screen", "change"]));
+        Assert.False(LoopRecovery.IsLoop(answer));
+    }
+
+    [Fact]
+    public void An_answer_sampled_after_a_loop_keeps_the_profiles_other_options()
+    {
+        var (settings, _) = AnalysisSettingsFile.Parse(Settings(LocalProfile));
+        var profile = settings.Profiles[0];
+        profile = profile with { Generation = profile.Generation with { Sampling = profile.Generation.Sampling.SetItem("presence_penalty", 1.5) } };
+
+        var sampled = LoopRecovery.Sample(profile, 2);
+
+        Assert.Equal((0.7, 2L), (sampled.Generation.Temperature, sampled.Generation.Seed));
+        Assert.Equal(1.5, sampled.Generation.Sampling["presence_penalty"]);
+        Assert.Equal(0.8, sampled.Generation.Sampling["top_p"]);
+        Assert.Equal(20, sampled.Generation.Sampling["top_k"]);
+        Assert.Equal(profile.Generation.MaxTokens, sampled.Generation.MaxTokens);
+    }
+
     [Fact]
     public void The_request_asks_for_repeatable_output_held_to_the_schema()
     {

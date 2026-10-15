@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Npgsql;
 using Recorder.Analysis;
 using Recorder.Database;
@@ -335,31 +336,187 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Assert.Equal("{ \"description\": [ [ { \"kind\"", attempt["raw_output"]);
     }
 
+    // Recovering from a loop: analysis-runner.md, "Decisions (2026-10-15)".
+    private static string Answer(params string[] texts) =>
+        "{ \"description\": [ [ " +
+        string.Join(", ", texts.Select(text => text.StartsWith('!')
+            ? $"{{ \"text\": {JsonSerializer.Serialize(text[1..])}, \"kind\": \"claim\", \"evidence\": [\"E7\"] }}"
+            : $"{{ \"text\": {JsonSerializer.Serialize(text)}, \"kind\": \"claim\", \"evidence\": [\"E1\"] }}")) +
+        " ] ] }";
+
+    private static readonly string Looping = Answer("An opening fact.", "A fact.", "A fact.", "A fact.");
+
+    private static StandInEndpoint Answers(params string[] contents)
+    {
+        var calls = 0;
+        return new StandInEndpoint
+        {
+            Answer = (_, _, _) => Task.FromResult(StandInEndpoint.Valid("E1") with { Content = contents[Math.Min(calls++, contents.Length - 1)] })
+        };
+    }
+
+    private static JsonElement Settings(string body) => JsonDocument.Parse(body).RootElement.Clone();
+
     [Fact]
-    public async Task An_answer_caught_in_a_loop_is_stopped_and_fails_without_being_asked_for_again()
+    public async Task An_answer_caught_in_a_loop_is_asked_for_at_seed_1_above_temperature_0_and_that_answer_is_kept()
     {
         var catalog = await CatalogAsync();
         var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
-        var repeated = """{ "description": [ [ { "kind": "claim", "text": "A fact.", "evidence": ["E1"] }, { "kind": "claim", "text": "A fact.", "evidence": ["E1"] }, { "kind": "claim", "text": "A fact.", "evidence": ["E1"] } ] ] }""";
-        var calls = 0;
-        var endpoint = new StandInEndpoint
-        {
-            Answer = (_, _, _) => { calls++; return Task.FromResult(StandInEndpoint.Valid("E1") with { Content = repeated }); }
-        };
+        var endpoint = Answers(Looping, Answer("A sampled fact."));
 
         await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
 
-        Assert.Equal(1, calls);
-        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
+        var bodies = endpoint.Bodies.ToArray();
+        Assert.Equal(2, bodies.Length);
+        Assert.Equal(0, Settings(bodies[0]).GetProperty("temperature").GetDouble());
+        var sampled = Settings(bodies[1]);
+        Assert.Equal(0.7, sampled.GetProperty("temperature").GetDouble());
+        Assert.Equal(1, sampled.GetProperty("seed").GetInt64());
+        Assert.Equal(0.8, sampled.GetProperty("top_p").GetDouble());
+        Assert.Equal(20, sampled.GetProperty("top_k").GetDouble());
+        var attempts = await AttemptsAsync(task);
+        Assert.Equal([AttemptOutcomes.Failed, AttemptOutcomes.Accepted], attempts.Select(attempt => attempt["outcome"]));
+        Assert.StartsWith("The model said the same statement word for word three times in a row", (string)attempts[0]["failure"]!, StringComparison.Ordinal);
+        var parameters = JsonNode.Parse((string)attempts[1]["parameters"]!)!;
+        Assert.Equal(0.7, parameters["temperature"]!.GetValue<double>());
+        Assert.Equal(1, parameters["seed"]!.GetValue<long>());
+        Assert.Equal(LoopRecovery.Sampled, parameters[LoopRecovery.AfterLoopParameter]!.GetValue<string>());
+        Assert.Equal(ChatRequest.Sha256(bodies[1]), attempts[1]["input_sha256"]);
+        Assert.Equal(["A sampled fact."], (await RowsAsync("SELECT text FROM analysis_claims c JOIN analysis_attempts a ON a.attempt_id = c.attempt_id WHERE a.task_id = $1", task)).Select(row => row["text"]));
+    }
+
+    [Fact]
+    public async Task After_a_loop_the_seeds_are_tried_in_turn_until_one_answer_passes_the_checks()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var endpoint = Answers(Looping, Looping, Answer("!A fact citing what was not given."), Answer("A fact at seed 3."));
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
         Assert.Equal(
-            "Step visit-1 failed: The model said the same statement word for word three times in a row, as statements 1 to 3, " +
-            "so the answer was stopped there: \"A fact.\" " +
-            "At temperature 0 the same request gives the same output, so it was not asked for again.",
-            await FailureAsync(task));
-        var attempt = Assert.Single(await AttemptsAsync(task));
-        Assert.Equal(AttemptOutcomes.Failed, attempt["outcome"]);
-        Assert.Equal(repeated, attempt["raw_output"]);
-        Assert.Null(attempt["finish_reason"]);
+            [(0.0, 1L), (0.7, 1L), (0.7, 2L), (0.7, 3L)],
+            endpoint.Bodies.Select(body => (Settings(body).GetProperty("temperature").GetDouble(), Settings(body).GetProperty("seed").GetInt64())));
+        var attempts = await AttemptsAsync(task);
+        Assert.Equal(
+            [AttemptOutcomes.Failed, AttemptOutcomes.Failed, AttemptOutcomes.Failed, AttemptOutcomes.Accepted],
+            attempts.Select(attempt => attempt["outcome"]));
+        Assert.Equal(3, JsonNode.Parse((string)attempts[3]["parameters"]!)!["seed"]!.GetValue<long>());
+    }
+
+    [Fact]
+    public async Task When_no_answer_sampled_after_a_loop_passes_the_answer_is_kept_up_to_the_loop_and_says_so()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var endpoint = Answers(Looping);
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
+        Assert.Equal(4, endpoint.Bodies.Count);
+        var attempts = await AttemptsAsync(task);
+        Assert.Equal(5, attempts.Count);
+        var cut = attempts[4];
+        Assert.Equal(AttemptOutcomes.Accepted, cut["outcome"]);
+        Assert.Equal(Looping, cut["raw_output"]);
+        Assert.Equal(attempts[0]["input_sha256"], cut["input_sha256"]);
+        var parameters = JsonNode.Parse((string)cut["parameters"]!)!;
+        Assert.Equal(0, parameters["temperature"]!.GetValue<double>());
+        Assert.Equal(LoopRecovery.CutShort, parameters[LoopRecovery.AfterLoopParameter]!.GetValue<string>());
+        var claims = await RowsAsync("SELECT text, claim_kind FROM analysis_claims WHERE attempt_id = (SELECT attempt_id FROM analysis_attempts WHERE task_id = $1 AND outcome = 'accepted') ORDER BY ordinal", task);
+        Assert.Equal(["An opening fact.", "A fact.", LoopRecovery.CutText], claims.Select(row => row["text"]));
+        Assert.Equal(Claim.UnknownKind, claims[2]["claim_kind"]);
+    }
+
+    [Fact]
+    public async Task A_loop_whose_answer_up_to_the_loop_fails_the_checks_fails_the_step()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var endpoint = Answers(Answer("!An opening fact citing what was not given.", "A fact.", "A fact.", "A fact."));
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
+        var failure = await FailureAsync(task);
+        Assert.StartsWith(
+            "Step visit-1 failed: its answer was caught in a loop, none of the answers sampled after it passed (at seed 1, The model said the same",
+            failure, StringComparison.Ordinal);
+        Assert.Contains("and its answer up to the loop failed the checks: ", failure, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_task_run_again_after_a_loop_reuses_the_answer_sampled_after_it_and_sends_nothing()
+    {
+        var catalog = await CatalogAsync();
+        var recording = await RecordingAsync();
+        var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), cancellationToken: Token);
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], Answers(Looping, Looping, Answer("A fact at seed 2.")), options: Fast)
+            .RunUntilEmptyAsync(Token);
+        var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), rerunOfTaskId: first, cancellationToken: Token);
+        var endpoint = Answers(Looping);
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(again));
+        Assert.Empty(endpoint.Bodies);
+        var reused = Assert.Single(await RowsAsync("SELECT parameters::text AS parameters, reused_from_attempt_id FROM analysis_attempts WHERE task_id = $1", again));
+        Assert.NotNull(reused["reused_from_attempt_id"]);
+        Assert.Equal(2, JsonNode.Parse((string)reused["parameters"]!)!["seed"]!.GetValue<long>());
+    }
+
+    [Fact]
+    public async Task A_task_run_again_after_a_loop_cut_short_reuses_that_answer_and_sends_nothing()
+    {
+        var catalog = await CatalogAsync();
+        var recording = await RecordingAsync();
+        var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), cancellationToken: Token);
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], Answers(Looping), options: Fast).RunUntilEmptyAsync(Token);
+        var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), rerunOfTaskId: first, cancellationToken: Token);
+        var endpoint = Answers(Answer("Never sent."));
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(again));
+        Assert.Empty(endpoint.Bodies);
+        var reused = Assert.Single(await RowsAsync("SELECT parameters::text AS parameters, reused_from_attempt_id FROM analysis_attempts WHERE task_id = $1", again));
+        Assert.NotNull(reused["reused_from_attempt_id"]);
+        Assert.Equal(LoopRecovery.CutShort, JsonNode.Parse((string)reused["parameters"]!)![LoopRecovery.AfterLoopParameter]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task A_task_run_again_after_a_loop_from_before_recovery_samples_without_sending_the_loop_again()
+    {
+        // A task whose loop failed the step, as before 2026-10-15.
+        var catalog = await CatalogAsync();
+        var recording = await RecordingAsync();
+        var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), cancellationToken: Token);
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], Answers(Looping), options: Fast).RunUntilEmptyAsync(Token);
+        await using (var connection = await fixture.Server.DataSource.OpenConnectionAsync(Token))
+        {
+            foreach (var sql in new[]
+            {
+                "DELETE FROM analysis_claims WHERE attempt_id IN (SELECT attempt_id FROM analysis_attempts WHERE task_id = $1 AND attempt_number > 1)",
+                "DELETE FROM analysis_attempts WHERE task_id = $1 AND attempt_number > 1"
+            })
+            {
+                await using var command = new NpgsqlCommand(sql, connection);
+                command.Parameters.AddWithValue(first);
+                await command.ExecuteNonQueryAsync(Token);
+            }
+        }
+
+        var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), rerunOfTaskId: first, cancellationToken: Token);
+        var endpoint = Answers(Answer("A fact at seed 1."));
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(again));
+        var body = Assert.Single(endpoint.Bodies);
+        Assert.Equal(0.7, Settings(body).GetProperty("temperature").GetDouble());
     }
 
     [Fact]

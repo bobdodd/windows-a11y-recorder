@@ -809,45 +809,73 @@ queued, and when it opens with tasks still waiting.
 
 ### Recovering from a loop
 
-Agreed by the owner on 2026-10-15, to be tried before it is built. Until
-then, a step whose answer is caught in a loop fails, and running the task
-again sends the same request, which at temperature 0 gives the same loop.
+Agreed by the owner on 2026-10-15, and built the same day after the
+trials below. Until then, a step whose answer was caught in a loop failed,
+and running the task again sent the same request, which at temperature 0
+gives the same loop.
 
-1. **Three answers are sampled above temperature 0, with fixed seeds.**
-   When a step's answer is stopped as a loop, the step is asked for three
-   more times, at seeds 1, 2, and 3, each recorded with its attempt.
-   llama.cpp takes a seed with each request
-   ([llama.cpp server](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)),
-   so the same request and seed should give the same answer on the same
-   machine and server build, and running the task again gives the same
-   three answers and the same vote; the trials are to show this. The
-   temperature starts from the model card's settings for its
-   non-thinking mode, `temperature=0.7`, `top_p=0.80`, `top_k=20`
-   ([Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)),
-   and is to be chosen from the trials: a higher temperature leaves a
-   loop more readily, and the answers agree less.
-2. **Two or more that are very close are an acceptable answer.** This
-   follows self-consistency, which samples several answers and keeps the
-   one most of them agree on
-   ([Wang et al.](https://arxiv.org/html/2203.11171v1)). Only an answer
-   that passes the checks and is not stopped as a loop has a vote. Answers
-   of many statements cannot be counted like a single final answer, and
-   the model is not asked to choose among them as in
-   ([Chen et al.](https://arxiv.org/abs/2311.17311)), since its choice could
-   fail as well. The answers are compared statement by statement: two
-   statements match when they are in the same section, cite the same
-   evidence, and share most of their word trigrams, the measure oh-my-pi
-   uses for near-copies
-   ([thinking-loop.ts](https://github.com/can1357/oh-my-pi/blob/6d8552d7/packages/ai/src/utils/thinking-loop.ts));
-   two answers are very close when most statements of each match one in
-   the other. The thresholds are to be chosen from the trials. Of answers
-   that are very close, the one that matches the others most is kept, the
-   lower seed first when they match equally.
-3. **Under two, the answer up to the loop is kept, and says so.** The
-   loop's first answer is kept up to where its copies began, with an
-   unknown saying that the answer was cut short by a loop and what it
-   would have said next is unknown; sections it did not reach are given
-   as unknown, and the report says that the step was cut short.
+1. **Answers are sampled above temperature 0, at fixed seeds, in turn.**
+   When a step's answer at temperature 0 is stopped as a loop, the step is
+   asked for again at temperature 0.7, `top_p` 0.8, and `top_k` 20, the
+   model card's settings for its non-thinking mode
+   ([Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)), with
+   the profile's other sampling options, such as its `presence_penalty`,
+   at seed 1, then seed 2, then seed 3. The seed has no effect at
+   temperature 0, where the most likely token is always taken
+   ([Ollama issue 1749](https://github.com/ollama/ollama/issues/1749)), so
+   the samples are above it; with a fixed seed the same request gave the
+   same answer, byte for byte, in the trials below, so running the task
+   again gives the same answer. The other steps keep temperature 0.
+2. **The first answer that passes is the step's answer; nothing is voted
+   on.** An answer passes when it is not stopped as a loop, does not reach
+   the output limit, and passes the checks of citations and form, as any
+   answer must. A vote among the three was agreed first, two or more that
+   were very close being an acceptable answer, but the trials showed
+   answers that agree on the facts and not on their wording, so that no
+   measure of shared wording could say which were very close; the owner
+   then chose the first that passes (owner, 2026-10-15).
+3. **Under none, the answer up to the loop is kept, and says so.** The
+   loop's answer is kept up to the end of the first copy of the repeated
+   statements, as the model wrote it, with its paragraphs, and an unknown
+   is added after the last: "The model began repeating itself here, so
+   its answer was cut short: what it would have said next is unknown."
+   Each section it did not reach is given as one unknown: "The model's
+   answer was cut short before this section because it began repeating
+   itself, so what this section would have said is unknown." The answer
+   so cut must pass the checks too; if it does not, the step fails, saying
+   why each sample failed.
+4. **Each attempt records how it was made.** A sample's attempt records
+   the temperature, seed, and options it was sent with and
+   `"after_loop": "sampled"`; the answer cut short is an attempt of its
+   own, with the request and settings of the loop and
+   `"after_loop": "cut short"`, its raw output the loop's answer as the
+   server gave it, and its output the answer cut from it.
+5. **Running again carries on, and sends nothing it has an answer to.**
+   A task run again whose step looped in the task it runs again does not
+   send the loop's request again, as at temperature 0 it would give the
+   same loop; it reuses the answer sampled or cut short there, and does
+   not send again a sample that failed there with the same request,
+   model, server build, and settings. A task run again after a loop from
+   before this was built, which failed the step, goes on to the samples.
+   A task that stopped part way, as for a recording, carries on with the
+   next seed. A server that gives no answer to a sample fails the step,
+   rather than the step going on without that sample, so that running
+   the task again tries it.
+6. **Trials are of one request only:** a trial of a step whose answer
+   loops says that it loops, and does not sample after it; the samples
+   can be tried with the trial's `temperature` and `seed` options.
+
+- **Tests:** a loop followed by an answer at seed 1 that passes, with
+  the temperature, seed, and options sent and recorded; the seeds tried in
+  turn past a loop and a failed check; the answer cut short at the loop,
+  with its unknown and the loop's raw output, when no sample passes; a
+  step failed when the answer cut short fails the checks; a task run
+  again reusing a sample's answer, and an answer cut short, sending
+  nothing; a task run again after a loop from before recovery, sampling
+  without sending the loop again; answers cut at a loop in the first
+  section and in a later one, keeping one copy and giving the sections not
+  reached as unknown; an answer with no loop not cut; and a sample keeping
+  the profile's other options.
 
 The trials, on the target machine, with the run queued 2026-10-14 18:05:24,
 the one run with every step up to moment 10 accepted; the runs whose
@@ -897,9 +925,9 @@ b11607-ff026f8c0:
   their word trigrams, against the 0.8 of oh-my-pi's near-copies, and
   the same fact told twice shared 0.19 to 0.64 of its words apart from
   the commonest, while different facts shared 0.06 to 0.15. A measure of
-  shared wording therefore cannot say which answers are very close, and
-  decision 2's comparison is not built as written; the owner is to
-  choose how answers are compared, or whether they are.
+  shared wording therefore cannot say which answers are very close, so
+  the vote first agreed was not built, and the owner chose the first
+  answer that passes (decision 2).
 
 ## Decisions (2026-10-14)
 

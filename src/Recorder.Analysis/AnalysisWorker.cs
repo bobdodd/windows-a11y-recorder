@@ -265,7 +265,11 @@ public sealed class AnalysisWorker
         var accepted = await Catalog.AcceptedStepAsync(task.TaskId, stepKey, request.Sections, cancellationToken).ConfigureAwait(false);
         if (accepted is not null)
         {
-            if (accepted.InputSha256 == inputSha)
+            // An answer sampled after a loop was sent with its own request
+            // (LoopRecovery).
+            if (accepted.InputSha256 == inputSha ||
+                (Repeatable(profile) && LoopRecovery.Seeds.Any(seed =>
+                    ChatRequest.Sha256(ChatRequest.Build(LoopRecovery.Sample(profile, seed), request)) == accepted.InputSha256)))
             {
                 return accepted;
             }
@@ -318,10 +322,33 @@ public sealed class AnalysisWorker
             if (Repeatable(profile) &&
                 await Catalog.UnchangedFailureAsync(source, stepKey, identity, cancellationToken).ConfigureAwait(false) is { } failed)
             {
+                // A loop is not sent again either, but recovered from, as
+                // the task it runs again did or would have (owner,
+                // 2026-10-15).
+                if (LoopRecovery.IsLoop(failed.RawOutput))
+                {
+                    return await RecoverFromLoopAsync(
+                        task, stepKey, request, profile, failed.RawOutput!, inputSha, parameters, modelSha, basis, build, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
                 throw new StepFailedException(
                     $"Step {stepKey} failed in task {source} with the same request, model, server build, and settings, " +
                     $"so it was not asked for again: at temperature 0 it would give the same output. It failed: {failed.Failure}");
             }
+        }
+
+        // A task that stopped part way through recovering from a loop, as
+        // for a recording, carries on where it stopped.
+        if (Repeatable(profile) && modelSha is not null && build is not null &&
+            await Catalog.UnchangedFailureAsync(
+                task.TaskId, stepKey, new StepIdentity(inputSha, modelSha, build, (JsonObject)parameters.DeepClone()), cancellationToken)
+                .ConfigureAwait(false) is { } own &&
+            LoopRecovery.IsLoop(own.RawOutput))
+        {
+            return await RecoverFromLoopAsync(
+                task, stepKey, request, profile, own.RawOutput!, inputSha, parameters, modelSha, basis, build, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         string? lastFailure = null;
@@ -399,6 +426,15 @@ public sealed class AnalysisWorker
                 // repaired".
                 if (response is not null && Repeatable(profile))
                 {
+                    // An answer caught in a loop is recovered from by
+                    // sampling, not sent again (owner, 2026-10-15).
+                    if (response.StoppedBecause is not null)
+                    {
+                        return await RecoverFromLoopAsync(
+                            task, stepKey, request, profile, response.Content ?? "", inputSha, parameters, modelSha, basis, build, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+
                     throw new StepFailedException(
                         $"Step {stepKey} failed: {failure} At temperature 0 the same request gives the same output, " +
                         "so it was not asked for again.");
@@ -423,6 +459,224 @@ public sealed class AnalysisWorker
                 cancellationToken).ConfigureAwait(false);
             return new AcceptedStep(attemptId, inputSha, output, claims);
         }
+    }
+
+    /// <summary>
+    /// Recovers from a step's answer at temperature 0 that was stopped as a
+    /// loop: the step is asked for at each of LoopRecovery's seeds in turn,
+    /// and the first answer that passes the checks is the step's; when none
+    /// does, the loop's answer is kept up to the loop and says so. Each
+    /// attempt records that it was made after a loop. Where the task it runs
+    /// again, or this task before it stopped, made an attempt with the same
+    /// request, model, server build, and settings, its answer is reused, or
+    /// its failure stands, as a fixed seed gives the same answer. See
+    /// docs/architecture/analysis-runner.md, "Decisions (2026-10-15)".
+    /// </summary>
+    private async Task<AcceptedStep> RecoverFromLoopAsync(
+        AnalysisTask task,
+        string stepKey,
+        ModelRequest request,
+        ModelProfile profile,
+        string loopContent,
+        string inputSha,
+        JsonObject parameters,
+        string? modelSha,
+        string basis,
+        string? build,
+        CancellationToken cancellationToken)
+    {
+        var failures = new List<string>();
+        foreach (var seed in LoopRecovery.Seeds)
+        {
+            var sample = LoopRecovery.Sample(profile, seed);
+            var body = ChatRequest.Build(sample, request);
+            var sha = ChatRequest.Sha256(body);
+            var sampleParameters = ChatRequest.Parameters(sample, request);
+            sampleParameters["server_defaults"] = parameters["server_defaults"]?.DeepClone();
+            sampleParameters[LoopRecovery.AfterLoopParameter] = LoopRecovery.Sampled;
+            var seedName = seed.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var earlier = await EarlierAttemptAsync(task, stepKey, request, sha, sampleParameters, modelSha, build, cancellationToken).ConfigureAwait(false);
+            if (earlier.Accepted is { } reused)
+            {
+                return reused;
+            }
+
+            if (earlier.Failure is { } before)
+            {
+                failures.Add($"at seed {seedName}, {before}");
+                continue;
+            }
+
+            var attempt = await AttemptAsync(
+                task, stepKey, request, sample, body, sha, sampleParameters, modelSha, basis, build,
+                $"answer sampled at seed {seedName} after a loop", cancellationToken).ConfigureAwait(false);
+            if (attempt.Failure is null)
+            {
+                return new AcceptedStep(attempt.AttemptId, sha, attempt.Output, attempt.Claims);
+            }
+
+            // A server that gave no answer may give one when the task is run
+            // again, so the step fails rather than going on without it.
+            if (attempt.Response is null)
+            {
+                throw new StepFailedException(
+                    $"Step {stepKey} failed: its answer was caught in a loop, and the server gave no answer at seed {seedName}: {attempt.Failure}");
+            }
+
+            failures.Add($"at seed {seedName}, {attempt.Failure}");
+        }
+
+        var cutParameters = (JsonObject)parameters.DeepClone();
+        cutParameters[LoopRecovery.AfterLoopParameter] = LoopRecovery.CutShort;
+        var earlierCut = await EarlierAttemptAsync(task, stepKey, request, inputSha, cutParameters, modelSha, build, cancellationToken).ConfigureAwait(false);
+        if (earlierCut.Accepted is { } reusedCut)
+        {
+            return reusedCut;
+        }
+
+        var cut = LoopRecovery.CutAtLoop(loopContent, request.Sections);
+        var (claims, output, failure) = cut is null
+            ? ([], default, "No loop was found in its answer.")
+            : ClaimCheck.Check(cut, request.Sections, request.InputReferences);
+        var number = await Catalog.AttemptCountAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false) + 1;
+        var attemptId = await Catalog.BeginAttemptAsync(
+            new AttemptStart(
+                task.TaskId, stepKey, number, profile, modelSha, basis, build, cutParameters,
+                request.PromptTemplate, request.PromptTemplateVersion, inputSha,
+                [.. request.InputReferences.Order(StringComparer.Ordinal)]),
+            cancellationToken).ConfigureAwait(false);
+
+        // The answer as the server gave it is kept beside the answer cut
+        // from it.
+        var loopResponse = new ModelResponse(loopContent, null, null, null, null, null);
+        if (failure is not null)
+        {
+            await Catalog.FinishAttemptAsync(attemptId, new AttemptEnd(AttemptOutcomes.Failed, failure, loopResponse, null, []), cancellationToken)
+                .ConfigureAwait(false);
+            throw new StepFailedException(
+                $"Step {stepKey} failed: its answer was caught in a loop, none of the answers sampled after it passed " +
+                $"({string.Join("; ", failures)}), and its answer up to the loop failed the checks: {failure}");
+        }
+
+        await Catalog.FinishAttemptAsync(attemptId, new AttemptEnd(AttemptOutcomes.Accepted, null, loopResponse, output, claims), cancellationToken)
+            .ConfigureAwait(false);
+        _status($"Running {task.Kind}, step {stepKey}: no answer sampled after a loop passed, so the answer is kept up to the loop.");
+        return new AcceptedStep(attemptId, inputSha, output, claims);
+    }
+
+    private sealed record EarlierAttempt(AcceptedStep? Accepted, string? Failure);
+
+    // An attempt made before with the same request, model, server build, and
+    // settings: in the task this one runs again, whose accepted answer is
+    // reused, or in either task, whose failure stands.
+    private async Task<EarlierAttempt> EarlierAttemptAsync(
+        AnalysisTask task,
+        string stepKey,
+        ModelRequest request,
+        string inputSha,
+        JsonObject parameters,
+        string? modelSha,
+        string? build,
+        CancellationToken cancellationToken)
+    {
+        if (modelSha is null || build is null)
+        {
+            return new EarlierAttempt(null, null);
+        }
+
+        var identity = new StepIdentity(inputSha, modelSha, build, (JsonObject)parameters.DeepClone());
+        if (task.RerunOfTaskId is { } source)
+        {
+            if (await Catalog.ReusableAttemptAsync(source, stepKey, identity, cancellationToken).ConfigureAwait(false) is { } reusable)
+            {
+                var number = await Catalog.AttemptCountAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false) + 1;
+                await Catalog.ReuseAttemptAsync(reusable, task.TaskId, number, cancellationToken).ConfigureAwait(false);
+                _status($"Running {task.Kind}, step {stepKey} reused from task {source}.");
+                return new EarlierAttempt(
+                    await Catalog.AcceptedStepAsync(task.TaskId, stepKey, request.Sections, cancellationToken).ConfigureAwait(false) ??
+                        throw new StepFailedException($"Step {stepKey} was reused from task {source}, but its answer could not be read back."),
+                    null);
+            }
+
+            if (await Catalog.UnchangedFailureAsync(source, stepKey, identity, cancellationToken).ConfigureAwait(false) is { } failed)
+            {
+                return new EarlierAttempt(null, failed.Failure ?? "it failed");
+            }
+        }
+
+        return await Catalog.UnchangedFailureAsync(task.TaskId, stepKey, identity, cancellationToken).ConfigureAwait(false) is { } own
+            ? new EarlierAttempt(null, own.Failure ?? "it failed")
+            : new EarlierAttempt(null, null);
+    }
+
+    private sealed record AttemptResult(Guid AttemptId, ModelResponse? Response, string? Failure, IReadOnlyList<Claim> Claims, System.Text.Json.JsonElement Output);
+
+    // One attempt at a step with the profile and request body given,
+    // recorded in the catalog, ended by a recording starting or the task
+    // being cancelled as any attempt is.
+    private async Task<AttemptResult> AttemptAsync(
+        AnalysisTask task,
+        string stepKey,
+        ModelRequest request,
+        ModelProfile profile,
+        string body,
+        string inputSha,
+        JsonObject parameters,
+        string? modelSha,
+        string basis,
+        string? build,
+        string what,
+        CancellationToken cancellationToken)
+    {
+        if (await Catalog.CancelRequestedAsync(task.TaskId, cancellationToken).ConfigureAwait(false))
+        {
+            throw new TaskCancelledException();
+        }
+
+        if (await Catalog.RecordingInProgressAsync(cancellationToken).ConfigureAwait(false))
+        {
+            throw new StoppedForRecordingException();
+        }
+
+        var number = await Catalog.AttemptCountAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false) + 1;
+        var attemptId = await Catalog.BeginAttemptAsync(
+            new AttemptStart(
+                task.TaskId, stepKey, number, profile, modelSha, basis, build, (JsonObject)parameters.DeepClone(),
+                request.PromptTemplate, request.PromptTemplateVersion, inputSha,
+                [.. request.InputReferences.Order(StringComparer.Ordinal)]),
+            cancellationToken).ConfigureAwait(false);
+        _status($"Running {task.Kind}, step {stepKey}, attempt {number}, an {what}, with {profile.Name}.");
+
+        var stop = await RequestAsync(task.TaskId, profile, body, cancellationToken).ConfigureAwait(false);
+        if (stop.Interruption is { } interruption)
+        {
+            await Catalog.FinishAttemptAsync(attemptId, new AttemptEnd(interruption, null, null, null, []), cancellationToken).ConfigureAwait(false);
+            if (interruption == AttemptOutcomes.StoppedForRecording)
+            {
+                await UnloadAsync(cancellationToken).ConfigureAwait(false);
+                throw new StoppedForRecordingException();
+            }
+
+            throw new TaskCancelledException();
+        }
+
+        var response = stop.Response;
+        var failure = stop.Failure ?? response!.StoppedBecause ??
+            (response!.FinishReason == "length" ? $"The output stopped at the output limit of {profile.Generation.MaxTokens} tokens." : null);
+        IReadOnlyList<Claim> claims = [];
+        System.Text.Json.JsonElement output = default;
+        if (failure is null)
+        {
+            (claims, output, failure) = ClaimCheck.Check(response!.Content, request.Sections, request.InputReferences);
+        }
+
+        await Catalog.FinishAttemptAsync(
+            attemptId,
+            failure is null
+                ? new AttemptEnd(AttemptOutcomes.Accepted, null, response, output, claims)
+                : new AttemptEnd(AttemptOutcomes.Failed, failure, response, null, []),
+            cancellationToken).ConfigureAwait(false);
+        return new AttemptResult(attemptId, response, failure, claims, output);
     }
 
     private ModelProfile StepProfile(AnalysisTask task, ModelRequest request)
