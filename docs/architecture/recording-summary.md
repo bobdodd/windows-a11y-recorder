@@ -481,6 +481,13 @@ it:
   two people "is missing in the recreation due to a refused request",
   while describing it; the one image recorded as not loaded is "A Ball
   for All.jpg". It is noted, not changed.
+- **The fourth run on the target machine,** 2026-10-14, build c790781,
+  accepted every moment's steps, none with a statement of what is unknown
+  labelled a claim, and failed at the visit step, `visit-0001`: its
+  request, 20,927 tokens, was longer than the server's context of 16,384
+  tokens. The owner agreed the same day to raise the image profile's
+  context to 32,768 tokens and to restart where it failed, reusing the
+  moments' steps (the runner design's "Reusing steps when run again").
 - **The report** lists under each moment its recreated page's size,
   scroll position, and tiles, marking those on the screen, and what the
   recreation lacked, then the three parts. "How this was made" gives the

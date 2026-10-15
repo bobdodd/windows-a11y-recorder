@@ -395,6 +395,16 @@ public sealed class AnalysisWorker
                         "so it was not asked for again.");
                 }
 
+                // A request the server refused itself, such as one longer
+                // than its context, would be refused again at any
+                // temperature, so it is not sent again (owner, 2026-10-14;
+                // analysis-runner.md, decision 8).
+                if (stop.Refused)
+                {
+                    throw new StepFailedException(
+                        $"Step {stepKey} failed: {failure} The server refused the request itself, so it was not sent again.");
+                }
+
                 continue;
             }
 
@@ -527,7 +537,7 @@ public sealed class AnalysisWorker
         return profile.Generation.Temperature == 0;
     }
 
-    private sealed record RequestResult(ModelResponse? Response, string? Failure, string? Interruption);
+    private sealed record RequestResult(ModelResponse? Response, string? Failure, string? Interruption, bool Refused = false);
 
     // Sends the request while watching for a recording starting or the task
     // being cancelled; either stops the request.
@@ -586,7 +596,7 @@ public sealed class AnalysisWorker
         catch (ModelEndpointException exception)
         {
             return interruption is null
-                ? new RequestResult(null, exception.Message, null)
+                ? new RequestResult(null, exception.Message, null, exception.Refused)
                 : new RequestResult(null, null, interruption);
         }
     }

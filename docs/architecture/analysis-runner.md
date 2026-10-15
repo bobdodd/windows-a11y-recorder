@@ -245,6 +245,13 @@ temperature above 0 has its refused output run again, up to the limit, as
 above. To try again with different settings, change the profile and choose
 Run again.
 
+A request the server refuses itself, answering 400 Bad Request, as for a
+request longer than its context, is not sent again either, at any
+temperature: the same request would be refused again (owner, 2026-10-14).
+On the target machine the visit step of the summary with vision, 20,927
+tokens, was refused three times by a server with a context of 16,384
+tokens before this was built.
+
 ### 9. Results are inferred
 
 Every model claim is shown as inferred, with the profile that made it, and
@@ -568,6 +575,20 @@ attempts marks each one reused.
   tile's text in the request ended with its file, in the task's own
   folder, so the request differed at every run. The request now leaves the
   file out; the report's evidence list still gives it (owner, 2026-10-14).
+- **The run that reached the visit step,** build c790781 on 2026-10-14,
+  had every moment's steps accepted, and its visit step was refused: its
+  request, 20,927 tokens, was longer than the server's context of 16,384.
+  The owner asked that the fix restart where it failed. The next build's
+  start script raises the context of the image profile to 32,768 tokens,
+  keeping the file as it was beside it; the context is not among the
+  settings compared, as the server's settings read do not include it
+  ([llama.cpp server-task.cpp at b11607](https://raw.githubusercontent.com/ggml-org/llama.cpp/b11607/tools/server/server-task.cpp)).
+  The moments' requests of the vision task's integration test were the
+  same, byte for byte, with build c790781 and the next. Whether 32,768
+  tokens fit in the target machine's 6 GB with the profile's arguments is
+  unknown until it runs. A visit's request grows by about 2,400 tokens a
+  moment, so a longer visit would not fit in any set context; what the
+  visit step is given is to be designed separately.
 - **Tests:** integration tests with the catalog in a real PostgreSQL
   server and a stand-in endpoint: a step reused, with its answer and
   statements, and one run again because its request changed; nothing

@@ -43,7 +43,14 @@ public sealed record ModelResponse(
     string? StoppedBecause = null);
 
 /// <summary>A failure reported by, or in reaching, a model server.</summary>
-public sealed class ModelEndpointException(string message, Exception? inner = null) : Exception(message, inner);
+public sealed class ModelEndpointException(string message, Exception? inner = null, bool refused = false) : Exception(message, inner)
+{
+    /// <summary>
+    /// Whether the server refused the request itself, as with a request
+    /// longer than its context: the same request would be refused again.
+    /// </summary>
+    public bool Refused { get; } = refused;
+}
 
 /// <summary>
 /// A server the worker sends requests to: an OpenAI-compatible chat
@@ -225,7 +232,8 @@ public sealed class HttpModelEndpoint(
         if (!response.IsSuccessStatusCode)
         {
             throw new ModelEndpointException(
-                $"The model server answered {(int)response.StatusCode} {response.ReasonPhrase}: {Shorten(text)}");
+                $"The model server answered {(int)response.StatusCode} {response.ReasonPhrase}: {Shorten(text)}",
+                refused: response.StatusCode == System.Net.HttpStatusCode.BadRequest);
         }
 
         try

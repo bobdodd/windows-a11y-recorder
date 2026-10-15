@@ -442,6 +442,22 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
     }
 
     [Fact]
+    public async Task A_request_the_server_refused_itself_is_not_sent_again()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        const string Refusal = "The model server answered 400 Bad Request: {\"error\":{\"code\":400,\"message\":\"request (20927 tokens) exceeds the available context size (16384 tokens), try increasing it\"}}";
+        var endpoint = new StandInEndpoint { Answer = (_, _, _) => throw new ModelEndpointException(Refusal, refused: true) };
+
+        // Where output could differ too: the refusal is of the request.
+        await new AnalysisWorker(catalog, SettingsWith(3, Varying()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Single(endpoint.Bodies);
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
+        Assert.Equal($"Step visit-1 failed: {Refusal} The server refused the request itself, so it was not sent again.", await FailureAsync(task));
+    }
+
+    [Fact]
     public async Task The_worker_waits_while_a_recording_is_in_progress()
     {
         var catalog = await CatalogAsync();
@@ -907,6 +923,12 @@ public sealed class HttpModelEndpointTests
         await serving;
         Assert.Contains("503", failure.Message, StringComparison.Ordinal);
         Assert.Contains("loading model", failure.Message, StringComparison.Ordinal);
+        Assert.False(failure.Refused);
+
+        serving = ServeOnceAsync(listener, 400, "{\"error\":{\"code\":400,\"type\":\"exceed_context_size_error\"}}");
+        failure = await Assert.ThrowsAsync<ModelEndpointException>(() => endpoint.CompleteAsync(profile, "{}", Token));
+        await serving;
+        Assert.True(failure.Refused);
 
         serving = ServeOnceAsync(listener, 200, "{\"build_info\": \"b11607-ff026f8c0\"}");
         Assert.Equal("b11607-ff026f8c0", await endpoint.ServerBuildAsync(profile, Token));
