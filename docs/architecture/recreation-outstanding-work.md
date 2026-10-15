@@ -111,6 +111,35 @@ Found in the design doc on 2026-10-07. These are not specific to frames.
   copy's layout object was not the one recorded ("Slice 4a", "Elements
   without a layout object").
 
+## The recorded viewport in the live recreation
+
+Added 2026-10-15, from the decision "The recreated page at the recorded
+viewport and scroll" in [recording summary](recording-summary.md). The
+recreation opened from the player is a live page; once it is scrolled,
+nothing shows which part of it was in the participant's viewport at the
+frame. Not designed; options to settle, with the player's mouse-only
+rule (44 by 44 pixel targets, a single click for every action):
+
+- **A strip beside the page, in the player** (owner's suggestion of a
+  sidebar): the page's whole height, with a band for the recorded
+  viewport and a marker for the part now shown; clicking the band
+  scrolls back to the recorded position. It is outside the page, so the
+  recreation and what DevTools shows of it are unchanged. The suggested
+  start.
+- **An outline over the page:** the recorded viewport drawn in place as
+  the page is scrolled. An element added to the page would change what
+  DevTools inspects; whether a DevTools highlight, which leaves the page
+  unchanged, can be held to a place on the page as it scrolls is to be
+  checked first.
+- **A button that scrolls back to the recorded position:** simple, but
+  it does not show where that was.
+
+Also to settle: where Magnifier was on, marking the part magnified on
+the screen within the viewport, from the recorded Magnifier evidence;
+and whether the scroll positions of areas that scroll inside the page,
+which the recreation restores, are marked too, left until a recording
+needs it.
+
 ## Elsewhere, for reference
 
 Recorded elsewhere and not repeated here: text by content hash (agreed,
