@@ -840,6 +840,123 @@ decision, the same day: "The change will be more radical, but it has to
 wait until after our current optimization of images" (see "Unique images
 across the recording").
 
+### The layered report (proposed)
+
+Proposed on 2026-10-15, from the owner's design of the same day; not
+agreed, not built. It replaces the page so far, whose answer is written
+again whole at each moment and outgrew the output limit at moment 10
+(see "The page so far at moment 10").
+
+The owner's design: the report is built in layers. At its most basic it
+is a review of the recorded data, which stage 1 gives. That is decorated
+with what the captured frames show of the visual user experience, then,
+where the browser is running, with what pictures of the browser's page
+add that the frame does not show: interactions, and the modals, widgets,
+and forms that appeared during the visit. "So the visual analysis is
+supposed to expand on the existing knowledge, not start from scratch
+again. But this is about user experience, not listing every element on
+the page" (owner). As built, every vision step starts again: each
+moment, each group of tiles, the combined step, the page so far, and the
+visit step each write their whole description anew.
+
+The owner's answers, the same day, to the questions raised with the
+design:
+
+1. **Each moment is still described alone, as recorded content.** The
+   moment's description is kept "for potential use in further testing
+   and documentation, so that we don't need to build it all again later
+   ... So we can query the visual of any moment out of context. So it's
+   indexed, recorded content" (owner). Decision 2 of "The page understood
+   moment by moment" stands for these descriptions; the layers are built
+   from them, not instead of them.
+2. **An addition may elaborate or correct an earlier statement, or be a
+   new statement** (owner: "the flexibility of both").
+3. **The report has two chapters** (owner): a description of the pages,
+   summarising what is known of each from all its visits, independent of
+   the participant's journey; and a report of the user experience, which
+   turns the layers into clean readable prose, with pictures, changes,
+   tables, and graphs where they make sense. "We are telling a story"
+   (owner).
+4. **The visit and recording steps are replaced by the two chapters**
+   (owner).
+
+Proposed, to be agreed:
+
+- **The moment records.** Each moment's captured frame is described
+  alone, as now, and each group of its page's tiles as now, a group
+  already described being given its earlier answer (see "Unique images
+  across the recording"). These are the moment's record. An index of
+  the records, `analysis\<task>\moments.json`, gives for each moment its
+  visit, number, time, frame, the steps that describe it, and its tiles'
+  keys, so that any moment's description can be found and read alone.
+  The combined step is not needed for the layers and is dropped: the
+  frame's and the tiles' descriptions are the record.
+- **The layers, one step for each moment.** The step is given the
+  visit's knowledge so far, each statement numbered by the recorder, and
+  the moment's record: its frame's description, and the descriptions of
+  only those groups of tiles not yet in the visit's knowledge. It is not
+  given the pictures again. It answers with additions only, in two
+  sections: "screen", what the frame adds to the visual user
+  experience, and "beyond", what the recreated page adds that the frame
+  does not show. Each addition either names the numbered statement it
+  elaborates or corrects, or is new. Where the moment disagrees with a
+  statement, the addition says so, citing both, and does not settle it.
+  A moment that adds nothing gives an empty answer. The visit's
+  knowledge starts as its stage 1 description and grows by each moment's
+  additions, put in place by the recorder, not by the model.
+- **Why the output is bounded.** Each step's answer is what that moment
+  adds, not the whole page again, so a moment that changes nothing costs
+  a short answer, and the answer no longer grows with the visit. The
+  request still grows with the visit's knowledge; a visit long enough to
+  overflow the context would fail saying so, not be cut.
+- **Chapter 1, the pages.** One step for each page, a page being a URL
+  visited, as the report already treats a return to a URL ("What counts
+  as a page visit"), given the knowledge of every visit to it, writes the
+  page's description, independent of the journey: its regions, and the
+  widgets, forms, dialogs, and messages it has or showed, and how it
+  changed. When two visits show the same view is the separate unique view
+  proposal.
+- **Chapter 2, the user experience.** One step for each visit, given the
+  visit's knowledge, its facts, and the story so far, writes that part
+  of the story as prose, choosing which moments' frames to show by their
+  references; then one step writes the story's opening, given the
+  visits' parts. The recorder, not the model, puts in the pictures the
+  steps chose, and builds the tables and graphs from the recorded facts,
+  such as the visits and moments on a timeline, so that every number in
+  them is the recorder's.
+- **What is kept and what goes:** kept are the frame and tile steps, the
+  store of unique images, and the evidence list; dropped are the
+  combined step, the page so far, and the visit and recording steps of
+  the vision stage. Stage 1 is unchanged.
+
+Questions to settle:
+
+- Whether each layer step is given the moment's frame again, as well as
+  its description, at the cost of the picture's image tokens in every
+  step, or the description alone, as proposed.
+- Whether the answer's JSON is held to one line by the answer's
+  grammar, which would save about a third of every answer's tokens
+  ("The page so far at moment 10";
+  [llama.cpp grammars](https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md)).
+- Which tables and graphs chapter 2 has, beyond the timeline of visits
+  and moments.
+- Whether the report keeps each moment's description as an appendix, or
+  the index alone holds them.
+
+- **Tests, when built:**
+  - **Unit tests:** the visit's knowledge numbered; an addition
+    elaborating, correcting, or new, put in place by the recorder; an
+    empty answer; a group of tiles already in the visit's knowledge left
+    out of the step; the index of moment records; a page's knowledge
+    gathered from two visits to its URL; the pictures and tables the
+    recorder puts in chapter 2.
+  - **Integration test:** the vision task on a recording built by the
+    tests, with a stand-in endpoint, checking each step's request and
+    that the report has its two chapters.
+  - **System test on the target machine:** a run of the summary with
+    vision on the cnib.ca recording, checking on screen that it reaches
+    its end and that the report has its two chapters.
+
 ### The recreated page at the recorded viewport and scroll
 
 The owner's decision, from a review of what the tiles are for.
