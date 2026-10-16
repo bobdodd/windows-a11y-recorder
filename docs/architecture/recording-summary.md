@@ -1293,6 +1293,63 @@ As built, 2026-10-16:
 - Tested at the unit level (`SettingsReaderTests`) and through the task
   with a stand-in model (`RecordingSummaryVisionTaskTests`).
 
+### The report's structure and its paragraphs (proposed)
+
+Asked for by the owner on 2026-10-16, after the executive summary and the
+appendices were built: "Appendices are always the last sections of a
+document, we have them before Other Windows and Evidence. All sections
+should have either a numbered heading or be an appendix, That probably
+means that How this was made should be the last appendix." And: "We have
+giant single paragraph sections that need to be properly structured for
+humans to read. So a mix of clearer, more distinct paras and probably some
+numbered lists/bullets."
+
+The layered report as built, in order: the title and an unheaded
+introduction; "The participant's capabilities", unnumbered; chapters 1
+to 3; Appendices A to D; then "Other windows", "Evidence", and "How this
+was made", all three unnumbered and after the appendices.
+
+Where the long paragraphs come from:
+
+- **The model's chapters.** Each section is a list of paragraphs, each a
+  list of statements, and the report keeps the model's paragraphs as it
+  gives them. The templates do not say what a paragraph is, so the model
+  often gives a section as one paragraph of many statements. Nothing is
+  lost or joined by the recorder: the story's paragraphs already end at
+  each paragraph the model gives, and at each heading and picture.
+- **The recorder's own text.** The introduction is one paragraph of
+  eight sentences; each visit's derived facts under a page are one line;
+  and "How this was made" is a list whose items are each a long
+  paragraph.
+
+Proposed, to be agreed:
+
+- **Every section numbered or an appendix, the appendices last.** Under
+  the title, only who inferred it and when. The introduction moves into
+  "How this was made". The order becomes chapters 1 to 3 (where the
+  participant's capabilities go is to be decided); Appendices A to D, the
+  settings; Appendix E, other windows; Appendix F, the evidence; and
+  Appendix G, how this was made, last.
+- **Paragraphs said in the templates.** Each template that writes prose
+  (the pages, the story and its opening, and the executive summary) says
+  what a paragraph is: one topic, a new paragraph for each new topic. The
+  report keeps the model's paragraphs as now; the recorder does not
+  split or join them, nor check their length.
+- **Lists as forms.** Two forms are added to every prose template:
+  `bullet`, an item of a list whose order does not matter, and
+  `numbered`, a step of a sequence, such as the participant's actions in
+  order. The pages' and the executive summary's templates gain the forms
+  the story's already has, so each of their statements has a form too.
+  Consecutive items of one kind are one list; the recorder numbers the
+  steps.
+- **The recorder's own text as lists.** Each visit's derived facts under a
+  page become a list, one item for each fact; "How this was made" becomes
+  numbered subsections (G.1 the model, G.2 the prompt templates, each a
+  list item, G.3 the settings, G.4 the limits, and so on).
+- **What a run again sends.** The page, story, opening, and executive
+  templates change version, so their steps are sent again; every moment's
+  step is reused.
+
 ### The recreated page at the recorded viewport and scroll
 
 The owner's decision, from a review of what the tiles are for.
