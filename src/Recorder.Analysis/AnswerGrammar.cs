@@ -4,9 +4,11 @@ namespace Recorder.Analysis;
 
 /// <summary>
 /// The answer's grammar, written by the recorder in llama.cpp's grammar
-/// format: the structure of <see cref="ClaimCheck.Schema"/>, with no space
-/// or line break allowed between tokens, so that the answer is JSON on one
-/// line. A schema sent as response_format is turned by llama.cpp into a
+/// format: the structure of <see cref="ClaimCheck.Schema"/>, with no line
+/// break allowed between tokens and at most one space, after a colon or a
+/// comma, so that the answer is JSON on one line. A first trial, allowing
+/// no space at all, gave an empty answer on the target machine on
+/// 2026-10-15 (recording-summary.md, "The layered report"). A schema sent as response_format is turned by llama.cpp into a
 /// grammar that allows up to two line breaks and 20 spaces or tabs between
 /// tokens, with no option to change it
 /// (https://raw.githubusercontent.com/ggml-org/llama.cpp/master/common/json-schema-to-grammar.cpp,
@@ -28,18 +30,19 @@ public static class AnswerGrammar
         var root = new StringBuilder("root ::= \"{\"");
         for (var index = 0; index < sections.Count; index++)
         {
-            root.Append(index == 0 ? " " : " \",\" ").Append("\"\\\"").Append(sections[index]).Append("\\\":\" section");
+            root.Append(index == 0 ? " " : " \",\" sp ").Append("\"\\\"").Append(sections[index]).Append("\\\":\" sp section");
         }
 
         root.Append(" \"}\"");
         return string.Join('\n',
             root.ToString(),
-            "section ::= \"[\" (paragraph (\",\" paragraph)*)? \"]\"",
-            "paragraph ::= \"[\" (statement (\",\" statement)*)? \"]\"",
-            "statement ::= \"{\\\"text\\\":\" text \",\\\"kind\\\":\" kind \",\\\"evidence\\\":\" evidence \"}\"",
+            "sp ::= \" \"?",
+            "section ::= \"[\" (paragraph (\",\" sp paragraph)*)? \"]\"",
+            "paragraph ::= \"[\" (statement (\",\" sp statement)*)? \"]\"",
+            "statement ::= \"{\\\"text\\\":\" sp text \",\" sp \"\\\"kind\\\":\" sp kind \",\" sp \"\\\"evidence\\\":\" sp evidence \"}\"",
             "text ::= \"\\\"\" char+ \"\\\"\"",
             $"kind ::= \"\\\"{Claim.ClaimKind}\\\"\" | \"\\\"{Claim.UnknownKind}\\\"\"",
-            "evidence ::= \"[\" (string (\",\" string)*)? \"]\"",
+            "evidence ::= \"[\" (string (\",\" sp string)*)? \"]\"",
             "string ::= \"\\\"\" char* \"\\\"\"",
             "char ::= [^\"\\\\\\x7F\\x00-\\x1F] | [\\\\] ([\"\\\\/bfnrt] | \"u\" [0-9a-fA-F]{4})") + "\n";
     }

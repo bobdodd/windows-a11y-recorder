@@ -593,7 +593,9 @@ catalog. It does not run while the worker is running.
 - **It may hold the answer to one line:** with `--one-line`, the request
   sends the recorder's own grammar for the answer as `grammar`, in place
   of the schema as `response_format`, so that the answer is JSON with no
-  space or line break between its tokens, and the file says so. Added on
+  line break between its tokens and at most one space, after a colon or
+  a comma, and the file says so. Until the second trial on 2026-10-15 no
+  space was allowed (recording-summary.md, "The layered report"). Added on
   2026-10-15 to try the grammar on the target machine before the layered
   report is built on it (recording-summary.md, "The layered report").
 - **Its pictures are its own:** pictures the task's code takes for the

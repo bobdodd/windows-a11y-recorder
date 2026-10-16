@@ -979,6 +979,23 @@ Proposed, to be agreed:
   says nothing of the answer's content; the trial on the target machine
   is still to come.
 
+  The first trial on the target machine, the same day, build 1325b36, of
+  step `visit-0001-moment-10-page-so-far` of task 01a1421c: the server
+  took the grammar, and the answer was on one line, but empty,
+  `{"page":[],"changes":[]}`, 10 output tokens, finish reason stop, and
+  it passed the checks, which do not refuse an answer with no
+  statements. Not measured, but likely: with no space or line break
+  allowed after `{"page":[`, the tokens the model would have written
+  next were refused, and at temperature 0 it took the most likely of
+  those left, closing the list. So the grammar changes what is written,
+  not only its layout. Agreed by the owner the same day: a second trial
+  with a grammar that allows one space, or none, after a colon or a
+  comma, and no line break, as JSON is usually written on one line; if
+  that also fails, the schema stays, since the layered report's answers
+  are what each moment adds and the indentation then costs far less.
+  Checked here as before: the server took it, and the answer came back
+  on one line in the answer's structure with single spaces.
+
 Questions to settle: none at present.
 
 - **Tests, when built:**

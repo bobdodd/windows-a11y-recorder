@@ -10,16 +10,17 @@ namespace Recorder.Tests;
 public sealed class AnswerGrammarTests
 {
     [Fact]
-    public void The_grammar_has_the_schemas_structure_with_no_space_between_tokens()
+    public void The_grammar_has_the_schemas_structure_with_no_line_break_and_at_most_one_space_after_a_colon_or_comma()
     {
         Assert.Equal(
-            "root ::= \"{\" \"\\\"page\\\":\" section \",\" \"\\\"changes\\\":\" section \"}\"\n" +
-            "section ::= \"[\" (paragraph (\",\" paragraph)*)? \"]\"\n" +
-            "paragraph ::= \"[\" (statement (\",\" statement)*)? \"]\"\n" +
-            "statement ::= \"{\\\"text\\\":\" text \",\\\"kind\\\":\" kind \",\\\"evidence\\\":\" evidence \"}\"\n" +
+            "root ::= \"{\" \"\\\"page\\\":\" sp section \",\" sp \"\\\"changes\\\":\" sp section \"}\"\n" +
+            "sp ::= \" \"?\n" +
+            "section ::= \"[\" (paragraph (\",\" sp paragraph)*)? \"]\"\n" +
+            "paragraph ::= \"[\" (statement (\",\" sp statement)*)? \"]\"\n" +
+            "statement ::= \"{\\\"text\\\":\" sp text \",\" sp \"\\\"kind\\\":\" sp kind \",\" sp \"\\\"evidence\\\":\" sp evidence \"}\"\n" +
             "text ::= \"\\\"\" char+ \"\\\"\"\n" +
             "kind ::= \"\\\"claim\\\"\" | \"\\\"unknown\\\"\"\n" +
-            "evidence ::= \"[\" (string (\",\" string)*)? \"]\"\n" +
+            "evidence ::= \"[\" (string (\",\" sp string)*)? \"]\"\n" +
             "string ::= \"\\\"\" char* \"\\\"\"\n" +
             "char ::= [^\"\\\\\\x7F\\x00-\\x1F] | [\\\\] ([\"\\\\/bfnrt] | \"u\" [0-9a-fA-F]{4})\n",
             AnswerGrammar.For(["page", "changes"]));
