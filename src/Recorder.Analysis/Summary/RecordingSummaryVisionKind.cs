@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Recorder.Database.RecordingFiles;
@@ -7,22 +6,24 @@ using Recorder.Database.RecordingFiles;
 namespace Recorder.Analysis.Summary;
 
 /// <summary>
-/// One moment as the vision stage described it: the moment, its picture's
-/// reference, its reasons' references, its recreated page and its tiles'
-/// references, and the accepted step that describes it: the combined
-/// description, or the frame's alone where the page was not recreated.
+/// One moment as the vision stage recorded it: the moment, its picture's
+/// reference, its reasons' references, the accepted step that describes
+/// its captured frame alone, and its recreated page with its tiles'
+/// references and the groups of tiles not sent. The frame's and the tiles'
+/// descriptions are the moment's record (recording-summary.md, "The
+/// layered report").
 /// </summary>
 public sealed record MomentDescription(
     Moment Moment,
     string FrameReference,
     IReadOnlyList<string> ReasonReferences,
-    AcceptedStep Step,
+    AcceptedStep FrameStep,
     RecreatedPage? Page = null,
     IReadOnlyList<string>? TileReferences = null,
     IReadOnlyList<GroupNotSent>? NotSent = null)
 {
-    /// <summary>Whether <see cref="Step"/> is the combined description, with its three sections.</summary>
-    public bool Combined => Page is { Tiles.Count: > 0 };
+    /// <summary>Whether the moment's page was recreated and pictured in tiles.</summary>
+    public bool Recreated => Page is { Tiles.Count: > 0 };
 }
 
 /// <summary>
@@ -41,34 +42,59 @@ public sealed record GroupNotSent(int Group, int FirstTile, int LastTile, int Fr
 /// </summary>
 internal sealed record DescribedGroup(int Visit, int Moment, long Time, int Group, string StepKey, IReadOnlyList<PageTile> Tiles, IReadOnlyList<string> TileReferences, AcceptedStep Step);
 
-/// <summary>A group of a moment's tiles with its description, and the earlier group it was the same as, where it was not sent.</summary>
-internal sealed record PageGroupDescription(IReadOnlyList<PageTile> Tiles, AcceptedStep Step, DescribedGroup? Earlier = null);
+/// <summary>
+/// A group of a moment's tiles with its description, the earlier group it
+/// was the same as, where it was not sent, and its key across the
+/// recording.
+/// </summary>
+internal sealed record PageGroupDescription(IReadOnlyList<PageTile> Tiles, AcceptedStep Step, string Key, DescribedGroup? Earlier = null);
 
 /// <summary>
-/// A visit's part of the vision stage: its moments as described, how many
-/// were left out, and the understanding of its page after the last moment,
-/// if it has moments.
+/// A visit's part of the vision stage: its moments as recorded, how many
+/// were left out, its knowledge in layers after its last moment, and its
+/// part of the story, chapter 2.
 /// </summary>
-public sealed record VisitVision(IReadOnlyList<MomentDescription> Moments, int MomentsLeftOut, AcceptedStep? PageSoFar = null);
+public sealed record VisitVision(IReadOnlyList<MomentDescription> Moments, int MomentsLeftOut, Knowledge Knowledge, AcceptedStep Story);
+
+/// <summary>
+/// A page of chapter 1: its number, its address, its title as last
+/// recorded, the visits to it, and its description.
+/// </summary>
+public sealed record PageChapter(int Number, string Url, string? Title, IReadOnlyList<int> Visits, AcceptedStep Step);
+
+/// <summary>
+/// A picture the report may show: the reference of the captured frame or
+/// tile, its file in the recording's folder with forward slashes, and what
+/// it is.
+/// </summary>
+public sealed record ReportPicture(string Reference, string File, string What);
 
 /// <summary>What the report adds for the vision stage.</summary>
 public sealed record VisionReportParts(
     IReadOnlyDictionary<int, VisitVision> Visits,
+    IReadOnlyList<PageChapter> Pages,
+    AcceptedStep Opening,
+    IReadOnlyDictionary<string, ReportPicture> Pictures,
     MomentLimits Limits,
     Guid SummaryTaskId,
     int ImageTokensPerRequest = RecordingSummaryVisionKind.DefaultImageTokensPerRequest,
-    string ImagesFolder = "analysis/images");
+    string ImagesFolder = "analysis/images",
+    string MomentIndexFile = "analysis/TASK/moments.json",
+    IReadOnlyList<string>? LayersNotSent = null);
 
 /// <summary>
-/// The recording summary's second stage: each visit's moments, chosen by
-/// the recorder's code, each described by a model from its captured frame
-/// and the facts around it (step 4a); then from its page, recreated at the
-/// moment's frame and pictured whole in tiles, and the two descriptions
-/// combined (step 4b); then each visit's description written again with
-/// them, and the whole recording's, written as summary-with-vision.md. It
-/// builds on a finished summary of the same recording, the task it follows.
-/// See docs/architecture/recording-summary.md, "Stage 2: the summary with
-/// vision".
+/// The recording summary's second stage, the layered report: each visit's
+/// moments, chosen by the recorder's code, each recorded as its captured
+/// frame described alone and its page, recreated at the frame and pictured
+/// whole in tiles, described in groups; then at each moment, layer 2 adds
+/// to the visit's knowledge what the frame shows, and layer 3 what the web
+/// page adds that the frame does not, the knowledge starting as layer 1,
+/// the visit's description from the recorded data. The report's chapter 1
+/// describes each page from every visit to it, and chapter 2 tells the
+/// story of the user experience, one part for each visit and an opening,
+/// written as summary-with-vision.md. It builds on a finished summary of
+/// the same recording, the task it follows. See
+/// docs/architecture/recording-summary.md, "The layered report".
 /// </summary>
 public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 {
@@ -78,27 +104,6 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     public const string MomentTemplate = "recording-summary-vision-moment";
 
-    public const string VisitTemplate = "recording-summary-vision-visit";
-
-    public const string RecordingTemplate = "recording-summary-vision-recording";
-
-    // Version 2 of the page, combined, visit, and recording templates, from
-    // the first run of step 4b on the target machine, 2026-10-14: each
-    // group of tiles restated the facts it was given before describing its
-    // tiles, the combined description copied both groups' statements in
-    // order and was stopped at the second group's first, the same as the
-    // first's, and it cited "[E24]" with its brackets. The page template
-    // now describes only what the tiles show; the combined one states each
-    // thing once, as an overview; and the combined, visit, and recording
-    // templates say to cite a reference without its brackets (agreed with
-    // the owner, 2026-10-14; recording-summary.md, "Step 4b").
-    // Each version was raised by one on 2026-10-14 when the statement's
-    // fields were put in the order text, kind, evidence, so that the model
-    // writes a statement before saying whether it is a claim: the answer
-    // form is held to the schema's order, and twice the model began a
-    // statement as a claim and then wrote that something was unknown
-    // (agreed with the owner; analysis-runner.md, decision 7).
-    public const int TemplateVersion = 3;
 
     // Version 4 of the page template, from the fourth run again on the
     // target machine, 2026-10-14: a description of moment 1's first tiles
@@ -113,26 +118,6 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "When several items are alike, such as cards that each end with the same button, say in each statement which item it is about, " +
         "by its heading, its label, or its place, so that no two statements are the same word for word. ";
 
-    // Version 3 of the combined template, from the second run of step 4b on
-    // the target machine, 2026-10-14: moments 1 to 8 were accepted, and
-    // moment 9's combined description was refused for a statement that
-    // said something was unknown but was of kind claim, citing nothing.
-    // The sentence is in the combined template only, so that the other
-    // steps' requests are unchanged and a run again can reuse them (agreed
-    // with the owner, 2026-10-14; recording-summary.md, "Step 4b").
-    // Version 4 puts the statement's fields in the order text, kind,
-    // evidence, as TemplateVersion above. Version 5 says how to read a
-    // group's description written at an earlier moment, where the tiles
-    // were the same pictures (recording-summary.md, "Unique images across
-    // the recording", decision 6).
-    public const int CombinedTemplateVersion = 5;
-
-    /// <summary>How the combined template, from version 5, reads a description written at an earlier moment.</summary>
-    public const string EarlierDescription =
-        "A group of tiles may be described as a model described the same pictures at an earlier moment, where the recorder found them the same, pixel for pixel, at the same places: " +
-        "that description cites the earlier moment's tiles, which are the same pictures as this moment's, and what it says was on the screen is of that moment, not this one; " +
-        "take what was on the screen at this moment from the part on the screen given for this moment. ";
-
     /// <summary>What kind a statement of what is unknown is, said in the combined template from version 3.</summary>
     public const string UnknownIsUnknown =
         "A statement that says something is unknown, or that cites no reference, is of kind unknown; every claim cites at least one reference. ";
@@ -145,18 +130,14 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // on it, 128 statements, until the output limit (recording-summary.md,
     // "Stage 2 implementation status").
     // Version 3 puts the statement's fields in the order text, kind,
-    // evidence, as TemplateVersion above.
+    // evidence, as analysis-runner.md, decision 7, gives.
     public const int MomentTemplateVersion = 3;
 
     public static readonly IReadOnlyList<string> MomentSections = ["screen", "change"];
 
     public const string PageTemplate = "recording-summary-vision-page";
 
-    public const string CombinedTemplate = "recording-summary-vision-moment-combined";
-
     public static readonly IReadOnlyList<string> PageSections = ["page"];
-
-    public static readonly IReadOnlyList<string> CombinedSections = ["screen", "page", "change"];
 
     /// <summary>
     /// The image tokens of the tiles in one request, a setting: on the
@@ -167,29 +148,141 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     /// </summary>
     public const int DefaultImageTokensPerRequest = 4096;
 
-    // Version 4 of the visit template, from the first finished run of the
-    // vision stage on the target machine, 2026-10-15: the visit was given
-    // ten descriptions of moments that each described the same page again,
-    // and its page section copied, word for word, the paragraphs of its
-    // other three sections. The page is now understood moment by moment
-    // (PageSoFarTemplate), and the visit is given that understanding and
-    // each moment's screen and change, and writes no page section (agreed
-    // with the owner; recording-summary.md, "Decisions (2026-10-15)").
-    public const int VisitTemplateVersion = 4;
-
-    public static readonly IReadOnlyList<string> VisitSections = ["purpose", "activity", "journey"];
+    /// <summary>
+    /// The layer 2 step at each moment: what the captured frame adds to the
+    /// visit's knowledge of the visual user experience.
+    /// </summary>
+    public const string Layer2Template = "recording-summary-vision-layer-2";
 
     /// <summary>
-    /// The understanding of a visit's page, written again after each
-    /// moment from the one before, the moment's description, and the
-    /// recorder's facts since the moment before (owner, 2026-10-15).
+    /// The layer 3 step at each moment whose page was recreated: what the
+    /// web page adds that the frame does not show.
     /// </summary>
-    public const string PageSoFarTemplate = "recording-summary-vision-page-so-far";
+    public const string Layer3Template = "recording-summary-vision-layer-3";
 
-    public const int PageSoFarTemplateVersion = 1;
+    /// <summary>Chapter 1's step for each page, from every visit to it.</summary>
+    public const string PageChapterTemplate = "recording-summary-vision-page-chapter";
 
-    public static readonly IReadOnlyList<string> PageSoFarSections = ["page", "changes"];
+    /// <summary>Chapter 2's step for each visit, its part of the story.</summary>
+    public const string StoryTemplate = "recording-summary-vision-story";
 
+    /// <summary>Chapter 2's opening, from the visits' parts.</summary>
+    public const string OpeningTemplate = "recording-summary-vision-story-opening";
+
+    public const int LayerTemplateVersion = 1;
+
+    public const int ChapterTemplateVersion = 1;
+
+    public static readonly IReadOnlyList<string> PageChapterSections = ["page", "changes"];
+
+    public static readonly IReadOnlyList<string> StorySections = ["story"];
+
+    public static readonly IReadOnlyList<string> OpeningSections = ["opening"];
+
+    public const string Sentence = "sentence";
+
+    public const string Picture = "picture";
+
+    /// <summary>
+    /// The forms a statement of chapter 2 takes: a heading at one of three
+    /// levels, which the recorder numbers; a sentence of prose; or a
+    /// picture, its text the caption, citing the frame or tile it shows,
+    /// which the recorder puts in (owner, 2026-10-16; recording-summary.md,
+    /// "Chapter 2's form, as built").
+    /// </summary>
+    public static readonly IReadOnlyList<string> StoryForms = ["heading-1", "heading-2", "heading-3", Sentence, Picture];
+
+    /// <summary>The rules on what a frame shows of the participant, and on NVDA, said in each layer's and chapter's template.</summary>
+    public const string ParticipantRules =
+        "A captured frame shows what was on the screen, not what the participant saw: say that the participant saw something only if the participant's capabilities, " +
+        "as given, say that they work by sight; otherwise do not say what the participant saw. " +
+        "What NVDA had to announce is the recorder's inference from the page, not a recording of speech: never say that NVDA said it or that the participant heard it. " +
+        "Assistive technology observed running shows what was running, not what the participant is able to do. ";
+
+    /// <summary>How a layer's answer is given, said in both layers' templates.</summary>
+    public const string LayerAnswer =
+        "Answer in JSON with three sections: \"elaborations\", statements that add detail to a numbered statement of the knowledge, each citing that statement's number, such as \"K3\", first; " +
+        "\"corrections\", statements where this moment shows that a numbered statement is wrong or disagrees with it, each citing that statement's number first and saying how they disagree, citing both, without settling it; " +
+        "and \"new\", statements about what the knowledge does not yet cover. " +
+        "Do not repeat what the knowledge already says, and do not restate the recorder's facts: add only what this moment adds. Where it adds nothing, give the three sections empty. " +
+        "This is about the user experience, not a list of the page's elements: do not list each control, link, or line of text. " +
+        "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
+        "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown.";
+
+    public const string Layer2Instructions =
+        "You add to what is known of one page visit from an accessibility test recording, for accessibility and usability engineers, what a captured frame of the screen shows of the visual user experience. " +
+        "You are given the visit's knowledge so far, each statement numbered, such as [K3], and labelled with its layer: layer 1 from the recorded data, layer 2 from captured frames of the screen, " +
+        "and layer 3 from the web page as the recorder rebuilt it; why the recorder chose this moment, and the recorder's facts since the moment before, each beginning with an evidence reference such as [E3]; " +
+        "and a model's description of this moment's captured frame, a picture of the whole screen, with the picture's reference. The knowledge and the description are inferences, not facts. " +
+        "Add what the frame adds to the knowledge of the visual user experience: what was on the screen and how it looked, what stood out, what was open, such as a dialog, a menu, or a popup, " +
+        "which part of the page was in view, what was hard to see or read, any other window in view, and what changed since the moment before. " +
+        "Every statement from the frame's description cites the frame's reference. " +
+        ParticipantRules + LayerAnswer;
+
+    public const string Layer3Instructions =
+        "You add to what is known of one page visit from an accessibility test recording, for accessibility and usability engineers, what the web page adds that the captured frame of the screen does not show. " +
+        "You are given the visit's knowledge so far, each statement numbered, such as [K3], and labelled with its layer: layer 1 from the recorded data, layer 2 from captured frames of the screen, " +
+        "and layer 3 from the web page as the recorder rebuilt it; why the recorder chose this moment, each reason beginning with an evidence reference such as [E3]; " +
+        "the page as the recorder rebuilt it at this moment and pictured it whole in tiles, which part of it was on the screen, and what the recreation lacked; " +
+        "and a model's descriptions of the groups of tiles not already in the visit's knowledge, with each tile's reference. " +
+        "A group of tiles may be described as a model described the same pictures at an earlier moment, where the recorder found them the same, pixel for pixel, at the same places: " +
+        "that description cites the earlier moment's tiles, which are the same pictures as this moment's. " +
+        "The knowledge and the descriptions are inferences, not facts. " +
+        "A tile is a recreation, not the page itself: where the recording lacks something, such as an image that was not loaded, the tile lacks it too, so say that it is missing in the recreation, not that the page lacked it. " +
+        "Add what the web page adds that the frame does not show: content that was not on the screen, and the interactions, dialogs, menus, widgets, forms, messages, notices, alerts, toasts, and errors " +
+        "that appeared during the visit, however small, each with where it is on the page and whether it was in the part on the screen. " +
+        "Every statement from a description of tiles cites the tiles it describes. " +
+        ParticipantRules + LayerAnswer;
+
+    public const string PageChapterInstructions =
+        "You write the description of one web page for the first chapter of a professional report for accessibility and usability engineers on an accessibility test recording. " +
+        "The chapter describes each page from everything known of it from every visit to it, independent of the participant's journey, which the second chapter tells. " +
+        "You are given the page's address and title, the visits to it with what the recorder derived of them, and each visit's knowledge in layers: " +
+        "layer 1 from the recorded data, layer 2 from captured frames of the screen, and layer 3 from the web page as the recorder rebuilt it, each statement with the evidence references it rests on, such as [E3]. " +
+        "The knowledge is inference, not fact. " +
+        "Describe the page as an engineer needs to know it: what it is for, its layout and regions from top to bottom, its imagery, colour, and emphasis, " +
+        "and the widgets, forms, dialogs, menus, and messages it has or showed, with where they are, as an overview and not a list of every element. " +
+        "Take your terms from the page's own: its headings, landmarks, and the names of its controls. " +
+        "Describe the page, not the participant. Where the knowledge disagrees, say so, citing both, and do not settle it. " +
+        "Describe only what the knowledge supports, name sites and pages only as they are named, and say that something is unknown where it does not settle it. " +
+        "Answer in JSON with two sections: \"page\", the page as described; and \"changes\", what appeared, went, moved, or changed on the page during the visits, in order, each with when. " +
+        "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
+        "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown.";
+
+    /// <summary>How chapter 2's answers are given, said in its templates.</summary>
+    public const string StoryAnswer =
+        "Write clean, readable prose for a professional report. Use headings where they help the reader; give each heading's level, and the recorder numbers them. " +
+        "Show a picture where it helps the reader see a layout, a pattern, or content you describe: a captured frame for what was on the screen, or a tile for part of the page as the recorder rebuilt it. " +
+        "Take your terms and your structure from the pages' own: their headings, landmarks, and the names of their controls. " +
+        "Each paragraph is a list of statements, and each statement has a form: \"heading-1\", \"heading-2\", or \"heading-3\", a heading at that level, its text the heading alone; " +
+        "\"sentence\", a sentence of prose; or \"picture\", a picture the recorder puts in, its text the picture's caption, citing the one captured frame or tile it shows and what the caption rests on. " +
+        "A statement is {\"form\": ..., \"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, a heading citing what its part rests on, " +
+        "or {\"form\": ..., \"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets +
+        "Write plain sentences without Markdown.";
+
+    public const string StoryInstructions =
+        "You write one part of the second chapter of a professional report for accessibility and usability engineers on an accessibility test recording: the story of the user experience. " +
+        "This part is one page visit. You are given the participant's capabilities; the recorder's facts about the visit, each beginning with an evidence reference such as [E3]; " +
+        "the visit's knowledge in layers: layer 1 from the recorded data, layer 2 from captured frames of the screen, and layer 3 from the web page as the recorder rebuilt it, each statement with the references it rests on; " +
+        "the moments of the visit, each with its captured frame's reference and its tiles' references; which section of the first chapter describes the visit's page; " +
+        "and the story so far, the parts written for the visits before. The knowledge is inference, not fact. " +
+        "Tell what happened during the visit and what the experience was: what the participant did and how the page responded, what was on the screen, what appeared, and where it worked or got in the way. " +
+        "Follow on from the story so far without repeating it, and do not describe the page again: refer to its section of the first chapter. " +
+        "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
+        ParticipantRules +
+        "Answer in JSON with one section, \"story\", a list of paragraphs. " + StoryAnswer;
+
+    public const string OpeningInstructions =
+        "You write the opening of the second chapter of a professional report for accessibility and usability engineers on an accessibility test recording: the story of the user experience. " +
+        "You are given the participant's capabilities; the page visits, as the recorder derived them; the pages, as the first chapter names them; and the chapter's parts, one for each visit, which follow the opening. " +
+        "Each part's statements cite the evidence references they rest on, such as [E3]; the parts are inferences, not facts. " +
+        "Introduce the story: the site tested and who it appears to be for, the participant's capabilities as given, the assistive technology observed running, and the course of the session in brief, " +
+        "so that the parts that follow read as one story. Do not repeat the parts. " +
+        "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
+        ParticipantRules +
+        "Answer in JSON with one section, \"opening\", a list of paragraphs. " + StoryAnswer;
     private readonly Func<string, string, CancellationToken, Task<(Recorder.Session.SessionPlaybackArchive Archive, RecordingFileDocuments Documents)>> _open;
 
     public RecordingSummaryVisionKind()
@@ -206,8 +299,10 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     public string Kind => Name;
 
     // Version 2 is step 4b: the recreated page's tiles, and the combined
-    // description of each moment.
-    public int Version => 2;
+    // description of each moment. Version 3 is the layered report: the
+    // layers' additions at each moment, and the report's two chapters
+    // (recording-summary.md, "The layered report").
+    public int Version => 3;
 
     /// <summary>The summary's collation limits, which must be the summary's own for its references to match.</summary>
     public CollationLimits Limits { get; init; } = CollationLimits.Default;
@@ -285,85 +380,6 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Cite only references that appear in the input. Write plain sentences without Markdown. " +
         "Write the JSON on one line, with no indentation and no line breaks.";
 
-    public const string CombinedInstructions =
-        "You describe one moment of a page visit from an accessibility test recording, for an accessibility auditor, " +
-        "combining two descriptions of it into one. You are given why the recorder chose the moment, with its facts, each beginning with an evidence reference such as [E3]; " +
-        "a model's description of the captured frame, a picture of the whole screen at the moment, with the picture's reference; " +
-        "and a model's descriptions of the page as the recorder rebuilt it at the moment and pictured it whole in tiles, with each tile's reference; " +
-        "and what the recreation lacked. Both descriptions are inferences, not facts. " + EarlierDescription +
-        "The captured frame is the screen as recorded; the tiles are a recreation of the page, which may lack what the recording lacks, such as images. " +
-        "Where the two disagree, say so, citing both, and do not settle it. " +
-        "Combine the descriptions; do not copy them. State each thing once: where statements say the same thing, write one statement citing all their references. " +
-        "Describe the page as an overview of its regions from top to bottom, not tile by tile, and do not list each control, link, or line of text. " +
-        "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
-        "A captured frame shows what was on the screen, not what the participant saw: say that the participant saw something only if the participant's capabilities, " +
-        "as given, say that they work by sight; otherwise do not say what the participant saw. " +
-        "What NVDA had to announce is the recorder's inference from the page, not a recording of speech: never say that NVDA said it or that the participant heard it. " +
-        "Answer in JSON with three sections: \"screen\", what was on the screen, from the captured frame: what was open, which part of the page was in view, and any other window in view; " +
-        "\"page\", the page as recreated, top to bottom, including the parts not on the screen, with every message, notice, alert, toast, error, dialog, or popup on it and where it is; " +
-        "and \"change\", what changed at this moment, as the reasons and facts give it, and what the frame and the tiles show of it, whether or not it was on the screen. " +
-        "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
-        "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
-        "with a statement from a description citing the picture or the tiles that description cites, " +
-        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown. " +
-        "Write the JSON on one line, with no indentation and no line breaks.";
-
-    public const string PageSoFarInstructions =
-        "You keep an understanding of one web page through a page visit from an accessibility test recording, for an accessibility auditor. " +
-        "It is the same page throughout the visit, seen at moments in time, and its content can change, move, appear, and go, such as a dialog that opens and closes. " +
-        "You are given the understanding of the page so far, as it was written after the moment before, or that there is none yet at the first moment; " +
-        "the recorder's facts of the visit since the moment before, each beginning with an evidence reference such as [E3]; " +
-        "which tiles of the page as the recorder rebuilt it are the same file, byte for byte, as at the moment before; " +
-        "and a model's description of this moment, from its captured frame of the screen and from the page as the recorder rebuilt it and pictured it whole in tiles. " +
-        "The understanding and the description are inferences, not facts. " +
-        "Write the understanding again, whole, as it stands after this moment: keep what still holds, add what this moment shows that was not known, " +
-        "correct what this moment shows better, and say what appeared, went, moved, or changed, and when. " +
-        "Where the recorder says a tile is the same file as at the moment before, that part of the recreated page did not change, " +
-        "so a different description of it is a difference between descriptions, not a change of the page: keep what each description supports, " +
-        "and where they conflict, say that they disagree, citing both, and do not settle it. " +
-        "Where descriptions from different moments say the same thing, write one statement citing the references of all of them. " +
-        "Do not merge what the page itself repeats: a page may be badly written, and where it has the same link, heading, or text more than once, say so, as it has it. " +
-        "A statement kept from the understanding so far keeps its references. " +
-        "Describe the page, not the participant: what the participant did, saw, or heard is given elsewhere. " +
-        "Describe only what these support, name sites and pages only as they are named, and say that something is unknown where they do not settle it. " +
-        "A recreation lacks what the recording lacks, such as an image that was not loaded: say that it is missing in the recreation, not that the page lacked it. " +
-        "Describe the page as an overview of its regions from top to bottom, not tile by tile, and do not list each control, link, or line of text. " +
-        "Answer in JSON with two sections: \"page\", the page as understood after this moment, top to bottom, including the parts not on the screen, " +
-        "with every message, notice, alert, toast, error, dialog, or popup on it and where it is; " +
-        "and \"changes\", what appeared, went, moved, or changed on the page during the visit so far, in order, each with when. " +
-        "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
-        "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
-        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown. " +
-        "Write the JSON on one line, with no indentation and no line breaks.";
-
-    public const string VisitInstructions =
-        "You describe one page visit from an accessibility test recording, for an accessibility auditor, adding what captured frames of the screen show " +
-        "to a description written from the recorder's facts alone. " +
-        "You are given the recorder's facts about the visit, each beginning with an evidence reference such as [E3]; a model's description of the visit from those facts; " +
-        "a model's understanding of the page through the visit, built moment by moment from captured frames of the screen and from the page as the recorder rebuilt it, " +
-        "which is given in the report as the visit's page; and, for each moment of the visit, what a model described as on the screen and what changed. " +
-        "These descriptions are inferences, not facts. " +
-        "Do not describe the page again: its understanding is given as it is. Say each thing in the one section it belongs to. " +
-        "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
-        "A captured frame shows what was on the screen, not what the participant saw: say that the participant saw something only if the participant's capabilities, " +
-        "as given, say that they work by sight; otherwise do not say what the participant saw. " +
-        "What NVDA had to announce is the recorder's inference from the page, not a recording of speech: never say that NVDA said it or that the participant heard it. " +
-        "Assistive technology observed running shows what was running, not what the participant is able to do. " +
-        "Answer in JSON with three sections: \"purpose\", what the page appears to be for; \"activity\", what the participant did there, in order, with repeated actions grouped into one statement; " +
-        "and \"journey\", the participant's course through the visit moment by moment: which part of the page was on the screen, what was open, and what changed. " +
-        "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
-        "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
-        "with a statement from a moment's description citing the picture or tiles it cites, " +
-        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown. " +
-        "Write the JSON on one line, with no indentation and no line breaks.";
-
-    public static readonly string RecordingInstructions = RecordingSummaryKind.RecordingInstructions.Replace(
-        "and a model's descriptions of each visit, which are inferences and not facts.",
-        "and a model's descriptions of each visit, from the recorder's facts, from captured frames of the screen, and from the pages as the recorder rebuilt them, which are inferences and not facts.",
-        StringComparison.Ordinal).Replace(
-        "Cite only references that appear in the input. ",
-        "Cite only references that appear in the input. " + CiteWithoutBrackets,
-        StringComparison.Ordinal);
 
     [GeneratedRegex(@"^\[(E\d+)\] (\d\d):(\d\d):(\d\d)\.(\d\d\d) ")]
     private static partial Regex TimedLine();
@@ -438,30 +454,36 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         }
 
         var register = collation.Evidence;
-        var parts = new Dictionary<int, VisitVision>();
 
         // Each unique picture kept once for the recording, the task's index
-        // of its tiles' pictures, and each group of tiles described so far
-        // in the recording, by its tiles' places and keys
-        // (recording-summary.md, "Unique images across the recording").
+        // of its tiles' pictures and of its moment records, and each group
+        // of tiles described so far in the recording, by its tiles' places
+        // and keys (recording-summary.md, "Unique images across the
+        // recording" and "The layered report").
         var store = new ImageStore(session, context.ImagesFolder);
         var index = new List<ImageIndexEntry>();
         var indexFile = Path.Combine([session, .. context.ImageIndexFile.Split('/')]);
+        var records = new List<MomentRecord>();
+        var recordsFile = Path.Combine([session, .. context.MomentIndexFile.Split('/')]);
         var groupsDescribed = new Dictionary<string, DescribedGroup>(StringComparer.Ordinal);
-        var enhanced = new List<(VisitCollation Visit, AcceptedStep Step)>();
-        var forRecording = new List<(VisitCollation Visit, AcceptedStep Step)>();
+        var pictures = new Dictionary<string, ReportPicture>(StringComparer.Ordinal);
+        var layersNotSent = new List<string>();
+        var visitsSeen = new List<(VisitCollation Visit, IReadOnlyList<MomentDescription> Moments, int LeftOut, Knowledge Knowledge)>();
         foreach (var (visit, summary) in described)
         {
             var moments = chosen[visit.Visit.Number];
             var descriptions = new List<MomentDescription>();
             var previous = visit.Visit.Start.Time - 1;
-            AcceptedStep? soFar = null;
-            MomentDescription? soFarAfter = null;
-            (MomentDescription Moment, IReadOnlyList<string> Hashes)? lastRecreated = null;
+
+            // The visit's knowledge starts as layer 1, its description from
+            // the recorded data, and grows by each layer's additions.
+            var knowledge = Knowledge.FromRecorded(summary.Claims);
+            var groupsKnown = new HashSet<string>(StringComparer.Ordinal);
             foreach (var moment in moments.Moments)
             {
                 var frame = moment.Frame;
                 var frameReference = register.Add(frame.Time, FrameText(frame), null, $"frame:{frame.Time.ToString(CultureInfo.InvariantCulture)}");
+                pictures[frameReference] = new ReportPicture(frameReference, frame.Path, $"The captured frame at {SummaryCollator.Time(frame.Time)}");
                 var reasonReferences = moment.Reasons.Select(reason => register.Add(
                     reason.Time,
                     "Derived by the recorder, a reason for a moment: " + reason.Text,
@@ -477,13 +499,12 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                     cancellationToken).ConfigureAwait(false);
 
                 // The page at the moment's frame, recreated and pictured
-                // whole, then described in groups of tiles, then the two
-                // descriptions combined (decision 7).
+                // whole, then described in groups of tiles.
                 var relativeFolder = context.PicturesFolder;
                 var page = await pages.RecreateAsync(
                     visit.Visit, moment, Path.Combine([session, .. relativeFolder.Split('/')]), relativeFolder, key, cancellationToken).ConfigureAwait(false);
                 MomentDescription momentDescribed;
-                IReadOnlyList<string> hashes = [];
+                IReadOnlyList<PageGroupDescription> groups = [];
                 IReadOnlyList<StoredImage> images = [];
                 if (page.Tiles.Count > 0)
                 {
@@ -493,74 +514,147 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                         visit.Visit.Number, moment.Number, frame.Time, ImageIndex.Clock(frame.Time), tile.Number, tile.Top, tile.Height, tile.Width,
                         tile.PixelWidth, tile.PixelHeight, images[at].Key, images[at].Basis, images[at].Path)));
                     await ImageIndex.WriteAsync(indexFile, index, cancellationToken).ConfigureAwait(false);
-                }
-
-                if (page.Tiles.Count == 0)
-                {
-                    momentDescribed = new MomentDescription(moment, frameReference, reasonReferences, frameStep, page, []);
+                    (momentDescribed, groups) = await DescribeTilesAsync(
+                        context, collation, visit, moment, key, frameReference, reasonReferences, frameStep, page,
+                        [.. images.Select(image => image.Key)], groupsDescribed, cancellationToken).ConfigureAwait(false);
+                    foreach (var tile in page.Tiles)
+                    {
+                        var reference = momentDescribed.TileReferences![tile.Number - 1];
+                        pictures[reference] = new ReportPicture(reference, tile.Path,
+                            string.Create(CultureInfo.InvariantCulture, $"Tile {tile.Number} of {page.Tiles.Count} of the page as the recorder rebuilt it at {SummaryCollator.Time(frame.Time)}"));
+                    }
                 }
                 else
                 {
-                    (momentDescribed, hashes) = await DescribePageAsync(
-                        context, collation, visit, moment, key, frameReference, reasonReferences, frameStep, page,
-                        [.. images.Select(image => image.Key)], groupsDescribed, cancellationToken).ConfigureAwait(false);
+                    momentDescribed = new MomentDescription(moment, frameReference, reasonReferences, frameStep, page, []);
                 }
 
                 descriptions.Add(momentDescribed);
+                records.Add(Record(visit, momentDescribed, key, images, groups));
+                await MomentIndex.WriteAsync(recordsFile, records, cancellationToken).ConfigureAwait(false);
 
-                // The page understood so far, written again from this
-                // moment (owner, 2026-10-15).
-                (string Text, IReadOnlyList<string> References)? comparison = page.Tiles.Count == 0 ? null : Comparison(momentDescribed, hashes, lastRecreated);
-                var (soFarInput, soFarReferences) = PageSoFarInput(visit, momentDescribed, FactsSince(visit, previous, frame.Time), comparison, soFar, soFarAfter);
-                soFar = await context.RunStepAsync(
-                    $"{key}-page-so-far",
-                    new ModelRequest(PageSoFarTemplate, PageSoFarTemplateVersion, PageSoFarInstructions, soFarInput, [], PageSoFarSections, soFarReferences),
+                // Layer 2: what the frame adds to the visit's knowledge.
+                var (layer2Input, layer2References) = Layer2Input(collation, visit, momentDescribed, FactsSince(visit, previous, frame.Time), knowledge);
+                var layer2 = await context.RunStepAsync(
+                    $"{key}-layer-2",
+                    new ModelRequest(Layer2Template, LayerTemplateVersion, Layer2Instructions, layer2Input, [], Knowledge.LayerSections, layer2References),
                     cancellationToken).ConfigureAwait(false);
-                soFarAfter = momentDescribed;
-                if (page.Tiles.Count > 0)
+                knowledge.Add(layer2.Claims, 2, moment.Number);
+
+                // Layer 3: what the web page adds, from the groups of tiles
+                // not yet in the visit's knowledge.
+                if (momentDescribed.Recreated)
                 {
-                    lastRecreated = (momentDescribed, hashes);
+                    var unknown = groups.Where(group => !groupsKnown.Contains(group.Key)).ToList();
+                    if (unknown.Count == 0)
+                    {
+                        var reason = "every group of its page's tiles is the same pictures at the same places as a group already in the visit's knowledge, so the web page adds nothing to it.";
+                        context.StepNotSent($"{key}-layer-3", reason);
+                        layersNotSent.Add($"{key}-layer-3");
+                    }
+                    else
+                    {
+                        var (layer3Input, layer3References) = Layer3Input(collation, visit, momentDescribed, groups, groupsKnown, knowledge);
+                        var layer3 = await context.RunStepAsync(
+                            $"{key}-layer-3",
+                            new ModelRequest(Layer3Template, LayerTemplateVersion, Layer3Instructions, layer3Input, [], Knowledge.LayerSections, layer3References),
+                            cancellationToken).ConfigureAwait(false);
+                        knowledge.Add(layer3.Claims, 3, moment.Number);
+                        groupsKnown.UnionWith(unknown.Select(group => group.Key));
+                    }
                 }
 
                 previous = frame.Time;
             }
 
-            parts[visit.Visit.Number] = new VisitVision(descriptions, moments.LeftOut, soFar);
-            var (visitInput, visitReferences) = VisitInput(collation, visit, summary, descriptions, moments.LeftOut, soFar);
-            var visitStep = await context.RunStepAsync(
-                RecordingSummaryKind.VisitStepKey(visit),
-                new ModelRequest(VisitTemplate, VisitTemplateVersion, VisitInstructions, visitInput, [], VisitSections, visitReferences),
-                cancellationToken).ConfigureAwait(false);
-            enhanced.Add((visit, visitStep));
-
-            // The whole recording's request is given each visit's page as
-            // understood with its description, as it was given the page
-            // section the visit wrote before.
-            forRecording.Add((visit, soFar is null ? visitStep : visitStep with { Claims = [.. soFar.Claims, .. visitStep.Claims] }));
+            visitsSeen.Add((visit, descriptions, moments.LeftOut, knowledge));
         }
 
-        var (recordingInput, recordingReferences) = RecordingSummaryKind.RecordingInput(
-            collation,
-            forRecording,
-            "Each visit as a model described it from the recorder's facts and from captured frames of the screen. These are inferences, not facts:");
-        var overall = await context.RunStepAsync(
-            "recording",
-            new ModelRequest(RecordingTemplate, TemplateVersion, RecordingInstructions, recordingInput, [], RecordingSummaryKind.RecordingSections, recordingReferences),
+        // Chapter 1: each page, a URL visited, from every visit to it.
+        var chapterPages = new List<PageChapter>();
+        foreach (var byUrl in visitsSeen.GroupBy(seen => seen.Visit.Visit.Start.Url, StringComparer.Ordinal))
+        {
+            var number = chapterPages.Count + 1;
+            var visitsTo = byUrl.ToList();
+            var (pageInput, pageReferences) = PageChapterInput(collation, number, visitsTo.Select(seen => (seen.Visit, seen.Knowledge)).ToList());
+            var pageStep = await context.RunStepAsync(
+                $"page-{number.ToString("D2", CultureInfo.InvariantCulture)}",
+                new ModelRequest(PageChapterTemplate, ChapterTemplateVersion, PageChapterInstructions, pageInput, [], PageChapterSections, pageReferences),
+                cancellationToken).ConfigureAwait(false);
+            chapterPages.Add(new PageChapter(number, byUrl.Key, visitsTo.Select(seen => seen.Visit.Title).LastOrDefault(title => title is { Length: > 0 }),
+                [.. visitsTo.Select(seen => seen.Visit.Visit.Number)], pageStep));
+        }
+
+        // Chapter 2: the story, one part for each visit, then its opening.
+        var parts = new Dictionary<int, VisitVision>();
+        var storySoFar = new List<(VisitCollation Visit, AcceptedStep Step)>();
+        foreach (var (visit, moments, leftOut, knowledge) in visitsSeen)
+        {
+            var section = chapterPages.First(pageOf => pageOf.Visits.Contains(visit.Visit.Number)).Number;
+            var (storyInput, storyReferences) = StoryInput(collation, visit, moments, leftOut, knowledge, section, storySoFar);
+            var story = await context.RunStepAsync(
+                $"{RecordingSummaryKind.VisitStepKey(visit)}-story",
+                new ModelRequest(StoryTemplate, ChapterTemplateVersion, StoryInstructions, storyInput, [], StorySections, storyReferences) { Forms = StoryForms },
+                cancellationToken).ConfigureAwait(false);
+            storySoFar.Add((visit, story));
+            parts[visit.Visit.Number] = new VisitVision(moments, leftOut, knowledge, story);
+        }
+
+        var (openingInput, openingReferences) = OpeningInput(collation, chapterPages, storySoFar);
+        var opening = await context.RunStepAsync(
+            "story-opening",
+            new ModelRequest(OpeningTemplate, ChapterTemplateVersion, OpeningInstructions, openingInput, [], OpeningSections, openingReferences) { Forms = StoryForms },
             cancellationToken).ConfigureAwait(false);
 
         var recording = await context.Catalog.RecordingAsync(task.RecordingId, cancellationToken).ConfigureAwait(false);
         var attempts = await context.Catalog.AttemptsAsync(task.TaskId, cancellationToken).ConfigureAwait(false);
-        var report = SummaryReport.Write(
+        var report = LayeredReport.Write(
             recording?.SessionKey ?? Path.GetFileName(Path.TrimEndingDirectorySeparator(session)),
             collation,
             capabilities,
-            enhanced,
-            overall,
             attempts,
             Limits,
             DateTime.UtcNow,
-            new VisionReportParts(parts, Moments, summaryTask, ImageTokensPerRequest, context.ImagesFolder));
+            new VisionReportParts(parts, chapterPages, opening, pictures, Moments, summaryTask, ImageTokensPerRequest, context.ImagesFolder, context.MomentIndexFile, layersNotSent));
         await RecordingSummaryKind.WriteReportAsync(context, session, FileName, report, cancellationToken).ConfigureAwait(false);
+    }
+
+    // A moment's record for the index: its frame and the step that
+    // describes it, and its page with its tiles and groups.
+    private static MomentRecord Record(
+        VisitCollation visit, MomentDescription moment, string key, IReadOnlyList<StoredImage> images, IReadOnlyList<PageGroupDescription> groups)
+    {
+        var frame = moment.Moment.Frame;
+        var page = moment.Page;
+        var tiles = moment.Recreated
+            ? page!.Tiles.Select((tile, at) => new MomentRecordTile(
+                tile.Number, tile.Top, tile.Height, images[at].Key, images[at].Path, moment.TileReferences![at], InView(page, tile))).ToList()
+            : [];
+        var recordGroups = groups.Select((group, at) =>
+        {
+            var stepKey = $"{key}-page-{(at + 1).ToString("D2", CultureInfo.InvariantCulture)}";
+            return group.Earlier is { } earlier
+                ? new MomentRecordGroup(at + 1, group.Tiles[0].Number, group.Tiles[^1].Number, earlier.StepKey, false, earlier.Visit, earlier.Moment)
+                : new MomentRecordGroup(at + 1, group.Tiles[0].Number, group.Tiles[^1].Number, stepKey, true);
+        }).ToList();
+        return new MomentRecord(
+            visit.Visit.Number,
+            moment.Moment.Number,
+            frame.Time,
+            SummaryCollator.Time(frame.Time),
+            [.. moment.Moment.Reasons.Select(reason => reason.Text)],
+            frame.Path,
+            moment.FrameReference,
+            key,
+            new MomentRecordPage(
+                moment.Recreated,
+                page?.NotRecreated,
+                page?.Width ?? 0,
+                page?.Height ?? 0,
+                page?.ScrollY ?? 0,
+                page?.ViewportHeight ?? 0,
+                tiles,
+                recordGroups));
     }
 
     // A recreated page's tiles kept in the store, each file the recreation
@@ -632,9 +726,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // A moment's recreated page described in groups of tiles, each group the
     // same pictures at the same places as a group described at an earlier
     // moment of the recording given that group's answer instead of being
-    // sent (decisions 4 and 5), then the frame's and the tiles'
-    // descriptions combined (decision 7), with each tile file's SHA-256.
-    private async Task<(MomentDescription Described, IReadOnlyList<string> Hashes)> DescribePageAsync(
+    // sent (recording-summary.md, "Unique images across the recording",
+    // decisions 4 and 5).
+    private async Task<(MomentDescription Described, IReadOnlyList<PageGroupDescription> Groups)> DescribeTilesAsync(
         AnalysisTaskContext context,
         RecordingCollation collation,
         VisitCollation visit,
@@ -675,23 +769,18 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         var tileReferences = page.Tiles.Select(tile => register.Add(
             frame.Time, TileText(moment, page, tile) + (sameAs.TryGetValue(tile.Number, out var same) ? ". " + same : ""), null,
             $"tile:{frame.Time.ToString(CultureInfo.InvariantCulture)}:{tile.Number.ToString(CultureInfo.InvariantCulture)}")).ToList();
-        var files = new Dictionary<int, byte[]>();
-        foreach (var tile in page.Tiles)
-        {
-            files[tile.Number] = await ReadFileAsync(tile.AbsolutePath, "tile", cancellationToken).ConfigureAwait(false);
-        }
-
         var pageSteps = new List<PageGroupDescription>();
         var notSent = new List<GroupNotSent>();
         for (var index = 0; index < groups.Count; index++)
         {
             var group = groups[index];
+            var groupKey = GroupKey(group, keys);
             var stepKey = $"{key}-page-{(index + 1).ToString("D2", CultureInfo.InvariantCulture)}";
             if (earlier[index] is { } match)
             {
                 context.StepNotSent(stepKey, string.Create(CultureInfo.InvariantCulture,
                     $"its tiles are the same pictures at the same places as group {match.Group} at moment {match.Moment} of visit {match.Visit}, at {SummaryCollator.Time(match.Time)}, so that group's answer, step {match.StepKey}, is used."));
-                pageSteps.Add(new PageGroupDescription(group, match.Step, match));
+                pageSteps.Add(new PageGroupDescription(group, match.Step, groupKey, match));
                 notSent.Add(new GroupNotSent(index + 1, group[0].Number, group[^1].Number, match.Visit, match.Moment, match.Time, match.Group, match.StepKey));
                 continue;
             }
@@ -700,26 +789,282 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             var images = new List<ModelImage>();
             foreach (var tile in group)
             {
-                images.Add(new ModelImage(tileReferences[tile.Number - 1], "image/png", files[tile.Number]));
+                images.Add(new ModelImage(tileReferences[tile.Number - 1], "image/png", await ReadFileAsync(tile.AbsolutePath, "tile", cancellationToken).ConfigureAwait(false)));
             }
 
             var pageStep = await context.RunStepAsync(
                 stepKey,
                 new ModelRequest(PageTemplate, PageTemplateVersion, PageInstructions, pageInput, images, PageSections, pageReferences),
                 cancellationToken).ConfigureAwait(false);
-            pageSteps.Add(new PageGroupDescription(group, pageStep));
-            groupsDescribed.TryAdd(GroupKey(group, keys), new DescribedGroup(
+            pageSteps.Add(new PageGroupDescription(group, pageStep, groupKey));
+            groupsDescribed.TryAdd(groupKey, new DescribedGroup(
                 visit.Visit.Number, moment.Number, frame.Time, index + 1, stepKey, group, [.. group.Select(tile => tileReferences[tile.Number - 1])], pageStep));
         }
 
-        var (combinedInput, combinedReferences) = CombinedInput(collation, visit, moment, frameReference, reasonReferences, frameStep, page, tileReferences, pageSteps);
-        var combined = await context.RunStepAsync(
-            $"{key}-described",
-            new ModelRequest(CombinedTemplate, CombinedTemplateVersion, CombinedInstructions, combinedInput, [], CombinedSections, combinedReferences),
-            cancellationToken).ConfigureAwait(false);
-        return (
-            new MomentDescription(moment, frameReference, reasonReferences, combined, page, tileReferences, notSent),
-            [.. page.Tiles.Select(tile => Convert.ToHexString(SHA256.HashData(files[tile.Number])))]);
+        return (new MomentDescription(moment, frameReference, reasonReferences, frameStep, page, tileReferences, notSent), pageSteps);
+    }
+
+    // The visit and the moment, as the layers' requests give them.
+    private static StringBuilder MomentHeader(RecordingCollation collation, VisitCollation visit, MomentDescription moment, HashSet<string> references)
+    {
+        references.UnionWith(RecordingSummaryKind.CapabilityReferences(collation));
+        var input = new StringBuilder()
+            .Append(string.Join('\n', collation.CapabilityLines)).Append("\n\n")
+            .Append(CultureInfo.InvariantCulture, $"Page visit {visit.Visit.Number}, derived by the recorder: {visit.Visit.Start.Url}")
+            .Append(visit.Title is { Length: > 0 } title ? $", titled \"{title.Replace("\"", "'", StringComparison.Ordinal)}\"" : ", with no title recorded")
+            .Append(".\n\n");
+        return input;
+    }
+
+    private static void AppendReasons(StringBuilder input, MomentDescription moment, HashSet<string> references)
+    {
+        input.Append(CultureInfo.InvariantCulture, $"Moment {moment.Moment.Number} of the visit, at {SummaryCollator.Time(moment.Moment.Frame.Time)}. Why the recorder chose it:\n");
+        for (var index = 0; index < moment.Moment.Reasons.Count; index++)
+        {
+            var reason = moment.Moment.Reasons[index];
+            references.Add(moment.ReasonReferences[index]);
+            input.Append(CultureInfo.InvariantCulture, $"[{moment.ReasonReferences[index]}] {SummaryCollator.Time(reason.Time)} {reason.Text}\n");
+        }
+    }
+
+    /// <summary>
+    /// A moment's layer 2 request: the capabilities, the visit, its
+    /// knowledge so far with each statement's number, why the moment was
+    /// chosen, the recorder's facts since the moment before, and the
+    /// captured frame's description.
+    /// </summary>
+    internal static (string Input, HashSet<string> References) Layer2Input(
+        RecordingCollation collation, VisitCollation visit, MomentDescription moment, IReadOnlyList<string> facts, Knowledge knowledge)
+    {
+        var references = new HashSet<string>(StringComparer.Ordinal) { moment.FrameReference };
+        var input = MomentHeader(collation, visit, moment, references);
+        input.Append("The visit's knowledge so far, in layers. These are inferences, not facts:\n");
+        knowledge.Append(input, references, withNumbers: true);
+        input.Append('\n');
+        AppendReasons(input, moment, references);
+        input.Append(facts.Count == 0
+            ? "\nThe recorder has no facts of the visit since the moment before.\n"
+            : "\nThe recorder's facts of the visit since the moment before:\n" + string.Join('\n', facts) + "\n");
+        foreach (var line in facts)
+        {
+            foreach (Match match in Reference().Matches(line))
+            {
+                references.Add(match.Groups[1].Value);
+            }
+        }
+
+        input.Append(CultureInfo.InvariantCulture, $"\nThe captured frame: [{moment.FrameReference}] {FrameText(moment.Moment.Frame)}.\n")
+            .Append("The frame as a model described it, from the picture and the recorder's facts. These are inferences, not facts:\n");
+        RecordingSummaryKind.AppendClaims(input, moment.FrameStep.Claims, references);
+        return (input.ToString(), references);
+    }
+
+    /// <summary>
+    /// A moment's layer 3 request: the capabilities, the visit, its
+    /// knowledge so far with each statement's number, why the moment was
+    /// chosen, the page as rebuilt, the part on the screen, what the
+    /// recreation lacked, and the descriptions of the groups of tiles not
+    /// yet in the visit's knowledge; a group already in it is named, not
+    /// described again.
+    /// </summary>
+    internal static (string Input, HashSet<string> References) Layer3Input(
+        RecordingCollation collation,
+        VisitCollation visit,
+        MomentDescription moment,
+        IReadOnlyList<PageGroupDescription> groups,
+        IReadOnlySet<string> groupsKnown,
+        Knowledge knowledge)
+    {
+        var page = moment.Page!;
+        var tileReferences = moment.TileReferences!;
+        var references = new HashSet<string>(tileReferences, StringComparer.Ordinal);
+        var input = MomentHeader(collation, visit, moment, references);
+        input.Append("The visit's knowledge so far, in layers. These are inferences, not facts:\n");
+        knowledge.Append(input, references, withNumbers: true);
+        input.Append('\n');
+        AppendReasons(input, moment, references);
+        input.Append(CultureInfo.InvariantCulture,
+                $"\nThe page as the recorder rebuilt it at this moment, {page.Width:0} by {page.Height:0} CSS pixels, pictured whole in {page.Tiles.Count} tiles. ")
+            .Append(InViewText(moment.Moment, page, tileReferences)).Append('\n')
+            .Append(RecreationNotes(page)).Append('\n');
+        for (var index = 0; index < groups.Count; index++)
+        {
+            var group = groups[index];
+            var named = string.Join(", ", group.Tiles.Select(tile => $"tile {tile.Number} [{tileReferences[tile.Number - 1]}], CSS pixels {tile.Top.ToString("0", CultureInfo.InvariantCulture)} to {(tile.Top + tile.Height).ToString("0", CultureInfo.InvariantCulture)}"));
+            if (groupsKnown.Contains(group.Key))
+            {
+                input.Append(CultureInfo.InvariantCulture,
+                    $"\nThe recreated page at {named}: derived by the recorder, the same pictures, pixel for pixel, at the same places, as tiles already in the visit's knowledge, so they are not described again.\n");
+                continue;
+            }
+
+            if (group.Earlier is { } earlier)
+            {
+                // A group not sent: its tiles are the same pictures as an
+                // earlier moment's, whose description is given, citing that
+                // moment's tiles.
+                references.UnionWith(earlier.TileReferences);
+                var then = string.Join(", ", earlier.Tiles.Select((tile, at) => $"tile {tile.Number} [{earlier.TileReferences[at]}]"));
+                input.Append(CultureInfo.InvariantCulture,
+                        $"\nThe recreated page at {named}: derived by the recorder, the same pictures, pixel for pixel, at the same places, as {then} of the page as rebuilt at moment {earlier.Moment} of visit {earlier.Visit}, at {SummaryCollator.Time(earlier.Time)}. ")
+                    .Append("So they were not sent again, and this is the description a model wrote of them at that moment, citing that moment's tiles; what it says was on the screen is of that moment. These are inferences, not facts:\n");
+            }
+            else
+            {
+                input.Append(CultureInfo.InvariantCulture, $"\nThe recreated page as a model described it from {named}. These are inferences, not facts:\n");
+            }
+
+            RecordingSummaryKind.AppendClaims(input, group.Step.Claims, references);
+        }
+
+        return (input.ToString(), references);
+    }
+
+    /// <summary>
+    /// A page's request for chapter 1: its address and titles, the visits to
+    /// it with what the recorder derived of them, and each visit's
+    /// knowledge in layers, without the statements' numbers.
+    /// </summary>
+    internal static (string Input, HashSet<string> References) PageChapterInput(
+        RecordingCollation collation, int number, IReadOnlyList<(VisitCollation Visit, Knowledge Knowledge)> visits)
+    {
+        var references = new HashSet<string>(StringComparer.Ordinal);
+        var titles = visits.Select(seen => seen.Visit.Title).Where(title => title is { Length: > 0 }).Distinct(StringComparer.Ordinal).ToList();
+        var input = new StringBuilder()
+            .Append(CultureInfo.InvariantCulture, $"Page {number} of the report's first chapter, derived by the recorder: {visits[0].Visit.Visit.Start.Url}")
+            .Append(titles.Count == 0 ? ", with no title recorded" : ", titled " + string.Join(", then ", titles.Select(title => $"\"{title!.Replace("\"", "'", StringComparison.Ordinal)}\"")))
+            .Append(CultureInfo.InvariantCulture, $". It was visited {visits.Count} {(visits.Count == 1 ? "time" : "times")}.\n");
+        foreach (var (visit, knowledge) in visits)
+        {
+            input.Append(CultureInfo.InvariantCulture,
+                $"\nVisit {visit.Visit.Number}, derived by the recorder: from {SummaryCollator.Time(visit.Visit.Start.Time)} to {SummaryCollator.Time(visit.Visit.End)}.\n");
+            input.Append("The visit's knowledge, in layers. These are inferences, not facts:\n");
+            knowledge.Append(input, references, withNumbers: false);
+        }
+
+        return (input.ToString(), references);
+    }
+
+    /// <summary>
+    /// A visit's request for its part of chapter 2: the capabilities, the
+    /// recorder's facts of the visit, its knowledge in layers, its moments
+    /// with their frames' and tiles' references, the section of chapter 1
+    /// that describes its page, and the story so far.
+    /// </summary>
+    internal static (string Input, HashSet<string> References) StoryInput(
+        RecordingCollation collation,
+        VisitCollation visit,
+        IReadOnlyList<MomentDescription> moments,
+        int leftOut,
+        Knowledge knowledge,
+        int section,
+        IReadOnlyList<(VisitCollation Visit, AcceptedStep Step)> storySoFar)
+    {
+        var references = new HashSet<string>(RecordingSummaryKind.VisitReferences(collation, visit), StringComparer.Ordinal);
+        var input = new StringBuilder(RecordingSummaryKind.VisitInput(collation, visit)).Append("\n\n")
+            .Append(CultureInfo.InvariantCulture, $"The visit's page is described in the report's first chapter, section 1.{section}.\n\n")
+            .Append("The visit's knowledge, in layers. These are inferences, not facts:\n");
+        knowledge.Append(input, references, withNumbers: false);
+        input.Append(moments.Count == 0
+            ? "\nThe visit has no moments: no captured frames were recorded during it.\n"
+            : "\nThe visit's moments, chosen by the recorder, with the pictures a part may show:\n");
+        foreach (var moment in moments)
+        {
+            references.Add(moment.FrameReference);
+            input.Append(CultureInfo.InvariantCulture, $"Moment {moment.Moment.Number}, at {SummaryCollator.Time(moment.Moment.Frame.Time)}: the captured frame [{moment.FrameReference}]");
+            if (moment.Recreated)
+            {
+                var page = moment.Page!;
+                var tiles = page.Tiles.Select(tile =>
+                {
+                    references.Add(moment.TileReferences![tile.Number - 1]);
+                    return string.Create(CultureInfo.InvariantCulture,
+                        $"tile {tile.Number} [{moment.TileReferences![tile.Number - 1]}], CSS pixels {tile.Top:0} to {tile.Top + tile.Height:0}{(InView(page, tile) ? ", on the screen" : "")}");
+                });
+                input.Append("; the page as the recorder rebuilt it, in tiles: ").Append(string.Join("; ", tiles));
+            }
+            else
+            {
+                input.Append("; the page was not recreated");
+            }
+
+            input.Append(".\n");
+        }
+
+        if (leftOut > 0)
+        {
+            input.Append(CultureInfo.InvariantCulture, $"{leftOut} more moments were left out to keep within the limit.\n");
+        }
+
+        if (storySoFar.Count == 0)
+        {
+            input.Append("\nThe story so far: this is the first part.\n");
+        }
+        else
+        {
+            input.Append("\nThe story so far, the parts for the visits before. These are inferences, not facts:\n");
+            foreach (var (before, step) in storySoFar)
+            {
+                input.Append(CultureInfo.InvariantCulture, $"The part for visit {before.Visit.Number}:\n");
+                AppendStory(input, step, references);
+            }
+        }
+
+        return (input.ToString(), references);
+    }
+
+    /// <summary>
+    /// Chapter 2's opening request: the capabilities, the visits, the pages
+    /// as chapter 1 names them, and the parts that follow.
+    /// </summary>
+    internal static (string Input, HashSet<string> References) OpeningInput(
+        RecordingCollation collation,
+        IReadOnlyList<PageChapter> pages,
+        IReadOnlyList<(VisitCollation Visit, AcceptedStep Step)> parts)
+    {
+        var references = new HashSet<string>(RecordingSummaryKind.CapabilityReferences(collation), StringComparer.Ordinal);
+        var input = new StringBuilder()
+            .Append(string.Join('\n', collation.CapabilityLines)).Append("\n\n")
+            .Append("The page visits, derived by the recorder:\n");
+        foreach (var (visit, _) in parts)
+        {
+            input.Append(CultureInfo.InvariantCulture,
+                $"Visit {visit.Visit.Number}, from {SummaryCollator.Time(visit.Visit.Start.Time)} to {SummaryCollator.Time(visit.Visit.End)}: {visit.Visit.Start.Url}")
+                .Append(visit.Title is { Length: > 0 } title ? $", titled \"{title.Replace("\"", "'", StringComparison.Ordinal)}\"" : ", with no title recorded")
+                .Append(".\n");
+        }
+
+        input.Append("\nThe pages, as the first chapter names them:\n");
+        foreach (var page in pages)
+        {
+            input.Append(CultureInfo.InvariantCulture, $"Section 1.{page.Number}: {LayeredReport.PageTitle(page)}, visits {string.Join(", ", page.Visits)}.\n");
+        }
+
+        input.Append("\nThe chapter's parts, which follow the opening. These are inferences, not facts:\n");
+        foreach (var (visit, step) in parts)
+        {
+            input.Append(CultureInfo.InvariantCulture, $"The part for visit {visit.Visit.Number}:\n");
+            AppendStory(input, step, references);
+        }
+
+        return (input.ToString(), references);
+    }
+
+    // A part of the story as a later request gives it: each statement with
+    // its form and its evidence.
+    private static void AppendStory(StringBuilder input, AcceptedStep step, ISet<string> references)
+    {
+        foreach (var claim in step.Claims)
+        {
+            references.UnionWith(claim.Evidence);
+            input.Append("  (").Append(LayeredReport.FormOf(step, claim)).Append(") ").Append(claim.Text);
+            if (claim.Evidence.Count > 0)
+            {
+                input.Append(' ').Append(string.Join(' ', claim.Evidence.Select(reference => $"[{reference}]")));
+            }
+
+            input.Append('\n');
+        }
     }
 
     /// <summary>A captured frame as the evidence list gives it.</summary>
@@ -833,100 +1178,6 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         return (input.ToString(), references);
     }
 
-    // A moment's combined request: the capabilities, the visit, why the
-    // moment was chosen, the frame's description, the tiles' descriptions,
-    // the part on the screen, and what the recreation lacked.
-    internal static (string Input, HashSet<string> References) CombinedInput(
-        RecordingCollation collation,
-        VisitCollation visit,
-        Moment moment,
-        string frameReference,
-        IReadOnlyList<string> reasonReferences,
-        AcceptedStep frameStep,
-        RecreatedPage page,
-        IReadOnlyList<string> tileReferences,
-        IReadOnlyList<PageGroupDescription> pageSteps)
-    {
-        var references = new HashSet<string>(RecordingSummaryKind.CapabilityReferences(collation), StringComparer.Ordinal) { frameReference };
-        references.UnionWith(tileReferences);
-        var input = new StringBuilder()
-            .Append(string.Join('\n', collation.CapabilityLines)).Append("\n\n")
-            .Append(CultureInfo.InvariantCulture, $"Page visit {visit.Visit.Number}, derived by the recorder: {visit.Visit.Start.Url}")
-            .Append(visit.Title is { Length: > 0 } title ? $", titled \"{title.Replace("\"", "'", StringComparison.Ordinal)}\"" : ", with no title recorded")
-            .Append(".\n\n")
-            .Append(CultureInfo.InvariantCulture, $"Moment {moment.Number} of the visit, at {SummaryCollator.Time(moment.Frame.Time)}. Why the recorder chose it:\n");
-        for (var index = 0; index < moment.Reasons.Count; index++)
-        {
-            references.Add(reasonReferences[index]);
-            input.Append(CultureInfo.InvariantCulture, $"[{reasonReferences[index]}] {SummaryCollator.Time(moment.Reasons[index].Time)} {moment.Reasons[index].Text}\n");
-        }
-
-        // A statement the same, word for word, as an earlier one in any of
-        // the descriptions is given once, with the references of both
-        // (agreed with the owner, 2026-10-14).
-        var blocks = new List<IReadOnlyList<Claim>> { frameStep.Claims };
-        blocks.AddRange(pageSteps.Select(item => item.Step.Claims));
-        var given = Distinct(blocks);
-        input.Append(CultureInfo.InvariantCulture, $"\nThe captured frame: [{frameReference}] {FrameText(moment.Frame)}.\n")
-            .Append("The moment as a model described it from the captured frame and the recorder's facts. These are inferences, not facts:\n");
-        RecordingSummaryKind.AppendClaims(input, given[0], references);
-        input.Append(CultureInfo.InvariantCulture,
-                $"\nThe page as the recorder rebuilt it at this moment, {page.Width:0} by {page.Height:0} CSS pixels, pictured whole in {page.Tiles.Count} tiles. ")
-            .Append(InViewText(moment, page, tileReferences)).Append('\n')
-            .Append(RecreationNotes(page)).Append('\n');
-        for (var index = 0; index < pageSteps.Count; index++)
-        {
-            var tiles = pageSteps[index].Tiles;
-            var named = string.Join(", ", tiles.Select(tile => $"tile {tile.Number} [{tileReferences[tile.Number - 1]}], CSS pixels {tile.Top.ToString("0", CultureInfo.InvariantCulture)} to {(tile.Top + tile.Height).ToString("0", CultureInfo.InvariantCulture)}"));
-            if (pageSteps[index].Earlier is { } earlier)
-            {
-                // A group not sent: its tiles are the same pictures as an
-                // earlier moment's, whose description is given, citing that
-                // moment's tiles (decisions 5 and 6).
-                references.UnionWith(earlier.TileReferences);
-                var then = string.Join(", ", earlier.Tiles.Select((tile, at) => $"tile {tile.Number} [{earlier.TileReferences[at]}]"));
-                input.Append(CultureInfo.InvariantCulture,
-                    $"\nThe recreated page at {named}: derived by the recorder, the same pictures, pixel for pixel, at the same places, as {then} of the page as rebuilt at moment {earlier.Moment} of visit {earlier.Visit}, at {SummaryCollator.Time(earlier.Time)}. ")
-                    .Append(CultureInfo.InvariantCulture,
-                    $"So they were not sent again, and this is the description a model wrote of them at that moment, citing that moment's tiles; what it says was on the screen is of that moment. These are inferences, not facts:\n");
-            }
-            else
-            {
-                input.Append(CultureInfo.InvariantCulture, $"\nThe recreated page as a model described it from {named}. These are inferences, not facts:\n");
-            }
-
-            RecordingSummaryKind.AppendClaims(input, given[index + 1], references);
-        }
-
-        return (input.ToString(), references);
-    }
-
-    // Each block's statements without those whose kind and text are the
-    // same as an earlier statement's in any block, the first given the
-    // references of all of them, in order.
-    internal static List<List<Claim>> Distinct(IReadOnlyList<IReadOnlyList<Claim>> blocks)
-    {
-        var result = blocks.Select(_ => new List<Claim>()).ToList();
-        var first = new Dictionary<(string Kind, string Text), (int Block, int Index)>();
-        for (var block = 0; block < blocks.Count; block++)
-        {
-            foreach (var claim in blocks[block])
-            {
-                if (first.TryGetValue((claim.Kind, claim.Text), out var at))
-                {
-                    var earlier = result[at.Block][at.Index];
-                    result[at.Block][at.Index] = earlier with { Evidence = [.. earlier.Evidence.Union(claim.Evidence, StringComparer.Ordinal)] };
-                    continue;
-                }
-
-                first[(claim.Kind, claim.Text)] = (block, result[block].Count);
-                result[block].Add(claim);
-            }
-        }
-
-        return result;
-    }
-
     // A moment's request: the capabilities, the visit's address and title,
     // why the moment was chosen, and the visit's facts since the moment
     // before, with the picture's reference.
@@ -972,200 +1223,12 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     internal static List<string> FactsSince(VisitCollation visit, long after, long until) =>
         [.. visit.Lines.Where(line => TimedLine().Match(line) is { Success: true } match && Within(match, after, until))];
 
-    /// <summary>
-    /// The recorder's comparison of a moment's tiles with those of the last
-    /// moment before it whose page was recreated: which are the same file,
-    /// byte for byte, as the tile at the same place then, which differ, and
-    /// which had no tile at the same place, with the earlier tiles'
-    /// references.
-    /// </summary>
-    internal static (string Text, IReadOnlyList<string> References) Comparison(
-        MomentDescription now,
-        IReadOnlyList<string> hashes,
-        (MomentDescription Moment, IReadOnlyList<string> Hashes)? before)
-    {
-        ArgumentNullException.ThrowIfNull(now);
-        ArgumentNullException.ThrowIfNull(hashes);
-        var page = now.Page!;
-        if (before is not { } earlier)
-        {
-            return ("This is the first moment of the visit whose page was recreated, so its tiles are compared with none.", []);
-        }
-
-        var then = earlier.Moment.Page!;
-        var same = new List<string>();
-        var differ = new List<string>();
-        var none = new List<string>();
-        var references = new List<string>();
-        foreach (var tile in page.Tiles)
-        {
-            var current = $"tile {tile.Number.ToString(CultureInfo.InvariantCulture)} [{now.TileReferences![tile.Number - 1]}]";
-            var match = then.Tiles.FirstOrDefault(other =>
-                other.Top == tile.Top && other.Height == tile.Height && other.Width == tile.Width &&
-                other.PixelWidth == tile.PixelWidth && other.PixelHeight == tile.PixelHeight);
-            if (match is null)
-            {
-                none.Add(current);
-                continue;
-            }
-
-            var earlierReference = earlier.Moment.TileReferences![match.Number - 1];
-            references.Add(earlierReference);
-            (earlier.Hashes[match.Number - 1] == hashes[tile.Number - 1] ? same : differ)
-                .Add($"{current}, as tile {match.Number.ToString(CultureInfo.InvariantCulture)} [{earlierReference}] then");
-        }
-
-        var text = new StringBuilder()
-            .Append(CultureInfo.InvariantCulture,
-                $"Compared by the recorder, file by file, with the tiles of the page as rebuilt at moment {earlier.Moment.Moment.Number}, at {SummaryCollator.Time(earlier.Moment.Moment.Frame.Time)}, ")
-            .Append(CultureInfo.InvariantCulture, $"when the page was {then.Width:0} by {then.Height:0} CSS pixels; it is {page.Width:0} by {page.Height:0} now. ")
-            .Append(same.Count == 0
-                ? "No tile is the same file as the tile at the same place then. "
-                : "The same file, byte for byte, as the tile at the same place then, so that part of the recreated page did not change: " + string.Join("; ", same) + ". ")
-            .Append(differ.Count == 0
-                ? ""
-                : "A different file from the tile at the same place then, so that part of the recreated page changed or was pictured differently: " + string.Join("; ", differ) + ". ")
-            .Append(none.Count == 0 ? "" : "With no tile at the same place then: " + string.Join("; ", none) + ".");
-        return (text.ToString().TrimEnd(), references);
-    }
-
-    // A moment's request to write the page understood so far: the visit,
-    // the understanding after the moment before, why this moment was
-    // chosen, the facts since the moment before, the frame and the
-    // recreated page, the recorder's comparison of the tiles, and the
-    // moment's description, labelled inferred.
-    internal static (string Input, HashSet<string> References) PageSoFarInput(
-        VisitCollation visit,
-        MomentDescription moment,
-        IReadOnlyList<string> facts,
-        (string Text, IReadOnlyList<string> References)? comparison,
-        AcceptedStep? soFar,
-        MomentDescription? soFarAfter)
-    {
-        ArgumentNullException.ThrowIfNull(visit);
-        ArgumentNullException.ThrowIfNull(moment);
-        ArgumentNullException.ThrowIfNull(facts);
-        var references = new HashSet<string>(StringComparer.Ordinal) { moment.FrameReference };
-        var input = new StringBuilder()
-            .Append(CultureInfo.InvariantCulture, $"Page visit {visit.Visit.Number}, derived by the recorder: {visit.Visit.Start.Url}")
-            .Append(visit.Title is { Length: > 0 } title ? $", titled \"{title.Replace("\"", "'", StringComparison.Ordinal)}\"" : ", with no title recorded")
-            .Append(".\n\n");
-        if (soFar is null)
-        {
-            input.Append("There is no understanding of the page yet: this is the first moment of the visit.\n\n");
-        }
-        else
-        {
-            input.Append(CultureInfo.InvariantCulture,
-                $"The understanding of the page so far, as a model wrote it after moment {soFarAfter!.Moment.Number}, at {SummaryCollator.Time(soFarAfter.Moment.Frame.Time)}. These are inferences, not facts:\n");
-            RecordingSummaryKind.AppendClaims(input, soFar.Claims, references);
-            input.Append('\n');
-        }
-
-        input.Append(CultureInfo.InvariantCulture, $"Moment {moment.Moment.Number} of the visit, at {SummaryCollator.Time(moment.Moment.Frame.Time)}. Why the recorder chose it:\n");
-        for (var index = 0; index < moment.Moment.Reasons.Count; index++)
-        {
-            references.Add(moment.ReasonReferences[index]);
-            input.Append(CultureInfo.InvariantCulture, $"[{moment.ReasonReferences[index]}] {SummaryCollator.Time(moment.Moment.Reasons[index].Time)} {moment.Moment.Reasons[index].Text}\n");
-        }
-
-        input.Append(facts.Count == 0
-            ? "\nThe recorder has no facts of the visit since the moment before.\n"
-            : "\nThe recorder's facts of the visit since the moment before:\n" + string.Join('\n', facts) + "\n");
-        foreach (var line in facts)
-        {
-            foreach (Match match in Reference().Matches(line))
-            {
-                references.Add(match.Groups[1].Value);
-            }
-        }
-
-        input.Append(CultureInfo.InvariantCulture, $"\nThe captured frame: [{moment.FrameReference}] {FrameText(moment.Moment.Frame)}.\n");
-        if (moment.Combined)
-        {
-            var page = moment.Page!;
-            references.UnionWith(moment.TileReferences!);
-            var named = string.Join(", ", page.Tiles.Select(tile =>
-                $"tile {tile.Number.ToString(CultureInfo.InvariantCulture)} [{moment.TileReferences![tile.Number - 1]}], CSS pixels {tile.Top.ToString("0", CultureInfo.InvariantCulture)} to {(tile.Top + tile.Height).ToString("0", CultureInfo.InvariantCulture)}"));
-            input.Append(CultureInfo.InvariantCulture,
-                    $"The page as the recorder rebuilt it at this moment, {page.Width:0} by {page.Height:0} CSS pixels, pictured whole in {page.Tiles.Count} tiles: {named}. ")
-                .Append(InViewText(moment.Moment, page, moment.TileReferences!)).Append('\n')
-                .Append(RecreationNotes(page)).Append('\n');
-        }
-        else
-        {
-            input.Append(moment.Page?.NotRecreated is { } why
-                ? $"The page was not recreated at this moment, because {why}, so the moment is described from its captured frame alone.\n"
-                : "The page was not recreated at this moment, so the moment is described from its captured frame alone.\n");
-        }
-
-        if (comparison is { } compared)
-        {
-            references.UnionWith(compared.References);
-            input.Append(compared.Text).Append('\n');
-        }
-
-        input.Append(moment.Combined
-            ? "\nThis moment as a model described it from its captured frame and its recreated page. These are inferences, not facts:\n"
-            : "\nThis moment as a model described it from its captured frame. These are inferences, not facts:\n");
-        RecordingSummaryKind.AppendClaims(input, moment.Step.Claims, references);
-        return (input.ToString(), references);
-    }
-
     private static bool Within(Match match, long after, long until)
     {
         var time = ((long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture) * 60 + long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture)) * 60 +
             long.Parse(match.Groups[4].Value, CultureInfo.InvariantCulture)) * 1_000_000_000 +
             long.Parse(match.Groups[5].Value, CultureInfo.InvariantCulture) * 1_000_000;
         return time > after && time <= until;
-    }
-
-    // A visit's enhanced request: its facts, its description from the
-    // summary, its page as understood after its last moment, and each
-    // moment's screen and change, all labelled inferred.
-    internal static (string Input, HashSet<string> References) VisitInput(
-        RecordingCollation collation,
-        VisitCollation visit,
-        AcceptedStep summary,
-        IReadOnlyList<MomentDescription> moments,
-        int leftOut,
-        AcceptedStep? soFar)
-    {
-        var references = RecordingSummaryKind.VisitReferences(collation, visit);
-        var input = new StringBuilder(RecordingSummaryKind.VisitInput(collation, visit))
-            .Append("\n\nThe visit as a model described it from the recorder's facts alone. These are inferences, not facts:\n");
-        RecordingSummaryKind.AppendClaims(input, summary.Claims, references);
-        if (moments.Count == 0)
-        {
-            input.Append("\nNo captured frames were recorded during this visit, so it has no moments.\n");
-        }
-        else
-        {
-            input.Append(CultureInfo.InvariantCulture,
-                $"\nThe page through the visit as a model understood it, moment by moment, after the last moment, {moments[^1].Moment.Number}. These are inferences, not facts:\n");
-            RecordingSummaryKind.AppendClaims(input, soFar?.Claims ?? [], references);
-            input.Append("\nMoments of the visit chosen by the recorder, each with what a model described as on the screen and what changed, from its captured frame and, where it was recreated, its page pictured whole in tiles. These are inferences, not facts:\n");
-            foreach (var moment in moments)
-            {
-                references.Add(moment.FrameReference);
-                references.UnionWith(moment.ReasonReferences);
-                references.UnionWith(moment.TileReferences ?? []);
-                var reasons = string.Join("; ", moment.Moment.Reasons.Select((reason, index) => $"{reason.Text} [{moment.ReasonReferences[index]}]"));
-                var tiles = moment.Combined
-                    ? $", the recreated page in tiles {string.Join(", ", moment.TileReferences!.Select(reference => $"[{reference}]"))}"
-                    : moment.Page?.NotRecreated is { } why ? $", the page not recreated because {why}" : "";
-                input.Append(CultureInfo.InvariantCulture,
-                    $"Moment {moment.Moment.Number}, at {SummaryCollator.Time(moment.Moment.Frame.Time)}, picture [{moment.FrameReference}]{tiles}, chosen because: {reasons}\n");
-                RecordingSummaryKind.AppendClaims(input, moment.Step.Claims.Where(claim => claim.Section is "screen" or "change"), references);
-            }
-
-            if (leftOut > 0)
-            {
-                input.Append(CultureInfo.InvariantCulture, $"The recorder left {leftOut} more moments out to keep within the limit; do not describe what was left out as absent.\n");
-            }
-        }
-
-        return (input.ToString(), references);
     }
 
     private static string MediaType(string path) => Path.GetExtension(path).ToUpperInvariant() switch

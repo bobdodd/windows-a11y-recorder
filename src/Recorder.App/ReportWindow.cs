@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Recorder.Analysis;
 
 namespace Recorder.App;
@@ -12,13 +13,16 @@ namespace Recorder.App;
 /// reference as plain text, and each paragraph is followed by a row of
 /// buttons, at least 44 by 44 pixels, one for each reference it cites with
 /// a time in the recording, each moving the playhead to that evidence.
-/// In the evidence list, each reference is such a button too. See
+/// In the evidence list, each reference is such a button too. A picture is
+/// shown from its file beside the report, no larger than its own size, and
+/// its caption's references are buttons as a paragraph's are. See
 /// docs/architecture/analysis-runner.md, "Decisions on the player
 /// (2026-10-13)".
 /// </summary>
 internal sealed class ReportWindow : Window
 {
     private readonly ReportDocument _report;
+    private readonly string _folder;
     private readonly Func<long, string?> _seek;
     private readonly SelectableText _status;
 
@@ -27,6 +31,7 @@ internal sealed class ReportWindow : Window
     {
         _report = report;
         _seek = seek;
+        _folder = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path)) ?? "";
         Title = (report.Title ?? "Analysis report") + ", Windows A11y Recorder";
         Width = 900;
         Height = 760;
@@ -105,8 +110,48 @@ internal sealed class ReportWindow : Window
                 };
             case ReportBlockKind.Table:
                 return Table(block);
+            case ReportBlockKind.Image:
+                return Picture(block);
             default:
                 return new SelectableText { Text = block.Text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 4) };
+        }
+    }
+
+    // A picture, from its path relative to the report's folder, shown at
+    // its own size or smaller to fit; where it cannot be read, a line that
+    // says so in its place.
+    private UIElement Picture(ReportBlock block)
+    {
+        var file = System.IO.Path.GetFullPath(System.IO.Path.Combine(_folder, (block.Source ?? "").Replace('/', System.IO.Path.DirectorySeparatorChar)));
+        try
+        {
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.UriSource = new Uri(file, UriKind.Absolute);
+            bitmap.EndInit();
+            var image = new Image
+            {
+                Source = bitmap,
+                Stretch = Stretch.Uniform,
+                StretchDirection = StretchDirection.DownOnly,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 8, 0, 4)
+            };
+            AutomationProperties.SetName(image, block.Text);
+            return image;
+        }
+#pragma warning disable CA1031 // A picture that cannot be read is named in its place, and the report reads on.
+        catch (Exception exception) when (exception is System.IO.IOException or UnauthorizedAccessException or NotSupportedException or FormatException or ArgumentException)
+#pragma warning restore CA1031
+        {
+            return new SelectableText
+            {
+                Text = $"The picture {block.Source} could not be read from {file}: {exception.Message}",
+                TextWrapping = TextWrapping.Wrap,
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 8, 0, 4)
+            };
         }
     }
 

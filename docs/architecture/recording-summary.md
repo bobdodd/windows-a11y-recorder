@@ -16,7 +16,9 @@ recording, all 12 of its steps accepted at the first attempt; and 4b,
 the recreated pages, its design revised by the owner the same day
 (decision 7), built the same day and not yet tested on the target
 machine. See "Stage 2 implementation status" and "Decisions
-(2026-10-14)".
+(2026-10-14)". On 2026-10-16 the vision stage was rebuilt as the layered
+report, agreed by the owner on 2026-10-15 and 2026-10-16, not yet tested
+on the target machine; see "The layered report (built)".
 The first task kind for the [analysis runner](analysis-runner.md), chosen
 by the owner the same day: a summary of the recording that describes each
 page visited and the site or application being tested. It is built from
@@ -840,10 +842,11 @@ decision, the same day: "The change will be more radical, but it has to
 wait until after our current optimization of images" (see "Unique images
 across the recording").
 
-### The layered report (agreed, not built)
+### The layered report (built)
 
 Proposed on 2026-10-15, from the owner's design of the same day, and
-agreed by the owner the same day; not built. The trial of one step with
+agreed by the owner the same day; built on 2026-10-16, as "As built"
+below gives, and not yet tested on the target machine. The trial of one step with
 the answer's grammar comes first, since the rest is built on it. It replaces the page so far, whose answer is written
 again whole at each moment and outgrew the output limit at moment 10
 (see "The page so far at moment 10").
@@ -948,8 +951,8 @@ Proposed, to be agreed:
   the app, it should still have citation links that move frames into
   view." The pictures are shown in the player's reading view (owner, the
   same day).
-- **Chapter 2's form, as built (proposed).** Chapter 2's requests alone
-  add an optional `form` to each statement: a heading, with its level,
+- **Chapter 2's form, as built (agreed, 2026-10-16).** Chapter 2's requests alone
+  add a `form` to each statement: a heading, with its level,
   a paragraph's sentence, the default, or a picture, whose text is its
   caption and which cites the one captured frame or tile it shows. Other
   steps' requests are unchanged, so a run again still reuses them. The
@@ -1030,19 +1033,102 @@ Proposed, to be agreed:
 
 Questions to settle: none at present.
 
-- **Tests, when built:**
-  - **Unit tests:** the visit's knowledge numbered; an addition
-    elaborating, correcting, or new, put in place by the recorder; an
-    empty answer; a group of tiles already in the visit's knowledge left
-    out of the step; the index of moment records; a page's knowledge
-    gathered from two visits to its URL; the pictures and tables the
-    recorder puts in chapter 2.
+#### As built
+
+Built on 2026-10-16. The task kind's version is 3. Its steps, in order:
+
+1. **At each moment of each visit:** `visit-NNNN-moment-MM`, the frame
+   alone, and `visit-NNNN-moment-MM-page-GG`, each group of the page's
+   tiles, as before, a group already described in the recording given
+   its earlier answer instead of being sent. Then the moment's record is
+   added to `analysis/<task>/moments.json`: the visit, the moment, the
+   frame's time and file, its reference and step, why the recorder chose
+   it, and the page, recreated or not and why, its size and scroll, each
+   tile's place, image key, file, reference, and whether it was on the
+   screen, and each group's tiles and the step whose answer describes
+   it, with the visit and moment it was first described at where it was
+   not sent. The file is written again after each moment.
+2. **Layer 2,** `visit-NNNN-moment-MM-layer-2`, template
+   `recording-summary-vision-layer-2` version 1, text only: the
+   participant's capabilities, the visit, its knowledge so far with each
+   statement numbered `[K1]`, `[K2]`, and so on, and labelled with its
+   layer, why the moment was chosen, the recorder's facts since the
+   moment before, and the frame's description from its record.
+3. **Layer 3,** `visit-NNNN-moment-MM-layer-3`, template
+   `recording-summary-vision-layer-3` version 1, text only, where the
+   page was recreated: the knowledge so far, now with layer 2's
+   additions, the part of the page on the screen, what the recreation
+   lacked, and the descriptions of the groups of tiles not yet in the
+   visit's knowledge; a group already in it is named, not described
+   again. Where every group is already in it, the step is not sent, the
+   task's record of steps not sent says why, and the report lists it.
+4. **Chapter 1,** `page-NN`, template
+   `recording-summary-vision-page-chapter` version 1: one step for each
+   URL visited, in the order first visited, given each visit's knowledge
+   without the statements' numbers, with sections `page` and `changes`.
+5. **Chapter 2,** `visit-NNNN-story`, template
+   `recording-summary-vision-story` version 1, one for each visit, given
+   the visit's facts, its knowledge, its moments with their frames' and
+   tiles' references, the section of chapter 1 that describes its page,
+   and the parts before it; then `story-opening`, template
+   `recording-summary-vision-story-opening` version 1, given the visits,
+   the pages, and the parts.
+
+The layers' answers have three sections, `elaborations`, `corrections`,
+and `new`. The recorder puts each statement in place: one in
+elaborations or corrections is about the first statement of the
+knowledge it cites; one there that cites no statement is taken as new.
+The statements' numbers are taken out of its evidence, which keeps the
+evidence list's references, and are never in the report. The knowledge
+is given in reading order: layer 1 in its order, each statement followed
+by those about it, indented, then the new statements. The steps reused
+on a run again are those whose requests are the same; the frame and
+tile steps of the earlier vision runs are reused, as their requests are
+unchanged.
+
+Chapter 2's statements each give a `form`, first in the statement, one
+of `heading-1`, `heading-2`, `heading-3`, `sentence`, and `picture`; the
+schema holds the model to these, in chapter 2's requests only. The form
+is read back from the stored answer, as the claims are stored without it.
+The recorder numbers the headings on from the opening through every
+visit's part, 2.1, 2.1.1, 2.1.1.1, a heading with no heading above it
+raised a level; joins a paragraph's sentences between headings and
+pictures into one paragraph; and puts in each picture from the first
+captured frame or tile it cites, as `![Figure k. caption](../../file)`
+followed by the caption with its references. A picture citing neither
+is given as its caption, saying that no picture is shown. Tables and
+graphs are not among the forms; a part of a frame or tile is to come
+after, as said above.
+
+The report, `summary-with-vision.md`: its title, "Report of recording",
+the model and profile, how the layers are built, the participant's
+capabilities, "1. The pages" with each page's visits as the recorder
+derived them, its description, and "How the page changed", "2. The user
+experience", the other windows, the evidence list, and how it was made.
+The player's reading view shows each picture from its file, found from
+the report's folder, no larger than its own size, named by its caption
+for assistive technology; where the file cannot be read, it says so in
+the picture's place. The caption's references are buttons that move the
+playhead, as every paragraph's are.
+
+- **Tests:**
+  - **Unit tests:** the visit's knowledge numbered, an addition
+    elaborating, correcting, or new put in place, one citing no
+    statement taken as new, and the knowledge given with and without
+    numbers; a statement's reference; the schema with the form first in
+    chapter 2's requests only; a statement's form read back from the
+    answer; a picture line read by the reading view's document.
   - **Integration test:** the vision task on a recording built by the
-    tests, with a stand-in endpoint, checking each step's request and
-    that the report has its two chapters.
+    tests, with a stand-in endpoint: the steps in order, layer 3 not
+    sent where its groups are known, each layer's request with the
+    knowledge in place, chapter 1's and chapter 2's requests, the
+    report's two chapters with numbered headings and pictures whose
+    files exist, the index of moment records, a run again restarting at
+    the step that failed, and a trial of a layer step.
   - **System test on the target machine:** a run of the summary with
     vision on the cnib.ca recording, checking on screen that it reaches
-    its end and that the report has its two chapters.
+    its end, that the report has its two chapters, and that the reading
+    view shows its pictures.
 
 ### The recreated page at the recorded viewport and scroll
 

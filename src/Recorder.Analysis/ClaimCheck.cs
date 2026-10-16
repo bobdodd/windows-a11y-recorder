@@ -27,7 +27,12 @@ public sealed record Claim(string Section, int Paragraph, int Ordinal, string Ki
 public static class ClaimCheck
 {
     /// <summary>The JSON schema the server is asked to hold output to.</summary>
-    public static JsonObject Schema(IReadOnlyList<string> sections)
+    /// <param name="forms">
+    /// Where given, each statement may also have a "form", one of these,
+    /// after its evidence, so that the schema of every other step is as it
+    /// was and a run again reuses those steps.
+    /// </param>
+    public static JsonObject Schema(IReadOnlyList<string> sections, IReadOnlyList<string>? forms = null)
     {
         ArgumentNullException.ThrowIfNull(sections);
         var statement = new JsonObject
@@ -46,6 +51,28 @@ public static class ClaimCheck
             },
             ["required"] = new JsonArray("text", "kind", "evidence")
         };
+        if (forms is { Count: > 0 })
+        {
+            // The form comes first, so that the model says whether it writes
+            // a heading, a sentence, or a picture's caption before writing it.
+            var given = statement["properties"]!.AsObject();
+            var formFirst = new JsonObject
+            {
+                ["form"] = new JsonObject
+                {
+                    ["type"] = "string",
+                    ["enum"] = new JsonArray([.. forms.Select(form => JsonValue.Create(form))])
+                }
+            };
+            foreach (var name in new[] { "text", "kind", "evidence" })
+            {
+                formFirst[name] = given[name]!.DeepClone();
+            }
+
+            statement["properties"] = formFirst;
+            statement["required"] = new JsonArray("form", "text", "kind", "evidence");
+        }
+
         var properties = new JsonObject();
         foreach (var section in sections)
         {

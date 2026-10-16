@@ -31,6 +31,7 @@ public sealed class AnalysisTaskContext
         var own = PicturesFolder[..PicturesFolder.LastIndexOf('/')];
         ImagesFolder = picturesFolder is null ? "analysis/images" : own + "/images";
         ImageIndexFile = own + "/images.json";
+        MomentIndexFile = own + "/moments.json";
     }
 
     public AnalysisTask Task { get; }
@@ -53,6 +54,9 @@ public sealed class AnalysisTaskContext
 
     /// <summary>The task's index of the images of its tiles, beside its pictures' folder, with forward slashes.</summary>
     public string ImageIndexFile { get; }
+
+    /// <summary>The task's index of its moment records, beside its pictures' folder, with forward slashes (recording-summary.md, "The layered report").</summary>
+    public string MomentIndexFile { get; }
 
     /// <summary>
     /// Says that a step is not sent at this run, and why. A trial of that

@@ -26,6 +26,14 @@ public sealed record ModelRequest(
     IReadOnlySet<string> InputReferences)
 {
     public string Capability => Images.Count > 0 ? ModelCapabilities.Image : ModelCapabilities.Text;
+
+    /// <summary>
+    /// The forms a statement may take, where the step's answer gives each
+    /// statement a form, or null where it does not, as for every step but
+    /// those of the report's second chapter (recording-summary.md, "The
+    /// layered report", "Chapter 2's form, as built").
+    /// </summary>
+    public IReadOnlyList<string>? Forms { get; init; }
 }
 
 /// <summary>
@@ -161,7 +169,7 @@ public static class ChatRequest
             ["response_format"] = new JsonObject
             {
                 ["type"] = "json_object",
-                ["schema"] = ClaimCheck.Schema(request.Sections)
+                ["schema"] = ClaimCheck.Schema(request.Sections, request.Forms)
             }
         };
         if (oneLine)

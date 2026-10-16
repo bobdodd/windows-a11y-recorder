@@ -8,10 +8,11 @@ using Recorder.Analysis.Summary;
 namespace Recorder.Tests;
 
 /// <summary>
-/// The summary with vision, step 4a: the moments of each visit described
-/// from their captured frames, run by the analysis worker after a summary
-/// of the same recording. See docs/architecture/recording-summary.md,
-/// "Stage 2: the summary with vision".
+/// The summary with vision, the layered report: the moments of each visit
+/// recorded from their captured frames and recreated pages, the layers
+/// added at each, and the report's two chapters, run by the analysis worker
+/// after a summary of the same recording. See
+/// docs/architecture/recording-summary.md, "The layered report".
 /// </summary>
 public sealed partial class RecordingSummaryTaskTests
 {
@@ -36,8 +37,14 @@ public sealed partial class RecordingSummaryTaskTests
         };
     }
 
+    [GeneratedRegex(@"the captured frame \[(E\d+)\]")]
+    private static partial Regex StoryFrame();
+
     // Answers each request with one statement in each of its sections: a
     // moment's citing its picture, the others the first reference given.
+    // A layer's elaboration also cites K1, the visit's first statement, and
+    // chapter 2's statements are a heading, a sentence, and a picture of
+    // the first captured frame its request gives.
     private static StandInEndpoint VisionEndpoint()
     {
         var endpoint = new StandInEndpoint();
@@ -46,22 +53,57 @@ public sealed partial class RecordingSummaryTaskTests
             var input = Input(body);
             var picture = PictureReference().Match(input);
             var reference = picture.Success ? picture.Groups[1].Value : Reference().Match(input).Groups[1].Value;
-            var sections = body.Contains("You keep an understanding of one web page", StringComparison.Ordinal) ? RecordingSummaryVisionKind.PageSoFarSections
-                : body.Contains("combining two descriptions", StringComparison.Ordinal) ? RecordingSummaryVisionKind.CombinedSections
-                : body.Contains("You describe part of a web page", StringComparison.Ordinal) ? RecordingSummaryVisionKind.PageSections
-                : body.Contains("\"screen\"", StringComparison.Ordinal) ? RecordingSummaryVisionKind.MomentSections
-                : body.Contains("\"journey\"", StringComparison.Ordinal) ? RecordingSummaryVisionKind.VisitSections
-                : body.Contains("\"audience\"", StringComparison.Ordinal) ? RecordingSummaryKind.RecordingSections
-                : RecordingSummaryKind.VisitSections;
             var output = new JsonObject();
-            foreach (var section in sections)
+            JsonObject Statement(string text, params string[] evidence) => new()
             {
-                output[section] = new JsonArray(new JsonArray(new JsonObject
+                ["text"] = text,
+                ["kind"] = "claim",
+                ["evidence"] = new JsonArray([.. evidence.Select(item => JsonValue.Create(item))])
+            };
+
+            JsonObject Formed(string form, string text, params string[] evidence)
+            {
+                var statement = new JsonObject { ["form"] = form };
+                foreach (var (name, value) in Statement(text, evidence))
                 {
-                    ["kind"] = "claim",
-                    ["text"] = $"A statement about {section}.",
-                    ["evidence"] = new JsonArray(reference)
-                }));
+                    statement[name] = value?.DeepClone();
+                }
+
+                return statement;
+            }
+
+            if (body.Contains("\"elaborations\"", StringComparison.Ordinal))
+            {
+                var layer = body.Contains("what the web page adds", StringComparison.Ordinal) ? "layer 3" : "layer 2";
+                output["elaborations"] = new JsonArray(new JsonArray(Statement($"An elaboration from {layer}.", "K1", reference)));
+                output["corrections"] = new JsonArray();
+                output["new"] = new JsonArray(new JsonArray(Statement($"Something new from {layer}.", reference)));
+            }
+            else if (body.Contains("\"story\"", StringComparison.Ordinal) || body.Contains("\"opening\"", StringComparison.Ordinal))
+            {
+                var section = body.Contains("\"story\"", StringComparison.Ordinal) ? "story" : "opening";
+                var frame = StoryFrame().Match(input);
+                var paragraph = new JsonArray(Formed("heading-1", $"A heading of the {section}.", reference), Formed("sentence", $"A sentence of the {section}.", reference));
+                if (frame.Success)
+                {
+                    paragraph.Add(Formed("picture", $"A picture of the {section}.", frame.Groups[1].Value));
+                }
+
+                paragraph.Add(Formed("heading-2", $"A smaller heading of the {section}.", reference));
+                paragraph.Add(Formed("sentence", $"Another sentence of the {section}.", reference));
+                output[section] = new JsonArray(paragraph);
+            }
+            else
+            {
+                var sections = body.Contains("\"changes\"", StringComparison.Ordinal) ? RecordingSummaryVisionKind.PageChapterSections
+                    : body.Contains("You describe part of a web page", StringComparison.Ordinal) ? RecordingSummaryVisionKind.PageSections
+                    : body.Contains("\"screen\"", StringComparison.Ordinal) ? RecordingSummaryVisionKind.MomentSections
+                    : body.Contains("\"audience\"", StringComparison.Ordinal) ? RecordingSummaryKind.RecordingSections
+                    : RecordingSummaryKind.VisitSections;
+                foreach (var section in sections)
+                {
+                    output[section] = new JsonArray(new JsonArray(Statement($"A statement about {section}.", reference)));
+                }
             }
 
             return Task.FromResult(new ModelResponse(output.ToJsonString(), "stop", 300, 80, 400, 1200));
@@ -246,7 +288,7 @@ public sealed partial class RecordingSummaryTaskTests
     }
 
     [Fact]
-    public async Task Vision_describes_each_moment_from_its_frame_and_its_recreated_page_then_each_visit_and_the_recording()
+    public async Task Vision_records_each_moment_adds_its_layers_then_writes_each_page_and_the_story()
     {
         var (catalog, summary, vision) = await QueueBothAsync();
         var endpoint = VisionEndpoint();
@@ -263,237 +305,171 @@ public sealed partial class RecordingSummaryTaskTests
             "SELECT step_key, outcome, prompt_template, input_references FROM analysis_attempts WHERE task_id = $1 ORDER BY started_utc", vision);
         Assert.Equal(
             [
-                "visit-0001-moment-01", "visit-0001-moment-01-page-01", "visit-0001-moment-01-page-02", "visit-0001-moment-01-described", "visit-0001-moment-01-page-so-far",
+                "visit-0001-moment-01", "visit-0001-moment-01-page-01", "visit-0001-moment-01-page-02", "visit-0001-moment-01-layer-2", "visit-0001-moment-01-layer-3",
                 // Moment 2's tiles are the same pictures at the same places
-                // as moment 1's, so its groups are not sent.
-                "visit-0001-moment-02", "visit-0001-moment-02-described", "visit-0001-moment-02-page-so-far",
-                "visit-0001", "visit-0002-moment-01", "visit-0002-moment-01-page-so-far", "visit-0002-moment-02", "visit-0002-moment-02-page-so-far", "visit-0002", "recording"
+                // as moment 1's, so its groups are not sent, and its layer 3
+                // is not sent, as they are already in the visit's knowledge.
+                "visit-0001-moment-02", "visit-0001-moment-02-layer-2",
+                "visit-0002-moment-01", "visit-0002-moment-01-layer-2", "visit-0002-moment-02", "visit-0002-moment-02-layer-2",
+                "page-01", "page-02", "visit-0001-story", "visit-0002-story", "story-opening"
             ],
             attempts.Select(row => (string)row["step_key"]!));
         Assert.All(attempts, row => Assert.Equal(AttemptOutcomes.Accepted, row["outcome"]));
         Assert.Equal(
             [
                 RecordingSummaryVisionKind.MomentTemplate, RecordingSummaryVisionKind.PageTemplate, RecordingSummaryVisionKind.PageTemplate,
-                RecordingSummaryVisionKind.CombinedTemplate, RecordingSummaryVisionKind.PageSoFarTemplate, RecordingSummaryVisionKind.MomentTemplate
+                RecordingSummaryVisionKind.Layer2Template, RecordingSummaryVisionKind.Layer3Template, RecordingSummaryVisionKind.MomentTemplate,
+                RecordingSummaryVisionKind.Layer2Template
             ],
-            attempts.Take(6).Select(row => (string)row["prompt_template"]!));
-        Assert.Equal(RecordingSummaryVisionKind.VisitTemplate, attempts[8]["prompt_template"]);
-        Assert.Equal(RecordingSummaryVisionKind.RecordingTemplate, attempts[^1]["prompt_template"]);
+            attempts.Take(7).Select(row => (string)row["prompt_template"]!));
+        Assert.Equal(
+            [
+                RecordingSummaryVisionKind.PageChapterTemplate, RecordingSummaryVisionKind.PageChapterTemplate,
+                RecordingSummaryVisionKind.StoryTemplate, RecordingSummaryVisionKind.StoryTemplate, RecordingSummaryVisionKind.OpeningTemplate
+            ],
+            attempts.TakeLast(5).Select(row => (string)row["prompt_template"]!));
 
         // Each frame's request carries its picture, and each group of tiles
         // as many tiles of 841 image tokens as fit 4,096: four, then one.
+        // No layer or chapter request carries a picture.
         var bodies = endpoint.Bodies.Skip(3).ToList();
-        Assert.Equal(15, bodies.Count);
+        Assert.Equal(16, bodies.Count);
         var picture = "data:image/png;base64," + Convert.ToBase64String(FramePicture);
         int Pictures(string body) => (body.Length - body.Replace(picture, "", StringComparison.Ordinal).Length) / picture.Length;
-        Assert.Equal([1, 4, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0], bodies.Select(Pictures));
-        foreach (var index in new[] { 0, 5, 9, 11 })
-        {
-            var reference = PictureReference().Match(Input(bodies[index])).Groups[1].Value;
-            Assert.Contains($"Picture {reference}:", bodies[index], StringComparison.Ordinal);
-            Assert.Contains(reference, (string[])attempts[index]["input_references"]!);
-        }
-
-        var first = Input(bodies[0]);
-        Assert.Contains("Moment 1 of the visit, at 00:00:02.500. Why the recorder chose it:", first, StringComparison.Ordinal);
-        Assert.Contains("No change in the page's layout was recorded during the visit", first, StringComparison.Ordinal);
+        Assert.Equal([1, 4, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0], bodies.Select(Pictures));
         var tiles = Input(bodies[1]);
         Assert.Contains("This is group 1 of 2 of the tiles.", tiles, StringComparison.Ordinal);
-        Assert.Contains("At the frame the page was scrolled to 1850 CSS pixels from the top and 0 from the left, with a viewport 922 by 925, so the part on the screen was CSS pixels 1850 to 2775:", tiles, StringComparison.Ordinal);
-        Assert.Contains("1 of its 15 images were not loaded in the recreation, so they are blank or missing in the tiles: https://example.com/blogs.jpg.", tiles, StringComparison.Ordinal);
-        Assert.Contains("CSS pixels 925 to 1850 from the top of a page 4625 high and 922 wide, pictured at 922 by 925 pixels, none of it on the screen at the frame", tiles, StringComparison.Ordinal);
-        Assert.Contains("CSS pixels 1850 to 2775 from the top of a page 4625 high and 922 wide, pictured at 922 by 925 pixels, part of it on the screen at the frame. A recreation", tiles, StringComparison.Ordinal);
-        // The tiles' files are in the task's own folder, so the request
-        // leaves them out, to be the same at every run.
         Assert.DoesNotContain(", file ", tiles, StringComparison.Ordinal);
-        var combined = Input(bodies[3]);
-        Assert.Contains("The moment as a model described it from the captured frame and the recorder's facts. These are inferences, not facts:", combined, StringComparison.Ordinal);
-        Assert.Contains("The recreated page as a model described it from tile 5 [", combined, StringComparison.Ordinal);
-        Assert.DoesNotContain("image_url", bodies[3], StringComparison.Ordinal);
-        // Both groups of tiles gave the same statement, which is given once.
-        Assert.Single(Regex.Matches(combined, Regex.Escape("(page, inferred) A statement about page.")));
 
-        // The page understood so far: none at the first moment, then the
-        // first's, with the recorder's comparison of the tiles, which are
-        // the same picture at both moments.
-        var firstSoFar = Input(bodies[4]);
-        Assert.Contains("There is no understanding of the page yet: this is the first moment of the visit.", firstSoFar, StringComparison.Ordinal);
-        Assert.Contains("This is the first moment of the visit whose page was recreated, so its tiles are compared with none.", firstSoFar, StringComparison.Ordinal);
-        Assert.Contains("This moment as a model described it from its captured frame and its recreated page. These are inferences, not facts:", firstSoFar, StringComparison.Ordinal);
-        Assert.Contains("(page, inferred) A statement about page.", firstSoFar, StringComparison.Ordinal);
-        Assert.DoesNotContain("image_url", bodies[4], StringComparison.Ordinal);
-        var secondSoFar = Input(bodies[7]);
-        Assert.Contains("The understanding of the page so far, as a model wrote it after moment 1, at 00:00:02.500. These are inferences, not facts:", secondSoFar, StringComparison.Ordinal);
-        Assert.Contains("(changes, inferred) A statement about changes.", secondSoFar, StringComparison.Ordinal);
-        Assert.Matches(@"Compared by the recorder, file by file, with the tiles of the page as rebuilt at moment 1, at 00:00:02\.500, when the page was 922 by 4625 CSS pixels; it is 922 by 4625 now\. " +
-            @"The same file, byte for byte, as the tile at the same place then, so that part of the recreated page did not change: tile 1 \[E\d+\], as tile 1 \[E\d+\] then; .*tile 5 \[E\d+\], as tile 5 \[E\d+\] then\.", secondSoFar);
-        Assert.Contains("The page was not recreated at this moment, because the visit's page is not among the pages recorded at the frame", Input(bodies[10]), StringComparison.Ordinal);
-        Assert.DoesNotContain("Compared by the recorder", Input(bodies[10]), StringComparison.Ordinal);
+        // Layer 2 is given the knowledge, numbered, starting as layer 1,
+        // the visit's description from the recorded data, and the frame's
+        // description; no schema of a form.
+        var layer2 = Input(bodies[3]);
+        Assert.Contains("The visit's knowledge so far, in layers. These are inferences, not facts:", layer2, StringComparison.Ordinal);
+        Assert.Matches(@"  \[K1\] \(layer 1, the recorded data, page, inferred\) A statement about page\. \[E\d+\]\n", layer2);
+        Assert.Contains("[K3] (layer 1, the recorded data, activity, inferred)", layer2, StringComparison.Ordinal);
+        Assert.Contains("The frame as a model described it, from the picture and the recorder's facts. These are inferences, not facts:", layer2, StringComparison.Ordinal);
+        Assert.Contains("(screen, inferred) A statement about screen.", layer2, StringComparison.Ordinal);
+        Assert.Contains("K1", (string[])attempts[3]["input_references"]!);
+        Assert.DoesNotContain("\"form\"", bodies[3], StringComparison.Ordinal);
 
-        // Moment 2's combined request is given moment 1's descriptions of
-        // the same pictures, saying when they were written, with moment 1's
-        // tiles to cite, and its own part on the screen.
-        var reused = Input(bodies[6]);
-        Assert.Matches(@"The recreated page at tile 1 \[E\d+\], CSS pixels 0 to 925, .*tile 4 \[E\d+\], CSS pixels 2775 to 3700: derived by the recorder, the same pictures, pixel for pixel, at the same places, as tile 1 \[E\d+\], .*tile 4 \[E\d+\] of the page as rebuilt at moment 1 of visit 1, at 00:00:02\.500\. " +
-            @"So they were not sent again, and this is the description a model wrote of them at that moment, citing that moment's tiles; what it says was on the screen is of that moment\.", reused);
-        Assert.Contains("The recreated page at tile 5 [", reused, StringComparison.Ordinal);
-        Assert.Contains("so the part on the screen was CSS pixels 1850 to 2775:", reused, StringComparison.Ordinal);
-        var momentOneTiles = Regex.Matches(Input(bodies[3]), @"tile \d \[(E\d+)\]").Select(match => match.Groups[1].Value).Distinct().ToList();
-        Assert.Equal(5, momentOneTiles.Count);
-        Assert.All(momentOneTiles, reference => Assert.Contains(reference, (string[])attempts[6]["input_references"]!));
+        // Layer 3 is given layer 2's additions in place, under the
+        // statement they elaborate, and each group's description.
+        var layer3 = Input(bodies[4]);
+        Assert.Matches(@"  \[K1\] \(layer 1, the recorded data, page, inferred\) A statement about page\. \[E\d+\]\n    \[K4\] \(layer 2, the captured frame at moment 1, elaborates K1, inferred\) An elaboration from layer 2\. \[E\d+\]\n", layer3);
+        Assert.Contains("[K5] (layer 2, the captured frame at moment 1, inferred) Something new from layer 2.", layer3, StringComparison.Ordinal);
+        Assert.Contains("The recreated page as a model described it from tile 1 [", layer3, StringComparison.Ordinal);
+        Assert.Contains("The recreated page as a model described it from tile 5 [", layer3, StringComparison.Ordinal);
+        Assert.Contains("so the part on the screen was CSS pixels 1850 to 2775:", layer3, StringComparison.Ordinal);
 
-        // The visit is given the page as understood after its last moment,
-        // and each moment's screen and change, not its page again.
-        var visit = Input(bodies[8]);
-        Assert.Contains("The visit as a model described it from the recorder's facts alone. These are inferences, not facts:", visit, StringComparison.Ordinal);
-        Assert.Contains("The page through the visit as a model understood it, moment by moment, after the last moment, 2. These are inferences, not facts:", visit, StringComparison.Ordinal);
-        Assert.Contains("(changes, inferred) A statement about changes.", visit, StringComparison.Ordinal);
-        Assert.Contains("(screen, inferred) A statement about screen.", visit, StringComparison.Ordinal);
-        Assert.Contains("(change, inferred) A statement about change.", visit, StringComparison.Ordinal);
-        var moments = visit[visit.IndexOf("Moments of the visit chosen by the recorder", StringComparison.Ordinal)..];
-        Assert.DoesNotContain("(page, inferred)", moments, StringComparison.Ordinal);
-        Assert.Contains(", the recreated page in tiles [E", visit, StringComparison.Ordinal);
-        Assert.Contains("The last captured frame before the visit ended.", visit, StringComparison.Ordinal);
-        Assert.Contains("the page not recreated because the visit's page is not among the pages recorded at the frame", Input(bodies[13]), StringComparison.Ordinal);
+        // Moment 2's layer 2 has layer 3's additions too.
+        Assert.Contains("(layer 3, the web page at moment 1, elaborates K1, inferred) An elaboration from layer 3.", Input(bodies[6]), StringComparison.Ordinal);
+
+        // Chapter 1's pages are given the knowledge without numbers, and
+        // the story its visit's facts, knowledge, moments, and section.
+        var page = Input(bodies[11]);
+        Assert.Contains("Page 1 of the report's first chapter, derived by the recorder:", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("[K", page, StringComparison.Ordinal);
+        Assert.Contains("(layer 2, the captured frame at moment 1, elaborating the statement before it, inferred) An elaboration from layer 2.", page, StringComparison.Ordinal);
+        var story = Input(bodies[13]);
+        Assert.Contains("The visit's page is described in the report's first chapter, section 1.1.", story, StringComparison.Ordinal);
+        Assert.Matches(@"Moment 1, at 00:00:02\.500: the captured frame \[E\d+\]; the page as the recorder rebuilt it, in tiles: tile 1 \[E\d+\], CSS pixels 0 to 925; .*tile 3 \[E\d+\], CSS pixels 1850 to 2775, on the screen;", story);
+        Assert.Contains("The story so far: this is the first part.", story, StringComparison.Ordinal);
+        Assert.Contains("\"form\"", bodies[13], StringComparison.Ordinal);
+        var secondStory = Input(bodies[14]);
+        Assert.Contains("the page was not recreated", secondStory, StringComparison.Ordinal);
+        Assert.Contains("The part for visit 1:\n  (heading-1) A heading of the story.", secondStory, StringComparison.Ordinal);
+        Assert.Contains("(picture) A picture of the story.", secondStory, StringComparison.Ordinal);
+        Assert.Contains("Section 1.2:", Input(bodies[15]), StringComparison.Ordinal);
 
         var report = Assert.Single(await catalog.ReportsAsync(vision, Token));
         Assert.Equal(RecordingSummaryVisionKind.FileName, report.FileName);
         var text = await File.ReadAllTextAsync(Path.Combine(_session, report.RelativePath), Token);
-        Assert.StartsWith($"# Summary with vision of recording {Path.GetFileName(_session)}", text, StringComparison.Ordinal);
-        Assert.Contains($"This adds what captured frames of the screen show to the summary of task {summary:D}", text, StringComparison.Ordinal);
-        Assert.Contains("#### The participant's journey", text, StringComparison.Ordinal);
-        Assert.Matches(@"#### The page\n\nA statement about page\. \[E\d+\]\n\n#### How the page changed\n\nA statement about changes\. \[E\d+\]\n\n#### What it is for\n\n", text);
-        Assert.Equal(2, Regex.Matches(text, "#### The page\n").Count);
-        Assert.Contains("#### The moments", text, StringComparison.Ordinal);
-        Assert.Matches(@"Moment 1, 00:00:02: No change in the page's layout .* \[E\d+\] Captured frame \[E\d+\]\.", text);
-        Assert.Matches(@"Recreated page: 922 by 4625 CSS pixels, scrolled to 1850, in 5 tiles: 1 \[E\d+\], 2 \[E\d+\], 3 \[E\d+\] \(on the screen\), 4 \[E\d+\], 5 \[E\d+\]\.", text);
-        Assert.Matches(@"The page as recreated: A statement about page\. \[E\d+\]", text);
-        Assert.Contains("The page was not recreated, as the visit's page is not among the pages recorded at the frame, so this moment is described from its captured frame alone.", text, StringComparison.Ordinal);
-        Assert.Matches(@"On the screen: A statement about screen\. \[E\d+\]", text);
-        Assert.Matches(@"What changed: A statement about change\. \[E\d+\]", text);
-        Assert.Contains("- Moment limits: no limit on the moments of a visit; moments less than 2 s apart merged; settled when the layout has not changed for 1 s, or 5 s after the visit starts; a large change is 50 elements or more at once.", text, StringComparison.Ordinal);
-        Assert.Contains($"{RecordingSummaryVisionKind.MomentTemplate} version 3 for each moment's captured frame, {RecordingSummaryVisionKind.PageTemplate} version 4 for each group of its page's tiles, " +
-            $"{RecordingSummaryVisionKind.CombinedTemplate} version 5 for each moment's description from both, " +
-            $"{RecordingSummaryVisionKind.PageSoFarTemplate} version 1 for the page as understood after each moment, {RecordingSummaryVisionKind.VisitTemplate} version 4 for each visit", text, StringComparison.Ordinal);
-        Assert.Contains("each request holds as many tiles as fit 4096 image tokens", text, StringComparison.Ordinal);
-        Assert.Contains("The captured frame at 00:00:02.500: the whole screen, 1920 by 1080 pixels, file frames/desktop/0000000001.png", text, StringComparison.Ordinal);
-        Assert.Contains("part of it on the screen at the frame, file ", text, StringComparison.Ordinal);
-        // Every tile is the same picture, kept once in the store, which the
-        // evidence list gives; the recreation's own files are removed.
-        var stored = Assert.Single(Directory.GetFiles(Path.Combine(_session, "analysis", "images")));
-        var key = Path.GetFileNameWithoutExtension(stored);
-        Assert.Equal(PngKey.Of(FramePicture).Key, key);
-        Assert.Matches($@"Tile 3 of 5 of the page as the recorder rebuilt it .* file analysis/images/{key}\.png", text);
-        Assert.False(Directory.Exists(Path.Combine(_session, "analysis", vision.ToString("D"), "pages")));
-        Assert.Matches(@"\| E\d+ \| [0-9:.]+ \| Tile 2 of 5 .*Derived by the recorder: the same picture, pixel for pixel, as tile 2 \[E\d+\] of the page as rebuilt at moment 1 of visit 1, at 00:00:02\.500", text);
+        Assert.StartsWith($"# Report of recording {Path.GetFileName(_session)}", text, StringComparison.Ordinal);
+        Assert.Contains($"in the summary of task {summary:D}", text, StringComparison.Ordinal);
+        Assert.Contains($"is in analysis/{vision:D}/moments.json.", text, StringComparison.Ordinal);
+        Assert.Contains("## 1. The pages\n\n### 1.1 ", text, StringComparison.Ordinal);
+        Assert.Matches(@"#### 1\.1\.1 How the page changed\n\nA statement about changes\. \[E\d+\]\n\n### 1\.2 ", text);
 
-        // The task's index gives every tile of every moment recreated.
-        var entries = ImageIndex.Read(Path.Combine(_session, "analysis", vision.ToString("D"), "images.json"));
-        Assert.Equal(10, entries.Count);
-        Assert.Equal(new ImageIndexEntry(1, 1, 2_500_000_000L, "00:00:02.500", 1, 0, 925, 922, 922, 925, key, "pixels", $"analysis/images/{key}.png"), entries[0]);
-        Assert.Equal((1, 2, 3, 1850.0), (entries[7].Visit, entries[7].Moment, entries[7].Tile, entries[7].Top));
-        Assert.True(entries[7].FrameTime > entries[0].FrameTime);
-
-        // The report lists the groups not sent, with the answer each uses.
+        // Chapter 2: the opening and each visit's part, the headings
+        // numbered on from one to the next, the sentences between them one
+        // paragraph, and each picture put in from its frame's file.
+        Assert.Contains("## 2. The user experience\n\n### 2.1 A heading of the opening.\n\n", text, StringComparison.Ordinal);
+        Assert.Matches(@"### 2\.2 A heading of the story\.\n\nA sentence of the story\. \[E\d+\]\n\n!\[Figure 1\. A picture of the story\.\]\(\.\./\.\./frames/desktop/\d+\.png\)\n\nFigure 1\. A picture of the story\. \[E\d+\]\n\n#### 2\.2\.1 A smaller heading of the story\.\n\nAnother sentence of the story\. \[E\d+\]\n\n### 2\.3 A heading of the story\.", text);
+        Assert.Contains("Figure 2. A picture of the story.", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("[K", text, StringComparison.Ordinal);
+        Assert.Contains($"{RecordingSummaryVisionKind.Layer2Template} and {RecordingSummaryVisionKind.Layer3Template} version 1 for each moment's layers", text, StringComparison.Ordinal);
+        Assert.Contains("- Layer 3 steps not sent, as every group of the moment's tiles was already in the visit's knowledge: visit-0001-moment-02-layer-3.\n", text, StringComparison.Ordinal);
         Assert.Contains(
-            "- Each tile's picture is kept once for the recording, in analysis/images, named by the SHA-256 of its size, its pixels, and its colour profile. " +
             "2 groups of tiles were not sent, as their tiles were the same pictures, pixel for pixel, at the same places as a group already described, whose answer each uses unchanged: " +
             "visit 1 moment 2 group 1 (tiles 1 to 4), the answer of group 1 at moment 1 of visit 1, at 00:00:02, step visit-0001-moment-01-page-01; " +
             "visit 1 moment 2 group 2 (tile 5), the answer of group 2 at moment 1 of visit 1, at 00:00:02, step visit-0001-moment-01-page-02.\n", text, StringComparison.Ordinal);
+        var stored = Assert.Single(Directory.GetFiles(Path.Combine(_session, "analysis", "images")));
+        var key = Path.GetFileNameWithoutExtension(stored);
+        Assert.False(Directory.Exists(Path.Combine(_session, "analysis", vision.ToString("D"), "pages")));
+
+        // The reading view's document has the pictures, each file there,
+        // and every reference it cites in the evidence list.
         var read = ReportDocument.Parse(text);
+        var shown = read.Blocks.Where(block => block.Kind == ReportBlockKind.Image).ToList();
+        Assert.Equal(2, shown.Count);
+        Assert.All(shown, block => Assert.True(File.Exists(Path.Combine(Path.GetDirectoryName(Path.Combine(_session, report.RelativePath))!, block.Source!))));
         Assert.All(read.Blocks.SelectMany(block => block.References).Distinct(),
             reference => Assert.True(read.Evidence.ContainsKey(reference), reference));
-    }
 
-    // The page understood moment by moment: decisions of 2026-10-15,
-    // recording-summary.md.
-    private static MomentDescription Recreated(int number, IReadOnlyList<(double Top, double Height)> places, int firstReference)
-    {
-        var frame = new CapturedFrame(number * 1_000_000_000L, $"frames/desktop/{number}.png", $"/frames/{number}.png", 1920, 1080, null);
-        var tiles = places.Select((place, index) => new PageTile(index + 1, place.Top, place.Height, 922, $"t{index + 1}.png", $"/t{index + 1}.png", 922, 925)).ToList();
-        var page = new RecreatedPage(tiles, 922, places[^1].Top + places[^1].Height, 0, 0, 922, 925, 0, [], 0, true, null);
-        return new MomentDescription(
-            new Moment(number, frame, []), $"E{firstReference}", [],
-            new AcceptedStep(Guid.Empty, "", default, []), page,
-            [.. tiles.Select(tile => $"E{firstReference + tile.Number}")]);
-    }
-
-    [Fact]
-    public void The_recorder_compares_each_tile_with_the_tile_at_the_same_place_at_the_moment_before_file_by_file()
-    {
-        var before = Recreated(1, [(0, 925), (925, 925), (1850, 925)], 10);
-        var now = Recreated(2, [(0, 925), (925, 925), (1850, 925), (2775, 925)], 20);
-
-        var (text, references) = RecordingSummaryVisionKind.Comparison(now, ["A", "B", "Z", "D"], (before, ["A", "B", "C"]));
-
+        // The task's indexes give every tile of every moment recreated, and
+        // every moment's record.
+        Assert.Equal(10, ImageIndex.Read(Path.Combine(_session, "analysis", vision.ToString("D"), "images.json")).Count);
+        var records = MomentIndex.Read(Path.Combine(_session, "analysis", vision.ToString("D"), "moments.json"));
+        Assert.Equal([(1, 1), (1, 2), (2, 1), (2, 2)], records.Select(record => (record.Visit, record.Moment)));
+        Assert.Equal(("visit-0001-moment-01", true, 5), (records[0].FrameStep, records[0].Page.Recreated, records[0].Page.Tiles.Count));
         Assert.Equal(
-            "Compared by the recorder, file by file, with the tiles of the page as rebuilt at moment 1, at 00:00:01.000, when the page was 922 by 2775 CSS pixels; it is 922 by 3700 now. " +
-            "The same file, byte for byte, as the tile at the same place then, so that part of the recreated page did not change: tile 1 [E21], as tile 1 [E11] then; tile 2 [E22], as tile 2 [E12] then. " +
-            "A different file from the tile at the same place then, so that part of the recreated page changed or was pictured differently: tile 3 [E23], as tile 3 [E13] then. " +
-            "With no tile at the same place then: tile 4 [E24].",
-            text);
-        Assert.Equal(["E11", "E12", "E13"], references);
-        Assert.Equal(
-            "This is the first moment of the visit whose page was recreated, so its tiles are compared with none.",
-            RecordingSummaryVisionKind.Comparison(before, ["A", "B", "C"], null).Text);
+            [new MomentRecordGroup(1, 1, 4, "visit-0001-moment-01-page-01", false, 1, 1), new MomentRecordGroup(2, 5, 5, "visit-0001-moment-01-page-02", false, 1, 1)],
+            records[1].Page.Groups);
+        Assert.True(records[1].Page.Tiles[2].OnScreen);
+        Assert.Equal($"analysis/images/{key}.png", records[1].Page.Tiles[0].File);
+        Assert.False(records[2].Page.Recreated);
+        Assert.Equal("the visit's page is not among the pages recorded at the frame", records[2].Page.NotRecreated);
     }
 
     [Fact]
-    public void The_page_so_far_template_keeps_one_understanding_merging_descriptions_and_not_what_the_page_repeats()
+    public void The_layer_templates_ask_for_additions_in_place_and_the_chapter_2_templates_for_forms()
     {
-        var instructions = RecordingSummaryVisionKind.PageSoFarInstructions;
-        Assert.Contains("Write the understanding again, whole, as it stands after this moment", instructions, StringComparison.Ordinal);
-        Assert.Contains("a different description of it is a difference between descriptions, not a change of the page", instructions, StringComparison.Ordinal);
-        Assert.Contains("where they conflict, say that they disagree, citing both, and do not settle it", instructions, StringComparison.Ordinal);
-        Assert.Contains("Do not merge what the page itself repeats: a page may be badly written", instructions, StringComparison.Ordinal);
-        Assert.Contains("A statement kept from the understanding so far keeps its references.", instructions, StringComparison.Ordinal);
-        Assert.DoesNotContain("\"page\"", RecordingSummaryVisionKind.VisitInstructions, StringComparison.Ordinal);
-        Assert.Contains("Do not describe the page again", RecordingSummaryVisionKind.VisitInstructions, StringComparison.Ordinal);
-        Assert.Equal(["purpose", "activity", "journey"], RecordingSummaryVisionKind.VisitSections);
-    }
+        foreach (var instructions in new[] { RecordingSummaryVisionKind.Layer2Instructions, RecordingSummaryVisionKind.Layer3Instructions })
+        {
+            Assert.Contains("\"elaborations\", statements that add detail to a numbered statement", instructions, StringComparison.Ordinal);
+            Assert.Contains("Where it adds nothing, give the three sections empty.", instructions, StringComparison.Ordinal);
+            Assert.Contains("never say that NVDA said it or that the participant heard it", instructions, StringComparison.Ordinal);
+        }
 
-    [Fact]
-    public void A_statement_given_twice_to_the_combined_description_is_given_once_with_the_references_of_both()
-    {
-        Claim Statement(string text, params string[] evidence) => new("page", 0, 0, Claim.ClaimKind, text, evidence);
-        IReadOnlyList<IReadOnlyList<Claim>> blocks =
-        [
-            [Statement("The page is titled Home | CNIB.", "E1"), Statement("A hero image.", "E27")],
-            [Statement("The page is titled Home | CNIB.", "E1", "E31"), Statement("The footer.", "E34")],
-        ];
+        Assert.Contains("however small", RecordingSummaryVisionKind.Layer3Instructions, StringComparison.Ordinal);
+        Assert.Contains("Describe the page, not the participant.", RecordingSummaryVisionKind.PageChapterInstructions, StringComparison.Ordinal);
+        foreach (var instructions in new[] { RecordingSummaryVisionKind.StoryInstructions, RecordingSummaryVisionKind.OpeningInstructions })
+        {
+            Assert.Contains("\"heading-1\", \"heading-2\", or \"heading-3\"", instructions, StringComparison.Ordinal);
+            Assert.Contains("{\"form\": ..., \"text\": ..., \"kind\": \"claim\", \"evidence\": [...]}", instructions, StringComparison.Ordinal);
+        }
 
-        var given = RecordingSummaryVisionKind.Distinct(blocks);
-
-        Assert.Equal(["The page is titled Home | CNIB.", "A hero image."], given[0].Select(claim => claim.Text));
-        Assert.Equal(["E1", "E31"], given[0][0].Evidence);
-        Assert.Equal(["The footer."], given[1].Select(claim => claim.Text));
+        Assert.Equal(["heading-1", "heading-2", "heading-3", "sentence", "picture"], RecordingSummaryVisionKind.StoryForms);
+        Assert.Equal(3, new RecordingSummaryVisionKind().Version);
     }
 
     [Fact]
     public void The_templates_from_version_2_say_what_the_first_run_of_step_4b_showed_was_needed()
     {
         Assert.Contains("Do not restate the facts you are given", RecordingSummaryVisionKind.PageInstructions, StringComparison.Ordinal);
-        Assert.Contains("Combine the descriptions; do not copy them. State each thing once", RecordingSummaryVisionKind.CombinedInstructions, StringComparison.Ordinal);
-        Assert.Contains("not tile by tile", RecordingSummaryVisionKind.CombinedInstructions, StringComparison.Ordinal);
-        foreach (var instructions in new[] { RecordingSummaryVisionKind.CombinedInstructions, RecordingSummaryVisionKind.VisitInstructions, RecordingSummaryVisionKind.RecordingInstructions })
+        foreach (var instructions in new[]
+                 {
+                     RecordingSummaryVisionKind.Layer2Instructions, RecordingSummaryVisionKind.Layer3Instructions, RecordingSummaryVisionKind.PageChapterInstructions,
+                     RecordingSummaryVisionKind.StoryInstructions, RecordingSummaryVisionKind.OpeningInstructions
+                 })
         {
             Assert.Contains("Cite each reference as it is written without its brackets, such as \"E3\".", instructions, StringComparison.Ordinal);
+            Assert.Contains("A statement that says something is unknown, or that cites no reference, is of kind unknown; every claim cites at least one reference.", instructions, StringComparison.Ordinal);
         }
 
         Assert.DoesNotContain("without its brackets", RecordingSummaryKind.RecordingInstructions, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void The_combined_and_page_so_far_templates_say_a_statement_of_what_is_unknown_is_of_kind_unknown_and_no_other_template_does()
-    {
-        const string Sentence = "A statement that says something is unknown, or that cites no reference, is of kind unknown; every claim cites at least one reference.";
-        Assert.Contains(Sentence, RecordingSummaryVisionKind.CombinedInstructions, StringComparison.Ordinal);
-        Assert.Contains(Sentence, RecordingSummaryVisionKind.PageSoFarInstructions, StringComparison.Ordinal);
-        foreach (var instructions in new[]
-                 {
-                     RecordingSummaryVisionKind.MomentInstructions, RecordingSummaryVisionKind.PageInstructions,
-                     RecordingSummaryVisionKind.VisitInstructions, RecordingSummaryVisionKind.RecordingInstructions,
-                 })
+        foreach (var instructions in new[] { RecordingSummaryVisionKind.MomentInstructions, RecordingSummaryVisionKind.PageInstructions })
         {
             Assert.DoesNotContain("is of kind unknown", instructions, StringComparison.Ordinal);
         }
@@ -502,19 +478,18 @@ public sealed partial class RecordingSummaryTaskTests
     [Fact]
     public void Every_template_shows_a_statement_with_its_text_before_its_kind()
     {
-        Assert.Equal((4, 3, 4, 3, 5, 4, 1), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
-            RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.TemplateVersion, RecordingSummaryVisionKind.CombinedTemplateVersion,
-            RecordingSummaryVisionKind.VisitTemplateVersion, RecordingSummaryVisionKind.PageSoFarTemplateVersion));
+        Assert.Equal((4, 3, 4, 1, 1), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+            RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.LayerTemplateVersion, RecordingSummaryVisionKind.ChapterTemplateVersion));
         foreach (var instructions in new[]
                  {
                      RecordingSummaryKind.VisitInstructions, RecordingSummaryKind.RecordingInstructions,
                      RecordingSummaryVisionKind.MomentInstructions, RecordingSummaryVisionKind.PageInstructions,
-                     RecordingSummaryVisionKind.CombinedInstructions, RecordingSummaryVisionKind.VisitInstructions,
-                     RecordingSummaryVisionKind.RecordingInstructions, RecordingSummaryVisionKind.PageSoFarInstructions,
+                     RecordingSummaryVisionKind.Layer2Instructions, RecordingSummaryVisionKind.Layer3Instructions, RecordingSummaryVisionKind.PageChapterInstructions,
+                     RecordingSummaryVisionKind.StoryInstructions, RecordingSummaryVisionKind.OpeningInstructions,
                  })
         {
-            Assert.Contains("{\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]}", instructions, StringComparison.Ordinal);
-            Assert.Contains("{\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}", instructions, StringComparison.Ordinal);
+            Assert.Contains("\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]}", instructions, StringComparison.Ordinal);
+            Assert.Contains("\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}", instructions, StringComparison.Ordinal);
             Assert.DoesNotContain("{\"kind\"", instructions, StringComparison.Ordinal);
         }
     }
@@ -528,7 +503,7 @@ public sealed partial class RecordingSummaryTaskTests
     public async Task Vision_run_again_after_failing_at_a_visit_restarts_there_with_the_same_request_and_run_again_once_done_sends_nothing()
     {
         var (catalog, summary, first) = await QueueBothAsync();
-        const string VisitStart = "You describe one page visit from an accessibility test recording, for an accessibility auditor, adding what captured frames";
+        const string VisitStart = "You write one part of the second chapter";
         var refusing = VisionEndpoint();
         var answer = refusing.Answer;
         refusing.Answer = (profile, body, cancellationToken) => body.Contains(VisitStart, StringComparison.Ordinal)
@@ -547,12 +522,12 @@ public sealed partial class RecordingSummaryTaskTests
 
         Assert.Equal((AnalysisTaskStates.Done, (string?)null), await StateAsync(second));
         var sent = again.Bodies.ToList();
-        Assert.Equal(7, sent.Count);
+        Assert.Equal(3, sent.Count);
         Assert.Equal(refused, sent[0]);
         Assert.DoesNotContain(sent, body => body.Contains("Moment 1 of the visit", StringComparison.Ordinal) && body.Contains("Page visit 1,", StringComparison.Ordinal));
         var visitOne = await RowsAsync(
             "SELECT step_key, reused_from_attempt_id FROM analysis_attempts WHERE task_id = $1 AND step_key LIKE 'visit-0001-moment-%'", second);
-        Assert.Equal(8, visitOne.Count);
+        Assert.Equal(7, visitOne.Count);
         Assert.All(visitOne, row => Assert.NotNull(row["reused_from_attempt_id"]));
 
         var third = await catalog.QueueTaskAsync(recording, RecordingSummaryVisionKind.Name, VisionVersion, profiles,
@@ -572,9 +547,9 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Contains(RecordingSummaryVisionKind.ItemNamed, RecordingSummaryVisionKind.PageInstructions, StringComparison.Ordinal);
         foreach (var instructions in new[]
                  {
-                     RecordingSummaryVisionKind.MomentInstructions, RecordingSummaryVisionKind.CombinedInstructions,
-                     RecordingSummaryVisionKind.VisitInstructions, RecordingSummaryVisionKind.RecordingInstructions,
-                     RecordingSummaryVisionKind.PageSoFarInstructions
+                     RecordingSummaryVisionKind.MomentInstructions, RecordingSummaryVisionKind.Layer2Instructions,
+                     RecordingSummaryVisionKind.Layer3Instructions, RecordingSummaryVisionKind.PageChapterInstructions,
+                     RecordingSummaryVisionKind.StoryInstructions, RecordingSummaryVisionKind.OpeningInstructions
                  })
         {
             Assert.DoesNotContain(RecordingSummaryVisionKind.ItemNamed, instructions, StringComparison.Ordinal);
@@ -599,7 +574,7 @@ public sealed partial class RecordingSummaryTaskTests
 
         var trialPages = new StandInPages();
         var trial = await new AnalysisWorker(catalog, VisionSettings(), [new RecordingSummaryKind(), new RecordingSummaryVisionKind { Pages = (_, _) => trialPages }], VisionEndpoint(), options: Fast)
-            .TrialAsync(vision, "visit-0001-moment-02-described", new Dictionary<string, double>(), Token);
+            .TrialAsync(vision, "visit-0001-moment-02-layer-2", new Dictionary<string, double>(), Token);
 
         Assert.NotEmpty(trialPages.Folders);
         Assert.All(trialPages.Folders, folder =>

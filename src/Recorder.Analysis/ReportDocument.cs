@@ -11,20 +11,24 @@ public enum ReportBlockKind
     Paragraph,
     ListItem,
     Quote,
-    Table
+    Table,
+    Image
 }
 
 /// <summary>
 /// A block of a report as the reading view shows it: its text, with the
 /// references it cites in the order cited; for a heading, its level; for a
-/// table, its rows of cells, the first row its header.
+/// table, its rows of cells, the first row its header; for a picture, its
+/// text the picture's description and its source the picture's path as
+/// written, relative to the report's folder, with escapes undone.
 /// </summary>
 public sealed record ReportBlock(
     ReportBlockKind Kind,
     int Level,
     string Text,
     IReadOnlyList<string> References,
-    IReadOnlyList<IReadOnlyList<string>> Rows);
+    IReadOnlyList<IReadOnlyList<string>> Rows,
+    string? Source = null);
 
 /// <summary>An entry of a report's evidence list: its time in the recording, or null when it is not of the recording.</summary>
 public sealed record ReportEvidence(string Reference, long? Nanoseconds, string Time, string Text);
@@ -32,7 +36,7 @@ public sealed record ReportEvidence(string Reference, long? Nanoseconds, string 
 /// <summary>
 /// A Markdown report read back for the reading view: the Markdown the
 /// recorder's reports are written in, which is headings, paragraphs,
-/// list items, quotes, and tables, and the evidence list that gives each
+/// list items, quotes, tables, and pictures, each on a line of its own, and the evidence list that gives each
 /// reference's time. See docs/architecture/analysis-runner.md, "Reports are
 /// Markdown files", and "Decisions on the player (2026-10-13)".
 /// </summary>
@@ -56,6 +60,10 @@ public sealed partial class ReportDocument
 
     [GeneratedRegex(@"^(\d{2}):(\d{2}):(\d{2})\.(\d{3})$")]
     private static partial Regex TimePattern();
+
+    // A picture on a line of its own: ![description](path).
+    [GeneratedRegex(@"^!\[([^\]]*)\]\(([^)\s]+)\)$")]
+    private static partial Regex ImagePattern();
 
     /// <summary>The references a text cites, each once, in the order first cited.</summary>
     public static IReadOnlyList<string> ReferencesIn(string text) =>
@@ -129,6 +137,13 @@ public sealed partial class ReportDocument
                 EndParagraph();
                 var text = line[(level + 1)..].Trim();
                 blocks.Add(new ReportBlock(ReportBlockKind.Heading, level, text, ReferencesIn(text), []));
+                continue;
+            }
+
+            if (ImagePattern().Match(line) is { Success: true } image)
+            {
+                EndParagraph();
+                blocks.Add(new ReportBlock(ReportBlockKind.Image, 0, image.Groups[1].Value, [], [], Uri.UnescapeDataString(image.Groups[2].Value)));
                 continue;
             }
 

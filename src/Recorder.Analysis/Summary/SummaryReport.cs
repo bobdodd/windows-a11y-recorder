@@ -34,78 +34,16 @@ public static class SummaryReport
         AcceptedStep? overall,
         IReadOnlyList<AttemptRecord> attempts,
         CollationLimits limits,
-        DateTime nowUtc,
-        VisionReportParts? vision = null)
+        DateTime nowUtc)
     {
         ArgumentNullException.ThrowIfNull(collation);
         ArgumentNullException.ThrowIfNull(capabilities);
         ArgumentNullException.ThrowIfNull(visits);
         ArgumentNullException.ThrowIfNull(attempts);
         ArgumentNullException.ThrowIfNull(limits);
-        var cited = new SortedSet<int>();
+        var citations = new ReportCitations(collation);
         var builder = new StringBuilder();
-
-        string Refs(IEnumerable<string> references)
-        {
-            var list = references.Distinct(StringComparer.Ordinal).ToList();
-            foreach (var reference in list)
-            {
-                if (reference.Length > 1 && int.TryParse(reference.AsSpan(1), NumberStyles.None, CultureInfo.InvariantCulture, out var number))
-                {
-                    cited.Add(number);
-                }
-            }
-
-            return list.Count == 0 ? "" : " " + string.Join(' ', list.Select(reference => $"[{reference}]"));
-        }
-
-        string? RefOf(string? eventId) =>
-            eventId is null ? null : collation.Evidence.Entries.FirstOrDefault(entry => entry.EventId == eventId)?.Reference;
-
-        void Moments(VisitVision? part)
-        {
-            builder.Append("#### The moments\n\n");
-            if (part is null || part.Moments.Count == 0)
-            {
-                builder.Append("No captured frames were recorded during this visit, so it has no moments; its description is from the facts alone.\n\n");
-                return;
-            }
-
-            builder.Append("Chosen by the recorder from the recorded evidence, each with a captured frame of the whole screen and its page as the recorder rebuilt it at that frame, pictured whole in tiles.\n\n");
-            foreach (var moment in part.Moments)
-            {
-                var reasons = string.Join(" ", moment.Moment.Reasons.Select((reason, index) => OneLine(reason.Text) + Refs([moment.ReasonReferences[index]])));
-                builder.Append(CultureInfo.InvariantCulture, $"Moment {moment.Moment.Number}, {Clock(moment.Moment.Frame.Time)}: {reasons} Captured frame{Refs([moment.FrameReference])}.\n\n");
-                if (moment.Combined)
-                {
-                    var page = moment.Page!;
-                    var tiles = string.Join(", ", page.Tiles.Select(tile =>
-                        $"{tile.Number}{Refs([moment.TileReferences![tile.Number - 1]])}{(RecordingSummaryVisionKind.InView(page, tile) ? " (on the screen)" : "")}"));
-                    builder.Append(CultureInfo.InvariantCulture,
-                        $"Recreated page: {page.Width:0} by {page.Height:0} CSS pixels, scrolled to {page.ScrollY:0}, in {page.Tiles.Count} tiles: {tiles}. ");
-                    builder.Append(RecordingSummaryVisionKind.RecreationNotes(page)).Append("\n\n");
-                }
-                else if (moment.Page?.NotRecreated is { } why)
-                {
-                    builder.Append("The page was not recreated, as ").Append(OneLine(why)).Append(", so this moment is described from its captured frame alone.\n\n");
-                }
-
-                foreach (var section in moment.Combined ? RecordingSummaryVisionKind.CombinedSections : RecordingSummaryVisionKind.MomentSections)
-                {
-                    var claims = moment.Step.Claims.Where(claim => claim.Section == section).OrderBy(claim => claim.Paragraph).ThenBy(claim => claim.Ordinal).ToList();
-                    builder.Append(section == "page" ? "The page as recreated" : SectionHeadings[section]).Append(": ");
-                    builder.Append(claims.Count == 0
-                        ? "the model gave nothing for this part."
-                        : string.Join(' ', claims.Select(claim => OneLine(claim.Text) + Refs(claim.Evidence))));
-                    builder.Append("\n\n");
-                }
-            }
-
-            if (part.MomentsLeftOut > 0)
-            {
-                builder.Append(CultureInfo.InvariantCulture, $"{part.MomentsLeftOut} more moments were left out to keep within the limit of {vision!.Limits.PerVisit}.\n\n");
-            }
-        }
+        string Refs(IEnumerable<string> references) => citations.Refs(references);
 
         void Claims(AcceptedStep step, IReadOnlyList<string> sections, string level)
         {
@@ -128,51 +66,20 @@ public static class SummaryReport
             }
         }
 
-        var accepted = attempts.FirstOrDefault(attempt => attempt.Outcome == "accepted") ?? attempts.FirstOrDefault();
-        builder.Append(vision is null ? "# Summary of recording " : "# Summary with vision of recording ").Append(sessionKey).Append("\n\n");
+        var accepted = Accepted(attempts);
+        builder.Append("# Summary of recording ").Append(sessionKey).Append("\n\n");
         var date = nowUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         if (accepted is not null)
         {
-            var quantization = accepted.ModelQuantization is { Length: > 0 } value ? $" ({value})" : "";
-            builder.Append(CultureInfo.InvariantCulture,
-                $"Inferred by {accepted.Model}{quantization}, profile \"{accepted.ProfileName}\", {date}. ");
+            AppendInferredBy(builder, accepted, date);
             builder.Append("Every statement below is a model's inference from the recorded evidence cited after it. Page visits are derived by the recorder.\n\n");
-        }
-
-        if (vision is not null)
-        {
-            builder.Append(CultureInfo.InvariantCulture,
-                $"This adds what captured frames of the screen show to the summary of task {vision.SummaryTaskId:D}, whose descriptions from the facts alone were given to the model with them. ");
-            builder.Append("The moments of each visit are chosen by the recorder. A captured frame shows what was on the screen, not what the participant saw. ");
-            builder.Append("A recreated page is the page as the recorder rebuilt it from the recorded evidence at the moment's frame, not the page itself: what the recording lacks, such as an image, it lacks too.\n\n");
         }
         else
         {
             builder.Append(CultureInfo.InvariantCulture, $"Written by the recorder on {date}. No model was asked, because no page visits were recorded.\n\n");
         }
 
-        // The participant's capabilities, as given to the model.
-        builder.Append("## The participant's capabilities\n\n");
-        if (capabilities.Description is { Length: > 0 } description)
-        {
-            var written = capabilities.WrittenUtc?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "an unrecorded date";
-            var reference = collation.Evidence.Entries.FirstOrDefault(entry => entry.EventId is null && entry.Text.StartsWith("The participant's capabilities", StringComparison.Ordinal));
-            builder.Append(CultureInfo.InvariantCulture, $"Reported by the auditor on {written}, a person's statement and not an observation:\n\n");
-            builder.Append("> ").Append(OneLine(description)).Append(reference is null ? "" : Refs([reference.Reference])).Append("\n\n");
-        }
-        else
-        {
-            builder.Append("Unknown: no description of the participant's capabilities was given.\n\n");
-        }
-
-        // Found by its evidence entry, not by the line's start: since the line
-        // gained its reference it starts "[E1]", and on the target machine on
-        // 2026-10-14 the report said nothing was running while NVDA was.
-        var observed = collation.Evidence.Entries.FirstOrDefault(entry =>
-            entry.EventId is null && entry.Text.StartsWith("Observed running at the start of the recording", StringComparison.Ordinal));
-        builder.Append(observed is null
-            ? "No assistive technology was observed running at the start of the recording."
-            : observed.Text + ". This shows what was running, not what the participant is able to do." + Refs([observed.Reference])).Append("\n\n");
+        AppendCapabilities(builder, collation, capabilities, citations);
 
         if (overall is not null)
         {
@@ -202,30 +109,7 @@ public static class SummaryReport
             var heading = visit.Title is { Length: > 0 } title ? OneLine(title) : start.Url;
             builder.Append(CultureInfo.InvariantCulture,
                 $"### {visit.Visit.Number}. {heading}, {Clock(start.Time)} to {Clock(visit.Visit.End)}\n\n");
-            builder.Append(CultureInfo.InvariantCulture, $"Derived by the recorder: a visit to a {visit.Visit.Label}, {start.Url}.");
-            builder.Append(RefOf(start.EventId) is { } startReference ? Refs([startReference]) : "").Append('\n');
-            if (visit.Visit.Kind == VisitKind.FragmentRoute && visit.Visit.RouteReason is { } reason)
-            {
-                builder.Append(CultureInfo.InvariantCulture, $"It is a visit of its own because {reason}.\n");
-            }
-
-            if (visit.Visit.ReturnOf is { } earlier)
-            {
-                builder.Append(CultureInfo.InvariantCulture, $"A return to the URL of visit {earlier}, judged by URL alone.\n");
-            }
-
-            if (visit.Visit.Steps.Count > 0)
-            {
-                builder.Append("\nIn-page jumps within the visit, derived by the recorder:\n\n");
-                foreach (var step in visit.Visit.Steps)
-                {
-                    var link = step.LinkName is { Length: > 0 } name ? $" \"{OneLine(name)}\"" : "";
-                    builder.Append(CultureInfo.InvariantCulture,
-                        $"- {Clock(step.Commit.Time)}, #{step.Fragment}: a {step.Name}{link} to {step.Target} ({step.Rule}).");
-                    builder.Append(RefOf(step.Commit.EventId) is { } stepReference ? Refs([stepReference]) : "").Append('\n');
-                }
-            }
-
+            AppendDerived(builder, visit, citations);
             builder.Append('\n');
             var described = visits.FirstOrDefault(item => item.Visit.Visit.Number == visit.Visit.Number);
             if (described.Step is null)
@@ -234,49 +118,112 @@ public static class SummaryReport
             }
             else
             {
-                // With vision, the visit's page is as understood moment by
-                // moment, and the visit's own description follows it.
-                if (vision is not null)
-                {
-                    if (vision.Visits.TryGetValue(visit.Visit.Number, out var seen) && seen.PageSoFar is { } soFar)
-                    {
-                        Claims(soFar, RecordingSummaryVisionKind.PageSoFarSections, "####");
-                    }
-                    else
-                    {
-                        builder.Append("#### The page\n\nNo captured frames were recorded during this visit, so its page was not understood from them.\n\n");
-                    }
-                }
-
-                Claims(described.Step, vision is null ? RecordingSummaryKind.VisitSections : RecordingSummaryVisionKind.VisitSections, "####");
-            }
-
-            if (vision is not null)
-            {
-                Moments(vision.Visits.TryGetValue(visit.Visit.Number, out var part) ? part : null);
+                Claims(described.Step, RecordingSummaryKind.VisitSections, "####");
             }
         }
 
+        AppendOtherWindows(builder, collation, citations);
+        AppendEvidence(builder, collation, citations);
+        builder.Append("## How this was made\n\n");
+        AppendModel(builder, accepted);
+        builder.Append(CultureInfo.InvariantCulture,
+            $"- Prompt templates: {RecordingSummaryKind.VisitTemplate} version {RecordingSummaryKind.TemplateVersion} for each visit, " +
+            $"{RecordingSummaryKind.RecordingTemplate} version {RecordingSummaryKind.TemplateVersion} for the whole recording.\n");
+        AppendLimitsAndAttempts(builder, collation, limits, attempts);
+        return builder.ToString();
+    }
+
+    /// <summary>The attempt whose model and profile the report names: the first accepted, or else the first.</summary>
+    internal static AttemptRecord? Accepted(IReadOnlyList<AttemptRecord> attempts) =>
+        attempts.FirstOrDefault(attempt => attempt.Outcome == "accepted") ?? attempts.FirstOrDefault();
+
+    internal static void AppendInferredBy(StringBuilder builder, AttemptRecord accepted, string date)
+    {
+        var quantization = accepted.ModelQuantization is { Length: > 0 } value ? $" ({value})" : "";
+        builder.Append(CultureInfo.InvariantCulture,
+            $"Inferred by {accepted.Model}{quantization}, profile \"{accepted.ProfileName}\", {date}. ");
+    }
+
+    /// <summary>The participant's capabilities, as given to the model, and the assistive technology observed running.</summary>
+    internal static void AppendCapabilities(StringBuilder builder, RecordingCollation collation, ParticipantCapabilities capabilities, ReportCitations citations)
+    {
+        builder.Append("## The participant's capabilities\n\n");
+        if (capabilities.Description is { Length: > 0 } description)
+        {
+            var written = capabilities.WrittenUtc?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "an unrecorded date";
+            var reference = collation.Evidence.Entries.FirstOrDefault(entry => entry.EventId is null && entry.Text.StartsWith("The participant's capabilities", StringComparison.Ordinal));
+            builder.Append(CultureInfo.InvariantCulture, $"Reported by the auditor on {written}, a person's statement and not an observation:\n\n");
+            builder.Append("> ").Append(OneLine(description)).Append(reference is null ? "" : citations.Refs([reference.Reference])).Append("\n\n");
+        }
+        else
+        {
+            builder.Append("Unknown: no description of the participant's capabilities was given.\n\n");
+        }
+
+        // Found by its evidence entry, not by the line's start: since the line
+        // gained its reference it starts "[E1]", and on the target machine on
+        // 2026-10-14 the report said nothing was running while NVDA was.
+        var observed = collation.Evidence.Entries.FirstOrDefault(entry =>
+            entry.EventId is null && entry.Text.StartsWith("Observed running at the start of the recording", StringComparison.Ordinal));
+        builder.Append(observed is null
+            ? "No assistive technology was observed running at the start of the recording."
+            : observed.Text + ". This shows what was running, not what the participant is able to do." + citations.Refs([observed.Reference])).Append("\n\n");
+    }
+
+    /// <summary>What the recorder derived of a visit: its kind and address, why it is a visit of its own, the visit it returns to, and its in-page jumps.</summary>
+    internal static void AppendDerived(StringBuilder builder, VisitCollation visit, ReportCitations citations)
+    {
+        var start = visit.Visit.Start;
+        builder.Append(CultureInfo.InvariantCulture, $"Derived by the recorder: a visit to a {visit.Visit.Label}, {start.Url}.");
+        builder.Append(citations.RefOf(start.EventId) is { } startReference ? citations.Refs([startReference]) : "").Append('\n');
+        if (visit.Visit.Kind == VisitKind.FragmentRoute && visit.Visit.RouteReason is { } reason)
+        {
+            builder.Append(CultureInfo.InvariantCulture, $"It is a visit of its own because {reason}.\n");
+        }
+
+        if (visit.Visit.ReturnOf is { } earlier)
+        {
+            builder.Append(CultureInfo.InvariantCulture, $"A return to the URL of visit {earlier}, judged by URL alone.\n");
+        }
+
+        if (visit.Visit.Steps.Count > 0)
+        {
+            builder.Append("\nIn-page jumps within the visit, derived by the recorder:\n\n");
+            foreach (var step in visit.Visit.Steps)
+            {
+                var link = step.LinkName is { Length: > 0 } name ? $" \"{OneLine(name)}\"" : "";
+                builder.Append(CultureInfo.InvariantCulture,
+                    $"- {Clock(step.Commit.Time)}, #{step.Fragment}: a {step.Name}{link} to {step.Target} ({step.Rule}).");
+                builder.Append(citations.RefOf(step.Commit.EventId) is { } stepReference ? citations.Refs([stepReference]) : "").Append('\n');
+            }
+        }
+    }
+
+    internal static void AppendOtherWindows(StringBuilder builder, RecordingCollation collation, ReportCitations citations)
+    {
         builder.Append("## Other windows\n\n");
         if (collation.OtherWindows.Count == 0)
         {
             builder.Append("No other program's window was recorded in front.\n\n");
+            return;
         }
-        else
+
+        builder.Append("Other programs' windows the recorder found in front, derived from the front window records:\n\n");
+        foreach (var window in collation.OtherWindows)
         {
-            builder.Append("Other programs' windows the recorder found in front, derived from the front window records:\n\n");
-            foreach (var window in collation.OtherWindows)
-            {
-                builder.Append(CultureInfo.InvariantCulture,
-                    $"- {Clock(window.Start)} to {Clock(window.End)}: {window.Process}, \"{OneLine(window.Title)}\".{Refs([window.Reference])}\n");
-            }
-
-            builder.Append('\n');
+            builder.Append(CultureInfo.InvariantCulture,
+                $"- {Clock(window.Start)} to {Clock(window.End)}: {window.Process}, \"{OneLine(window.Title)}\".{citations.Refs([window.Reference])}\n");
         }
 
+        builder.Append('\n');
+    }
+
+    /// <summary>The evidence list: each reference cited, with its time and what it is.</summary>
+    internal static void AppendEvidence(StringBuilder builder, RecordingCollation collation, ReportCitations citations)
+    {
         builder.Append("## Evidence\n\n");
         builder.Append("| Ref | Time | Evidence |\n| --- | --- | --- |\n");
-        foreach (var number in cited)
+        foreach (var number in citations.Cited)
         {
             var reference = "E" + number.ToString(CultureInfo.InvariantCulture);
             if (collation.Evidence.Of(reference) is { } entry)
@@ -292,56 +239,25 @@ public static class SummaryReport
         }
 
         builder.Append('\n');
-        builder.Append("## How this was made\n\n");
-        if (accepted is not null)
+    }
+
+    internal static void AppendModel(StringBuilder builder, AttemptRecord? accepted)
+    {
+        if (accepted is null)
         {
-            builder.Append(CultureInfo.InvariantCulture, $"- Model profile: \"{accepted.ProfileName}\", model {accepted.Model}.\n");
-            builder.Append(CultureInfo.InvariantCulture, $"- Model file: {accepted.ModelFileName ?? "unknown"}, quantization {accepted.ModelQuantization ?? "unknown"}.\n");
-            builder.Append(CultureInfo.InvariantCulture, $"- Model SHA-256: {accepted.ModelSha256 ?? "unknown"} ({BasisText(accepted.ModelSha256Basis)}).\n");
-            builder.Append(CultureInfo.InvariantCulture, $"- Server build: {accepted.ServerBuild ?? "unknown"}.\n");
-            builder.Append(CultureInfo.InvariantCulture, $"- Generation settings: `{accepted.Parameters}`.\n");
+            return;
         }
 
-        if (vision is null)
-        {
-            builder.Append(CultureInfo.InvariantCulture,
-                $"- Prompt templates: {RecordingSummaryKind.VisitTemplate} version {RecordingSummaryKind.TemplateVersion} for each visit, " +
-                $"{RecordingSummaryKind.RecordingTemplate} version {RecordingSummaryKind.TemplateVersion} for the whole recording.\n");
-        }
-        else
-        {
-            builder.Append(CultureInfo.InvariantCulture,
-                $"- Prompt templates: {RecordingSummaryVisionKind.MomentTemplate} version {RecordingSummaryVisionKind.MomentTemplateVersion} for each moment's captured frame, " +
-                $"{RecordingSummaryVisionKind.PageTemplate} version {RecordingSummaryVisionKind.PageTemplateVersion} for each group of its page's tiles, " +
-                $"{RecordingSummaryVisionKind.CombinedTemplate} version {RecordingSummaryVisionKind.CombinedTemplateVersion} for each moment's description from both, " +
-                $"{RecordingSummaryVisionKind.PageSoFarTemplate} version {RecordingSummaryVisionKind.PageSoFarTemplateVersion} for the page as understood after each moment, " +
-                $"{RecordingSummaryVisionKind.VisitTemplate} version {RecordingSummaryVisionKind.VisitTemplateVersion} for each visit, " +
-                $"{RecordingSummaryVisionKind.RecordingTemplate} version {RecordingSummaryVisionKind.TemplateVersion} for the whole recording.\n");
-            var moments = vision.Limits;
-            builder.Append(CultureInfo.InvariantCulture,
-                $"- Moment limits: {(moments.PerVisit is { } most ? $"{most} moments for each visit" : "no limit on the moments of a visit")}; moments less than {Seconds(moments.MergeNanoseconds)} apart merged; " +
-                $"settled when the layout has not changed for {Seconds(moments.SettleQuietNanoseconds)}, or {Seconds(moments.SettleFallbackNanoseconds)} after the visit starts; " +
-                $"a large change is {moments.LargeChangeNodes} elements or more at once.\n");
-            builder.Append("- Each captured frame is sent to the model whole, as recorded. ");
-            builder.Append("Each moment's page is rebuilt at its frame in the instrumented Chromium without a window, and pictured whole in tiles the height of its viewport, each sent at full size; ");
-            builder.Append(CultureInfo.InvariantCulture,
-                $"each request holds as many tiles as fit {vision.ImageTokensPerRequest} image tokens, counted as one token for each 32 by 32 pixels, and at least one.\n");
+        builder.Append(CultureInfo.InvariantCulture, $"- Model profile: \"{accepted.ProfileName}\", model {accepted.Model}.\n");
+        builder.Append(CultureInfo.InvariantCulture, $"- Model file: {accepted.ModelFileName ?? "unknown"}, quantization {accepted.ModelQuantization ?? "unknown"}.\n");
+        builder.Append(CultureInfo.InvariantCulture, $"- Model SHA-256: {accepted.ModelSha256 ?? "unknown"} ({BasisText(accepted.ModelSha256Basis)}).\n");
+        builder.Append(CultureInfo.InvariantCulture, $"- Server build: {accepted.ServerBuild ?? "unknown"}.\n");
+        builder.Append(CultureInfo.InvariantCulture, $"- Generation settings: `{accepted.Parameters}`.\n");
+    }
 
-            // The groups of tiles not sent, each with the answer it uses
-            // (recording-summary.md, "Unique images across the recording",
-            // decision 9).
-            var notSent = vision.Visits.OrderBy(pair => pair.Key).SelectMany(pair => pair.Value.Moments.SelectMany(moment =>
-                (moment.NotSent ?? []).Select(group => (Visit: pair.Key, Moment: moment.Moment.Number, Group: group)))).ToList();
-            builder.Append(CultureInfo.InvariantCulture,
-                $"- Each tile's picture is kept once for the recording, in {vision.ImagesFolder}, named by the SHA-256 of its size, its pixels, and its colour profile. ");
-            builder.Append(notSent.Count == 0
-                ? "No group of tiles was the same pictures at the same places as a group already described, so every group was sent.\n"
-                : string.Create(CultureInfo.InvariantCulture,
-                      $"{notSent.Count} {(notSent.Count == 1 ? "group of tiles was" : "groups of tiles were")} not sent, as their tiles were the same pictures, pixel for pixel, at the same places as a group already described, whose answer each uses unchanged: ") +
-                  string.Join("; ", notSent.Select(item => string.Create(CultureInfo.InvariantCulture,
-                      $"visit {item.Visit} moment {item.Moment} group {item.Group.Group} ({TileRange(item.Group.FirstTile, item.Group.LastTile)}), the answer of group {item.Group.FromGroup} at moment {item.Group.FromMoment} of visit {item.Group.FromVisit}, at {Clock(item.Group.FromTime)}, step {item.Group.FromStep}"))) +
-                  ".\n");
-        }
+    /// <summary>The collation limits, the facts left out, the reused steps, and the attempts.</summary>
+    internal static void AppendLimitsAndAttempts(StringBuilder builder, RecordingCollation collation, CollationLimits limits, IReadOnlyList<AttemptRecord> attempts)
+    {
         builder.Append(CultureInfo.InvariantCulture,
             $"- Collation limits: {limits.Landmarks} landmarks, {limits.Headings} headings, {limits.Fields} form fields, {limits.Buttons} buttons, " +
             $"{limits.MainTextCharacters} characters of opening text, {limits.KeyKinds} kinds of key, {limits.Commands} NVDA commands, " +
@@ -378,8 +294,6 @@ public static class SummaryReport
                     $"{Milliseconds(attempt.PromptMilliseconds)} | {Milliseconds(attempt.CompletionMilliseconds)} |\n");
             }
         }
-
-        return builder.ToString();
     }
 
     private static string BasisText(string basis) => basis switch
@@ -389,7 +303,7 @@ public static class SummaryReport
         _ => "unknown"
     };
 
-    private static string Seconds(long nanoseconds) => (nanoseconds / 1e9).ToString("0.###", CultureInfo.InvariantCulture) + " s";
+    internal static string Seconds(long nanoseconds) => (nanoseconds / 1e9).ToString("0.###", CultureInfo.InvariantCulture) + " s";
 
     private static string Count(int? value) => value?.ToString(CultureInfo.InvariantCulture) ?? "unknown";
 
@@ -398,11 +312,38 @@ public static class SummaryReport
     /// <summary>A time as hours, minutes, and seconds.</summary>
     public static string Clock(long nanoseconds) => SummaryCollator.Time(nanoseconds)[..8];
 
-    private static string TileRange(int first, int last) =>
+    internal static string TileRange(int first, int last) =>
         first == last ? string.Create(CultureInfo.InvariantCulture, $"tile {first}") : string.Create(CultureInfo.InvariantCulture, $"tiles {first} to {last}");
 
-    private static string OneLine(string text) =>
+    internal static string OneLine(string text) =>
         string.Join(' ', text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
-    private static string Cell(string text) => OneLine(text).Replace("|", "\\|", StringComparison.Ordinal);
+    internal static string Cell(string text) => OneLine(text).Replace("|", "\\|", StringComparison.Ordinal);
+}
+
+/// <summary>
+/// The references a report cites, for its evidence list: each reference
+/// written after a statement is noted, except the numbers of a visit's
+/// knowledge, which are not in the evidence list.
+/// </summary>
+internal sealed class ReportCitations(RecordingCollation collation)
+{
+    public SortedSet<int> Cited { get; } = [];
+
+    public string Refs(IEnumerable<string> references)
+    {
+        var list = references.Where(reference => !Knowledge.IsStatementReference(reference)).Distinct(StringComparer.Ordinal).ToList();
+        foreach (var reference in list)
+        {
+            if (reference.Length > 1 && int.TryParse(reference.AsSpan(1), NumberStyles.None, CultureInfo.InvariantCulture, out var number))
+            {
+                Cited.Add(number);
+            }
+        }
+
+        return list.Count == 0 ? "" : " " + string.Join(' ', list.Select(reference => $"[{reference}]"));
+    }
+
+    public string? RefOf(string? eventId) =>
+        eventId is null ? null : collation.Evidence.Entries.FirstOrDefault(entry => entry.EventId == eventId)?.Reference;
 }
