@@ -314,6 +314,12 @@ design.
   statement of what is unknown labelled a claim. The statement's fields
   were put in the order text, kind, evidence, and the files left out of
   the requests, the same day (the runner design's decision 7).
+- Built 2026-10-16: the layered report, which replaces the vision
+  stage's combined, page so far, visit, and recording steps; see the
+  summary design's "The layered report (built)". It passed on the target
+  machine the same day with build 4199327, on the cnib.ca recording.
+  Still to do: chapter 2's prose, whose paragraphs are too long to read
+  (owner, 2026-10-16), left for later.
 
 ## Recording summary
 

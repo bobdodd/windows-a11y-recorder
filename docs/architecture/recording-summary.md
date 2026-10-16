@@ -17,8 +17,9 @@ the recreated pages, its design revised by the owner the same day
 (decision 7), built the same day and not yet tested on the target
 machine. See "Stage 2 implementation status" and "Decisions
 (2026-10-14)". On 2026-10-16 the vision stage was rebuilt as the layered
-report, agreed by the owner on 2026-10-15 and 2026-10-16, not yet tested
-on the target machine; see "The layered report (built)".
+report, agreed by the owner on 2026-10-15 and 2026-10-16, which passed
+on the target machine the same day with build 4199327, on the cnib.ca
+recording; see "The layered report (built)".
 The first task kind for the [analysis runner](analysis-runner.md), chosen
 by the owner the same day: a summary of the recording that describes each
 page visited and the site or application being tested. It is built from
@@ -846,7 +847,8 @@ across the recording").
 
 Proposed on 2026-10-15, from the owner's design of the same day, and
 agreed by the owner the same day; built on 2026-10-16, as "As built"
-below gives, and not yet tested on the target machine. The trial of one step with
+below gives, and passed on the target machine the same day (see "On the
+target machine" below). The trial of one step with
 the answer's grammar comes first, since the rest is built on it. It replaces the page so far, whose answer is written
 again whole at each moment and outgrew the output limit at moment 10
 (see "The page so far at moment 10").
@@ -1129,6 +1131,14 @@ playhead, as every paragraph's are.
     vision on the cnib.ca recording, checking on screen that it reaches
     its end, that the report has its two chapters, and that the reading
     view shows its pictures.
+
+#### On the target machine
+
+2026-10-16, build 4199327, a run again of the summary with vision on the
+cnib.ca recording, task 01a1421c run again: the report was completed
+successfully (owner). Still to be worked on, and left for later by the
+owner the same day: chapter 2's prose, which still has "giant paragraphs
+of text that are unreadable" (owner).
 
 ### The recreated page at the recorded viewport and scroll
 
