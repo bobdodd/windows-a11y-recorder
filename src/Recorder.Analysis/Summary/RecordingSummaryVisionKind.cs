@@ -193,16 +193,40 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // summary: each says what a paragraph is, and the story, its opening,
     // and the executive summary have list forms; the participant becomes
     // chapter 2, the pages 3 and the story 4 (recording-summary.md, "The
-    // report's structure and its paragraphs").
-    public const int PageChapterTemplateVersion = 3;
+    // report's structure and its paragraphs"). Version 4 of the page
+    // chapter and version 3 of the executive summary: each in subsections
+    // the recorder gives and heads, each its own section of the answer,
+    // and the executive summary interpreting and explaining, after the
+    // owner's example (recording-summary.md, "The executive summary and
+    // the pages rewritten").
+    public const int PageChapterTemplateVersion = 4;
 
     public const int StoryTemplateVersion = 3;
 
-    public const int ExecutiveTemplateVersion = 2;
+    public const int ExecutiveTemplateVersion = 3;
 
-    public static readonly IReadOnlyList<string> ExecutiveSections = ["summary"];
+    /// <summary>The executive summary's subsections, each a section of its answer, with the heading the recorder gives it.</summary>
+    public static readonly IReadOnlyList<(string Section, string Heading)> ExecutiveParts =
+    [
+        ("overview", "Overview"),
+        ("participant", "The participant and their set-up"),
+        ("journey", "The journey"),
+        ("evidence", "What the evidence shows and does not show")
+    ];
 
-    public static readonly IReadOnlyList<string> PageChapterSections = ["page", "changes"];
+    public static readonly IReadOnlyList<string> ExecutiveSections = [.. ExecutiveParts.Select(part => part.Section)];
+
+    /// <summary>A page's subsections, each a section of its answer, with the heading the recorder gives it.</summary>
+    public static readonly IReadOnlyList<(string Section, string Heading)> PageChapterParts =
+    [
+        ("purpose", "What the page is for"),
+        ("layout", "Layout from top to bottom"),
+        ("content", "Content"),
+        ("controls", "Controls, forms, dialogs, menus, and messages"),
+        ("changes", "How the page changed")
+    ];
+
+    public static readonly IReadOnlyList<string> PageChapterSections = [.. PageChapterParts.Select(part => part.Section)];
 
     public static readonly IReadOnlyList<string> StorySections = ["story"];
 
@@ -291,12 +315,17 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "You are given the page's address and title, the visits to it with what the recorder derived of them, and each visit's knowledge in layers: " +
         "layer 1 from the recorded data, layer 2 from captured frames of the screen, and layer 3 from the web page as the recorder rebuilt it, each statement with the evidence references it rests on, such as [E3]. " +
         "The knowledge is inference, not fact. " +
-        "Describe the page as an engineer needs to know it: what it is for, its layout and regions from top to bottom, its imagery, colour, and emphasis, " +
-        "and the widgets, forms, dialogs, menus, and messages it has or showed, with where they are, as an overview and not a list of every element. " +
+        "Describe the page as an engineer needs to know it, as an overview and not a list of every element, in prose whose sentences connect, each paragraph one topic. " +
         "Take your terms from the page's own: its headings, landmarks, and the names of its controls. " +
         "Describe the page, not the participant. Where the knowledge disagrees, say so, citing both, and do not settle it. " +
         "Describe only what the knowledge supports, name sites and pages only as they are named, and say that something is unknown where it does not settle it. " +
-        "Answer in JSON with two sections: \"page\", the page as described; and \"changes\", what appeared, went, moved, or changed on the page during the visits, in order, each with when. " +
+        "Answer in JSON with five sections, each a subsection of the page's description that the recorder heads, so that each holds only its own topic: " +
+        "\"purpose\", what the page is for and who it appears to be for; " +
+        "\"layout\", its layout and regions from top to bottom, with their landmarks, and its imagery, colour, and emphasis; " +
+        "\"content\", what its regions hold: its headings, sections, text, and images, as an overview; " +
+        "\"controls\", the controls, links, forms, dialogs, menus, widgets, and messages it has or showed, with where they are and how they behave; " +
+        "and \"changes\", what appeared, went, moved, or changed on the page during the visits, in order, each with when. " +
+        "Do not repeat in one section what another holds. " +
         "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " + ParagraphRule +
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
         "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown.";
@@ -343,21 +372,28 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     public const string ExecutiveInstructions =
         "You write the executive summary, the first chapter, of a professional report for accessibility and usability engineers on an accessibility test recording. " +
-        "The report records the participant's journey through a web site; it does not yet analyse the site's accessibility or usability, so give no findings and do not judge the site. " +
         "You are given the participant's capabilities; the assistive technology at the start and the accessibility settings at the start, found by the recorder, each with whether it is at its default; " +
         "the changes to them during the recording; the page visits and the pages; and the chapter on the user experience, which tells the journey. " +
         "Each is given with the evidence references it rests on, such as [E3]; the chapter's statements are inferences, not facts. " +
-        "Say who the participant is, from the capabilities as given; the kind of assistive technology they used, from what was observed running and its settings; " +
-        "the significant accessibility settings in use, those not at their defaults, and their changes during the recording; and the site tested and the course of the session in brief. " +
+        "Write as the executive summary of a professional report is written: interpret and explain. State a judgement first and then explain it, with its reasons from the evidence and the caveats that temper it. " +
+        "Say what the facts mean and why they matter, for this participant and for the engineers who will act on the report, not the facts alone; the chapters and appendices give the facts. " +
+        "Judge how the journey went for this participant, where the experience worked and where it got in the way, and why, as the evidence and the chapter on the user experience show; " +
+        "do not grade the site, rank findings, or map them to WCAG, which the report does not yet do. " +
         "A setting whose default is unknown may still be significant, such as a larger text size or a contrast theme: name it with its value, and do not say whether it is the default. " +
-        "Do not list every setting, which the appendices give, and do not repeat the chapter. " +
         "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
         ParticipantRules +
-        "Answer in JSON with one section, \"summary\", a list of paragraphs, each a list of statements. " + ParagraphRule +
-        "Each statement has a form: \"sentence\", a sentence of prose; " + ListForms +
+        "Answer in JSON with four sections, each a subsection of the summary that the recorder heads, so that each holds only its own topic: " +
+        "\"overview\", the overall picture in one paragraph: who the participant is, what they did, and your judgement of how it went, with its main reason; " +
+        "\"participant\", the participant and their set-up: the assistive technology they used and the significant accessibility settings in use and their changes, and what these mean for how the participant works and for what the report can say; " +
+        "\"journey\", the journey: what the participant did and how it went, where it worked and where it got in the way, and why it matters; " +
+        "and \"evidence\", what the evidence shows and does not show: how much the recording covers, what was inferred rather than recorded, and what is unknown, and how that limits the judgement. " +
+        "Do not repeat in one section what another holds. " +
+        "Each section is a list of paragraphs, each a list of statements. " + ParagraphRule +
+        "Write prose by default. Each statement has a form: \"sentence\", a sentence of prose; \"bullet\", a point of a list whose order does not matter, its text the point and why it matters, in two or three sentences, never a bare fact; " +
+        "or \"numbered\", a step of a sequence whose order matters, which the recorder numbers. Use a list only where its points are distinct and each needs explaining; otherwise write sentences. " +
         "A statement is {\"form\": ..., \"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
         "or {\"form\": ..., \"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets +
-        "Write clean, readable prose for a professional report, in plain sentences without Markdown.";
+        "Write clean, readable prose for a professional report, without Markdown.";
     private readonly Func<string, string, CancellationToken, Task<(Recorder.Session.SessionPlaybackArchive Archive, RecordingFileDocuments Documents)>> _open;
 
     public RecordingSummaryVisionKind()

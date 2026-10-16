@@ -1411,7 +1411,7 @@ As built, 2026-10-16:
 - Stage 1's report is unchanged; the shared parts take their heading as
   a parameter, stage 1's being the headings as before.
 
-### The executive summary and the pages rewritten (proposed)
+### The executive summary and the pages rewritten (built)
 
 The owner's review of the run of 9b0956a, 2026-10-16: "That is not an
 executive summary, it's a collection of bullet points. I expect the
@@ -1457,9 +1457,61 @@ Proposed, to be agreed:
   changed, as now. Each is its own section of the answer, so no
   subsection can run into the next.
 - **What a run again sends:** the page chapter and executive summary
-  templates change version, so those steps are sent again, and the story
-  and opening, whose inputs name the pages' sections, too; every moment's
+  templates change version, so those steps are sent again; every moment's
   step is reused.
+
+The owner's answers, 2026-10-16:
+
+1. **Judgement in the executive summary:** yes. It interprets where the
+   experience worked or got in the way, as the story tells it, still
+   without grading the site, ranking findings, or mapping them to WCAG.
+2. **The executive summary's subsections:** the four proposed.
+3. **The pages' subsections:** the five proposed.
+4. **The story:** it has the same problem, so it is to be given the same
+   treatment, its structure proposed next.
+
+As built, 2026-10-16:
+
+- The executive summary's template, version 3, answers in four sections,
+  `overview`, `participant`, `journey`, and `evidence`, which the recorder
+  heads 1.1 to 1.4 (`ExecutiveParts`). It asks for a judgement first,
+  then its reasons and caveats; for what the facts mean and why they
+  matter, not the facts alone; for prose by default; and for a bullet only
+  as a point explained in two or three sentences, "never a bare fact".
+- The page chapter's template, version 4, answers in five sections,
+  `purpose`, `layout`, `content`, `controls`, and `changes`, which the
+  recorder heads 3.N.1 to 3.N.5 (`PageChapterParts`), each told to hold
+  only its own topic.
+- The story's and the opening's inputs are unchanged, so a run again
+  reuses them as well as the moments; it sends the pages' steps and the
+  executive summary's.
+
+### The story in subsections (proposed)
+
+The owner, 2026-10-16, of chapter 4, the user experience: it has the same
+problem as the pages, paragraphs too long to read. As built, each visit's
+part chooses its own headings and writes the sentences between them as
+the model groups them, and its sentences ran into long paragraphs.
+
+Proposed, to be agreed:
+
+- **4.1, the opening, headed by the recorder "Introduction":** one or two
+  paragraphs that set the story up, without repeating the executive
+  summary or chapter 2.
+- **Each visit a section the recorder heads,** 4.N, "Visit N: the page's
+  title, from its start to its end", in three subsections, each its own
+  section of the answer: 4.N.1, arriving, how the participant came to the
+  page and what was on the screen; 4.N.2, what the participant did, the
+  actions in order as numbered steps, each with how the page responded;
+  4.N.3, what worked and what got in the way, interpreted, with why it
+  matters.
+- **Pictures** stay, in any subsection, put in by the recorder as now.
+- **The model's own headings are dropped** from the story, as the
+  recorder now heads every part; a heading below 4.N.k would be too deep
+  to help.
+- **The story's and the opening's templates** change version, so their
+  steps are sent again, and the executive summary's, which is given
+  them.
 
 ### The recreated page at the recorded viewport and scroll
 

@@ -74,10 +74,14 @@ public sealed partial class RecordingSummaryTaskTests
 
             if (body.Contains("You write the executive summary", StringComparison.Ordinal))
             {
-                output["summary"] = new JsonArray(
-                    new JsonArray(Formed("sentence", "A statement of the executive summary.", reference),
-                        Formed("bullet", "A setting in use.", reference), Formed("bullet", "Another setting in use.", reference)),
-                    new JsonArray(Formed("numbered", "A first step.", reference), Formed("numbered", "A second step.", reference)));
+                output["overview"] = new JsonArray(new JsonArray(Formed("sentence", "A judgement of the journey.", reference)));
+                output["participant"] = new JsonArray(
+                    new JsonArray(Formed("sentence", "A statement of the participant.", reference),
+                        Formed("bullet", "A setting in use, and why it matters.", reference), Formed("bullet", "Another setting in use, and why it matters.", reference)));
+                output["journey"] = new JsonArray(
+                    new JsonArray(Formed("numbered", "A first step.", reference), Formed("numbered", "A second step.", reference)),
+                    new JsonArray(Formed("sentence", "Where it got in the way.", reference)));
+                output["evidence"] = new JsonArray(new JsonArray(Formed("sentence", "What the evidence does not show.", reference)));
             }
             else if (body.Contains("\"elaborations\"", StringComparison.Ordinal))
             {
@@ -410,10 +414,15 @@ public sealed partial class RecordingSummaryTaskTests
         // participant; chapter 3 the pages, each visit an item of a list.
         Assert.Matches(@"^# Report of recording [^\n]+\n\nInferred by [^\n]+\. How the report was made, and what its statements rest on, is in Appendix G\.\n\n## 1\. Executive summary\n\n", text);
         Assert.Matches(
-            @"## 1\. Executive summary\n\nA statement of the executive summary\. \[E\d+\]\n\n- A setting in use\. \[E\d+\]\n- Another setting in use\. \[E\d+\]\n\n" +
-            @"1\. A first step\. \[E\d+\]\n2\. A second step\. \[E\d+\]\n\n## 2\. The participant\n\n", text);
+            @"## 1\. Executive summary\n\n### 1\.1 Overview\n\nA judgement of the journey\. \[E\d+\]\n\n" +
+            @"### 1\.2 The participant and their set-up\n\nA statement of the participant\. \[E\d+\]\n\n- A setting in use, and why it matters\. \[E\d+\]\n- Another setting in use, and why it matters\. \[E\d+\]\n\n" +
+            @"### 1\.3 The journey\n\n1\. A first step\. \[E\d+\]\n2\. A second step\. \[E\d+\]\n\nWhere it got in the way\. \[E\d+\]\n\n" +
+            @"### 1\.4 What the evidence shows and does not show\n\nWhat the evidence does not show\. \[E\d+\]\n\n## 2\. The participant\n\n", text);
         Assert.Matches(@"## 3\. The pages\n\n### 3\.1 [^\n]+\n\nThe visit to the page, derived by the recorder:\n\n- Visit 1, 00:00:0\d to 00:00:\d\d: a visit to a ", text);
-        Assert.Matches(@"#### 3\.1\.1 How the page changed\n\nA statement about changes\. \[E\d+\]\n\n### 3\.2 ", text);
+        Assert.Matches(
+            @"\n\n#### 3\.1\.1 What the page is for\n\nA statement about purpose\. \[E\d+\]\n\n#### 3\.1\.2 Layout from top to bottom\n\nA statement about layout\. \[E\d+\]\n\n" +
+            @"#### 3\.1\.3 Content\n\nA statement about content\. \[E\d+\]\n\n#### 3\.1\.4 Controls, forms, dialogs, menus, and messages\n\nA statement about controls\. \[E\d+\]\n\n" +
+            @"#### 3\.1\.5 How the page changed\n\nA statement about changes\. \[E\d+\]\n\n### 3\.2 ", text);
 
         // Chapter 2: the opening and each visit's part, the headings
         // numbered on from one to the next, the sentences between them one
@@ -511,11 +520,18 @@ public sealed partial class RecordingSummaryTaskTests
 
         foreach (var instructions in new[]
                  {
-                     RecordingSummaryVisionKind.StoryInstructions, RecordingSummaryVisionKind.OpeningInstructions, RecordingSummaryVisionKind.ExecutiveInstructions
+                     RecordingSummaryVisionKind.StoryInstructions, RecordingSummaryVisionKind.OpeningInstructions
                  })
         {
             Assert.Contains(RecordingSummaryVisionKind.ListForms, instructions, StringComparison.Ordinal);
         }
+
+        // The executive summary interprets and explains, prose by default,
+        // a bullet an explained point (owner, 2026-10-16).
+        Assert.Contains("interpret and explain. State a judgement first and then explain it", RecordingSummaryVisionKind.ExecutiveInstructions, StringComparison.Ordinal);
+        Assert.Contains("never a bare fact", RecordingSummaryVisionKind.ExecutiveInstructions, StringComparison.Ordinal);
+        Assert.Equal(["overview", "participant", "journey", "evidence"], RecordingSummaryVisionKind.ExecutiveSections);
+        Assert.Equal(["purpose", "layout", "content", "controls", "changes"], RecordingSummaryVisionKind.PageChapterSections);
 
         Assert.DoesNotContain(RecordingSummaryVisionKind.ListForms, RecordingSummaryVisionKind.PageChapterInstructions, StringComparison.Ordinal);
         Assert.Equal(3, new RecordingSummaryVisionKind().Version);
@@ -545,7 +561,7 @@ public sealed partial class RecordingSummaryTaskTests
     [Fact]
     public void Every_template_shows_a_statement_with_its_text_before_its_kind()
     {
-        Assert.Equal((4, 3, 4, 1, 3, 3, 2), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+        Assert.Equal((4, 3, 4, 1, 4, 3, 3), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
             RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.LayerTemplateVersion, RecordingSummaryVisionKind.PageChapterTemplateVersion,
             RecordingSummaryVisionKind.StoryTemplateVersion, RecordingSummaryVisionKind.ExecutiveTemplateVersion));
         foreach (var instructions in new[]

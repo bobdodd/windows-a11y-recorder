@@ -227,7 +227,12 @@ public static class LayeredReport
         builder.Append("## 1. Executive summary\n\n");
         if (parts.Executive is { } executive)
         {
-            Story(executive, "summary");
+            var part = 0;
+            foreach (var (section, heading) in RecordingSummaryVisionKind.ExecutiveParts)
+            {
+                builder.Append(CultureInfo.InvariantCulture, $"### 1.{++part} {heading}\n\n");
+                Story(executive, section);
+            }
         }
         else
         {
@@ -241,9 +246,12 @@ public static class LayeredReport
         {
             builder.Append(CultureInfo.InvariantCulture, $"### 3.{page.Number} {PageTitle(page)}\n\n");
             AppendVisits(builder, page, collation, citations);
-            Claims(page.Step, "page");
-            builder.Append(CultureInfo.InvariantCulture, $"#### 3.{page.Number}.1 How the page changed\n\n");
-            Claims(page.Step, "changes");
+            var part = 0;
+            foreach (var (section, heading) in RecordingSummaryVisionKind.PageChapterParts)
+            {
+                builder.Append(CultureInfo.InvariantCulture, $"#### 3.{page.Number}.{++part} {heading}\n\n");
+                Claims(page.Step, section);
+            }
         }
 
         builder.Append("## 4. The user experience\n\n");
