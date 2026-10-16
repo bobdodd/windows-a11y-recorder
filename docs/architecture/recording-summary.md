@@ -1411,6 +1411,56 @@ As built, 2026-10-16:
 - Stage 1's report is unchanged; the shared parts take their heading as
   a parameter, stage 1's being the headings as before.
 
+### The executive summary and the pages rewritten (proposed)
+
+The owner's review of the run of 9b0956a, 2026-10-16: "That is not an
+executive summary, it's a collection of bullet points. I expect the
+results to be interpreted and explained like a real executive summary."
+The owner gave an accessibility report's executive summary as the style to
+follow, its content being different: "Prose summary bullets where it makes
+sense." Of a page's description, given as one paragraph of 24 statements:
+"I asked for multiple clear paras ... In what way is that multiple clear
+simple paras?"
+
+The style of the owner's example: numbered subsections; an overall
+judgement stated first and then explained, with its reasons and its
+caveats; prose that says what the facts mean and why they matter, not the
+facts alone; and bullets only where each is a point explained in two or
+three sentences, never a bare fact.
+
+Why the built design gave what it did:
+
+- **The executive summary** was given a list of what to say (who the
+  participant is, the assistive technology, the settings not at their
+  defaults, the changes, the site and the session), told to give no
+  findings and not to judge, and given list forms with "use a list where
+  the reader is helped by one". It did as it was asked: it listed facts.
+- **The pages** were given one section, `page`, for everything about a
+  page, and one sentence on what a paragraph is. The report keeps the
+  model's paragraphs (each statement's paragraph is its index in the
+  answer, `ClaimCheck`), so the model gave all 24 statements as one
+  paragraph. One sentence among many instructions does not change how
+  this model writes; a structure the recorder gives does.
+
+Proposed, to be agreed:
+
+- **The executive summary in subsections the recorder gives,** each its
+  own section of the answer, headed by the recorder: 1.1, an overview,
+  the overall picture in a few sentences; 1.2, the participant and their
+  set-up, what the assistive technology and the settings chosen mean for
+  how they work; 1.3, the journey, what they did and how it went; 1.4,
+  what the evidence shows and does not show. Each is interpretive prose,
+  with bullets only where each bullet is an explained point.
+- **Each page in subsections the recorder gives:** 3.N.1, what the page
+  is for; 3.N.2, its layout from top to bottom; 3.N.3, its content;
+  3.N.4, its controls, forms, dialogs, menus, and messages; 3.N.5, how it
+  changed, as now. Each is its own section of the answer, so no
+  subsection can run into the next.
+- **What a run again sends:** the page chapter and executive summary
+  templates change version, so those steps are sent again, and the story
+  and opening, whose inputs name the pages' sections, too; every moment's
+  step is reused.
+
 ### The recreated page at the recorded viewport and scroll
 
 The owner's decision, from a review of what the tiles are for.
