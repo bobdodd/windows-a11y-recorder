@@ -1140,6 +1140,68 @@ successfully (owner). Still to be worked on, and left for later by the
 owner the same day: chapter 2's prose, which still has "giant paragraphs
 of text that are unreadable" (owner).
 
+### The executive summary and the settings in use (proposed)
+
+Asked for by the owner on 2026-10-16, before the other planned work
+([outstanding work](analysis-outstanding-work.md), "Planned work for the
+report"): "an executive summary for the report (a new chapter 1), and
+then we need to address the accessibility and AT settings in use. Changes
+to them should be identified in the story, but we need appendices for the
+initial settings."
+
+Proposed, to be agreed:
+
+- **The chapters renumbered.** Chapter 1 is the executive summary,
+  chapter 2 the pages, and chapter 3 the user experience, the story. The
+  recorder numbers the headings, as now, so the story's headings become
+  3.1, 3.1.1, and so on.
+- **The executive summary, one step,** `executive-summary`, written last,
+  after the story's opening, as it summarises the whole report. It is
+  given the participant's capabilities, the assistive technology and
+  settings at the start, the changes to them, the pages as chapter 2
+  describes them, and the story, each statement with its references. It
+  is text only, and its statements cite the references they rest on, as
+  every statement does, so that it stays checkable.
+- **The settings at the start, in appendices written by the recorder,**
+  not by a model, from the same records the player's properties panel
+  shows, as at the start of the recording: Appendix A, the Windows
+  accessibility settings (`system.preferences`); Appendix B, the browser's
+  settings and what it sent to the page (`browser.preferences`); Appendix
+  C, the assistive technology running, with its version, and NVDA's
+  settings as read from its configuration, and the Magnifier's level
+  (`system.assistive-technology`, `graphics.magnifier`). Each is a table
+  of setting, value, and when it was read, each row with its reference;
+  a setting not recorded says so, and an older recording without the
+  records says that they were not recorded.
+- **The changes in the story.** The recorder finds each change to a
+  setting or to the assistive technology during the recording, from the
+  same records, as a derived fact with its time, its value before and
+  after, and its reference. Each visit's story step is given the changes
+  during its visit, and the opening those before the first visit, with
+  the instruction to tell each where it happened and what it did to the
+  experience, as far as the evidence shows. The layered knowledge, and so
+  every step already accepted before the story, is unchanged, so a run
+  again reuses them.
+
+Questions to settle:
+
+1. **What the executive summary holds.** Proposed: what was tested and
+   by whom (the site, the participant's capabilities, the assistive
+   technology and settings); the main findings, the barriers first, then
+   what worked; and what the recording cannot show. Should the findings
+   be ranked by severity, or mapped to WCAG success criteria, or neither,
+   for now?
+2. **Which settings the appendices list.** Every setting recorded, as the
+   panel shows them, or only those not at their default? The recorder
+   knows NVDA's defaults; whether it knows every Windows and browser
+   setting's default is unknown until checked.
+3. **The changes not told in the story.** A model may leave a change out.
+   Should the recorder also list every change in an appendix, so that
+   none is lost, or are the changes in the story only?
+4. **The Magnifier's panning.** It is recorded at every frame that pans.
+   Proposed: its level, and its being turned on or off, are changes; its
+   panning is not listed as a change.
+
 ### The recreated page at the recorded viewport and scroll
 
 The owner's decision, from a review of what the tiles are for.

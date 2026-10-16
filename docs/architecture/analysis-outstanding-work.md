@@ -336,3 +336,63 @@ questions the same day, and two more: fragment changes are judged from
 the page's structure, to recognise skip links and back to top links, and
 the participant's capabilities are an input, with the capability model
 from the owner's PhD work to follow later.
+
+### Planned work for the report (owner, 2026-10-16)
+
+Listed by the owner on 2026-10-16 so that it is not forgotten. The first
+two are to be done first, in this order; the rest wait for a decision to
+start. Each is designed in [recording summary](recording-summary.md)
+before it is built.
+
+1. **An executive summary,** a new chapter 1 of the layered report, the
+   pages and the story becoming chapters 2 and 3.
+2. **The accessibility and assistive technology settings in use:** their
+   changes during the recording told in the story, and the settings at the
+   start given in appendices.
+3. **Recorded evidence the summary does not yet use,** found by a review
+   of stage 1's collation on 2026-10-16 (its reading, `ISummaryEvidence`
+   and `RecordedSummaryEvidence`, against the channels the recorder
+   writes):
+   - session markers and their notes (`session.annotations`);
+   - the microphone's audio (`audio.microphone`), such as a participant
+     thinking aloud;
+   - the system's audio (`audio.system`), which likely holds NVDA's speech
+     as spoken, which could be transcribed; whether it does on the
+     recordings so far is unknown;
+   - the Windows and browser accessibility settings (`system.preferences`,
+     `browser.preferences`), and their changes (item 2);
+   - the assistive technology's changes during the recording, including
+     the magnifier's (`system.assistive-technology`, `graphics.magnifier`):
+     stage 1 gives what was running at the start only (item 2);
+   - the page's changes during a visit: layout changes, scrolls,
+     animations, and live regions, now used only to choose the vision
+     stage's moments; stage 1 gives the page at the end of the visit only;
+   - NVDA's own windows, now used only to choose moments;
+   - page popups closing, and the other page interaction records;
+   - the mouse's movement and hover, and NVDA's tracking of the mouse,
+     which matter for a participant using a head pointer or eye tracking;
+     stage 1 gives the presses of its buttons only;
+   - the whole screen's accessibility events (`accessibility.uia.events`),
+     such as the contents of NVDA's dialogs and of other programs' windows;
+   - the network, resources, and cookies (`browser.network`,
+     `browser.resources`, `browser.cookie`), such as loads that failed and
+     consent banners;
+   - the browser's lower level records, its scripts, timers, listeners,
+     dispatch, scheduler, lifecycle, and compositor, which are more for
+     diagnosis than for the user experience.
+4. **The collation limits** of stage 1, on landmarks, headings, fields,
+   buttons, opening text, kinds of key, NVDA commands, clicks, focus
+   changes, announcements, typed fields, in-page jumps, and popups: to be
+   removed, or shown to be forced by the context size (owner: "I don't
+   like artificial limits unless absolutely forced by the platform and
+   resources").
+5. **A better test recording,** made by the owner: more than one page,
+   and at least one session marker, as the recordings so far have none
+   and the cnib.ca recording has one page.
+6. **Chapter 2's prose** (the story, chapter 3 once the executive summary
+   is added): paragraphs too long to read (owner, 2026-10-16).
+7. **Cut-outs of single regions** in the story's pictures, once it is
+   checked whether the recording gives each element's place.
+8. **Tables and graphs** in the story, which its forms do not yet allow.
+9. **Stage 1's session step,** which repeats the visits' descriptions.
+10. **The unique view proposal:** when two visits show the same view.
