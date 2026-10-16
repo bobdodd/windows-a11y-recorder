@@ -879,9 +879,13 @@ The owner's decision, from a review of what the tiles are for.
 
 ### Unique images across the recording (built)
 
-Agreed by the owner on 2026-10-15 and built the same day; not yet
-tested on the target machine. How it was built is under "As built",
-after the decisions. Most of a visit's model
+Agreed by the owner on 2026-10-15 and built the same day, build
+0633c96. On the target machine the same day, a Run again of task
+01a1407c on the cnib.ca recording failed where that task had, at
+`visit-0001-moment-10-page-so-far`, at the output limit of 8,192 tokens
+(see "The page so far at moment 10"), so no report was written; the
+owner's finding was that "the new image work seems effective". How it
+was built is under "As built", after the decisions. Most of a visit's model
 time is in describing tiles whose pictures are the same as tiles already
 described, and in real use a participant goes back to the same page
 more than once. In task 01a13fd9, the 20 requests for groups of tiles
