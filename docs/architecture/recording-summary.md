@@ -890,20 +890,29 @@ Proposed, to be agreed:
   visit, number, time, frame, the steps that describe it, and its tiles'
   keys, so that any moment's description can be found and read alone.
   The combined step is not needed for the layers and is dropped: the
-  frame's and the tiles' descriptions are the record.
-- **The layers, one step for each moment.** The step is given the
-  visit's knowledge so far, each statement numbered by the recorder, and
-  the moment's record: its frame's description, and the descriptions of
-  only those groups of tiles not yet in the visit's knowledge. It is not
-  given the pictures again. It answers with additions only, in two
-  sections: "screen", what the frame adds to the visual user
-  experience, and "beyond", what the recreated page adds that the frame
-  does not show. Each addition either names the numbered statement it
-  elaborates or corrects, or is new. Where the moment disagrees with a
-  statement, the addition says so, citing both, and does not settle it.
-  A moment that adds nothing gives an empty answer. The visit's
-  knowledge starts as its stage 1 description and grows by each moment's
-  additions, put in place by the recorder, not by the model.
+  frame's and the tiles' descriptions are the record. The records are in
+  the index only, not in the report (owner, 2026-10-15: "Index please.
+  We may use it later but I wouldn't expect it in our report").
+- **The layers, a step for each at each moment** (owner, 2026-10-15:
+  "Layer 1 is only text for the recording data. Layer 2 gets the Frame
+  (visual analysis of the frame), Layer 3 gets the Web page if it
+  exists"). Layer 1 is the visit's stage 1 description, from the
+  recorded data, text only. At each moment, the layer 2 step is given
+  the visit's knowledge so far, each statement numbered by the recorder,
+  and the visual analysis of the moment's frame, from its record; then,
+  where the page was recreated, the layer 3 step is given the knowledge
+  so far, now with layer 2's additions, and the analysis of the web
+  page, the descriptions of only those groups of tiles not yet in the
+  visit's knowledge. Neither is sent the pictures again: each is given
+  the analysis in the moment's record. Each answers with additions only:
+  layer 2 what the frame adds to the visual user experience, layer 3
+  what the web page adds that the frame does not show. Each addition
+  either names the numbered statement it elaborates or corrects, or is
+  new. Where the moment disagrees with a statement, the addition says
+  so, citing both, and does not settle it. A layer that adds nothing at
+  a moment gives an empty answer. The visit's knowledge starts as layer
+  1 and grows by each layer's additions, put in place by the recorder,
+  not by the model, each labelled with its layer.
 - **Why the output is bounded.** Each step's answer is what that moment
   adds, not the whole page again, so a moment that changes nothing costs
   a short answer, and the answer no longer grows with the visit. The
@@ -918,30 +927,46 @@ Proposed, to be agreed:
   proposal.
 - **Chapter 2, the user experience.** One step for each visit, given the
   visit's knowledge, its facts, and the story so far, writes that part
-  of the story as prose, choosing which moments' frames to show by their
-  references; then one step writes the story's opening, given the
-  visits' parts. The recorder, not the model, puts in the pictures the
-  steps chose, and builds the tables and graphs from the recorded facts,
-  such as the visits and moments on a timeline, so that every number in
-  them is the recorder's.
+  of the story; then one step writes the story's opening, given the
+  visits' parts. Its form is not set in advance (owner, 2026-10-15: "It
+  will depend on the content within the recording. The report should
+  take its cue from the ontologies used by the page content and
+  structure. The model should have freedom of expression as far as
+  possible"). So the instructions ask the model to take its terms and
+  its structure from the pages' own, such as their headings, landmarks,
+  and the names of their controls, and to choose for itself where prose,
+  a list, a table, or a picture of a moment's frame tells the story
+  best. Whatever form it chooses, each part cites the references it
+  rests on, as every statement does now, so that the report stays
+  checkable; the recorder puts in the pictures of the frames it chose.
 - **What is kept and what goes:** kept are the frame and tile steps, the
   store of unique images, and the evidence list; dropped are the
   combined step, the page so far, and the visit and recording steps of
   the vision stage. Stage 1 is unchanged.
 
-Questions to settle:
+- **Answers on one line, held by a grammar of the recorder's own.** The
+  instruction to write the JSON on one line has been ignored in every
+  answer so far, and the request's own constraint allows it: each
+  request sends the answer's JSON schema as `response_format`, and
+  llama.cpp turns a schema into a grammar whose rule for the space
+  between tokens is `| " " | "\n"{1,2} [ \t]{0,20}`, up to two line
+  breaks and 20 spaces or tabs of indentation, with no option to change
+  it ([json-schema-to-grammar.cpp](https://raw.githubusercontent.com/ggml-org/llama.cpp/master/common/json-schema-to-grammar.cpp)).
+  So the indentation is within what the request allows. Proposed: the
+  recorder writes the answer's grammar itself, in llama.cpp's grammar
+  format ([llama.cpp grammars](https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md)),
+  the same structure as the schema with no space between tokens, and
+  sends it as `grammar` in place of the schema. The model could then not
+  write a line break outside a string. In the cut answer at moment 10,
+  that was 2,636 of its 8,192 tokens. Whether the chat endpoint of the
+  server build in use takes `grammar` is unknown, as its documentation
+  names only `response_format` for it
+  ([llama.cpp server](https://raw.githubusercontent.com/ggml-org/llama.cpp/master/tools/server/README.md)),
+  so it is to be tried on the target machine first, by a trial of one
+  step. It changes every step's request, so no step already accepted
+  would be reused after it.
 
-- Whether each layer step is given the moment's frame again, as well as
-  its description, at the cost of the picture's image tokens in every
-  step, or the description alone, as proposed.
-- Whether the answer's JSON is held to one line by the answer's
-  grammar, which would save about a third of every answer's tokens
-  ("The page so far at moment 10";
-  [llama.cpp grammars](https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md)).
-- Which tables and graphs chapter 2 has, beyond the timeline of visits
-  and moments.
-- Whether the report keeps each moment's description as an appendix, or
-  the index alone holds them.
+Questions to settle: none at present.
 
 - **Tests, when built:**
   - **Unit tests:** the visit's knowledge numbered; an addition
