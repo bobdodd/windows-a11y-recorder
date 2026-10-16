@@ -1486,7 +1486,7 @@ As built, 2026-10-16:
   reuses them as well as the moments; it sends the pages' steps and the
   executive summary's.
 
-### The story in subsections (proposed)
+### The story in subsections (built)
 
 The owner, 2026-10-16, of chapter 4, the user experience: it has the same
 problem as the pages, paragraphs too long to read. As built, each visit's
@@ -1512,6 +1512,33 @@ Proposed, to be agreed:
 - **The story's and the opening's templates** change version, so their
   steps are sent again, and the executive summary's, which is given
   them.
+
+The owner agreed, 2026-10-16: "The report is now much more like I
+expected, thank you. Please push the work to date and then start on the
+story work you proposed".
+
+As built, 2026-10-16:
+
+- The story's template, version 4, answers in three sections,
+  `arriving`, `actions`, and `experience` (`StoryParts`), which the
+  recorder heads "Arriving", "What the participant did", and "What worked
+  and what got in the way". The actions are asked for as numbered steps,
+  each an action and how the page responded to it.
+- As the introduction is 4.1, each visit is numbered one on from its
+  visit number: visit 1 is 4.2, headed "4.2 Visit 1: the page's title,
+  its start to its end", the title and times as chapter 3 gives them, and
+  its subsections 4.2.1 to 4.2.3.
+- The opening, of the same version, is headed "4.1 Introduction" by the
+  recorder and asked for one or two paragraphs: the site, the changes
+  before the first visit, and the course of the session in brief,
+  referring to the participant and their set-up in a phrase only.
+- The story's forms are sentence, bullet, numbered, and picture; the
+  model's heading forms and the recorder's numbering of them are removed.
+- A later request that is given a visit's part, the next visit's story or
+  the executive summary, gives each statement under its subsection's
+  name, such as "Arriving:".
+- The executive summary's template is unchanged, but its input, which
+  holds the story, is not, so a run again sends it too.
 
 ### The recreated page at the recorded viewport and scroll
 

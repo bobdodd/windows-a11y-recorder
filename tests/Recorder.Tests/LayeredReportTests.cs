@@ -76,14 +76,14 @@ public sealed class LayeredReportTests
     public void A_statement_form_is_read_from_the_answer_and_is_a_sentence_where_it_gives_none()
     {
         using var answer = JsonDocument.Parse("""
-            {"story": [[{"form": "heading-1", "text": "A", "kind": "claim", "evidence": ["E1"]},
+            {"story": [[{"form": "bullet", "text": "A", "kind": "claim", "evidence": ["E1"]},
                         {"text": "B", "kind": "claim", "evidence": ["E1"]}],
                        [{"form": "picture", "text": "C", "kind": "claim", "evidence": ["E2"]},
                         {"form": "table", "text": "D", "kind": "claim", "evidence": ["E2"]}]]}
             """);
         var step = new AcceptedStep(Guid.Empty, "", answer.RootElement.Clone(), []);
 
-        Assert.Equal("heading-1", LayeredReport.FormOf(step, new Claim("story", 0, 0, Claim.ClaimKind, "A", ["E1"])));
+        Assert.Equal("bullet", LayeredReport.FormOf(step, new Claim("story", 0, 0, Claim.ClaimKind, "A", ["E1"])));
         Assert.Equal("sentence", LayeredReport.FormOf(step, new Claim("story", 0, 1, Claim.ClaimKind, "B", ["E1"])));
         Assert.Equal("picture", LayeredReport.FormOf(step, new Claim("story", 1, 0, Claim.ClaimKind, "C", ["E2"])));
         Assert.Equal("sentence", LayeredReport.FormOf(step, new Claim("story", 1, 1, Claim.ClaimKind, "D", ["E2"])));

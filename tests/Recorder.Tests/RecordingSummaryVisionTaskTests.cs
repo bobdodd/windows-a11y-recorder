@@ -90,19 +90,26 @@ public sealed partial class RecordingSummaryTaskTests
                 output["corrections"] = new JsonArray();
                 output["new"] = new JsonArray(new JsonArray(Statement($"Something new from {layer}.", reference)));
             }
-            else if (body.Contains("\"story\"", StringComparison.Ordinal) || body.Contains("\"opening\"", StringComparison.Ordinal))
+            else if (body.Contains("\"arriving\"", StringComparison.Ordinal))
             {
-                var section = body.Contains("\"story\"", StringComparison.Ordinal) ? "story" : "opening";
                 var frame = StoryFrame().Match(input);
-                var paragraph = new JsonArray(Formed("heading-1", $"A heading of the {section}.", reference), Formed("sentence", $"A sentence of the {section}.", reference));
+                var arriving = new JsonArray(Formed("sentence", "How the participant arrived.", reference));
                 if (frame.Success)
                 {
-                    paragraph.Add(Formed("picture", $"A picture of the {section}.", frame.Groups[1].Value));
+                    arriving.Add(Formed("picture", "A picture of the story.", frame.Groups[1].Value));
                 }
 
-                paragraph.Add(Formed("heading-2", $"A smaller heading of the {section}.", reference));
-                paragraph.Add(Formed("sentence", $"Another sentence of the {section}.", reference));
-                output[section] = new JsonArray(paragraph);
+                arriving.Add(Formed("sentence", "What was on the screen.", reference));
+                output["arriving"] = new JsonArray(arriving);
+                output["actions"] = new JsonArray(new JsonArray(Formed("numbered", "An action and how the page responded.", reference),
+                    Formed("numbered", "Another action and how the page responded.", reference)));
+                output["experience"] = new JsonArray(new JsonArray(Formed("sentence", "What worked, and why it matters.", reference)),
+                    new JsonArray(Formed("sentence", "What got in the way, and why it matters.", reference)));
+            }
+            else if (body.Contains("\"opening\"", StringComparison.Ordinal))
+            {
+                output["opening"] = new JsonArray(new JsonArray(Formed("sentence", "The site and the session.", reference)),
+                    new JsonArray(Formed("sentence", "The course of the session.", reference)));
             }
             else
             {
@@ -391,7 +398,9 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Contains("\"form\"", bodies[13], StringComparison.Ordinal);
         var secondStory = Input(bodies[14]);
         Assert.Contains("the page was not recreated", secondStory, StringComparison.Ordinal);
-        Assert.Contains("The part for visit 1:\n  (heading-1) A heading of the story.", secondStory, StringComparison.Ordinal);
+        Assert.Contains("The part for visit 1:\n  Arriving:\n  (sentence) How the participant arrived.", secondStory, StringComparison.Ordinal);
+        Assert.Contains("  What the participant did:\n  (numbered) An action and how the page responded.", secondStory, StringComparison.Ordinal);
+        Assert.Contains("  What worked and what got in the way:\n  (sentence) What worked, and why it matters.", secondStory, StringComparison.Ordinal);
         Assert.Contains("(picture) A picture of the story.", secondStory, StringComparison.Ordinal);
         Assert.Contains("Section 3.2:", Input(bodies[15]), StringComparison.Ordinal);
 
@@ -400,8 +409,8 @@ public sealed partial class RecordingSummaryTaskTests
         // settings records, so each part says so.
         var executive = Input(bodies[16]);
         Assert.Contains("The Windows settings at the start, found by the recorder (Appendix A):\nThe recording holds no record of the Windows settings, so they are unknown.\n", executive, StringComparison.Ordinal);
-        Assert.Contains("Its opening:\n  (heading-1) A heading of the opening.", executive, StringComparison.Ordinal);
-        Assert.Contains("The part for visit 2:\n  (heading-1) A heading of the story.", executive, StringComparison.Ordinal);
+        Assert.Contains("Its opening:\n  (sentence) The site and the session.", executive, StringComparison.Ordinal);
+        Assert.Contains("The part for visit 2:\n  Arriving:\n  (sentence) How the participant arrived.", executive, StringComparison.Ordinal);
 
         var report = Assert.Single(await catalog.ReportsAsync(vision, Token));
         Assert.Equal(RecordingSummaryVisionKind.FileName, report.FileName);
@@ -424,11 +433,15 @@ public sealed partial class RecordingSummaryTaskTests
             @"#### 3\.1\.3 Content\n\nA statement about content\. \[E\d+\]\n\n#### 3\.1\.4 Controls, forms, dialogs, menus, and messages\n\nA statement about controls\. \[E\d+\]\n\n" +
             @"#### 3\.1\.5 How the page changed\n\nA statement about changes\. \[E\d+\]\n\n### 3\.2 ", text);
 
-        // Chapter 2: the opening and each visit's part, the headings
-        // numbered on from one to the next, the sentences between them one
-        // paragraph, and each picture put in from its frame's file.
-        Assert.Contains("## 4. The user experience\n\n### 4.1 A heading of the opening.\n\n", text, StringComparison.Ordinal);
-        Assert.Matches(@"### 4\.2 A heading of the story\.\n\nA sentence of the story\. \[E\d+\]\n\n!\[Figure 1\. A picture of the story\.\]\(\.\./\.\./frames/desktop/\d+\.png\)\n\nFigure 1\. A picture of the story\. \[E\d+\]\n\n#### 4\.2\.1 A smaller heading of the story\.\n\nAnother sentence of the story\. \[E\d+\]\n\n### 4\.3 A heading of the story\.", text);
+        // Chapter 4: the introduction 4.1, each visit 4.(N + 1) headed by
+        // the recorder with its page and times, in three subsections; the
+        // actions numbered; each picture put in from its frame's file.
+        Assert.Contains("## 4. The user experience\n\n### 4.1 Introduction\n\nThe site and the session. [E", text, StringComparison.Ordinal);
+        Assert.Matches(@"\]\n\nThe course of the session\. \[E\d+\]\n\n### 4\.2 Visit 1: [^\n]+, 00:00:0\d to 00:00:\d\d\n\n", text);
+        Assert.Matches(
+            @"### 4\.2 Visit 1: [^\n]+\n\n#### 4\.2\.1 Arriving\n\nHow the participant arrived\. \[E\d+\]\n\n!\[Figure 1\. A picture of the story\.\]\(\.\./\.\./frames/desktop/\d+\.png\)\n\nFigure 1\. A picture of the story\. \[E\d+\]\n\n" +
+            @"What was on the screen\. \[E\d+\]\n\n#### 4\.2\.2 What the participant did\n\n1\. An action and how the page responded\. \[E\d+\]\n2\. Another action and how the page responded\. \[E\d+\]\n\n" +
+            @"#### 4\.2\.3 What worked and what got in the way\n\nWhat worked, and why it matters\. \[E\d+\]\n\nWhat got in the way, and why it matters\. \[E\d+\]\n\n### 4\.3 Visit 2: ", text);
 
         // The appendices, which the stand-in recording has no records for,
         // and the changes, of which there are none.
@@ -466,8 +479,8 @@ public sealed partial class RecordingSummaryTaskTests
         // and every reference it cites in the evidence list.
         var read = ReportDocument.Parse(text);
         var shown = read.Blocks.Where(block => block.Kind == ReportBlockKind.Image).ToList();
-        Assert.Equal([(1, "A first step. [E1]"), (2, "A second step. [E1]")],
-            read.Blocks.Where(block => block.Kind == ReportBlockKind.NumberedItem).Select(block => (block.Level, block.Text.Replace(block.References[0], "E1", StringComparison.Ordinal))));
+        Assert.Equal([(1, "A first step. [E1]"), (2, "A second step. [E1]"), (1, "An action and how the page responded. [E1]"), (2, "Another action and how the page responded. [E1]")],
+            read.Blocks.Where(block => block.Kind == ReportBlockKind.NumberedItem).Take(4).Select(block => (block.Level, block.Text.Replace(block.References[0], "E1", StringComparison.Ordinal))));
         Assert.NotEmpty(read.Evidence);
         Assert.Equal(2, shown.Count);
         Assert.All(shown, block => Assert.True(File.Exists(Path.Combine(Path.GetDirectoryName(Path.Combine(_session, report.RelativePath))!, block.Source!))));
@@ -503,11 +516,15 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Contains("Describe the page, not the participant.", RecordingSummaryVisionKind.PageChapterInstructions, StringComparison.Ordinal);
         foreach (var instructions in new[] { RecordingSummaryVisionKind.StoryInstructions, RecordingSummaryVisionKind.OpeningInstructions })
         {
-            Assert.Contains("\"heading-1\", \"heading-2\", or \"heading-3\"", instructions, StringComparison.Ordinal);
+            Assert.Contains("The recorder gives every heading; give none.", instructions, StringComparison.Ordinal);
+            Assert.DoesNotContain("heading-", instructions, StringComparison.Ordinal);
             Assert.Contains("{\"form\": ..., \"text\": ..., \"kind\": \"claim\", \"evidence\": [...]}", instructions, StringComparison.Ordinal);
         }
 
-        Assert.Equal(["heading-1", "heading-2", "heading-3", "sentence", "bullet", "numbered", "picture"], RecordingSummaryVisionKind.StoryForms);
+        Assert.Equal(["sentence", "bullet", "numbered", "picture"], RecordingSummaryVisionKind.StoryForms);
+        Assert.Equal(["arriving", "actions", "experience"], RecordingSummaryVisionKind.StorySections);
+        Assert.Contains("as numbered steps, each step an action and how the page responded to it", RecordingSummaryVisionKind.StoryInstructions, StringComparison.Ordinal);
+        Assert.Contains("Introduce the story in one or two paragraphs", RecordingSummaryVisionKind.OpeningInstructions, StringComparison.Ordinal);
         Assert.Equal(["sentence", "bullet", "numbered"], RecordingSummaryVisionKind.ExecutiveForms);
         foreach (var instructions in new[]
                  {
@@ -561,7 +578,7 @@ public sealed partial class RecordingSummaryTaskTests
     [Fact]
     public void Every_template_shows_a_statement_with_its_text_before_its_kind()
     {
-        Assert.Equal((4, 3, 4, 1, 4, 3, 3), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+        Assert.Equal((4, 3, 4, 1, 4, 4, 3), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
             RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.LayerTemplateVersion, RecordingSummaryVisionKind.PageChapterTemplateVersion,
             RecordingSummaryVisionKind.StoryTemplateVersion, RecordingSummaryVisionKind.ExecutiveTemplateVersion));
         foreach (var instructions in new[]

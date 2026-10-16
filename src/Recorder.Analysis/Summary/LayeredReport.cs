@@ -114,13 +114,11 @@ public static class LayeredReport
             }
         }
 
-        // Statements in their forms, in chapter 1 and chapter 4: each heading
-        // numbered by the recorder, a heading with no heading above it
-        // raised a level; the sentences of a paragraph between headings,
-        // lists, and pictures one paragraph; consecutive items of a list one
-        // list, a numbered list numbered from 1; each picture put in,
-        // numbered, with its caption.
-        var counters = new List<int>();
+        // Statements in their forms, in chapter 1 and chapter 4: the
+        // sentences of a paragraph between lists and pictures one paragraph;
+        // consecutive items of a list one list, a numbered list numbered
+        // from 1; each picture put in, numbered, with its caption. The
+        // recorder heads every part, so no statement is a heading.
         var figures = 0;
         void Story(AcceptedStep step, string section)
         {
@@ -161,24 +159,7 @@ public static class LayeredReport
                 {
                     var form = FormOf(step, claim);
                     var text = SummaryReport.OneLine(claim.Text);
-                    if (form.StartsWith("heading-", StringComparison.Ordinal))
-                    {
-                        Flush();
-                        var level = Math.Min(int.Parse(form.AsSpan("heading-".Length), NumberStyles.None, CultureInfo.InvariantCulture), counters.Count + 1);
-                        while (counters.Count > level)
-                        {
-                            counters.RemoveAt(counters.Count - 1);
-                        }
-
-                        if (counters.Count < level)
-                        {
-                            counters.Add(0);
-                        }
-
-                        counters[level - 1]++;
-                        builder.Append('#', level + 2).Append(" 4.").Append(string.Join('.', counters)).Append(' ').Append(text).Append("\n\n");
-                    }
-                    else if (form is RecordingSummaryVisionKind.Bullet or RecordingSummaryVisionKind.Numbered)
+                    if (form is RecordingSummaryVisionKind.Bullet or RecordingSummaryVisionKind.Numbered)
                     {
                         if (sentences.Count > 0 || list != form)
                         {
@@ -255,12 +236,25 @@ public static class LayeredReport
         }
 
         builder.Append("## 4. The user experience\n\n");
+        // 4.1 the introduction, then each visit 4.(N + 1), as the
+        // introduction is 4.1, in its three subsections.
+        builder.Append("### 4.1 Introduction\n\n");
         Story(parts.Opening, "opening");
         foreach (var visit in collation.Visits)
         {
             if (parts.Visits.TryGetValue(visit.Visit.Number, out var part))
             {
-                Story(part.Story, "story");
+                var number = visit.Visit.Number + 1;
+                var start = visit.Visit.Start;
+                var title = visit.Title is { Length: > 0 } named ? SummaryReport.OneLine(named) : start.Url;
+                builder.Append(CultureInfo.InvariantCulture,
+                    $"### 4.{number} Visit {visit.Visit.Number}: {title}, {SummaryReport.Clock(start.Time)} to {SummaryReport.Clock(visit.Visit.End)}\n\n");
+                var sub = 0;
+                foreach (var (section, heading) in RecordingSummaryVisionKind.StoryParts)
+                {
+                    builder.Append(CultureInfo.InvariantCulture, $"#### 4.{number}.{++sub} {heading}\n\n");
+                    Story(part.Story, section);
+                }
             }
         }
 

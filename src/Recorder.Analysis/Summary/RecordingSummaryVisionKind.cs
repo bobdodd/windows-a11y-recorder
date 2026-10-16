@@ -198,10 +198,13 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // the recorder gives and heads, each its own section of the answer,
     // and the executive summary interpreting and explaining, after the
     // owner's example (recording-summary.md, "The executive summary and
-    // the pages rewritten").
+    // the pages rewritten"). Version 4 of the story and its opening: each
+    // visit's part in three subsections the recorder gives and heads, the
+    // opening an introduction the recorder heads, and no headings of the
+    // model's own (recording-summary.md, "The story in subsections").
     public const int PageChapterTemplateVersion = 4;
 
-    public const int StoryTemplateVersion = 3;
+    public const int StoryTemplateVersion = 4;
 
     public const int ExecutiveTemplateVersion = 3;
 
@@ -228,7 +231,15 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     public static readonly IReadOnlyList<string> PageChapterSections = [.. PageChapterParts.Select(part => part.Section)];
 
-    public static readonly IReadOnlyList<string> StorySections = ["story"];
+    /// <summary>A visit's part of the story: its subsections, each a section of its answer, with the heading the recorder gives it.</summary>
+    public static readonly IReadOnlyList<(string Section, string Heading)> StoryParts =
+    [
+        ("arriving", "Arriving"),
+        ("actions", "What the participant did"),
+        ("experience", "What worked and what got in the way")
+    ];
+
+    public static readonly IReadOnlyList<string> StorySections = [.. StoryParts.Select(part => part.Section)];
 
     public static readonly IReadOnlyList<string> OpeningSections = ["opening"];
 
@@ -255,13 +266,13 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Consecutive statements of one of these forms are one list; use a list where the reader is helped by one, and sentences otherwise. ";
 
     /// <summary>
-    /// The forms a statement of chapter 4 takes: a heading at one of three
-    /// levels, which the recorder numbers; a sentence of prose; or a
-    /// picture, its text the caption, citing the frame or tile it shows,
-    /// which the recorder puts in (owner, 2026-10-16; recording-summary.md,
-    /// "Chapter 2's form, as built").
+    /// The forms a statement of chapter 4 takes: a sentence of prose; an
+    /// item of a list; or a picture, its text the caption, citing the frame
+    /// or tile it shows, which the recorder puts in. The recorder heads
+    /// every part, so the model gives no headings (owner, 2026-10-16;
+    /// recording-summary.md, "The story in subsections").
     /// </summary>
-    public static readonly IReadOnlyList<string> StoryForms = ["heading-1", "heading-2", "heading-3", Sentence, Bullet, Numbered, Picture];
+    public static readonly IReadOnlyList<string> StoryForms = [Sentence, Bullet, Numbered, Picture];
 
     /// <summary>The forms a statement of the executive summary takes: a sentence of prose, or an item of a list.</summary>
     public static readonly IReadOnlyList<string> ExecutiveForms = [Sentence, Bullet, Numbered];
@@ -332,14 +343,14 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     /// <summary>How chapter 4's answers are given, said in its templates.</summary>
     public const string StoryAnswer =
-        "Write clean, readable prose for a professional report. Use headings where they help the reader; give each heading's level, and the recorder numbers them. " +
+        "Write clean, readable prose for a professional report. The recorder gives every heading; give none. " +
         "Show a picture where it helps the reader see a layout, a pattern, or content you describe: a captured frame for what was on the screen, or a tile for part of the page as the recorder rebuilt it. " +
         "Take your terms and your structure from the pages' own: their headings, landmarks, and the names of their controls. " +
         ParagraphRule +
-        "Each paragraph is a list of statements, and each statement has a form: \"heading-1\", \"heading-2\", or \"heading-3\", a heading at that level, its text the heading alone; " +
+        "Each section is a list of paragraphs, each paragraph a list of statements, and each statement has a form: " +
         "\"sentence\", a sentence of prose; " + ListForms +
         "or \"picture\", a picture the recorder puts in, its text the picture's caption, citing the one captured frame or tile it shows and what the caption rests on. " +
-        "A statement is {\"form\": ..., \"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, a heading citing what its part rests on, " +
+        "A statement is {\"form\": ..., \"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
         "or {\"form\": ..., \"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets +
         "Write plain sentences without Markdown.";
 
@@ -350,13 +361,16 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "the moments of the visit, each with its captured frame's reference and its tiles' references; which section of the chapter on the pages describes the visit's page; " +
         "the changes during the visit to the accessibility settings, the assistive technology, and the Magnifier's view, found by the recorder, each with its references; " +
         "and the story so far, the parts written for the visits before. The knowledge is inference, not fact. " +
-        "Tell what happened during the visit and what the experience was: what the participant did and how the page responded, what was on the screen, what appeared, and where it worked or got in the way. " +
+        "Tell what happened during the visit and what the experience was, in three subsections that the recorder heads, so that each holds only its own topic. " +
         "Tell each change to the settings or the assistive technology where it happened in the story, and what followed it as far as the evidence shows. " +
         "Where the Magnifier panned, say which part of the screen it showed, from the parts given: that is what was on the screen, not necessarily what the participant looked at. " +
         "Follow on from the story so far without repeating it, and do not describe the page again: refer to its section of the chapter on the pages. " +
         "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
         ParticipantRules +
-        "Answer in JSON with one section, \"story\", a list of paragraphs. " + StoryAnswer;
+        "Answer in JSON with three sections: \"arriving\", how the participant came to the page and what was on the screen when they arrived; " +
+        "\"actions\", what the participant did, in order, as numbered steps, each step an action and how the page responded to it, with what appeared or changed; " +
+        "and \"experience\", what worked and what got in the way for this participant, interpreted, each with why it matters. " +
+        "Do not repeat in one section what another holds. " + StoryAnswer;
 
     public const string OpeningInstructions =
         "You write the opening of the chapter on the user experience of a professional report for accessibility and usability engineers on an accessibility test recording: the story of the user experience. " +
@@ -364,11 +378,12 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "the changes to the accessibility settings, the assistive technology, and the Magnifier's view before the first visit, found by the recorder, each with its references; " +
         "and the chapter's parts, one for each visit, which follow the opening. " +
         "Each part's statements cite the evidence references they rest on, such as [E3]; the parts are inferences, not facts. " +
-        "Introduce the story: the site tested and who it appears to be for, the participant's capabilities as given, the assistive technology observed running, the changes before the first visit, and the course of the session in brief, " +
-        "so that the parts that follow read as one story. Do not repeat the parts. The settings at the start are given in the report's appendices; do not list them. " +
+        "Introduce the story in one or two paragraphs: the site tested and who it appears to be for, the changes before the first visit, and the course of the session in brief, " +
+        "so that the parts that follow read as one story. The participant, their capabilities, and their assistive technology are described in the executive summary and the chapter on the participant: " +
+        "refer to them in a phrase, and do not describe them again. Do not repeat the parts. The settings at the start are given in the report's appendices; do not list them. " +
         "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
         ParticipantRules +
-        "Answer in JSON with one section, \"opening\", a list of paragraphs. " + StoryAnswer;
+        "Answer in JSON with one section, \"opening\", the introduction, which the recorder heads. " + StoryAnswer;
 
     public const string ExecutiveInstructions =
         "You write the executive summary, the first chapter, of a professional report for accessibility and usability engineers on an accessibility test recording. " +
@@ -1325,12 +1340,23 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     }
 
     // A part of the story as a later request gives it: each statement with
-    // its form and its evidence.
+    // its form and its evidence, under the name of its subsection where
+    // the part has several.
     private static void AppendStory(StringBuilder input, AcceptedStep step, ISet<string> references)
     {
+        string? section = null;
         foreach (var claim in step.Claims)
         {
             references.UnionWith(claim.Evidence);
+            if (claim.Section != section)
+            {
+                section = claim.Section;
+                if (StoryParts.FirstOrDefault(part => part.Section == section).Heading is { } heading)
+                {
+                    input.Append("  ").Append(heading).Append(":\n");
+                }
+            }
+
             input.Append("  (").Append(LayeredReport.FormOf(step, claim)).Append(") ").Append(claim.Text);
             if (claim.Evidence.Count > 0)
             {
