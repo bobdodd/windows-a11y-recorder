@@ -945,7 +945,8 @@ Proposed, to be agreed:
   combined step, the page so far, and the visit and recording steps of
   the vision stage. Stage 1 is unchanged.
 
-- **Answers on one line, held by a grammar of the recorder's own.** The
+- **Answers on one line, held by a grammar of the recorder's own (tried,
+  not taken).** The
   instruction to write the JSON on one line has been ignored in every
   answer so far, and the request's own constraint allows it: each
   request sends the answer's JSON schema as `response_format`, and
@@ -995,6 +996,13 @@ Proposed, to be agreed:
   are what each moment adds and the indentation then costs far less.
   Checked here as before: the server took it, and the answer came back
   on one line in the answer's structure with single spaces.
+
+  The second trial on the target machine, the same day, build b4a0191,
+  of the same step: again empty, `{"page": [], "changes": []}`, 11
+  output tokens, finish reason stop. So, as agreed, the schema stays:
+  the task's steps send it as `response_format`, as before, and the
+  layered report is built on it. The trial option `--one-line` is kept,
+  for trying a grammar again later.
 
 Questions to settle: none at present.
 
