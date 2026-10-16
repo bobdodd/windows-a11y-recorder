@@ -92,7 +92,7 @@ internal sealed class ModelSwitchNeededException(string profile) : Exception($"T
 
 internal sealed class StoppedForRecordingException() : Exception("A recording started.");
 
-internal sealed record TrialPlan(string StepKey, IReadOnlyDictionary<string, double> Sampling, string PicturesFolder);
+internal sealed record TrialPlan(string StepKey, IReadOnlyDictionary<string, double> Sampling, string PicturesFolder, bool OneLine = false);
 
 internal sealed class TrialFinishedException(StepTrial trial) : Exception("The trial step has run.")
 {
@@ -729,7 +729,8 @@ public sealed class AnalysisWorker
         Guid taskId,
         string stepKey,
         IReadOnlyDictionary<string, double> sampling,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool oneLine = false)
     {
         ArgumentNullException.ThrowIfNull(stepKey);
         ArgumentNullException.ThrowIfNull(sampling);
@@ -741,7 +742,7 @@ public sealed class AnalysisWorker
         }
 
         var pictures = $"analysis/trials/{task.TaskId:D}-{DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture)}/pages";
-        _trial = new TrialPlan(stepKey, sampling, pictures);
+        _trial = new TrialPlan(stepKey, sampling, pictures, oneLine);
         try
         {
             await kind.RunAsync(new AnalysisTaskContext(this, task, pictures), cancellationToken).ConfigureAwait(false);
@@ -820,7 +821,7 @@ public sealed class AnalysisWorker
         }
 
         var profile = given with { Generation = generation with { Sampling = options.ToImmutable() } };
-        var body = ChatRequest.Build(profile, request);
+        var body = ChatRequest.Build(profile, request, trial.OneLine);
 
         // The request as the task itself would send it, without the trial's
         // options, beside the task's attempts at the step, so that the trial
@@ -856,7 +857,8 @@ public sealed class AnalysisWorker
             RequestSha256 = asTask,
             SentSha256 = ChatRequest.Sha256(body),
             TaskAttempts = attempts,
-            PicturesFolder = trial.PicturesFolder
+            PicturesFolder = trial.PicturesFolder,
+            OneLine = trial.OneLine
         });
     }
 

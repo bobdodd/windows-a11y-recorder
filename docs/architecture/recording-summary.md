@@ -840,10 +840,11 @@ decision, the same day: "The change will be more radical, but it has to
 wait until after our current optimization of images" (see "Unique images
 across the recording").
 
-### The layered report (proposed)
+### The layered report (agreed, not built)
 
-Proposed on 2026-10-15, from the owner's design of the same day; not
-agreed, not built. It replaces the page so far, whose answer is written
+Proposed on 2026-10-15, from the owner's design of the same day, and
+agreed by the owner the same day; not built. The trial of one step with
+the answer's grammar comes first, since the rest is built on it. It replaces the page so far, whose answer is written
 again whole at each moment and outgrew the output limit at moment 10
 (see "The page so far at moment 10").
 
@@ -964,7 +965,19 @@ Proposed, to be agreed:
   ([llama.cpp server](https://raw.githubusercontent.com/ggml-org/llama.cpp/master/tools/server/README.md)),
   so it is to be tried on the target machine first, by a trial of one
   step. It changes every step's request, so no step already accepted
-  would be reused after it.
+  would be reused after it. Built for trials only on 2026-10-15: a trial
+  given `--one-line` sends the grammar as `grammar` in place of the
+  schema, and its file says so (analysis-runner.md, "Trying a step with
+  other sampling options"); a task's own steps still send the schema.
+  Checked here the same day with llama.cpp b11607, the build in use, in
+  its Linux build for the processor
+  ([release b11607](https://github.com/ggml-org/llama.cpp/releases/tag/b11607)),
+  with a tiny test model, stories260K
+  ([ggml-org models](https://huggingface.co/ggml-org/models)): the chat
+  endpoint took `grammar`, streamed as the worker streams, and the answer
+  came back on one line in the answer's structure. A model that small
+  says nothing of the answer's content; the trial on the target machine
+  is still to come.
 
 Questions to settle: none at present.
 

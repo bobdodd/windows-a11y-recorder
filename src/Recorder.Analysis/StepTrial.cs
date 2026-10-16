@@ -31,6 +31,9 @@ public sealed record StepTrial(
     /// <summary>The task's attempts at the step.</summary>
     public IReadOnlyList<StepRequest> TaskAttempts { get; init; } = [];
 
+    /// <summary>Whether the answer was held to one line by the recorder's own grammar, sent in place of the schema.</summary>
+    public bool OneLine { get; init; }
+
     /// <summary>Where the trial kept the pictures it took, in the recording's folder.</summary>
     public string? PicturesFolder { get; init; }
 
@@ -44,6 +47,11 @@ public sealed record StepTrial(
         if (PicturesFolder is { } pictures)
         {
             text.Append("Pictures taken for the trial, if any, are in the recording's folder under ").Append(pictures).Append(", not in the task's.\n");
+        }
+
+        if (OneLine)
+        {
+            text.Append("The answer was held to JSON on one line by the recorder's own grammar, sent as grammar in place of the schema.\n");
         }
 
         text.Append('\n');

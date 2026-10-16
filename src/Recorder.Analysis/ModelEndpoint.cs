@@ -120,7 +120,13 @@ public sealed class CurrentUserApiKeyProtector : IApiKeyProtector
 /// </summary>
 public static class ChatRequest
 {
-    public static string Build(ModelProfile profile, ModelRequest request)
+    /// <param name="oneLine">
+    /// Whether the answer is held to JSON on one line by the recorder's own
+    /// grammar, sent in place of the schema; for a trial only, until it is
+    /// tried on the target machine (recording-summary.md, "The layered
+    /// report").
+    /// </param>
+    public static string Build(ModelProfile profile, ModelRequest request, bool oneLine = false)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(request);
@@ -158,6 +164,12 @@ public static class ChatRequest
                 ["schema"] = ClaimCheck.Schema(request.Sections)
             }
         };
+        if (oneLine)
+        {
+            body.Remove("response_format");
+            body["grammar"] = AnswerGrammar.For(request.Sections);
+        }
+
         if (!profile.Generation.Thinking)
         {
             body["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false };

@@ -574,7 +574,7 @@ Built on 2026-10-14, after decision 4 below.
 Built on 2026-10-14, so that one step can be tried with other sampling
 options without running its task again. The worker program, run as
 
-`Recorder.AnalysisWorker.exe --trial TASK STEP FILE [OPTION=VALUE ...]`
+`Recorder.AnalysisWorker.exe --trial TASK STEP FILE [OPTION=VALUE ...] [--one-line]`
 
 runs the task's code again, giving back the task's accepted steps before
 STEP, sends STEP's request with the options given on top of its profile's,
@@ -590,6 +590,12 @@ catalog. It does not run while the worker is running.
   seed. Added on 2026-10-15 so that answers sampled above temperature 0
   can be tried before they are used to recover from a loop (owner, the
   same day; see "Decisions (2026-10-15)", "Recovering from a loop").
+- **It may hold the answer to one line:** with `--one-line`, the request
+  sends the recorder's own grammar for the answer as `grammar`, in place
+  of the schema as `response_format`, so that the answer is JSON with no
+  space or line break between its tokens, and the file says so. Added on
+  2026-10-15 to try the grammar on the target machine before the layered
+  report is built on it (recording-summary.md, "The layered report").
 - **Its pictures are its own:** pictures the task's code takes for the
   trial, such as the tiles of recreated pages, are kept in the
   recording's folder under `analysis/trials/TASK-TIME`, with a store of
@@ -611,8 +617,10 @@ catalog. It does not run while the worker is running.
   statements said three times in a row; a streamed answer read whole and
   stopped where the watch says; the server's defaults read from its
   properties; an answer caught in a loop failing without being asked for
-  again; and a trial
-  of one step that writes nothing to the catalog.
+  again; a trial
+  of one step that writes nothing to the catalog; and the answer's
+  grammar, and a trial held to one line sending it in place of the
+  schema.
 
 ### Reusing steps when run again
 

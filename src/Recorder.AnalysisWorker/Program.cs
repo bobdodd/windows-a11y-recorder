@@ -11,21 +11,29 @@ using Recorder.Database;
 // With --trial TASK STEP FILE [OPTION=VALUE ...], the worker instead tries
 // one step of a task that has run, with the sampling options given, and
 // writes what it gave to FILE; nothing is written to the catalog. The
-// options may include temperature and seed. See
+// options may include temperature and seed, and --one-line, which holds the
+// answer to JSON on one line by the recorder's own grammar. See
 // docs/architecture/analysis-runner.md, "Trying a step with other sampling
 // options".
-(Guid Task, string Step, string File, Dictionary<string, double> Sampling)? trial = null;
+(Guid Task, string Step, string File, Dictionary<string, double> Sampling, bool OneLine)? trial = null;
 if (args.Length > 0 && args[0] == "--trial")
 {
     var sampling = new Dictionary<string, double>(StringComparer.Ordinal);
     if (args.Length < 4 || !Guid.TryParse(args[1], out var trialTask))
     {
-        Console.Error.WriteLine("Give: --trial TASK STEP FILE [OPTION=VALUE ...], for example --trial 01a13a7e-... visit-0001-moment-10 C:\\Users\\Public\\Downloads\\trial.txt presence_penalty=1.5");
+        Console.Error.WriteLine("Give: --trial TASK STEP FILE [OPTION=VALUE ...] [--one-line], for example --trial 01a13a7e-... visit-0001-moment-10 C:\\Users\\Public\\Downloads\\trial.txt presence_penalty=1.5");
         return 2;
     }
 
+    var oneLine = false;
     foreach (var pair in args.Skip(4))
     {
+        if (pair == "--one-line")
+        {
+            oneLine = true;
+            continue;
+        }
+
         var parts = pair.Split('=', 2);
         if (parts.Length != 2 || !double.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value))
         {
@@ -36,7 +44,7 @@ if (args.Length > 0 && args[0] == "--trial")
         sampling[parts[0]] = value;
     }
 
-    trial = (trialTask, args[2], args[3], sampling);
+    trial = (trialTask, args[2], args[3], sampling, oneLine);
 }
 
 // With --recreation-check RECORDING TIME FOLDER [CHROMIUM], the worker
@@ -139,7 +147,7 @@ try
     if (trial is { } plan)
     {
         Console.WriteLine($"Trying step {plan.Step}. This can take some minutes.");
-        var result = await worker.TrialAsync(plan.Task, plan.Step, plan.Sampling, shutdown.Token).ConfigureAwait(false);
+        var result = await worker.TrialAsync(plan.Task, plan.Step, plan.Sampling, shutdown.Token, plan.OneLine).ConfigureAwait(false);
         await File.WriteAllTextAsync(plan.File, result.Describe(), new System.Text.UTF8Encoding(false), shutdown.Token).ConfigureAwait(false);
         Console.WriteLine($"Written: {plan.File}");
         Status("Stopped: the trial has run.");

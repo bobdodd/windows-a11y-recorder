@@ -572,6 +572,30 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
     }
 
     [Fact]
+    public async Task A_trial_held_to_one_line_sends_the_recorders_grammar_in_place_of_the_schema_and_says_so()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var endpoint = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(StandInEndpoint.Valid("E1")) };
+        var kind = new StandInKind("visit-1");
+
+        var trial = await new AnalysisWorker(catalog, SettingsWith(), [kind], endpoint, options: Fast)
+            .TrialAsync(task, "visit-1", new Dictionary<string, double>(), Token, oneLine: true);
+
+        Assert.Null(trial.Failure);
+        Assert.True(trial.OneLine);
+        var body = Assert.Single(endpoint.Bodies);
+        using (var document = JsonDocument.Parse(body))
+        {
+            Assert.False(document.RootElement.TryGetProperty("response_format", out _));
+            Assert.StartsWith("root ::= ", document.RootElement.GetProperty("grammar").GetString(), StringComparison.Ordinal);
+        }
+
+        Assert.NotEqual(trial.RequestSha256, trial.SentSha256);
+        Assert.Contains("The answer was held to JSON on one line by the recorder's own grammar, sent as grammar in place of the schema.", trial.Describe(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_trial_may_set_the_temperature_and_the_seed_but_not_the_other_fields_the_worker_sets()
     {
         var catalog = await CatalogAsync();
