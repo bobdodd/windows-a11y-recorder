@@ -940,6 +940,30 @@ Proposed, to be agreed:
   best. Whatever form it chooses, each part cites the references it
   rests on, as every statement does now, so that the report stays
   checkable; the recorder puts in the pictures of the frames it chose.
+- **Chapter 2's form, the owner's requirement** (2026-10-16): "a
+  professional report for accessibility and usability engineers that is
+  primarily prose with nested heading numbers as needed, the provides
+  images (possibly partial) of referenced frames, or web pages when
+  talking about specific layout patterns or content. When read within
+  the app, it should still have citation links that move frames into
+  view." The pictures are shown in the player's reading view (owner, the
+  same day).
+- **Chapter 2's form, as built (proposed).** Chapter 2's requests alone
+  add an optional `form` to each statement: a heading, with its level,
+  a paragraph's sentence, the default, or a picture, whose text is its
+  caption and which cites the one captured frame or tile it shows. Other
+  steps' requests are unchanged, so a run again still reuses them. The
+  recorder, not the model, numbers the headings, 1, 1.1, 1.1.1, from
+  their levels, and puts in each picture: in the Markdown file as an
+  image of the frame's or the tile's file, and in the reading view as
+  the picture scaled to the view's width, with its caption, whose
+  references move the frames into view as every reference does. A tile
+  is already part of a page, the height of the viewport. A part of a
+  frame or a tile, such as one region or control, is to come after: the
+  model works from the descriptions, not the pictures, so it cannot give
+  a part's place in pixels, and the recorder would cut the part from the
+  place the recording gives for what the model names, where the
+  recording gives one, which is to be checked.
 - **What is kept and what goes:** kept are the frame and tile steps, the
   store of unique images, and the evidence list; dropped are the
   combined step, the page so far, and the visit and recording steps of
