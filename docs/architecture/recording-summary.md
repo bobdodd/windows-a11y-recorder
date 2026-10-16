@@ -1061,10 +1061,16 @@ The owner's decision, from a review of what the tiles are for.
 
 Agreed by the owner on 2026-10-15 and built the same day, build
 0633c96. On the target machine the same day, a Run again of task
-01a1407c on the cnib.ca recording failed where that task had, at
-`visit-0001-moment-10-page-so-far`, at the output limit of 8,192 tokens
-(see "The page so far at moment 10"), so no report was written; the
-owner's finding was that "the new image work seems effective". How it
+01a1407c on the cnib.ca recording, which made task 01a1421c, finished,
+and the owner's finding was that "the new image work seems effective".
+It was first noted here as failing at
+`visit-0001-moment-10-page-so-far`, as 01a1407c had; the failed task in
+the player's list was 01a1407c. Task 01a1421c's report was written at
+21:49 that day, its step `visit-0001-moment-10-page-so-far` was
+accepted at its first attempt, as each trial of that step shows ("The
+layered report"), and its "How this was made" lists 16 groups of tiles
+not sent, as predicted. The recording's store held 11 unique images for
+its 80 tiles. How it
 was built is under "As built", after the decisions. Most of a visit's model
 time is in describing tiles whose pictures are the same as tiles already
 described, and in real use a participant goes back to the same page
