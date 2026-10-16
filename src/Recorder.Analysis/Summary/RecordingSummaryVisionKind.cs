@@ -52,12 +52,12 @@ internal sealed record PageGroupDescription(IReadOnlyList<PageTile> Tiles, Accep
 /// <summary>
 /// A visit's part of the vision stage: its moments as recorded, how many
 /// were left out, its knowledge in layers after its last moment, and its
-/// part of the story, chapter 2.
+/// part of the story, chapter 3.
 /// </summary>
 public sealed record VisitVision(IReadOnlyList<MomentDescription> Moments, int MomentsLeftOut, Knowledge Knowledge, AcceptedStep Story);
 
 /// <summary>
-/// A page of chapter 1: its number, its address, its title as last
+/// A page of chapter 2: its number, its address, its title as last
 /// recorded, the visits to it, and its description.
 /// </summary>
 public sealed record PageChapter(int Number, string Url, string? Title, IReadOnlyList<int> Visits, AcceptedStep Step);
@@ -80,7 +80,17 @@ public sealed record VisionReportParts(
     int ImageTokensPerRequest = RecordingSummaryVisionKind.DefaultImageTokensPerRequest,
     string ImagesFolder = "analysis/images",
     string MomentIndexFile = "analysis/TASK/moments.json",
-    IReadOnlyList<string>? LayersNotSent = null);
+    IReadOnlyList<string>? LayersNotSent = null)
+{
+    /// <summary>Chapter 1, the executive summary; null in a report written before it.</summary>
+    public AcceptedStep? Executive { get; init; }
+
+    /// <summary>The settings at the start and their changes, for the appendices and the story.</summary>
+    public RecordedSettings Settings { get; init; } = RecordedSettings.None;
+
+    /// <summary>The reference each setting's record is cited by, by its key.</summary>
+    public IReadOnlyDictionary<string, string> SettingReferences { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+}
 
 /// <summary>
 /// The recording summary's second stage, the layered report: each visit's
@@ -89,8 +99,8 @@ public sealed record VisionReportParts(
 /// whole in tiles, described in groups; then at each moment, layer 2 adds
 /// to the visit's knowledge what the frame shows, and layer 3 what the web
 /// page adds that the frame does not, the knowledge starting as layer 1,
-/// the visit's description from the recorded data. The report's chapter 1
-/// describes each page from every visit to it, and chapter 2 tells the
+/// the visit's description from the recorded data. The report's chapter 1 is the
+/// executive summary, chapter 2 describes each page from every visit to it, chapter 3 tells the
 /// story of the user experience, one part for each visit and an opening,
 /// written as summary-with-vision.md. It builds on a finished summary of
 /// the same recording, the task it follows. See
@@ -160,18 +170,32 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     /// </summary>
     public const string Layer3Template = "recording-summary-vision-layer-3";
 
-    /// <summary>Chapter 1's step for each page, from every visit to it.</summary>
+    /// <summary>Chapter 2's step for each page, from every visit to it.</summary>
     public const string PageChapterTemplate = "recording-summary-vision-page-chapter";
 
-    /// <summary>Chapter 2's step for each visit, its part of the story.</summary>
+    /// <summary>Chapter 3's step for each visit, its part of the story.</summary>
     public const string StoryTemplate = "recording-summary-vision-story";
 
-    /// <summary>Chapter 2's opening, from the visits' parts.</summary>
+    /// <summary>Chapter 3's opening, from the visits' parts.</summary>
     public const string OpeningTemplate = "recording-summary-vision-story-opening";
+
+    /// <summary>Chapter 1, the executive summary, written last.</summary>
+    public const string ExecutiveTemplate = "recording-summary-vision-executive-summary";
 
     public const int LayerTemplateVersion = 1;
 
-    public const int ChapterTemplateVersion = 1;
+    // Version 2 of the chapters' templates: the executive summary becomes
+    // chapter 1, so the pages are chapter 2 and the story chapter 3, named
+    // by what they are; the story's parts and opening are given the changes
+    // to the settings and the assistive technology (recording-summary.md,
+    // "The executive summary and the settings in use").
+    public const int PageChapterTemplateVersion = 2;
+
+    public const int StoryTemplateVersion = 2;
+
+    public const int ExecutiveTemplateVersion = 1;
+
+    public static readonly IReadOnlyList<string> ExecutiveSections = ["summary"];
 
     public static readonly IReadOnlyList<string> PageChapterSections = ["page", "changes"];
 
@@ -184,7 +208,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     public const string Picture = "picture";
 
     /// <summary>
-    /// The forms a statement of chapter 2 takes: a heading at one of three
+    /// The forms a statement of chapter 3 takes: a heading at one of three
     /// levels, which the recorder numbers; a sentence of prose; or a
     /// picture, its text the caption, citing the frame or tile it shows,
     /// which the recorder puts in (owner, 2026-10-16; recording-summary.md,
@@ -236,8 +260,8 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         ParticipantRules + LayerAnswer;
 
     public const string PageChapterInstructions =
-        "You write the description of one web page for the first chapter of a professional report for accessibility and usability engineers on an accessibility test recording. " +
-        "The chapter describes each page from everything known of it from every visit to it, independent of the participant's journey, which the second chapter tells. " +
+        "You write the description of one web page for the chapter on the pages of a professional report for accessibility and usability engineers on an accessibility test recording. " +
+        "The chapter describes each page from everything known of it from every visit to it, independent of the participant's journey, which the chapter on the user experience tells. " +
         "You are given the page's address and title, the visits to it with what the recorder derived of them, and each visit's knowledge in layers: " +
         "layer 1 from the recorded data, layer 2 from captured frames of the screen, and layer 3 from the web page as the recorder rebuilt it, each statement with the evidence references it rests on, such as [E3]. " +
         "The knowledge is inference, not fact. " +
@@ -251,7 +275,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
         "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown.";
 
-    /// <summary>How chapter 2's answers are given, said in its templates.</summary>
+    /// <summary>How chapter 3's answers are given, said in its templates.</summary>
     public const string StoryAnswer =
         "Write clean, readable prose for a professional report. Use headings where they help the reader; give each heading's level, and the recorder numbers them. " +
         "Show a picture where it helps the reader see a layout, a pattern, or content you describe: a captured frame for what was on the screen, or a tile for part of the page as the recorder rebuilt it. " +
@@ -263,26 +287,48 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Write plain sentences without Markdown.";
 
     public const string StoryInstructions =
-        "You write one part of the second chapter of a professional report for accessibility and usability engineers on an accessibility test recording: the story of the user experience. " +
+        "You write one part of the chapter on the user experience of a professional report for accessibility and usability engineers on an accessibility test recording: the story of the user experience. " +
         "This part is one page visit. You are given the participant's capabilities; the recorder's facts about the visit, each beginning with an evidence reference such as [E3]; " +
         "the visit's knowledge in layers: layer 1 from the recorded data, layer 2 from captured frames of the screen, and layer 3 from the web page as the recorder rebuilt it, each statement with the references it rests on; " +
-        "the moments of the visit, each with its captured frame's reference and its tiles' references; which section of the first chapter describes the visit's page; " +
+        "the moments of the visit, each with its captured frame's reference and its tiles' references; which section of the chapter on the pages describes the visit's page; " +
+        "the changes during the visit to the accessibility settings, the assistive technology, and the Magnifier's view, found by the recorder, each with its references; " +
         "and the story so far, the parts written for the visits before. The knowledge is inference, not fact. " +
         "Tell what happened during the visit and what the experience was: what the participant did and how the page responded, what was on the screen, what appeared, and where it worked or got in the way. " +
-        "Follow on from the story so far without repeating it, and do not describe the page again: refer to its section of the first chapter. " +
+        "Tell each change to the settings or the assistive technology where it happened in the story, and what followed it as far as the evidence shows. " +
+        "Where the Magnifier panned, say which part of the screen it showed, from the parts given: that is what was on the screen, not necessarily what the participant looked at. " +
+        "Follow on from the story so far without repeating it, and do not describe the page again: refer to its section of the chapter on the pages. " +
         "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
         ParticipantRules +
         "Answer in JSON with one section, \"story\", a list of paragraphs. " + StoryAnswer;
 
     public const string OpeningInstructions =
-        "You write the opening of the second chapter of a professional report for accessibility and usability engineers on an accessibility test recording: the story of the user experience. " +
-        "You are given the participant's capabilities; the page visits, as the recorder derived them; the pages, as the first chapter names them; and the chapter's parts, one for each visit, which follow the opening. " +
+        "You write the opening of the chapter on the user experience of a professional report for accessibility and usability engineers on an accessibility test recording: the story of the user experience. " +
+        "You are given the participant's capabilities; the page visits, as the recorder derived them; the pages, as the chapter on the pages names them; " +
+        "the changes to the accessibility settings, the assistive technology, and the Magnifier's view before the first visit, found by the recorder, each with its references; " +
+        "and the chapter's parts, one for each visit, which follow the opening. " +
         "Each part's statements cite the evidence references they rest on, such as [E3]; the parts are inferences, not facts. " +
-        "Introduce the story: the site tested and who it appears to be for, the participant's capabilities as given, the assistive technology observed running, and the course of the session in brief, " +
-        "so that the parts that follow read as one story. Do not repeat the parts. " +
+        "Introduce the story: the site tested and who it appears to be for, the participant's capabilities as given, the assistive technology observed running, the changes before the first visit, and the course of the session in brief, " +
+        "so that the parts that follow read as one story. Do not repeat the parts. The settings at the start are given in the report's appendices; do not list them. " +
         "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
         ParticipantRules +
         "Answer in JSON with one section, \"opening\", a list of paragraphs. " + StoryAnswer;
+
+    public const string ExecutiveInstructions =
+        "You write the executive summary, the first chapter, of a professional report for accessibility and usability engineers on an accessibility test recording. " +
+        "The report records the participant's journey through a web site; it does not yet analyse the site's accessibility or usability, so give no findings and do not judge the site. " +
+        "You are given the participant's capabilities; the assistive technology at the start and the accessibility settings at the start, found by the recorder, each with whether it is at its default; " +
+        "the changes to them during the recording; the page visits and the pages; and the chapter on the user experience, which tells the journey. " +
+        "Each is given with the evidence references it rests on, such as [E3]; the chapter's statements are inferences, not facts. " +
+        "Say who the participant is, from the capabilities as given; the kind of assistive technology they used, from what was observed running and its settings; " +
+        "the significant accessibility settings in use, those not at their defaults, and their changes during the recording; and the site tested and the course of the session in brief. " +
+        "A setting whose default is unknown may still be significant, such as a larger text size or a contrast theme: name it with its value, and do not say whether it is the default. " +
+        "Do not list every setting, which the appendices give, and do not repeat the chapter. " +
+        "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
+        ParticipantRules +
+        "Answer in JSON with one section, \"summary\", a list of paragraphs, each a list of statements. " +
+        "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets +
+        "Write clean, readable prose for a professional report, in plain sentences without Markdown.";
     private readonly Func<string, string, CancellationToken, Task<(Recorder.Session.SessionPlaybackArchive Archive, RecordingFileDocuments Documents)>> _open;
 
     public RecordingSummaryVisionKind()
@@ -579,31 +625,48 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             var (pageInput, pageReferences) = PageChapterInput(collation, number, visitsTo.Select(seen => (seen.Visit, seen.Knowledge)).ToList());
             var pageStep = await context.RunStepAsync(
                 $"page-{number.ToString("D2", CultureInfo.InvariantCulture)}",
-                new ModelRequest(PageChapterTemplate, ChapterTemplateVersion, PageChapterInstructions, pageInput, [], PageChapterSections, pageReferences),
+                new ModelRequest(PageChapterTemplate, PageChapterTemplateVersion, PageChapterInstructions, pageInput, [], PageChapterSections, pageReferences),
                 cancellationToken).ConfigureAwait(false);
             chapterPages.Add(new PageChapter(number, byUrl.Key, visitsTo.Select(seen => seen.Visit.Title).LastOrDefault(title => title is { Length: > 0 }),
                 [.. visitsTo.Select(seen => seen.Visit.Visit.Number)], pageStep));
         }
 
-        // Chapter 2: the story, one part for each visit, then its opening.
+        // The settings at the start and their changes, read by the recorder,
+        // their records added to the evidence after every step before the
+        // story, so that those steps are given the same input as before
+        // (recording-summary.md, "The executive summary and the settings in
+        // use").
+        var settings = evidence.Settings(collation.Visits[0].Visit.Start.Time);
+        var settingReferences = RegisterSettings(register, settings);
+        var changesOf = SettingChangesByVisit(collation, settings);
+
+        // Chapter 3: the story, one part for each visit, then its opening.
         var parts = new Dictionary<int, VisitVision>();
         var storySoFar = new List<(VisitCollation Visit, AcceptedStep Step)>();
         foreach (var (visit, moments, leftOut, knowledge) in visitsSeen)
         {
             var section = chapterPages.First(pageOf => pageOf.Visits.Contains(visit.Visit.Number)).Number;
-            var (storyInput, storyReferences) = StoryInput(collation, visit, moments, leftOut, knowledge, section, storySoFar);
+            var (storyInput, storyReferences) = StoryInput(collation, visit, moments, leftOut, knowledge, section, storySoFar,
+                changesOf.GetValueOrDefault(visit.Visit.Number) ?? [], settingReferences);
             var story = await context.RunStepAsync(
                 $"{RecordingSummaryKind.VisitStepKey(visit)}-story",
-                new ModelRequest(StoryTemplate, ChapterTemplateVersion, StoryInstructions, storyInput, [], StorySections, storyReferences) { Forms = StoryForms },
+                new ModelRequest(StoryTemplate, StoryTemplateVersion, StoryInstructions, storyInput, [], StorySections, storyReferences) { Forms = StoryForms },
                 cancellationToken).ConfigureAwait(false);
             storySoFar.Add((visit, story));
             parts[visit.Visit.Number] = new VisitVision(moments, leftOut, knowledge, story);
         }
 
-        var (openingInput, openingReferences) = OpeningInput(collation, chapterPages, storySoFar);
+        var (openingInput, openingReferences) = OpeningInput(collation, chapterPages, storySoFar, changesOf.GetValueOrDefault(0) ?? [], settingReferences);
         var opening = await context.RunStepAsync(
             "story-opening",
-            new ModelRequest(OpeningTemplate, ChapterTemplateVersion, OpeningInstructions, openingInput, [], OpeningSections, openingReferences) { Forms = StoryForms },
+            new ModelRequest(OpeningTemplate, StoryTemplateVersion, OpeningInstructions, openingInput, [], OpeningSections, openingReferences) { Forms = StoryForms },
+            cancellationToken).ConfigureAwait(false);
+
+        // Chapter 1: the executive summary, written last.
+        var (executiveInput, executiveReferences) = ExecutiveInput(collation, chapterPages, opening, storySoFar, settings, settingReferences);
+        var executive = await context.RunStepAsync(
+            "executive-summary",
+            new ModelRequest(ExecutiveTemplate, ExecutiveTemplateVersion, ExecutiveInstructions, executiveInput, [], ExecutiveSections, executiveReferences),
             cancellationToken).ConfigureAwait(false);
 
         var recording = await context.Catalog.RecordingAsync(task.RecordingId, cancellationToken).ConfigureAwait(false);
@@ -615,7 +678,12 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             attempts,
             Limits,
             DateTime.UtcNow,
-            new VisionReportParts(parts, chapterPages, opening, pictures, Moments, summaryTask, ImageTokensPerRequest, context.ImagesFolder, context.MomentIndexFile, layersNotSent));
+            new VisionReportParts(parts, chapterPages, opening, pictures, Moments, summaryTask, ImageTokensPerRequest, context.ImagesFolder, context.MomentIndexFile, layersNotSent)
+            {
+                Executive = executive,
+                Settings = settings,
+                SettingReferences = settingReferences
+            });
         await RecordingSummaryKind.WriteReportAsync(context, session, FileName, report, cancellationToken).ConfigureAwait(false);
     }
 
@@ -921,7 +989,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     }
 
     /// <summary>
-    /// A page's request for chapter 1: its address and titles, the visits to
+    /// A page's request for chapter 2: its address and titles, the visits to
     /// it with what the recorder derived of them, and each visit's
     /// knowledge in layers, without the statements' numbers.
     /// </summary>
@@ -931,7 +999,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         var references = new HashSet<string>(StringComparer.Ordinal);
         var titles = visits.Select(seen => seen.Visit.Title).Where(title => title is { Length: > 0 }).Distinct(StringComparer.Ordinal).ToList();
         var input = new StringBuilder()
-            .Append(CultureInfo.InvariantCulture, $"Page {number} of the report's first chapter, derived by the recorder: {visits[0].Visit.Visit.Start.Url}")
+            .Append(CultureInfo.InvariantCulture, $"Page {number} of the report's chapter on the pages, derived by the recorder: {visits[0].Visit.Visit.Start.Url}")
             .Append(titles.Count == 0 ? ", with no title recorded" : ", titled " + string.Join(", then ", titles.Select(title => $"\"{title!.Replace("\"", "'", StringComparison.Ordinal)}\"")))
             .Append(CultureInfo.InvariantCulture, $". It was visited {visits.Count} {(visits.Count == 1 ? "time" : "times")}.\n");
         foreach (var (visit, knowledge) in visits)
@@ -946,9 +1014,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     }
 
     /// <summary>
-    /// A visit's request for its part of chapter 2: the capabilities, the
+    /// A visit's request for its part of chapter 3: the capabilities, the
     /// recorder's facts of the visit, its knowledge in layers, its moments
-    /// with their frames' and tiles' references, the section of chapter 1
+    /// with their frames' and tiles' references, the section of chapter 2
     /// that describes its page, and the story so far.
     /// </summary>
     internal static (string Input, HashSet<string> References) StoryInput(
@@ -958,11 +1026,13 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         int leftOut,
         Knowledge knowledge,
         int section,
-        IReadOnlyList<(VisitCollation Visit, AcceptedStep Step)> storySoFar)
+        IReadOnlyList<(VisitCollation Visit, AcceptedStep Step)> storySoFar,
+        IReadOnlyList<SettingChange>? changes = null,
+        IReadOnlyDictionary<string, string>? settingReferences = null)
     {
         var references = new HashSet<string>(RecordingSummaryKind.VisitReferences(collation, visit), StringComparer.Ordinal);
         var input = new StringBuilder(RecordingSummaryKind.VisitInput(collation, visit)).Append("\n\n")
-            .Append(CultureInfo.InvariantCulture, $"The visit's page is described in the report's first chapter, section 1.{section}.\n\n")
+            .Append(CultureInfo.InvariantCulture, $"The visit's page is described in the report's chapter on the pages, section 2.{section}.\n\n")
             .Append("The visit's knowledge, in layers. These are inferences, not facts:\n");
         knowledge.Append(input, references, withNumbers: false);
         input.Append(moments.Count == 0
@@ -996,6 +1066,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             input.Append(CultureInfo.InvariantCulture, $"{leftOut} more moments were left out to keep within the limit.\n");
         }
 
+        AppendChanges(input, "during the visit", changes ?? [], settingReferences, references);
         if (storySoFar.Count == 0)
         {
             input.Append("\nThe story so far: this is the first part.\n");
@@ -1015,12 +1086,14 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     /// <summary>
     /// Chapter 2's opening request: the capabilities, the visits, the pages
-    /// as chapter 1 names them, and the parts that follow.
+    /// as chapter 2 names them, and the parts that follow.
     /// </summary>
     internal static (string Input, HashSet<string> References) OpeningInput(
         RecordingCollation collation,
         IReadOnlyList<PageChapter> pages,
-        IReadOnlyList<(VisitCollation Visit, AcceptedStep Step)> parts)
+        IReadOnlyList<(VisitCollation Visit, AcceptedStep Step)> parts,
+        IReadOnlyList<SettingChange>? changes = null,
+        IReadOnlyDictionary<string, string>? settingReferences = null)
     {
         var references = new HashSet<string>(RecordingSummaryKind.CapabilityReferences(collation), StringComparer.Ordinal);
         var input = new StringBuilder()
@@ -1034,12 +1107,13 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                 .Append(".\n");
         }
 
-        input.Append("\nThe pages, as the first chapter names them:\n");
+        input.Append("\nThe pages, as the chapter on the pages names them:\n");
         foreach (var page in pages)
         {
-            input.Append(CultureInfo.InvariantCulture, $"Section 1.{page.Number}: {LayeredReport.PageTitle(page)}, visits {string.Join(", ", page.Visits)}.\n");
+            input.Append(CultureInfo.InvariantCulture, $"Section 2.{page.Number}: {LayeredReport.PageTitle(page)}, visits {string.Join(", ", page.Visits)}.\n");
         }
 
+        AppendChanges(input, "before the first visit", changes ?? [], settingReferences, references);
         input.Append("\nThe chapter's parts, which follow the opening. These are inferences, not facts:\n");
         foreach (var (visit, step) in parts)
         {
@@ -1048,6 +1122,141 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         }
 
         return (input.ToString(), references);
+    }
+
+    /// <summary>
+    /// The executive summary's request: the capabilities and the assistive
+    /// technology observed running, the settings at the start with whether
+    /// each is at its default, every change, the visits and pages, and the
+    /// chapter on the user experience.
+    /// </summary>
+    internal static (string Input, HashSet<string> References) ExecutiveInput(
+        RecordingCollation collation,
+        IReadOnlyList<PageChapter> pages,
+        AcceptedStep opening,
+        IReadOnlyList<(VisitCollation Visit, AcceptedStep Step)> parts,
+        RecordedSettings settings,
+        IReadOnlyDictionary<string, string> settingReferences)
+    {
+        var references = new HashSet<string>(RecordingSummaryKind.CapabilityReferences(collation), StringComparer.Ordinal);
+        var input = new StringBuilder()
+            .Append(string.Join('\n', collation.CapabilityLines)).Append("\n\n");
+        void Rows(string title, IReadOnlyList<SettingRow> rows, string? note)
+        {
+            input.Append(title).Append(":\n");
+            if (note is not null)
+            {
+                input.Append(note).Append('\n');
+            }
+
+            foreach (var row in rows)
+            {
+                var reference = settingReferences.GetValueOrDefault(row.Source.Key);
+                if (reference is not null)
+                {
+                    references.Add(reference);
+                }
+
+                input.Append(reference is null ? "" : $"[{reference}] ")
+                    .Append(row.Group).Append(", ").Append(row.Setting).Append(": ").Append(row.Value)
+                    .Append(" (").Append(LayeredReport.DefaultText(row)).Append(").\n");
+            }
+
+            input.Append('\n');
+        }
+
+        Rows("The assistive technology at the start, found by the recorder (the report's Appendix C)", settings.Assistive, settings.AssistiveNote);
+        Rows("The Windows settings at the start, found by the recorder (Appendix A)", settings.Windows, settings.WindowsNote);
+        Rows("The browser's settings at the start, and the values it sent to the first page visited, found by the recorder (Appendix B)", settings.Browser, settings.BrowserNote);
+        AppendChanges(input, "during the recording", settings.Changes, settingReferences, references);
+        input.Append("\nThe page visits, derived by the recorder:\n");
+        foreach (var (visit, _) in parts)
+        {
+            input.Append(CultureInfo.InvariantCulture,
+                $"Visit {visit.Visit.Number}, from {SummaryCollator.Time(visit.Visit.Start.Time)} to {SummaryCollator.Time(visit.Visit.End)}: {visit.Visit.Start.Url}")
+                .Append(visit.Title is { Length: > 0 } title ? $", titled \"{title.Replace("\"", "'", StringComparison.Ordinal)}\"" : ", with no title recorded")
+                .Append(".\n");
+        }
+
+        input.Append("\nThe pages, as the chapter on the pages names them:\n");
+        foreach (var page in pages)
+        {
+            input.Append(CultureInfo.InvariantCulture, $"Section 2.{page.Number}: {LayeredReport.PageTitle(page)}, visits {string.Join(", ", page.Visits)}.\n");
+        }
+
+        input.Append("\nThe chapter on the user experience. These are inferences, not facts:\nIts opening:\n");
+        AppendStory(input, opening, references);
+        foreach (var (visit, step) in parts)
+        {
+            input.Append(CultureInfo.InvariantCulture, $"The part for visit {visit.Visit.Number}:\n");
+            AppendStory(input, step, references);
+        }
+
+        return (input.ToString(), references);
+    }
+
+    /// <summary>
+    /// Adds each setting's record to the evidence, once for each record, in
+    /// the order of the appendices then the changes, and gives the
+    /// reference of each record by its key.
+    /// </summary>
+    internal static Dictionary<string, string> RegisterSettings(EvidenceRegister register, RecordedSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(register);
+        ArgumentNullException.ThrowIfNull(settings);
+        var references = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var source in settings.AllRows.Select(row => row.Source).Concat(settings.Changes.SelectMany(change => change.Sources)))
+        {
+            if (!references.ContainsKey(source.Key))
+            {
+                references[source.Key] = register.Add(source.Time, source.Text, source.EventId, source.Key);
+            }
+        }
+
+        return references;
+    }
+
+    /// <summary>
+    /// Each change by the visit it happens in, by its start: the last visit
+    /// started at or before it; 0 for a change before the first visit,
+    /// which the opening is given.
+    /// </summary>
+    internal static Dictionary<int, List<SettingChange>> SettingChangesByVisit(RecordingCollation collation, RecordedSettings settings)
+    {
+        var byVisit = new Dictionary<int, List<SettingChange>>();
+        foreach (var change in settings.Changes)
+        {
+            var visit = collation.Visits.LastOrDefault(item => item.Visit.Start.Time <= change.Time)?.Visit.Number ?? 0;
+            if (!byVisit.TryGetValue(visit, out var list))
+            {
+                list = [];
+                byVisit[visit] = list;
+            }
+
+            list.Add(change);
+        }
+
+        return byVisit;
+    }
+
+    // The changes as a request gives them, each beginning with its references.
+    private static void AppendChanges(
+        StringBuilder input, string when, IReadOnlyList<SettingChange> changes, IReadOnlyDictionary<string, string>? settingReferences, ISet<string> references)
+    {
+        input.Append(CultureInfo.InvariantCulture,
+            $"\nThe changes {when} to the accessibility settings, the assistive technology, and the Magnifier's view, found by the recorder:\n");
+        if (changes.Count == 0)
+        {
+            input.Append("None were recorded.\n");
+            return;
+        }
+
+        foreach (var change in changes)
+        {
+            var cited = change.Sources.Select(source => settingReferences?.GetValueOrDefault(source.Key)).OfType<string>().Distinct(StringComparer.Ordinal).ToList();
+            references.UnionWith(cited);
+            input.Append(string.Concat(cited.Select(reference => $"[{reference}] "))).Append(LayeredReport.ChangeText(change)).Append('\n');
+        }
     }
 
     // A part of the story as a later request gives it: each statement with

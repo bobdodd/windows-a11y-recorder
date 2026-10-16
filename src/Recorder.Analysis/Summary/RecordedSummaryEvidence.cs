@@ -104,6 +104,9 @@ public sealed class RecordedSummaryEvidence : ISummaryEvidence, IMomentEvidence
 
     public long Duration => _archive.DurationNanoseconds;
 
+    /// <summary>The settings, read from the same records the properties panel shows.</summary>
+    public RecordedSettings Settings(long? firstPageTime) => SettingsReader.Read(_archive, _documents.Index.Events, firstPageTime);
+
     public IReadOnlyList<NavigationCommit> Commits { get; }
 
     public IReadOnlyList<TimedFact> Keys { get; }

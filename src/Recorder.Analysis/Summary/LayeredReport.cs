@@ -7,12 +7,15 @@ namespace Recorder.Analysis.Summary;
 /// <summary>
 /// Writes the layered report, summary-with-vision.md, from the recorder's
 /// collation and the accepted, checked model output, never from the
-/// model's text as written: chapter 1, each page from every visit to it;
-/// chapter 2, the story of the user experience, its headings numbered and
-/// its pictures put in by the recorder from the forms the model gave. Each
+/// model's text as written: chapter 1, the executive summary; chapter 2,
+/// each page from every visit to it; chapter 3, the story of the user
+/// experience, its headings numbered and its pictures put in by the
+/// recorder from the forms the model gave; and the appendices, the
+/// settings at the start and every change, written by the recorder. Each
 /// statement ends with the references it cites, and the evidence list
 /// gives each cited reference's time and what it is. See
-/// docs/architecture/recording-summary.md, "The layered report".
+/// docs/architecture/recording-summary.md, "The layered report" and "The
+/// executive summary and the settings in use".
 /// </summary>
 public static class LayeredReport
 {
@@ -44,6 +47,32 @@ public static class LayeredReport
     {
         ArgumentNullException.ThrowIfNull(page);
         return page.Title is { Length: > 0 } title ? SummaryReport.OneLine(title) : page.Url;
+    }
+
+    /// <summary>Whether a setting is at its default, as the appendices and the executive summary's request say it.</summary>
+    public static string DefaultText(SettingRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        return row.Default switch
+        {
+            DefaultState.Default => "the default",
+            DefaultState.NotDefault => row.DefaultValue is { } value ? $"not the default, which is {value}" : "not the default",
+            DefaultState.NotASetting => "not a setting: a value read",
+            _ => "default unknown"
+        };
+    }
+
+    /// <summary>A change as the story's requests and Appendix D give it.</summary>
+    public static string ChangeText(SettingChange change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        var when = change.End is { } end
+            ? $"{SummaryCollator.Time(change.Time)} to {SummaryCollator.Time(end)}"
+            : SummaryCollator.Time(change.Time);
+        var what = change.End is not null
+            ? $"{change.Group}, {change.Setting}: the view moved from {change.Before} to {change.After}"
+            : $"{change.Group}, {change.Setting}: changed from {change.Before} to {change.After}";
+        return $"{when} {what}" + (change.Detail is { } detail ? $", {detail}" : "") + ".";
     }
 
     /// <summary>A picture's path from the report, in the task's folder under analysis, with spaces escaped.</summary>
@@ -125,7 +154,7 @@ public static class LayeredReport
                         }
 
                         counters[level - 1]++;
-                        builder.Append('#', level + 2).Append(" 2.").Append(string.Join('.', counters)).Append(' ').Append(text).Append("\n\n");
+                        builder.Append('#', level + 2).Append(" 3.").Append(string.Join('.', counters)).Append(' ').Append(text).Append("\n\n");
                     }
                     else if (form == RecordingSummaryVisionKind.Picture &&
                         claim.Evidence.Select(reference => parts.Pictures.GetValueOrDefault(reference)).FirstOrDefault(picture => picture is not null) is { } picture)
@@ -159,22 +188,33 @@ public static class LayeredReport
             SummaryReport.AppendInferredBy(builder, accepted, date);
         }
 
-        builder.Append("Every statement in the two chapters is a model's inference from the recorded evidence cited after it. Page visits and pages are derived by the recorder.\n\n");
+        builder.Append("Every statement in the three chapters is a model's inference from the recorded evidence cited after it. Page visits and pages are derived by the recorder, and the appendices are written by the recorder from the recorded settings, not by a model.\n\n");
         builder.Append(CultureInfo.InvariantCulture,
             $"The report is built in layers. Each visit's knowledge starts as layer 1, its description from the recorded data, in the summary of task {parts.SummaryTaskId:D}. ");
         builder.Append("At each moment of the visit the recorder chose, a model adds layer 2, what the captured frame of the screen shows, ");
         builder.Append("and layer 3, what the web page adds that the frame does not show, from the page as the recorder rebuilt it at that frame and pictured whole in tiles. ");
-        builder.Append("Chapter 1 describes each page from every visit to it, and chapter 2 tells the story of the user experience. ");
+        builder.Append("Chapter 1 is the executive summary, chapter 2 describes each page from every visit to it, and chapter 3 tells the story of the user experience. ");
+        builder.Append("Appendices A to C give the accessibility and assistive technology settings at the start, and Appendix D every change to them during the recording. ");
         builder.Append("A captured frame shows what was on the screen, not what the participant saw. ");
         builder.Append("A recreated page is the page as the recorder rebuilt it from the recorded evidence, not the page itself: what the recording lacks, such as an image, it lacks too. ");
         builder.Append(CultureInfo.InvariantCulture, $"Each moment's record, its frame and its tiles with the steps that describe them, is in {parts.MomentIndexFile}.\n\n");
 
         SummaryReport.AppendCapabilities(builder, collation, capabilities, citations);
 
-        builder.Append("## 1. The pages\n\n");
+        builder.Append("## 1. Executive summary\n\n");
+        if (parts.Executive is { } executive)
+        {
+            Claims(executive, "summary");
+        }
+        else
+        {
+            builder.Append("The model gave nothing for this part.\n\n");
+        }
+
+        builder.Append("## 2. The pages\n\n");
         foreach (var page in parts.Pages)
         {
-            builder.Append(CultureInfo.InvariantCulture, $"### 1.{page.Number} {PageTitle(page)}\n\n");
+            builder.Append(CultureInfo.InvariantCulture, $"### 2.{page.Number} {PageTitle(page)}\n\n");
             foreach (var number in page.Visits)
             {
                 var visit = collation.Visits.First(item => item.Visit.Number == number);
@@ -185,11 +225,11 @@ public static class LayeredReport
             }
 
             Claims(page.Step, "page");
-            builder.Append(CultureInfo.InvariantCulture, $"#### 1.{page.Number}.1 How the page changed\n\n");
+            builder.Append(CultureInfo.InvariantCulture, $"#### 2.{page.Number}.1 How the page changed\n\n");
             Claims(page.Step, "changes");
         }
 
-        builder.Append("## 2. The user experience\n\n");
+        builder.Append("## 3. The user experience\n\n");
         Story(parts.Opening, "opening");
         foreach (var visit in collation.Visits)
         {
@@ -199,6 +239,7 @@ public static class LayeredReport
             }
         }
 
+        AppendAppendices(builder, parts, citations);
         SummaryReport.AppendOtherWindows(builder, collation, citations);
         SummaryReport.AppendEvidence(builder, collation, citations);
         builder.Append("## How this was made\n\n");
@@ -207,9 +248,16 @@ public static class LayeredReport
             $"- Prompt templates: {RecordingSummaryVisionKind.MomentTemplate} version {RecordingSummaryVisionKind.MomentTemplateVersion} for each moment's captured frame, " +
             $"{RecordingSummaryVisionKind.PageTemplate} version {RecordingSummaryVisionKind.PageTemplateVersion} for each group of its page's tiles, " +
             $"{RecordingSummaryVisionKind.Layer2Template} and {RecordingSummaryVisionKind.Layer3Template} version {RecordingSummaryVisionKind.LayerTemplateVersion} for each moment's layers, " +
-            $"{RecordingSummaryVisionKind.PageChapterTemplate} version {RecordingSummaryVisionKind.ChapterTemplateVersion} for each page of chapter 1, " +
-            $"{RecordingSummaryVisionKind.StoryTemplate} version {RecordingSummaryVisionKind.ChapterTemplateVersion} for each visit's part of chapter 2, " +
-            $"and {RecordingSummaryVisionKind.OpeningTemplate} version {RecordingSummaryVisionKind.ChapterTemplateVersion} for its opening.\n");
+            $"{RecordingSummaryVisionKind.PageChapterTemplate} version {RecordingSummaryVisionKind.PageChapterTemplateVersion} for each page of chapter 2, " +
+            $"{RecordingSummaryVisionKind.StoryTemplate} version {RecordingSummaryVisionKind.StoryTemplateVersion} for each visit's part of chapter 3, " +
+            $"{RecordingSummaryVisionKind.OpeningTemplate} version {RecordingSummaryVisionKind.StoryTemplateVersion} for its opening, " +
+            $"and {RecordingSummaryVisionKind.ExecutiveTemplate} version {RecordingSummaryVisionKind.ExecutiveTemplateVersion} for chapter 1, the executive summary.\n");
+        builder.Append(
+            $"- The settings: read by the recorder from the records the player's properties panel shows, and the Magnifier's from each captured frame's reading. " +
+            $"A period of panning is the Magnifier's view moving at one level, each move less than {SummaryReport.Seconds(SettingsReader.MagnifierGapNanoseconds)} after the one before; " +
+            $"changes of its level less than {SummaryReport.Seconds(SettingsReader.MagnifierGapNanoseconds)} apart are one change. " +
+            "A Windows setting's default is known only where Microsoft documents it, the caret width's; a browser setting's is Chromium's own answer, recorded with it; " +
+            "an NVDA setting's is NVDA 2026.2's configuration specification, a setting not written in nvda.ini being at its default.\n");
         var moments = parts.Limits;
         builder.Append(CultureInfo.InvariantCulture,
             $"- Moment limits: {(moments.PerVisit is { } most ? $"{most} moments for each visit" : "no limit on the moments of a visit")}; moments less than {SummaryReport.Seconds(moments.MergeNanoseconds)} apart merged; " +
@@ -248,5 +296,68 @@ public static class LayeredReport
             : "- Layer 3 steps not sent, as every group of the moment's tiles was already in the visit's knowledge: " + string.Join(", ", layersNotSent) + ".\n");
         SummaryReport.AppendLimitsAndAttempts(builder, collation, limits, attempts);
         return builder.ToString();
+    }
+
+    // The appendices, written by the recorder: the settings at the start,
+    // A to C, each a table of setting, value, whether it is the default, and
+    // when it was read, citing its record; and D, every change.
+    private static void AppendAppendices(StringBuilder builder, VisionReportParts parts, ReportCitations citations)
+    {
+        var settings = parts.Settings;
+        string Cite(SettingSource source) =>
+            parts.SettingReferences.TryGetValue(source.Key, out var reference) ? citations.Refs([reference]).Trim() : "not in the evidence list";
+
+        void Table(string heading, string about, IReadOnlyList<SettingRow> rows, string? note)
+        {
+            builder.Append(heading).Append("\n\n").Append(about).Append("\n\n");
+            if (note is not null)
+            {
+                builder.Append(note).Append("\n\n");
+            }
+
+            if (rows.Count == 0)
+            {
+                return;
+            }
+
+            builder.Append("| Group | Setting | Value | Default | Read at | Evidence |\n| --- | --- | --- | --- | --- | --- |\n");
+            foreach (var row in rows)
+            {
+                builder.Append(
+                    $"| {SummaryReport.Cell(row.Group)} | {SummaryReport.Cell(row.Setting)} | {SummaryReport.Cell(row.Value)} | {SummaryReport.Cell(DefaultText(row))} | " +
+                    $"{(row.Source.Time is { } time ? SummaryCollator.Time(time) : "unknown")} | {Cite(row.Source)} |\n");
+            }
+
+            builder.Append('\n');
+        }
+
+        Table("## Appendix A. Windows settings at the start",
+            "The Windows accessibility and display settings as the recorder read them at the start of the recording. Microsoft documents the default of the caret width alone, so the other defaults are unknown.",
+            settings.Windows, settings.WindowsNote);
+        Table("## Appendix B. Browser settings at the start",
+            "The browser's settings as read when its profile was loaded, each with Chromium's own answer to whether it is the default, and the values the browser sent to the first page visited, which follow from the settings and are not settings themselves.",
+            settings.Browser, settings.BrowserNote);
+        Table("## Appendix C. Assistive technology at the start",
+            "The assistive technology the recorder watched for, as at the start of the recording; NVDA's settings as first read from its configuration folder, a setting not written in nvda.ini being at NVDA's default; and the Magnifier as read with the first captured frame.",
+            settings.Assistive, settings.AssistiveNote);
+
+        builder.Append("## Appendix D. Changes during the recording\n\n");
+        builder.Append("Every change the recorder found to the settings, the assistive technology, and the Magnifier's view, in order. The story tells each where it happened; this list keeps them all.\n\n");
+        if (settings.Changes.Count == 0)
+        {
+            builder.Append("No change was recorded.\n\n");
+            return;
+        }
+
+        builder.Append("| Time | Group | Setting | Before | After | More | Evidence |\n| --- | --- | --- | --- | --- | --- | --- |\n");
+        foreach (var change in settings.Changes)
+        {
+            var when = change.End is { } end ? $"{SummaryCollator.Time(change.Time)} to {SummaryCollator.Time(end)}" : SummaryCollator.Time(change.Time);
+            builder.Append(
+                $"| {when} | {SummaryReport.Cell(change.Group)} | {SummaryReport.Cell(change.Setting)} | {SummaryReport.Cell(change.Before)} | {SummaryReport.Cell(change.After)} | " +
+                $"{SummaryReport.Cell(change.Detail ?? "")} | {string.Join(' ', change.Sources.Select(Cite).Distinct(StringComparer.Ordinal))} |\n");
+        }
+
+        builder.Append('\n');
     }
 }

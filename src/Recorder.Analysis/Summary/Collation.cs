@@ -53,6 +53,13 @@ public interface ISummaryEvidence
 
     /// <summary>Page popups opening, such as a select list.</summary>
     IReadOnlyList<TimedFact> Popups { get; }
+
+    /// <summary>
+    /// The accessibility and assistive technology settings at the start and
+    /// their changes, for the layered report's appendices and story, given
+    /// the first page visit's start; none where they were not read.
+    /// </summary>
+    RecordedSettings Settings(long? firstPageTime) => RecordedSettings.None;
 }
 
 /// <summary>An entry of the evidence list: its reference, time, what it is, and its record.</summary>

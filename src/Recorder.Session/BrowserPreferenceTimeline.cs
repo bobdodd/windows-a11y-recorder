@@ -175,6 +175,34 @@ public sealed class BrowserPreferenceTimeline
     }
 
     /// <summary>
+    /// Whether a browser preference was at its default at a time, as
+    /// Chromium answered when it was read (its reading's <c>isDefault</c>,
+    /// from <c>PrefService</c>'s <c>IsDefaultValue</c>); null where the
+    /// recording does not hold it or the reading does not say.
+    /// </summary>
+    public bool? IsDefaultAt(string name, long time)
+    {
+        JsonElement? reading = _start.TryGetValue(name, out var startReading) ? startReading : null;
+        foreach (var change in _changes)
+        {
+            if (change.Time > time)
+            {
+                break;
+            }
+
+            if (change.Preference == name)
+            {
+                reading = change.Reading;
+            }
+        }
+
+        return reading is { ValueKind: JsonValueKind.Object } value && value.TryGetProperty("isDefault", out var isDefault) &&
+            isDefault.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? isDefault.GetBoolean()
+            : null;
+    }
+
+    /// <summary>
     /// The rows of the Browser and Sent to the page groups at a time. A
     /// recording without browser preference records has one row saying so.
     /// The number of rows is the same at every time of a recording.

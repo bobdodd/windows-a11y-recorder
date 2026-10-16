@@ -132,6 +132,30 @@ public sealed class WindowsPreferenceTimeline
         [.. _changes.Where(change => change.Setting == setting).Select(change => change.Time).Distinct()];
 
     /// <summary>
+    /// A setting's reading in effect at a time, {value, problem, ...}, from
+    /// its last change at or before it or the start; null where the
+    /// recording does not hold it.
+    /// </summary>
+    public JsonElement? ReadingAt(string setting, long time)
+    {
+        JsonElement? reading = _start.TryGetValue(setting, out var startReading) ? startReading : null;
+        foreach (var change in _changes)
+        {
+            if (change.Time > time)
+            {
+                break;
+            }
+
+            if (change.Setting == setting)
+            {
+                reading = change.Reading;
+            }
+        }
+
+        return reading;
+    }
+
+    /// <summary>
     /// The rows of the panel at a time: the Magnifier group from the frame
     /// shown, then each Windows setting from the most recent record at or
     /// before the time.

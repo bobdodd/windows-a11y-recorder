@@ -72,7 +72,11 @@ public sealed partial class RecordingSummaryTaskTests
                 return statement;
             }
 
-            if (body.Contains("\"elaborations\"", StringComparison.Ordinal))
+            if (body.Contains("You write the executive summary", StringComparison.Ordinal))
+            {
+                output["summary"] = new JsonArray(new JsonArray(Statement("A statement of the executive summary.", reference)));
+            }
+            else if (body.Contains("\"elaborations\"", StringComparison.Ordinal))
             {
                 var layer = body.Contains("what the web page adds", StringComparison.Ordinal) ? "layer 3" : "layer 2";
                 output["elaborations"] = new JsonArray(new JsonArray(Statement($"An elaboration from {layer}.", "K1", reference)));
@@ -311,7 +315,7 @@ public sealed partial class RecordingSummaryTaskTests
                 // is not sent, as they are already in the visit's knowledge.
                 "visit-0001-moment-02", "visit-0001-moment-02-layer-2",
                 "visit-0002-moment-01", "visit-0002-moment-01-layer-2", "visit-0002-moment-02", "visit-0002-moment-02-layer-2",
-                "page-01", "page-02", "visit-0001-story", "visit-0002-story", "story-opening"
+                "page-01", "page-02", "visit-0001-story", "visit-0002-story", "story-opening", "executive-summary"
             ],
             attempts.Select(row => (string)row["step_key"]!));
         Assert.All(attempts, row => Assert.Equal(AttemptOutcomes.Accepted, row["outcome"]));
@@ -325,18 +329,19 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Equal(
             [
                 RecordingSummaryVisionKind.PageChapterTemplate, RecordingSummaryVisionKind.PageChapterTemplate,
-                RecordingSummaryVisionKind.StoryTemplate, RecordingSummaryVisionKind.StoryTemplate, RecordingSummaryVisionKind.OpeningTemplate
+                RecordingSummaryVisionKind.StoryTemplate, RecordingSummaryVisionKind.StoryTemplate, RecordingSummaryVisionKind.OpeningTemplate,
+                RecordingSummaryVisionKind.ExecutiveTemplate
             ],
-            attempts.TakeLast(5).Select(row => (string)row["prompt_template"]!));
+            attempts.TakeLast(6).Select(row => (string)row["prompt_template"]!));
 
         // Each frame's request carries its picture, and each group of tiles
         // as many tiles of 841 image tokens as fit 4,096: four, then one.
         // No layer or chapter request carries a picture.
         var bodies = endpoint.Bodies.Skip(3).ToList();
-        Assert.Equal(16, bodies.Count);
+        Assert.Equal(17, bodies.Count);
         var picture = "data:image/png;base64," + Convert.ToBase64String(FramePicture);
         int Pictures(string body) => (body.Length - body.Replace(picture, "", StringComparison.Ordinal).Length) / picture.Length;
-        Assert.Equal([1, 4, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0], bodies.Select(Pictures));
+        Assert.Equal([1, 4, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0], bodies.Select(Pictures));
         var tiles = Input(bodies[1]);
         Assert.Contains("This is group 1 of 2 of the tiles.", tiles, StringComparison.Ordinal);
         Assert.DoesNotContain(", file ", tiles, StringComparison.Ordinal);
@@ -368,11 +373,12 @@ public sealed partial class RecordingSummaryTaskTests
         // Chapter 1's pages are given the knowledge without numbers, and
         // the story its visit's facts, knowledge, moments, and section.
         var page = Input(bodies[11]);
-        Assert.Contains("Page 1 of the report's first chapter, derived by the recorder:", page, StringComparison.Ordinal);
+        Assert.Contains("Page 1 of the report's chapter on the pages, derived by the recorder:", page, StringComparison.Ordinal);
         Assert.DoesNotContain("[K", page, StringComparison.Ordinal);
         Assert.Contains("(layer 2, the captured frame at moment 1, elaborating the statement before it, inferred) An elaboration from layer 2.", page, StringComparison.Ordinal);
         var story = Input(bodies[13]);
-        Assert.Contains("The visit's page is described in the report's first chapter, section 1.1.", story, StringComparison.Ordinal);
+        Assert.Contains("The visit's page is described in the report's chapter on the pages, section 2.1.", story, StringComparison.Ordinal);
+        Assert.Contains("The changes during the visit to the accessibility settings, the assistive technology, and the Magnifier's view, found by the recorder:\nNone were recorded.\n", story, StringComparison.Ordinal);
         Assert.Matches(@"Moment 1, at 00:00:02\.500: the captured frame \[E\d+\]; the page as the recorder rebuilt it, in tiles: tile 1 \[E\d+\], CSS pixels 0 to 925; .*tile 3 \[E\d+\], CSS pixels 1850 to 2775, on the screen;", story);
         Assert.Contains("The story so far: this is the first part.", story, StringComparison.Ordinal);
         Assert.Contains("\"form\"", bodies[13], StringComparison.Ordinal);
@@ -380,7 +386,15 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Contains("the page was not recreated", secondStory, StringComparison.Ordinal);
         Assert.Contains("The part for visit 1:\n  (heading-1) A heading of the story.", secondStory, StringComparison.Ordinal);
         Assert.Contains("(picture) A picture of the story.", secondStory, StringComparison.Ordinal);
-        Assert.Contains("Section 1.2:", Input(bodies[15]), StringComparison.Ordinal);
+        Assert.Contains("Section 2.2:", Input(bodies[15]), StringComparison.Ordinal);
+
+        // The executive summary is given the settings, the changes, and the
+        // chapter on the user experience; the stand-in recording has no
+        // settings records, so each part says so.
+        var executive = Input(bodies[16]);
+        Assert.Contains("The Windows settings at the start, found by the recorder (Appendix A):\nThe recording holds no record of the Windows settings, so they are unknown.\n", executive, StringComparison.Ordinal);
+        Assert.Contains("Its opening:\n  (heading-1) A heading of the opening.", executive, StringComparison.Ordinal);
+        Assert.Contains("The part for visit 2:\n  (heading-1) A heading of the story.", executive, StringComparison.Ordinal);
 
         var report = Assert.Single(await catalog.ReportsAsync(vision, Token));
         Assert.Equal(RecordingSummaryVisionKind.FileName, report.FileName);
@@ -388,14 +402,21 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.StartsWith($"# Report of recording {Path.GetFileName(_session)}", text, StringComparison.Ordinal);
         Assert.Contains($"in the summary of task {summary:D}", text, StringComparison.Ordinal);
         Assert.Contains($"is in analysis/{vision:D}/moments.json.", text, StringComparison.Ordinal);
-        Assert.Contains("## 1. The pages\n\n### 1.1 ", text, StringComparison.Ordinal);
-        Assert.Matches(@"#### 1\.1\.1 How the page changed\n\nA statement about changes\. \[E\d+\]\n\n### 1\.2 ", text);
+        Assert.Matches(@"## 1\. Executive summary\n\nA statement of the executive summary\. \[E\d+\]\n\n## 2\. The pages\n\n### 2\.1 ", text);
+        Assert.Matches(@"#### 2\.1\.1 How the page changed\n\nA statement about changes\. \[E\d+\]\n\n### 2\.2 ", text);
 
         // Chapter 2: the opening and each visit's part, the headings
         // numbered on from one to the next, the sentences between them one
         // paragraph, and each picture put in from its frame's file.
-        Assert.Contains("## 2. The user experience\n\n### 2.1 A heading of the opening.\n\n", text, StringComparison.Ordinal);
-        Assert.Matches(@"### 2\.2 A heading of the story\.\n\nA sentence of the story\. \[E\d+\]\n\n!\[Figure 1\. A picture of the story\.\]\(\.\./\.\./frames/desktop/\d+\.png\)\n\nFigure 1\. A picture of the story\. \[E\d+\]\n\n#### 2\.2\.1 A smaller heading of the story\.\n\nAnother sentence of the story\. \[E\d+\]\n\n### 2\.3 A heading of the story\.", text);
+        Assert.Contains("## 3. The user experience\n\n### 3.1 A heading of the opening.\n\n", text, StringComparison.Ordinal);
+        Assert.Matches(@"### 3\.2 A heading of the story\.\n\nA sentence of the story\. \[E\d+\]\n\n!\[Figure 1\. A picture of the story\.\]\(\.\./\.\./frames/desktop/\d+\.png\)\n\nFigure 1\. A picture of the story\. \[E\d+\]\n\n#### 3\.2\.1 A smaller heading of the story\.\n\nAnother sentence of the story\. \[E\d+\]\n\n### 3\.3 A heading of the story\.", text);
+
+        // The appendices, which the stand-in recording has no records for,
+        // and the changes, of which there are none.
+        Assert.Contains("## Appendix A. Windows settings at the start\n\n", text, StringComparison.Ordinal);
+        Assert.Contains("## Appendix C. Assistive technology at the start\n\n", text, StringComparison.Ordinal);
+        Assert.Contains("## Appendix D. Changes during the recording\n\n", text, StringComparison.Ordinal);
+        Assert.Contains("No change was recorded.\n\n", text, StringComparison.Ordinal);
         Assert.Contains("Figure 2. A picture of the story.", text, StringComparison.Ordinal);
         Assert.DoesNotContain("[K", text, StringComparison.Ordinal);
         Assert.Contains($"{RecordingSummaryVisionKind.Layer2Template} and {RecordingSummaryVisionKind.Layer3Template} version 1 for each moment's layers", text, StringComparison.Ordinal);
@@ -478,14 +499,16 @@ public sealed partial class RecordingSummaryTaskTests
     [Fact]
     public void Every_template_shows_a_statement_with_its_text_before_its_kind()
     {
-        Assert.Equal((4, 3, 4, 1, 1), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
-            RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.LayerTemplateVersion, RecordingSummaryVisionKind.ChapterTemplateVersion));
+        Assert.Equal((4, 3, 4, 1, 2, 2, 1), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+            RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.LayerTemplateVersion, RecordingSummaryVisionKind.PageChapterTemplateVersion,
+            RecordingSummaryVisionKind.StoryTemplateVersion, RecordingSummaryVisionKind.ExecutiveTemplateVersion));
         foreach (var instructions in new[]
                  {
                      RecordingSummaryKind.VisitInstructions, RecordingSummaryKind.RecordingInstructions,
                      RecordingSummaryVisionKind.MomentInstructions, RecordingSummaryVisionKind.PageInstructions,
                      RecordingSummaryVisionKind.Layer2Instructions, RecordingSummaryVisionKind.Layer3Instructions, RecordingSummaryVisionKind.PageChapterInstructions,
                      RecordingSummaryVisionKind.StoryInstructions, RecordingSummaryVisionKind.OpeningInstructions,
+                     RecordingSummaryVisionKind.ExecutiveInstructions,
                  })
         {
             Assert.Contains("\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]}", instructions, StringComparison.Ordinal);
@@ -503,7 +526,7 @@ public sealed partial class RecordingSummaryTaskTests
     public async Task Vision_run_again_after_failing_at_a_visit_restarts_there_with_the_same_request_and_run_again_once_done_sends_nothing()
     {
         var (catalog, summary, first) = await QueueBothAsync();
-        const string VisitStart = "You write one part of the second chapter";
+        const string VisitStart = "You write one part of the chapter on the user experience";
         var refusing = VisionEndpoint();
         var answer = refusing.Answer;
         refusing.Answer = (profile, body, cancellationToken) => body.Contains(VisitStart, StringComparison.Ordinal)
@@ -522,7 +545,7 @@ public sealed partial class RecordingSummaryTaskTests
 
         Assert.Equal((AnalysisTaskStates.Done, (string?)null), await StateAsync(second));
         var sent = again.Bodies.ToList();
-        Assert.Equal(3, sent.Count);
+        Assert.Equal(4, sent.Count);
         Assert.Equal(refused, sent[0]);
         Assert.DoesNotContain(sent, body => body.Contains("Moment 1 of the visit", StringComparison.Ordinal) && body.Contains("Page visit 1,", StringComparison.Ordinal));
         var visitOne = await RowsAsync(
@@ -549,7 +572,8 @@ public sealed partial class RecordingSummaryTaskTests
                  {
                      RecordingSummaryVisionKind.MomentInstructions, RecordingSummaryVisionKind.Layer2Instructions,
                      RecordingSummaryVisionKind.Layer3Instructions, RecordingSummaryVisionKind.PageChapterInstructions,
-                     RecordingSummaryVisionKind.StoryInstructions, RecordingSummaryVisionKind.OpeningInstructions
+                     RecordingSummaryVisionKind.StoryInstructions, RecordingSummaryVisionKind.OpeningInstructions,
+                     RecordingSummaryVisionKind.ExecutiveInstructions
                  })
         {
             Assert.DoesNotContain(RecordingSummaryVisionKind.ItemNamed, instructions, StringComparison.Ordinal);

@@ -1140,7 +1140,7 @@ successfully (owner). Still to be worked on, and left for later by the
 owner the same day: chapter 2's prose, which still has "giant paragraphs
 of text that are unreadable" (owner).
 
-### The executive summary and the settings in use (proposed)
+### The executive summary and the settings in use (built)
 
 Asked for by the owner on 2026-10-16, before the other planned work
 ([outstanding work](analysis-outstanding-work.md), "Planned work for the
@@ -1183,24 +1183,115 @@ Proposed, to be agreed:
   every step already accepted before the story, is unchanged, so a run
   again reuses them.
 
-Questions to settle:
+The owner's answers, 2026-10-16:
 
-1. **What the executive summary holds.** Proposed: what was tested and
-   by whom (the site, the participant's capabilities, the assistive
-   technology and settings); the main findings, the barriers first, then
-   what worked; and what the recording cannot show. Should the findings
-   be ranked by severity, or mapped to WCAG success criteria, or neither,
-   for now?
-2. **Which settings the appendices list.** Every setting recorded, as the
-   panel shows them, or only those not at their default? The recorder
-   knows NVDA's defaults; whether it knows every Windows and browser
-   setting's default is unknown until checked.
-3. **The changes not told in the story.** A model may leave a change out.
-   Should the recorder also list every change in an appendix, so that
-   none is lost, or are the changes in the story only?
-4. **The Magnifier's panning.** It is recorded at every frame that pans.
-   Proposed: its level, and its being turned on or off, are changes; its
-   panning is not listed as a change.
+1. **What the executive summary holds.** Not findings, ranked or mapped to
+   WCAG, "not yet. Currently we are recording the basic user journey the
+   accessibility and usability analysis is not yet there. We should be
+   talking about the user and the kind of assistive tech they are using
+   and significant accessibility settings chosen by them."
+2. **Which settings the appendices list.** "Probably all of them, but
+   indicate which are default settings."
+3. **An appendix of the changes.** "Yes, we should probably have an
+   appendix for that too."
+4. **The Magnifier's position.** "No, position is important. It says what
+   the user was looking at, or at least what was actually on screen, but
+   it doesn't need to be pixel by pixel. We should identify periods of
+   panning and record their start and end locations and maximum extent
+   left, right, top, bottom."
+
+As agreed, to be built:
+
+- **The executive summary** says who the participant is, from the
+  capabilities as given; the assistive technology in use, from what was
+  observed running; the accessibility settings not at their defaults, and
+  their changes; and the site and the course of the session in brief. It
+  gives no findings, and does not judge the accessibility or usability of
+  the site, which the report does not yet analyse. Its template is
+  `recording-summary-vision-executive-summary`, version 1, its one section
+  `summary`, sentences only.
+- **Four appendices,** each a table written by the recorder: A, the
+  Windows settings at the start; B, the browser's settings at the start,
+  and the values sent to the first page visited; C, the assistive
+  technology at the start: each product's rows of the properties panel,
+  NVDA's settings as read from its configuration, its profiles, profile
+  triggers, and custom key commands, and the Magnifier's level, the part
+  of the screen it showed, and its color effect, from the first captured
+  frame; and D, every change during the recording.
+- **Which settings are at their defaults.** Each row says whether its
+  value is the default, is not the default, or that its default is
+  unknown, or that it is not a setting (the values sent to the page, a
+  product running, and the Magnifier's view, which are read, not chosen):
+  - Windows: Microsoft documents a default for one of the 27 settings
+    recorded, the caret width, "The default and minimum value is 1"
+    ([SystemParametersInfoW](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow),
+    `SPI_SETCARETWIDTH`); the others' defaults are unknown, and the
+    appendix says so, as Microsoft does not document them (for example,
+    [UISettings.TextScaleFactor](https://learn.microsoft.com/en-us/uwp/api/windows.ui.viewmanagement.uisettings.textscalefactor)
+    gives only its range, "The value ranges from 1 to 2.25").
+  - The browser: Chromium's own answer, recorded with each setting
+    (`isDefault`, from `PrefService`'s `IsDefaultValue`), as the panel
+    shows it.
+  - NVDA: a setting not written in `nvda.ini` is NVDA's default; one
+    written is compared with the default in NVDA 2026.2's configuration
+    specification
+    ([configSpec.py](https://raw.githubusercontent.com/nvaccess/nvda/release-2026.2/source/config/configSpec.py)).
+- **The changes,** each found by the recorder with its time, its value
+  before and after, and its reference: a Windows setting's; a browser
+  setting's, and the default zoom's; a value sent to the page again while
+  the same page is shown; a product starting or exiting, and NVDA's
+  settings that differ when it starts again; and the Magnifier's level,
+  its color effect, and its periods of panning.
+- **Periods of panning.** A period of panning is the Magnifier's view
+  moving at one level, each move less than 1 second after the one before;
+  a level change in less than 1 second is one change, from the level
+  before to the level after. Each period is given with its start and end
+  times, the part of the screen shown at its start and at its end, and
+  the furthest it reached left, right, top, and bottom, in the screen's
+  pixels, from the Magnifier's readings with every frame of the period.
+  The 1 second is the recorder's choice, stated in the report, to be
+  changed if it does not suit.
+- **Where the changes go.** Each change is given to the story's part for
+  the visit it happens in, or to the opening when before the first visit,
+  as recorder facts with their references, with the instruction to tell
+  each where it happened and what followed it as far as the evidence
+  shows; and all are in Appendix D, so that none is lost if the story
+  leaves one out.
+- **References.** Each record read is one reference, which every row read
+  from it cites: the Windows settings at the start, the browser's, the
+  values first sent to the page, NVDA's start and its settings record;
+  the Magnifier's rows cite the first captured frame. They are added to
+  the evidence after the pages' steps, so every step before the story is
+  given the same input as before and a run again reuses it.
+- **Templates.** The story and opening templates go to version 2, given
+  the changes; the page chapter template goes to version 2 as well, its
+  instructions naming the chapters by what they are rather than by
+  number, so a run again sends each page's step once more.
+
+As built, 2026-10-16:
+
+- `SettingsReader` (`src/Recorder.Analysis/Summary/SettingsInUse.cs`)
+  reads the rows and the changes from the archive's timelines, the same
+  ones the player's properties panel shows, and the records' events from
+  the playback index, which keeps the settings channels; the archive's own
+  list of events is empty when it is read from the database or a
+  recording file, so it is not used.
+- The executive summary's step, `executive-summary`, is sent after the
+  story's opening. It is given the capabilities, the settings at the
+  start as Appendices A to C give them, each row with whether it is the
+  default, the changes, the page visits and the pages' titles, and the story's
+  statements with their references.
+- The default zoom is at its default when no default is set or it is
+  100 percent, the zoom map's starting level.
+- NVDA's settings not read, as when its configuration folder could not be
+  found, are given as "not read" with the reason recorded, their defaults
+  unknown.
+- A Magnifier frame's reference uses the same key as the moments'
+  frames, `frame:` and its time, so one frame has one reference.
+- The report's "How this was made" states the 1 second of the panning
+  periods and where each kind of default comes from.
+- Tested at the unit level (`SettingsReaderTests`) and through the task
+  with a stand-in model (`RecordingSummaryVisionTaskTests`).
 
 ### The recreated page at the recorded viewport and scroll
 
