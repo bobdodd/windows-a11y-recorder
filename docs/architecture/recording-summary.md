@@ -1293,7 +1293,7 @@ As built, 2026-10-16:
 - Tested at the unit level (`SettingsReaderTests`) and through the task
   with a stand-in model (`RecordingSummaryVisionTaskTests`).
 
-### The report's structure and its paragraphs (proposed)
+### The report's structure and its paragraphs (built)
 
 Asked for by the owner on 2026-10-16, after the executive summary and the
 appendices were built: "Appendices are always the last sections of a
@@ -1349,6 +1349,67 @@ Proposed, to be agreed:
 - **What a run again sends.** The page, story, opening, and executive
   templates change version, so their steps are sent again; every moment's
   step is reused.
+
+The owner's answers, 2026-10-16:
+
+1. **The participant's capabilities:** a new chapter 2, "The
+   participant", so that the chapters are 1, the executive summary; 2,
+   the participant; 3, the pages; and 4, the user experience.
+2. **A paragraph:** one topic each, a new paragraph for each new topic,
+   with no limit on its sentences.
+3. **Lists:** in the story, its opening, and the executive summary only;
+   the pages stay prose, their template gaining the paragraph rule alone.
+4. **The stage 1 report:** unchanged. "Stage 1, if we are generating it
+   still, would only be as input to stage 2, so it would be structured to
+   support the model's understanding. Do we really need it though? Even
+   though we build by layer, I expect a single final report to the user,
+   not ones for the intermediate layers. The UI will eventually not show
+   the intermediate layers anyway. The user will select "Describe user
+   journey" from a menu and the analysis and final report will run. What
+   we have now is for development." Recorded in
+   [outstanding work](analysis-outstanding-work.md), "Planned work for
+   the report".
+
+As agreed, to be built:
+
+- **Under the title,** who inferred the report and when, only.
+- **The chapters:** 1, the executive summary; 2, the participant, the
+  capabilities as given and the assistive technology observed running;
+  3, the pages, headed 3.N and 3.N.1, the visits to each page derived by
+  the recorder as a list; 4, the user experience, headed 4.N.
+- **The appendices, last:** A to D, the settings and their changes; E,
+  other windows; F, the evidence; G, how this was made, in numbered
+  subsections: G.1, how the report is built, the introduction as a list;
+  G.2, the model; G.3, the prompt templates, one item each; G.4, the
+  settings; G.5, the moments and their pictures; G.6, the limits, the
+  steps reused, and the attempts. The reading view finds the evidence
+  list under "Appendix F. Evidence".
+- **The forms:** `bullet` and `numbered` added to the story's and the
+  opening's forms; the executive summary given forms, `sentence`,
+  `bullet`, and `numbered`. Consecutive items of one form are one list;
+  the recorder numbers a numbered list from 1, and the reading view shows
+  each numbered item with its number.
+- **The templates' versions:** the page chapter 3, the story and its
+  opening 3, and the executive summary 2.
+
+As built, 2026-10-16:
+
+- The paragraph rule is one sentence, `ParagraphRule`, in the page
+  chapter's, the story's, the opening's, and the executive summary's
+  templates; the list forms are `ListForms`, in the last three only.
+- The executive summary is written as the story is, in its forms, without
+  headings. A list ends at a statement of another form or at the end of
+  the model's paragraph.
+- Under the title, the line of who inferred the report and when ends
+  "How the report was made, and what its statements rest on, is in
+  Appendix G."
+- Appendix C's introduction is a list of what it holds; the groups of
+  tiles not sent, in G.5, are a list, one item for each group.
+- The reading view shows a numbered item as its number and its text, and
+  reads the evidence list under "Evidence" or a level 2 heading
+  "Appendix" ending ". Evidence".
+- Stage 1's report is unchanged; the shared parts take their heading as
+  a parameter, stage 1's being the headings as before.
 
 ### The recreated page at the recorded viewport and scroll
 

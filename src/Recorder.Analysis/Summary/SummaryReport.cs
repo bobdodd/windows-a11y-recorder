@@ -145,9 +145,10 @@ public static class SummaryReport
     }
 
     /// <summary>The participant's capabilities, as given to the model, and the assistive technology observed running.</summary>
-    internal static void AppendCapabilities(StringBuilder builder, RecordingCollation collation, ParticipantCapabilities capabilities, ReportCitations citations)
+    internal static void AppendCapabilities(
+        StringBuilder builder, RecordingCollation collation, ParticipantCapabilities capabilities, ReportCitations citations, string heading = "## The participant's capabilities")
     {
-        builder.Append("## The participant's capabilities\n\n");
+        builder.Append(heading).Append("\n\n");
         if (capabilities.Description is { Length: > 0 } description)
         {
             var written = capabilities.WrittenUtc?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "an unrecorded date";
@@ -199,9 +200,9 @@ public static class SummaryReport
         }
     }
 
-    internal static void AppendOtherWindows(StringBuilder builder, RecordingCollation collation, ReportCitations citations)
+    internal static void AppendOtherWindows(StringBuilder builder, RecordingCollation collation, ReportCitations citations, string heading = "## Other windows")
     {
-        builder.Append("## Other windows\n\n");
+        builder.Append(heading).Append("\n\n");
         if (collation.OtherWindows.Count == 0)
         {
             builder.Append("No other program's window was recorded in front.\n\n");
@@ -219,9 +220,9 @@ public static class SummaryReport
     }
 
     /// <summary>The evidence list: each reference cited, with its time and what it is.</summary>
-    internal static void AppendEvidence(StringBuilder builder, RecordingCollation collation, ReportCitations citations)
+    internal static void AppendEvidence(StringBuilder builder, RecordingCollation collation, ReportCitations citations, string heading = "## Evidence")
     {
-        builder.Append("## Evidence\n\n");
+        builder.Append(heading).Append("\n\n");
         builder.Append("| Ref | Time | Evidence |\n| --- | --- | --- |\n");
         foreach (var number in citations.Cited)
         {

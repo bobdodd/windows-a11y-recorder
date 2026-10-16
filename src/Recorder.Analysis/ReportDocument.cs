@@ -10,6 +10,7 @@ public enum ReportBlockKind
     Heading,
     Paragraph,
     ListItem,
+    NumberedItem,
     Quote,
     Table,
     Image
@@ -17,7 +18,8 @@ public enum ReportBlockKind
 
 /// <summary>
 /// A block of a report as the reading view shows it: its text, with the
-/// references it cites in the order cited; for a heading, its level; for a
+/// references it cites in the order cited; for a heading, its level; for an
+/// item of a numbered list, its number in its Level; for a
 /// table, its rows of cells, the first row its header; for a picture, its
 /// text the picture's description and its source the picture's path as
 /// written, relative to the report's folder, with escapes undone.
@@ -64,6 +66,10 @@ public sealed partial class ReportDocument
     // A picture on a line of its own: ![description](path).
     [GeneratedRegex(@"^!\[([^\]]*)\]\(([^)\s]+)\)$")]
     private static partial Regex ImagePattern();
+
+    // An item of a numbered list, as the recorder numbers it: "1. text".
+    [GeneratedRegex(@"^(\d{1,3})\. (.+)$")]
+    private static partial Regex NumberedPattern();
 
     /// <summary>The references a text cites, each once, in the order first cited.</summary>
     public static IReadOnlyList<string> ReferencesIn(string text) =>
@@ -155,6 +161,15 @@ public sealed partial class ReportDocument
                 continue;
             }
 
+            if (NumberedPattern().Match(line) is { Success: true } numbered)
+            {
+                EndParagraph();
+                var text = numbered.Groups[2].Value.Trim();
+                blocks.Add(new ReportBlock(ReportBlockKind.NumberedItem,
+                    int.Parse(numbered.Groups[1].Value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture), text, ReferencesIn(text), []));
+                continue;
+            }
+
             if (line.StartsWith('>'))
             {
                 EndParagraph();
@@ -188,11 +203,13 @@ public sealed partial class ReportDocument
         return new ReportDocument(blocks, EvidenceOf(blocks));
     }
 
-    // The table under the Evidence heading: Ref, Time, Evidence.
+    // The table under the evidence list's heading, "Evidence", or in the
+    // layered report "Appendix F. Evidence": Ref, Time, Evidence.
     private static Dictionary<string, ReportEvidence> EvidenceOf(List<ReportBlock> blocks)
     {
         var evidence = new Dictionary<string, ReportEvidence>(StringComparer.Ordinal);
-        var heading = blocks.FindIndex(block => block.Kind == ReportBlockKind.Heading && block.Level == 2 && block.Text == "Evidence");
+        var heading = blocks.FindIndex(block => block.Kind == ReportBlockKind.Heading && block.Level == 2 &&
+            (block.Text == "Evidence" || (block.Text.StartsWith("Appendix ", StringComparison.Ordinal) && block.Text.EndsWith(". Evidence", StringComparison.Ordinal))));
         if (heading < 0)
         {
             return evidence;

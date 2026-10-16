@@ -389,10 +389,20 @@ before it is built.
 5. **A better test recording,** made by the owner: more than one page,
    and at least one session marker, as the recordings so far have none
    and the cnib.ca recording has one page.
-6. **Chapter 2's prose** (the story, chapter 3 once the executive summary
-   is added): paragraphs too long to read (owner, 2026-10-16).
+6. **The report's prose:** paragraphs too long to read (owner,
+   2026-10-16). Being built with the report's structure: see
+   [recording summary](recording-summary.md), "The report's structure and
+   its paragraphs".
 7. **Cut-outs of single regions** in the story's pictures, once it is
    checked whether the recording gives each element's place.
 8. **Tables and graphs** in the story, which its forms do not yet allow.
 9. **Stage 1's session step,** which repeats the visits' descriptions.
 10. **The unique view proposal:** when two visits show the same view.
+11. **One report for the user** (owner, 2026-10-16): "I expect a single
+    final report to the user, not ones for the intermediate layers. The UI
+    will eventually not show the intermediate layers anyway. The user will
+    select "Describe user journey" from a menu and the analysis and final
+    report will run. What we have now is for development." Stage 1's
+    report, if stage 1 is still run, is then input to stage 2 only,
+    structured for the model's understanding; whether it is needed at all
+    is open.

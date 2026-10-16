@@ -114,16 +114,36 @@ public static class LayeredReport
             }
         }
 
-        // Chapter 2's statements in their forms: each heading numbered by
-        // the recorder, a heading with no heading above it raised a level;
-        // the sentences of a paragraph between headings and pictures one
-        // paragraph; each picture put in, numbered, with its caption.
+        // Statements in their forms, in chapter 1 and chapter 4: each heading
+        // numbered by the recorder, a heading with no heading above it
+        // raised a level; the sentences of a paragraph between headings,
+        // lists, and pictures one paragraph; consecutive items of a list one
+        // list, a numbered list numbered from 1; each picture put in,
+        // numbered, with its caption.
         var counters = new List<int>();
         var figures = 0;
         void Story(AcceptedStep step, string section)
         {
             var claims = step.Claims.Where(claim => claim.Section == section).ToList();
+            if (claims.Count == 0)
+            {
+                builder.Append("The model gave nothing for this part.\n\n");
+                return;
+            }
+
             var sentences = new List<string>();
+            string? list = null;
+            var items = 0;
+            void EndList()
+            {
+                if (list is not null)
+                {
+                    builder.Append('\n');
+                    list = null;
+                    items = 0;
+                }
+            }
+
             void Flush()
             {
                 if (sentences.Count > 0)
@@ -131,6 +151,8 @@ public static class LayeredReport
                     builder.Append(string.Join(' ', sentences)).Append("\n\n");
                     sentences.Clear();
                 }
+
+                EndList();
             }
 
             foreach (var paragraph in claims.GroupBy(claim => claim.Paragraph).OrderBy(group => group.Key))
@@ -154,7 +176,19 @@ public static class LayeredReport
                         }
 
                         counters[level - 1]++;
-                        builder.Append('#', level + 2).Append(" 3.").Append(string.Join('.', counters)).Append(' ').Append(text).Append("\n\n");
+                        builder.Append('#', level + 2).Append(" 4.").Append(string.Join('.', counters)).Append(' ').Append(text).Append("\n\n");
+                    }
+                    else if (form is RecordingSummaryVisionKind.Bullet or RecordingSummaryVisionKind.Numbered)
+                    {
+                        if (sentences.Count > 0 || list != form)
+                        {
+                            Flush();
+                        }
+
+                        list = form;
+                        items++;
+                        builder.Append(form == RecordingSummaryVisionKind.Bullet ? "- " : items.ToString(CultureInfo.InvariantCulture) + ". ")
+                            .Append(text).Append(Refs(claim.Evidence)).Append('\n');
                     }
                     else if (form == RecordingSummaryVisionKind.Picture &&
                         claim.Evidence.Select(reference => parts.Pictures.GetValueOrDefault(reference)).FirstOrDefault(picture => picture is not null) is { } picture)
@@ -172,6 +206,7 @@ public static class LayeredReport
                     }
                     else
                     {
+                        EndList();
                         sentences.Add(text + Refs(claim.Evidence));
                     }
                 }
@@ -186,50 +221,32 @@ public static class LayeredReport
         if (accepted is not null)
         {
             SummaryReport.AppendInferredBy(builder, accepted, date);
+            builder.Append("How the report was made, and what its statements rest on, is in Appendix G.\n\n");
         }
-
-        builder.Append("Every statement in the three chapters is a model's inference from the recorded evidence cited after it. Page visits and pages are derived by the recorder, and the appendices are written by the recorder from the recorded settings, not by a model.\n\n");
-        builder.Append(CultureInfo.InvariantCulture,
-            $"The report is built in layers. Each visit's knowledge starts as layer 1, its description from the recorded data, in the summary of task {parts.SummaryTaskId:D}. ");
-        builder.Append("At each moment of the visit the recorder chose, a model adds layer 2, what the captured frame of the screen shows, ");
-        builder.Append("and layer 3, what the web page adds that the frame does not show, from the page as the recorder rebuilt it at that frame and pictured whole in tiles. ");
-        builder.Append("Chapter 1 is the executive summary, chapter 2 describes each page from every visit to it, and chapter 3 tells the story of the user experience. ");
-        builder.Append("Appendices A to C give the accessibility and assistive technology settings at the start, and Appendix D every change to them during the recording. ");
-        builder.Append("A captured frame shows what was on the screen, not what the participant saw. ");
-        builder.Append("A recreated page is the page as the recorder rebuilt it from the recorded evidence, not the page itself: what the recording lacks, such as an image, it lacks too. ");
-        builder.Append(CultureInfo.InvariantCulture, $"Each moment's record, its frame and its tiles with the steps that describe them, is in {parts.MomentIndexFile}.\n\n");
-
-        SummaryReport.AppendCapabilities(builder, collation, capabilities, citations);
 
         builder.Append("## 1. Executive summary\n\n");
         if (parts.Executive is { } executive)
         {
-            Claims(executive, "summary");
+            Story(executive, "summary");
         }
         else
         {
             builder.Append("The model gave nothing for this part.\n\n");
         }
 
-        builder.Append("## 2. The pages\n\n");
+        SummaryReport.AppendCapabilities(builder, collation, capabilities, citations, "## 2. The participant");
+
+        builder.Append("## 3. The pages\n\n");
         foreach (var page in parts.Pages)
         {
-            builder.Append(CultureInfo.InvariantCulture, $"### 2.{page.Number} {PageTitle(page)}\n\n");
-            foreach (var number in page.Visits)
-            {
-                var visit = collation.Visits.First(item => item.Visit.Number == number);
-                builder.Append(CultureInfo.InvariantCulture,
-                    $"Visit {number}, {SummaryReport.Clock(visit.Visit.Start.Time)} to {SummaryReport.Clock(visit.Visit.End)}. ");
-                SummaryReport.AppendDerived(builder, visit, citations);
-                builder.Append('\n');
-            }
-
+            builder.Append(CultureInfo.InvariantCulture, $"### 3.{page.Number} {PageTitle(page)}\n\n");
+            AppendVisits(builder, page, collation, citations);
             Claims(page.Step, "page");
-            builder.Append(CultureInfo.InvariantCulture, $"#### 2.{page.Number}.1 How the page changed\n\n");
+            builder.Append(CultureInfo.InvariantCulture, $"#### 3.{page.Number}.1 How the page changed\n\n");
             Claims(page.Step, "changes");
         }
 
-        builder.Append("## 3. The user experience\n\n");
+        builder.Append("## 4. The user experience\n\n");
         Story(parts.Opening, "opening");
         foreach (var visit in collation.Visits)
         {
@@ -240,29 +257,63 @@ public static class LayeredReport
         }
 
         AppendAppendices(builder, parts, citations);
-        SummaryReport.AppendOtherWindows(builder, collation, citations);
-        SummaryReport.AppendEvidence(builder, collation, citations);
-        builder.Append("## How this was made\n\n");
-        SummaryReport.AppendModel(builder, accepted);
+        SummaryReport.AppendOtherWindows(builder, collation, citations, "## Appendix E. Other windows");
+        SummaryReport.AppendEvidence(builder, collation, citations, "## Appendix F. Evidence");
+
+        builder.Append("## Appendix G. How this was made\n\n");
+        builder.Append("### G.1 How the report is built\n\n");
+        builder.Append("- Every statement in chapters 1 and 4 and in the pages of chapter 3 is a model's inference from the recorded evidence cited after it.\n");
+        builder.Append("- Chapter 2 quotes the participant's capabilities as the auditor gave them, and the assistive technology the recorder observed running.\n");
+        builder.Append("- The page visits, the pages, and Appendices A to F are derived by the recorder from the recording, not by a model.\n");
         builder.Append(CultureInfo.InvariantCulture,
-            $"- Prompt templates: {RecordingSummaryVisionKind.MomentTemplate} version {RecordingSummaryVisionKind.MomentTemplateVersion} for each moment's captured frame, " +
-            $"{RecordingSummaryVisionKind.PageTemplate} version {RecordingSummaryVisionKind.PageTemplateVersion} for each group of its page's tiles, " +
-            $"{RecordingSummaryVisionKind.Layer2Template} and {RecordingSummaryVisionKind.Layer3Template} version {RecordingSummaryVisionKind.LayerTemplateVersion} for each moment's layers, " +
-            $"{RecordingSummaryVisionKind.PageChapterTemplate} version {RecordingSummaryVisionKind.PageChapterTemplateVersion} for each page of chapter 2, " +
-            $"{RecordingSummaryVisionKind.StoryTemplate} version {RecordingSummaryVisionKind.StoryTemplateVersion} for each visit's part of chapter 3, " +
-            $"{RecordingSummaryVisionKind.OpeningTemplate} version {RecordingSummaryVisionKind.StoryTemplateVersion} for its opening, " +
-            $"and {RecordingSummaryVisionKind.ExecutiveTemplate} version {RecordingSummaryVisionKind.ExecutiveTemplateVersion} for chapter 1, the executive summary.\n");
-        builder.Append(
-            $"- The settings: read by the recorder from the records the player's properties panel shows, and the Magnifier's from each captured frame's reading. " +
-            $"A period of panning is the Magnifier's view moving at one level, each move less than {SummaryReport.Seconds(SettingsReader.MagnifierGapNanoseconds)} after the one before; " +
-            $"changes of its level less than {SummaryReport.Seconds(SettingsReader.MagnifierGapNanoseconds)} apart are one change. " +
-            "A Windows setting's default is known only where Microsoft documents it, the caret width's; a browser setting's is Chromium's own answer, recorded with it; " +
-            "an NVDA setting's is NVDA 2026.2's configuration specification, a setting not written in nvda.ini being at its default.\n");
+            $"- The report is built in layers. Each visit's knowledge starts as layer 1, its description from the recorded data, in the summary of task {parts.SummaryTaskId:D}.\n");
+        builder.Append("- At each moment of the visit the recorder chose, a model adds layer 2, what the captured frame of the screen shows.\n");
+        builder.Append("- It then adds layer 3, what the web page adds that the frame does not show, from the page as the recorder rebuilt it at that frame and pictured whole in tiles.\n");
+        builder.Append("- A captured frame shows what was on the screen, not what the participant saw.\n");
+        builder.Append("- A recreated page is the page as the recorder rebuilt it from the recorded evidence, not the page itself: what the recording lacks, such as an image, it lacks too.\n");
+        builder.Append(CultureInfo.InvariantCulture, $"- Each moment's record, its frame and its tiles with the steps that describe them, is in {parts.MomentIndexFile}.\n\n");
+
+        builder.Append("### G.2 The model\n\n");
+        if (accepted is null)
+        {
+            builder.Append("No step was accepted, so no model is named.\n");
+        }
+
+        SummaryReport.AppendModel(builder, accepted);
+        builder.Append('\n');
+
+        builder.Append("### G.3 The prompt templates\n\n");
+        builder.Append(CultureInfo.InvariantCulture,
+            $"- {RecordingSummaryVisionKind.MomentTemplate} version {RecordingSummaryVisionKind.MomentTemplateVersion}, for each moment's captured frame.\n");
+        builder.Append(CultureInfo.InvariantCulture,
+            $"- {RecordingSummaryVisionKind.PageTemplate} version {RecordingSummaryVisionKind.PageTemplateVersion}, for each group of its page's tiles.\n");
+        builder.Append(CultureInfo.InvariantCulture,
+            $"- {RecordingSummaryVisionKind.Layer2Template} and {RecordingSummaryVisionKind.Layer3Template} version {RecordingSummaryVisionKind.LayerTemplateVersion}, for each moment's layers.\n");
+        builder.Append(CultureInfo.InvariantCulture,
+            $"- {RecordingSummaryVisionKind.ExecutiveTemplate} version {RecordingSummaryVisionKind.ExecutiveTemplateVersion}, for chapter 1, the executive summary.\n");
+        builder.Append(CultureInfo.InvariantCulture,
+            $"- {RecordingSummaryVisionKind.PageChapterTemplate} version {RecordingSummaryVisionKind.PageChapterTemplateVersion}, for each page of chapter 3.\n");
+        builder.Append(CultureInfo.InvariantCulture,
+            $"- {RecordingSummaryVisionKind.OpeningTemplate} version {RecordingSummaryVisionKind.StoryTemplateVersion}, for the opening of chapter 4.\n");
+        builder.Append(CultureInfo.InvariantCulture,
+            $"- {RecordingSummaryVisionKind.StoryTemplate} version {RecordingSummaryVisionKind.StoryTemplateVersion}, for each visit's part of chapter 4.\n\n");
+
+        var gap = SummaryReport.Seconds(SettingsReader.MagnifierGapNanoseconds);
+        builder.Append("### G.4 The settings\n\n");
+        builder.Append("- The settings are read by the recorder from the records the player's properties panel shows, and the Magnifier's from each captured frame's reading.\n");
+        builder.Append(CultureInfo.InvariantCulture, $"- A period of panning is the Magnifier's view moving at one level, each move less than {gap} after the one before.\n");
+        builder.Append(CultureInfo.InvariantCulture, $"- Changes of the Magnifier's level less than {gap} apart are one change.\n");
+        builder.Append("- A Windows setting's default is known only where Microsoft documents it, which it does for the caret width alone.\n");
+        builder.Append("- A browser setting's default is Chromium's own answer, recorded with the setting.\n");
+        builder.Append("- An NVDA setting's default is from NVDA 2026.2's configuration specification; a setting not written in nvda.ini is at its default.\n\n");
+
+        builder.Append("### G.5 The moments and their pictures\n\n");
         var moments = parts.Limits;
         builder.Append(CultureInfo.InvariantCulture,
-            $"- Moment limits: {(moments.PerVisit is { } most ? $"{most} moments for each visit" : "no limit on the moments of a visit")}; moments less than {SummaryReport.Seconds(moments.MergeNanoseconds)} apart merged; " +
-            $"settled when the layout has not changed for {SummaryReport.Seconds(moments.SettleQuietNanoseconds)}, or {SummaryReport.Seconds(moments.SettleFallbackNanoseconds)} after the visit starts; " +
-            $"a large change is {moments.LargeChangeNodes} elements or more at once.\n");
+            $"- Moments of a visit: {(moments.PerVisit is { } most ? $"at most {most} for each visit" : "no limit on their number")}; moments less than {SummaryReport.Seconds(moments.MergeNanoseconds)} apart are merged.\n");
+        builder.Append(CultureInfo.InvariantCulture,
+            $"- A moment is settled when the layout has not changed for {SummaryReport.Seconds(moments.SettleQuietNanoseconds)}, or {SummaryReport.Seconds(moments.SettleFallbackNanoseconds)} after the visit starts.\n");
+        builder.Append(CultureInfo.InvariantCulture, $"- A large change is {moments.LargeChangeNodes} elements or more at once.\n");
         var leftOut = parts.Visits.OrderBy(pair => pair.Key).Where(pair => pair.Value.MomentsLeftOut > 0).ToList();
         if (leftOut.Count > 0)
         {
@@ -271,31 +322,84 @@ public static class LayeredReport
                 .Append(".\n");
         }
 
-        builder.Append("- Each captured frame is sent to the model whole, as recorded. ");
-        builder.Append("Each moment's page is rebuilt at its frame in the instrumented Chromium without a window, and pictured whole in tiles the height of its viewport, each sent at full size; ");
+        builder.Append("- Each captured frame is sent to the model whole, as recorded.\n");
+        builder.Append("- Each moment's page is rebuilt at its frame in the instrumented Chromium without a window, and pictured whole in tiles the height of its viewport, each sent at full size.\n");
         builder.Append(CultureInfo.InvariantCulture,
-            $"each request holds as many tiles as fit {parts.ImageTokensPerRequest} image tokens, counted as one token for each 32 by 32 pixels, and at least one.\n");
+            $"- Each request holds as many tiles as fit {parts.ImageTokensPerRequest} image tokens, counted as one token for each 32 by 32 pixels, and at least one.\n");
+        builder.Append(CultureInfo.InvariantCulture,
+            $"- Each tile's picture is kept once for the recording, in {parts.ImagesFolder}, named by the SHA-256 of its size, its pixels, and its colour profile.\n");
 
         // The groups of tiles not sent, each with the answer it uses
         // (recording-summary.md, "Unique images across the recording",
         // decision 9), and the layer 3 steps not sent.
         var notSent = parts.Visits.OrderBy(pair => pair.Key).SelectMany(pair => pair.Value.Moments.SelectMany(moment =>
             (moment.NotSent ?? []).Select(group => (Visit: pair.Key, Moment: moment.Moment.Number, Group: group)))).ToList();
-        builder.Append(CultureInfo.InvariantCulture,
-            $"- Each tile's picture is kept once for the recording, in {parts.ImagesFolder}, named by the SHA-256 of its size, its pixels, and its colour profile. ");
-        builder.Append(notSent.Count == 0
-            ? "No group of tiles was the same pictures at the same places as a group already described, so every group was sent.\n"
-            : string.Create(CultureInfo.InvariantCulture,
-                  $"{notSent.Count} {(notSent.Count == 1 ? "group of tiles was" : "groups of tiles were")} not sent, as their tiles were the same pictures, pixel for pixel, at the same places as a group already described, whose answer each uses unchanged: ") +
-              string.Join("; ", notSent.Select(item => string.Create(CultureInfo.InvariantCulture,
-                  $"visit {item.Visit} moment {item.Moment} group {item.Group.Group} ({SummaryReport.TileRange(item.Group.FirstTile, item.Group.LastTile)}), the answer of group {item.Group.FromGroup} at moment {item.Group.FromMoment} of visit {item.Group.FromVisit}, at {SummaryReport.Clock(item.Group.FromTime)}, step {item.Group.FromStep}"))) +
-              ".\n");
         var layersNotSent = parts.LayersNotSent ?? [];
         builder.Append(layersNotSent.Count == 0
             ? "- Every moment whose page was recreated had a layer 3 step.\n"
             : "- Layer 3 steps not sent, as every group of the moment's tiles was already in the visit's knowledge: " + string.Join(", ", layersNotSent) + ".\n");
+        if (notSent.Count == 0)
+        {
+            builder.Append("- No group of tiles was the same pictures at the same places as a group already described, so every group was sent.\n\n");
+        }
+        else
+        {
+            builder.Append(CultureInfo.InvariantCulture,
+                $"\n{notSent.Count} {(notSent.Count == 1 ? "group of tiles was" : "groups of tiles were")} not sent, as their tiles were the same pictures, pixel for pixel, at the same places as a group already described, whose answer each uses unchanged:\n\n");
+            foreach (var item in notSent)
+            {
+                builder.Append(CultureInfo.InvariantCulture,
+                    $"- Visit {item.Visit} moment {item.Moment} group {item.Group.Group} ({SummaryReport.TileRange(item.Group.FirstTile, item.Group.LastTile)}): the answer of group {item.Group.FromGroup} at moment {item.Group.FromMoment} of visit {item.Group.FromVisit}, at {SummaryReport.Clock(item.Group.FromTime)}, step {item.Group.FromStep}.\n");
+            }
+
+            builder.Append('\n');
+        }
+
+        builder.Append("### G.6 The limits, the steps reused, and the attempts\n\n");
         SummaryReport.AppendLimitsAndAttempts(builder, collation, limits, attempts);
         return builder.ToString();
+    }
+
+    // The visits to a page, derived by the recorder, as a list: each
+    // visit's time, kind, and address, why it is a visit of its own, and the
+    // visit it returns to; then each visit's in-page jumps, a list each.
+    private static void AppendVisits(StringBuilder builder, PageChapter page, RecordingCollation collation, ReportCitations citations)
+    {
+        builder.Append(page.Visits.Count == 1 ? "The visit to the page, derived by the recorder:\n\n" : "The visits to the page, derived by the recorder:\n\n");
+        var visits = page.Visits.Select(number => collation.Visits.First(item => item.Visit.Number == number)).ToList();
+        foreach (var visit in visits)
+        {
+            var start = visit.Visit.Start;
+            builder.Append(CultureInfo.InvariantCulture,
+                $"- Visit {visit.Visit.Number}, {SummaryReport.Clock(start.Time)} to {SummaryReport.Clock(visit.Visit.End)}: a visit to a {visit.Visit.Label}, {start.Url}.");
+            builder.Append(citations.RefOf(start.EventId) is { } startReference ? citations.Refs([startReference]) : "");
+            if (visit.Visit.Kind == VisitKind.FragmentRoute && visit.Visit.RouteReason is { } reason)
+            {
+                builder.Append(CultureInfo.InvariantCulture, $" It is a visit of its own because {reason}.");
+            }
+
+            if (visit.Visit.ReturnOf is { } earlier)
+            {
+                builder.Append(CultureInfo.InvariantCulture, $" A return to the URL of visit {earlier}, judged by URL alone.");
+            }
+
+            builder.Append('\n');
+        }
+
+        builder.Append('\n');
+        foreach (var visit in visits.Where(item => item.Visit.Steps.Count > 0))
+        {
+            builder.Append(CultureInfo.InvariantCulture, $"In-page jumps within visit {visit.Visit.Number}, derived by the recorder:\n\n");
+            foreach (var step in visit.Visit.Steps)
+            {
+                var link = step.LinkName is { Length: > 0 } name ? $" \"{SummaryReport.OneLine(name)}\"" : "";
+                builder.Append(CultureInfo.InvariantCulture,
+                    $"- {SummaryReport.Clock(step.Commit.Time)}, #{step.Fragment}: a {step.Name}{link} to {step.Target} ({step.Rule}).");
+                builder.Append(citations.RefOf(step.Commit.EventId) is { } stepReference ? citations.Refs([stepReference]) : "").Append('\n');
+            }
+
+            builder.Append('\n');
+        }
     }
 
     // The appendices, written by the recorder: the settings at the start,
@@ -338,7 +442,10 @@ public static class LayeredReport
             "The browser's settings as read when its profile was loaded, each with Chromium's own answer to whether it is the default, and the values the browser sent to the first page visited, which follow from the settings and are not settings themselves.",
             settings.Browser, settings.BrowserNote);
         Table("## Appendix C. Assistive technology at the start",
-            "The assistive technology the recorder watched for, as at the start of the recording; NVDA's settings as first read from its configuration folder, a setting not written in nvda.ini being at NVDA's default; and the Magnifier as read with the first captured frame.",
+            "The assistive technology at the start of the recording, as the recorder read it:\n\n" +
+            "- The products the recorder watched for, and whether each was running.\n" +
+            "- NVDA's settings, as first read from its configuration folder. A setting not written in nvda.ini is at NVDA's default.\n" +
+            "- The Magnifier, as read with the first captured frame.",
             settings.Assistive, settings.AssistiveNote);
 
         builder.Append("## Appendix D. Changes during the recording\n\n");

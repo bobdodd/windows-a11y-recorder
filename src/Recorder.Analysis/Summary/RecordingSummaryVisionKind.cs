@@ -52,12 +52,12 @@ internal sealed record PageGroupDescription(IReadOnlyList<PageTile> Tiles, Accep
 /// <summary>
 /// A visit's part of the vision stage: its moments as recorded, how many
 /// were left out, its knowledge in layers after its last moment, and its
-/// part of the story, chapter 3.
+/// part of the story, chapter 4.
 /// </summary>
 public sealed record VisitVision(IReadOnlyList<MomentDescription> Moments, int MomentsLeftOut, Knowledge Knowledge, AcceptedStep Story);
 
 /// <summary>
-/// A page of chapter 2: its number, its address, its title as last
+/// A page of chapter 3: its number, its address, its title as last
 /// recorded, the visits to it, and its description.
 /// </summary>
 public sealed record PageChapter(int Number, string Url, string? Title, IReadOnlyList<int> Visits, AcceptedStep Step);
@@ -100,7 +100,7 @@ public sealed record VisionReportParts(
 /// to the visit's knowledge what the frame shows, and layer 3 what the web
 /// page adds that the frame does not, the knowledge starting as layer 1,
 /// the visit's description from the recorded data. The report's chapter 1 is the
-/// executive summary, chapter 2 describes each page from every visit to it, chapter 3 tells the
+/// executive summary, chapter 2 the participant, chapter 3 describes each page from every visit to it, chapter 4 tells the
 /// story of the user experience, one part for each visit and an opening,
 /// written as summary-with-vision.md. It builds on a finished summary of
 /// the same recording, the task it follows. See
@@ -188,12 +188,17 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // chapter 1, so the pages are chapter 2 and the story chapter 3, named
     // by what they are; the story's parts and opening are given the changes
     // to the settings and the assistive technology (recording-summary.md,
-    // "The executive summary and the settings in use").
-    public const int PageChapterTemplateVersion = 2;
+    // "The executive summary and the settings in use"). Version 3 of the
+    // page chapter, story, and opening, and version 2 of the executive
+    // summary: each says what a paragraph is, and the story, its opening,
+    // and the executive summary have list forms; the participant becomes
+    // chapter 2, the pages 3 and the story 4 (recording-summary.md, "The
+    // report's structure and its paragraphs").
+    public const int PageChapterTemplateVersion = 3;
 
-    public const int StoryTemplateVersion = 2;
+    public const int StoryTemplateVersion = 3;
 
-    public const int ExecutiveTemplateVersion = 1;
+    public const int ExecutiveTemplateVersion = 2;
 
     public static readonly IReadOnlyList<string> ExecutiveSections = ["summary"];
 
@@ -207,14 +212,35 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     public const string Picture = "picture";
 
+    public const string Bullet = "bullet";
+
+    public const string Numbered = "numbered";
+
     /// <summary>
-    /// The forms a statement of chapter 3 takes: a heading at one of three
+    /// What a paragraph is, said in each template that writes the report's
+    /// prose (owner, 2026-10-16: "One topic each"; recording-summary.md,
+    /// "The report's structure and its paragraphs").
+    /// </summary>
+    public const string ParagraphRule =
+        "A paragraph is about one topic: begin a new paragraph for each new topic, so that no paragraph covers several. ";
+
+    /// <summary>The list forms, said in the story's and the executive summary's templates.</summary>
+    public const string ListForms =
+        "\"bullet\", an item of a list whose order does not matter, such as the settings in use; " +
+        "\"numbered\", a step of a sequence whose order matters, such as the participant's actions in order, which the recorder numbers. " +
+        "Consecutive statements of one of these forms are one list; use a list where the reader is helped by one, and sentences otherwise. ";
+
+    /// <summary>
+    /// The forms a statement of chapter 4 takes: a heading at one of three
     /// levels, which the recorder numbers; a sentence of prose; or a
     /// picture, its text the caption, citing the frame or tile it shows,
     /// which the recorder puts in (owner, 2026-10-16; recording-summary.md,
     /// "Chapter 2's form, as built").
     /// </summary>
-    public static readonly IReadOnlyList<string> StoryForms = ["heading-1", "heading-2", "heading-3", Sentence, Picture];
+    public static readonly IReadOnlyList<string> StoryForms = ["heading-1", "heading-2", "heading-3", Sentence, Bullet, Numbered, Picture];
+
+    /// <summary>The forms a statement of the executive summary takes: a sentence of prose, or an item of a list.</summary>
+    public static readonly IReadOnlyList<string> ExecutiveForms = [Sentence, Bullet, Numbered];
 
     /// <summary>The rules on what a frame shows of the participant, and on NVDA, said in each layer's and chapter's template.</summary>
     public const string ParticipantRules =
@@ -271,17 +297,19 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Describe the page, not the participant. Where the knowledge disagrees, say so, citing both, and do not settle it. " +
         "Describe only what the knowledge supports, name sites and pages only as they are named, and say that something is unknown where it does not settle it. " +
         "Answer in JSON with two sections: \"page\", the page as described; and \"changes\", what appeared, went, moved, or changed on the page during the visits, in order, each with when. " +
-        "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
+        "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " + ParagraphRule +
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
         "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown.";
 
-    /// <summary>How chapter 3's answers are given, said in its templates.</summary>
+    /// <summary>How chapter 4's answers are given, said in its templates.</summary>
     public const string StoryAnswer =
         "Write clean, readable prose for a professional report. Use headings where they help the reader; give each heading's level, and the recorder numbers them. " +
         "Show a picture where it helps the reader see a layout, a pattern, or content you describe: a captured frame for what was on the screen, or a tile for part of the page as the recorder rebuilt it. " +
         "Take your terms and your structure from the pages' own: their headings, landmarks, and the names of their controls. " +
+        ParagraphRule +
         "Each paragraph is a list of statements, and each statement has a form: \"heading-1\", \"heading-2\", or \"heading-3\", a heading at that level, its text the heading alone; " +
-        "\"sentence\", a sentence of prose; or \"picture\", a picture the recorder puts in, its text the picture's caption, citing the one captured frame or tile it shows and what the caption rests on. " +
+        "\"sentence\", a sentence of prose; " + ListForms +
+        "or \"picture\", a picture the recorder puts in, its text the picture's caption, citing the one captured frame or tile it shows and what the caption rests on. " +
         "A statement is {\"form\": ..., \"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, a heading citing what its part rests on, " +
         "or {\"form\": ..., \"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets +
         "Write plain sentences without Markdown.";
@@ -325,9 +353,10 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Do not list every setting, which the appendices give, and do not repeat the chapter. " +
         "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
         ParticipantRules +
-        "Answer in JSON with one section, \"summary\", a list of paragraphs, each a list of statements. " +
-        "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
-        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets +
+        "Answer in JSON with one section, \"summary\", a list of paragraphs, each a list of statements. " + ParagraphRule +
+        "Each statement has a form: \"sentence\", a sentence of prose; " + ListForms +
+        "A statement is {\"form\": ..., \"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
+        "or {\"form\": ..., \"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets +
         "Write clean, readable prose for a professional report, in plain sentences without Markdown.";
     private readonly Func<string, string, CancellationToken, Task<(Recorder.Session.SessionPlaybackArchive Archive, RecordingFileDocuments Documents)>> _open;
 
@@ -666,7 +695,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         var (executiveInput, executiveReferences) = ExecutiveInput(collation, chapterPages, opening, storySoFar, settings, settingReferences);
         var executive = await context.RunStepAsync(
             "executive-summary",
-            new ModelRequest(ExecutiveTemplate, ExecutiveTemplateVersion, ExecutiveInstructions, executiveInput, [], ExecutiveSections, executiveReferences),
+            new ModelRequest(ExecutiveTemplate, ExecutiveTemplateVersion, ExecutiveInstructions, executiveInput, [], ExecutiveSections, executiveReferences) { Forms = ExecutiveForms },
             cancellationToken).ConfigureAwait(false);
 
         var recording = await context.Catalog.RecordingAsync(task.RecordingId, cancellationToken).ConfigureAwait(false);
@@ -989,7 +1018,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     }
 
     /// <summary>
-    /// A page's request for chapter 2: its address and titles, the visits to
+    /// A page's request for chapter 3: its address and titles, the visits to
     /// it with what the recorder derived of them, and each visit's
     /// knowledge in layers, without the statements' numbers.
     /// </summary>
@@ -1014,9 +1043,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     }
 
     /// <summary>
-    /// A visit's request for its part of chapter 3: the capabilities, the
+    /// A visit's request for its part of chapter 4: the capabilities, the
     /// recorder's facts of the visit, its knowledge in layers, its moments
-    /// with their frames' and tiles' references, the section of chapter 2
+    /// with their frames' and tiles' references, the section of chapter 3
     /// that describes its page, and the story so far.
     /// </summary>
     internal static (string Input, HashSet<string> References) StoryInput(
@@ -1032,7 +1061,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     {
         var references = new HashSet<string>(RecordingSummaryKind.VisitReferences(collation, visit), StringComparer.Ordinal);
         var input = new StringBuilder(RecordingSummaryKind.VisitInput(collation, visit)).Append("\n\n")
-            .Append(CultureInfo.InvariantCulture, $"The visit's page is described in the report's chapter on the pages, section 2.{section}.\n\n")
+            .Append(CultureInfo.InvariantCulture, $"The visit's page is described in the report's chapter on the pages, section 3.{section}.\n\n")
             .Append("The visit's knowledge, in layers. These are inferences, not facts:\n");
         knowledge.Append(input, references, withNumbers: false);
         input.Append(moments.Count == 0
@@ -1086,7 +1115,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     /// <summary>
     /// Chapter 2's opening request: the capabilities, the visits, the pages
-    /// as chapter 2 names them, and the parts that follow.
+    /// as chapter 3 names them, and the parts that follow.
     /// </summary>
     internal static (string Input, HashSet<string> References) OpeningInput(
         RecordingCollation collation,
@@ -1110,7 +1139,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         input.Append("\nThe pages, as the chapter on the pages names them:\n");
         foreach (var page in pages)
         {
-            input.Append(CultureInfo.InvariantCulture, $"Section 2.{page.Number}: {LayeredReport.PageTitle(page)}, visits {string.Join(", ", page.Visits)}.\n");
+            input.Append(CultureInfo.InvariantCulture, $"Section 3.{page.Number}: {LayeredReport.PageTitle(page)}, visits {string.Join(", ", page.Visits)}.\n");
         }
 
         AppendChanges(input, "before the first visit", changes ?? [], settingReferences, references);
@@ -1181,7 +1210,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         input.Append("\nThe pages, as the chapter on the pages names them:\n");
         foreach (var page in pages)
         {
-            input.Append(CultureInfo.InvariantCulture, $"Section 2.{page.Number}: {LayeredReport.PageTitle(page)}, visits {string.Join(", ", page.Visits)}.\n");
+            input.Append(CultureInfo.InvariantCulture, $"Section 3.{page.Number}: {LayeredReport.PageTitle(page)}, visits {string.Join(", ", page.Visits)}.\n");
         }
 
         input.Append("\nThe chapter on the user experience. These are inferences, not facts:\nIts opening:\n");

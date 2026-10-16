@@ -99,6 +99,13 @@ internal sealed class ReportWindow : Window
                 return heading;
             case ReportBlockKind.ListItem:
                 return new SelectableText { Text = "\u2022 " + block.Text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(12, 2, 0, 2) };
+            case ReportBlockKind.NumberedItem:
+                return new SelectableText
+                {
+                    Text = block.Level.ToString(System.Globalization.CultureInfo.InvariantCulture) + ". " + block.Text,
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(12, 2, 0, 2)
+                };
             case ReportBlockKind.Quote:
                 return new Border
                 {
