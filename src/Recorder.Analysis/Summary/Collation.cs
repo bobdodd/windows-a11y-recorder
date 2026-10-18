@@ -60,6 +60,21 @@ public interface ISummaryEvidence
     /// the first page visit's start; none where they were not read.
     /// </summary>
     RecordedSettings Settings(long? firstPageTime) => RecordedSettings.None;
+
+    /// <summary>Page popups closing; none where not read.</summary>
+    IReadOnlyList<TimedFact> PopupsClosed => [];
+
+    /// <summary>The spans in which one of NVDA's own windows was in front; none where not read.</summary>
+    IReadOnlyList<NvdaWindowFact> NvdaWindows => [];
+
+    /// <summary>The page's changes to its live regions; none where not read.</summary>
+    IReadOnlyList<LiveRegionFact> LiveRegions => [];
+
+    /// <summary>Each scroll position recorded; none where not read.</summary>
+    IReadOnlyList<ScrollFact> Scrolls => [];
+
+    /// <summary>The document's viewport height in CSS pixels at a time; null where not recorded.</summary>
+    double? ViewportHeightAt(string documentToken, long time) => null;
 }
 
 /// <summary>An entry of the evidence list: its reference, time, what it is, and its record.</summary>
@@ -95,30 +110,38 @@ public sealed class EvidenceRegister
     public EvidenceEntry? Of(string reference) => _entries.FirstOrDefault(entry => entry.Reference == reference);
 }
 
-/// <summary>The limits on each visit's facts, so that a long page cannot overflow the model's context.</summary>
-public sealed record CollationLimits(
-    int Landmarks = 20,
-    int Headings = 40,
-    int Fields = 30,
-    int Buttons = 30,
-    int MainTextCharacters = 1500,
-    int KeyKinds = 20,
-    int Commands = 30,
-    int Clicks = 20,
-    int FocusChanges = 30,
-    int Announcements = 20,
-    int TypedFields = 20,
-    int Steps = 20,
-    int Popups = 10,
-    long InputBeforeNanoseconds = 3_000_000_000)
+/// <summary>
+/// The settings of the collation. There is no limit on how many facts a
+/// visit has or how long they are: a limit is shown to be forced only by
+/// a server refusing a real request as longer than its context (owner,
+/// 2026-10-16; recording-summary.md, "The collation limits removed").
+/// </summary>
+/// <param name="InputBeforeNanoseconds">An input counts as the one before a visit within this long before it.</param>
+/// <param name="ScrollPauseNanoseconds">One scroller's scroll records with no pause between them longer than this are one scroll.</param>
+public sealed record CollationSettings(
+    long InputBeforeNanoseconds = 3_000_000_000,
+    long ScrollPauseNanoseconds = 1_000_000_000)
 {
-    public static CollationLimits Default { get; } = new();
+    public static CollationSettings Default { get; } = new();
 }
 
-/// <summary>One visit's facts: its lines for the model, the references they cite, and how many facts were cut.</summary>
-public sealed record VisitCollation(Visit Visit, string? Title, IReadOnlyList<string> Lines, IReadOnlySet<string> References, int LeftOut)
+/// <summary>
+/// One visit's facts: its lines for the model, the page's changes during
+/// it in time order, and the references both cite. The moments' requests
+/// are given the lines only, as each moment's reasons already name the
+/// changes that chose it (owner, 2026-10-16).
+/// </summary>
+public sealed record VisitCollation(Visit Visit, string? Title, IReadOnlyList<string> Lines, IReadOnlySet<string> References, IReadOnlyList<string> Changes)
 {
-    public string Text => string.Join('\n', Lines);
+    /// <summary>The heading of the changes, as each request that is given them has it.</summary>
+    public const string ChangesHeading = "The page's changes during the visit, in time order: its live regions, its popups opening and closing, NVDA's windows, and its scrolls:";
+
+    /// <summary>The changes with their heading, or a line that none was recorded.</summary>
+    public string ChangesText => Changes.Count == 0
+        ? "The page's changes during the visit: no change to a live region, popup opening or closing, NVDA window, or scroll was recorded."
+        : ChangesHeading + "\n" + string.Join('\n', Changes);
+
+    public string Text => string.Join('\n', Lines) + "\n" + ChangesText;
 }
 
 /// <summary>A period another program's window was in front.</summary>
@@ -148,16 +171,16 @@ public sealed record RecordingCollation(
 /// </summary>
 public static class SummaryCollator
 {
-    public static RecordingCollation Collate(ISummaryEvidence evidence, ParticipantCapabilities capabilities, CollationLimits? limits = null)
+    public static RecordingCollation Collate(ISummaryEvidence evidence, ParticipantCapabilities capabilities, CollationSettings? settings = null)
     {
         ArgumentNullException.ThrowIfNull(evidence);
         ArgumentNullException.ThrowIfNull(capabilities);
-        limits ??= CollationLimits.Default;
+        settings ??= CollationSettings.Default;
         var register = new EvidenceRegister();
         // The capabilities come first, so a reported description is E1.
         var capabilityLines = CapabilityLines(evidence, capabilities, register);
         var visits = VisitDivider.Divide(evidence.Commits, evidence.Duration, (commit, previous, until) => JudgeFragment(evidence, commit, until));
-        var collated = visits.Select(visit => CollateVisit(evidence, visit, register, limits)).ToList();
+        var collated = visits.Select(visit => CollateVisit(evidence, visit, register, settings)).ToList();
         var windows = OtherWindows(evidence, register);
         return new RecordingCollation(collated, windows, capabilityLines, register, evidence.Duration);
     }
@@ -232,16 +255,13 @@ public static class SummaryCollator
     {
         var role = page.RoleOf(node) ?? (node.Tag.Length > 0 ? node.Tag + " element" : "node");
         var name = page.NameOf(node);
-        return name.Length > 0 ? $"{role} {Quote(Shorten(name, 80))}" : role;
+        return name.Length > 0 ? $"{role} {Quote(name)}" : role;
     }
 
-    private static string Shorten(string text, int length) => text.Length <= length ? text : text[..length] + "...";
-
-    private static VisitCollation CollateVisit(ISummaryEvidence evidence, Visit visit, EvidenceRegister register, CollationLimits limits)
+    private static VisitCollation CollateVisit(ISummaryEvidence evidence, Visit visit, EvidenceRegister register, CollationSettings settings)
     {
         var lines = new List<string>();
         var references = new HashSet<string>(StringComparer.Ordinal);
-        var leftOut = 0;
         var start = visit.Start;
         string Cite(long time, string text, string? eventId, string? key = null)
         {
@@ -252,15 +272,6 @@ public static class SummaryCollator
 
         void Line(long time, string text, string? eventId, string? key = null) =>
             lines.Add($"[{Cite(time, text, eventId, key)}] {Time(time)} {text}");
-
-        void More(int count, string what)
-        {
-            if (count > 0)
-            {
-                leftOut += count;
-                lines.Add($"({count.ToString(CultureInfo.InvariantCulture)} more {what} left out)");
-            }
-        }
 
         var how = visit.Kind switch
         {
@@ -282,7 +293,7 @@ public static class SummaryCollator
 
         lines.Add($"The visit lasts from {Time(start.Time)} to {Time(visit.End)}.");
         var before = evidence.Keys.Concat(evidence.Clicks)
-            .Where(fact => fact.Time <= start.Time && fact.Time >= start.Time - limits.InputBeforeNanoseconds)
+            .Where(fact => fact.Time <= start.Time && fact.Time >= start.Time - settings.InputBeforeNanoseconds)
             .MaxBy(fact => fact.Time);
         if (before is not null)
         {
@@ -290,7 +301,7 @@ public static class SummaryCollator
         }
         else
         {
-            lines.Add("No key or click was recorded in the 3 seconds before it.");
+            lines.Add($"No key or click was recorded in the {settings.InputBeforeNanoseconds / 1e9:0.###} seconds before it.");
         }
 
         // Observed running, with a reference like every other fact, so that a
@@ -320,8 +331,7 @@ public static class SummaryCollator
             var landmarks = page.Landmarks;
             lines.Add(landmarks.Count == 0
                 ? "  Landmarks: none."
-                : "  Landmarks: " + string.Join("; ", landmarks.Take(limits.Landmarks).Select(item => item.Name.Length > 0 ? $"{item.Role} {Quote(item.Name)}" : item.Role)) + ".");
-            More(landmarks.Count - limits.Landmarks, "landmarks");
+                : "  Landmarks: " + string.Join("; ", landmarks.Select(item => item.Name.Length > 0 ? $"{item.Role} {Quote(item.Name)}" : item.Role)) + ".");
             var headings = page.Headings;
             if (headings.Count == 0)
             {
@@ -330,25 +340,21 @@ public static class SummaryCollator
             else
             {
                 lines.Add("  Headings, in order:");
-                foreach (var heading in headings.Take(limits.Headings))
+                foreach (var heading in headings)
                 {
                     var level = heading.Level is { } value ? "level " + value.ToString(CultureInfo.InvariantCulture) : "level not recorded";
-                    lines.Add($"    {level}: {Quote(Shorten(heading.Name, 160))}");
+                    lines.Add($"    {level}: {Quote(heading.Name)}");
                 }
-
-                More(headings.Count - limits.Headings, "headings");
             }
 
             var fields = page.Fields;
             lines.Add(fields.Count == 0
                 ? "  Form fields: none."
-                : "  Form fields: " + string.Join("; ", fields.Take(limits.Fields).Select(item => $"{item.Role} {(item.Name.Length > 0 ? Quote(Shorten(item.Name, 80)) : "with no name")}")) + ".");
-            More(fields.Count - limits.Fields, "form fields");
+                : "  Form fields: " + string.Join("; ", fields.Select(item => $"{item.Role} {(item.Name.Length > 0 ? Quote(item.Name) : "with no name")}")) + ".");
             var buttons = page.Buttons;
             lines.Add(buttons.Count == 0
                 ? "  Buttons: none."
-                : "  Buttons: " + string.Join("; ", buttons.Take(limits.Buttons).Select(item => item.Name.Length > 0 ? Quote(Shorten(item.Name, 80)) : "a button with no name")) + ".");
-            More(buttons.Count - limits.Buttons, "buttons");
+                : "  Buttons: " + string.Join("; ", buttons.Select(item => item.Name.Length > 0 ? Quote(item.Name) : "a button with no name")) + ".");
             lines.Add($"  Links: {page.LinkCount.ToString(CultureInfo.InvariantCulture)}. Images: {page.ImageCount.ToString(CultureInfo.InvariantCulture)}.");
             if (page.Dialogs is { Count: > 0 } dialogs)
             {
@@ -358,27 +364,21 @@ public static class SummaryCollator
             var container = page.Main ?? page.InOrder.FirstOrDefault(node => node.Tag == "body");
             if (container is not null)
             {
-                var (text, more) = page.TextOf(container, limits.MainTextCharacters);
+                var (text, _) = page.TextOf(container, int.MaxValue);
                 var where = page.Main is not null ? "the main landmark" : "the page, which has no main landmark";
-                var reference = Cite(endTime, $"The opening text of {where}, at the end of visit {visit.Number}", null, $"text:{visit.Number}");
+                var reference = Cite(endTime, $"The text of {where}, at the end of visit {visit.Number}", null, $"text:{visit.Number}");
                 lines.Add(text.Length == 0
-                    ? $"[{reference}] The opening text of {where}: none."
-                    : $"[{reference}] The opening text of {where}: {Quote(text)}" + (more > 0 ? $" ({more.ToString(CultureInfo.InvariantCulture)} more characters left out)" : ""));
-                if (more > 0)
-                {
-                    leftOut++;
-                }
+                    ? $"[{reference}] The text of {where}: none."
+                    : $"[{reference}] The text of {where}, in full: {Quote(text)}");
             }
         }
 
         // In-page jumps.
-        foreach (var step in visit.Steps.Take(limits.Steps))
+        foreach (var step in visit.Steps)
         {
             var link = step.LinkName is { Length: > 0 } name ? $" {Quote(name)}" : "";
             Line(step.Commit.Time, $"In-page jump to #{step.Fragment}, {step.Target}: a {step.Name}{link} ({step.Rule}).", step.Commit.EventId);
         }
-
-        More(visit.Steps.Count - limits.Steps, "in-page jumps");
 
         bool Within(long time) => time >= start.Time && time < visit.End;
 
@@ -392,8 +392,7 @@ public static class SummaryCollator
                 .ToList();
             var reference = Cite(keys[0].Time, $"The keys pressed in visit {visit.Number}", keys[0].EventId, $"keys:{visit.Number}");
             lines.Add($"[{reference}] Keys pressed during the visit, {keys.Count.ToString(CultureInfo.InvariantCulture)} in all: " +
-                string.Join("; ", kinds.Take(limits.KeyKinds).Select(group => $"{group.Key} x{group.Count().ToString(CultureInfo.InvariantCulture)}")) + ".");
-            More(kinds.Count - limits.KeyKinds, "kinds of key");
+                string.Join("; ", kinds.Select(group => $"{group.Key} x{group.Count().ToString(CultureInfo.InvariantCulture)}")) + ".");
         }
         else
         {
@@ -401,31 +400,27 @@ public static class SummaryCollator
         }
 
         var commands = evidence.Commands.Where(fact => Within(fact.Time)).ToList();
-        foreach (var command in commands.Take(limits.Commands))
+        foreach (var command in commands)
         {
             Line(command.Time, command.Text, command.EventId);
         }
 
-        More(commands.Count - limits.Commands, "NVDA commands");
         var clicks = evidence.Clicks.Where(fact => Within(fact.Time)).ToList();
-        foreach (var click in clicks.Take(limits.Clicks))
+        foreach (var click in clicks)
         {
             Line(click.Time, click.Text, click.EventId);
         }
 
-        More(clicks.Count - limits.Clicks, "clicks");
         if (start.DocumentToken is { } document)
         {
             var focus = evidence.Focus.Where(fact => fact.DocumentToken == document && Within(fact.Time)).ToList();
-            foreach (var change in focus.Take(limits.FocusChanges))
+            foreach (var change in focus)
             {
                 var what = change.NodeId is { } node && page?.Node(node) is { } focused
                     ? Describe(page, focused)
                     : change.NodeId is null ? "the document itself" : "an element no longer in the page at the visit's end";
                 Line(change.Time, $"The page's focus moved to {what}.", change.EventId);
             }
-
-            More(focus.Count - limits.FocusChanges, "focus changes");
 
             // Text typed: each text control whose value at the end differs
             // from its value at the start, given verbatim.
@@ -436,31 +431,138 @@ public static class SummaryCollator
                     (!atStart.TryGetValue(control.NodeId, out var earlierState) || earlierState.Value != value))
                 .OrderBy(control => page?.Node(control.NodeId) is { } node ? page.OrderOf(node) : int.MaxValue)
                 .ToList();
-            foreach (var control in typed.Take(limits.TypedFields))
+            foreach (var control in typed)
             {
                 var field = page?.Node(control.NodeId) is { } node ? Describe(page, node) : "a text field";
                 var kind = control.ControlType is { Length: > 0 } type ? $" (type {type})" : "";
                 Line(endTime, $"Text in {field}{kind} at the end of the visit: {Quote(control.Value!)}.", null, $"typed:{visit.Number}:{control.NodeId}");
             }
 
-            More(typed.Count - limits.TypedFields, "text fields");
         }
 
         var announcements = evidence.Announcements.Where(fact => Within(fact.Time)).ToList();
-        foreach (var announcement in announcements.Take(limits.Announcements))
+        foreach (var announcement in announcements)
         {
             Line(announcement.Time, announcement.Text, announcement.EventId);
         }
 
-        More(announcements.Count - limits.Announcements, "NVDA announcements");
-        var popups = evidence.Popups.Where(fact => Within(fact.Time)).ToList();
-        foreach (var popup in popups.Take(limits.Popups))
+        return new VisitCollation(visit, title, lines, references, Changes(evidence, visit, page, settings, Cite));
+    }
+
+    // The page's changes during a visit, in time order, each with its
+    // time and reference: each change to a live region, each popup opening
+    // and closing, each of NVDA's windows coming to the front and leaving
+    // it, and each scroll, one scroller's records with no pause longer than
+    // the setting being one movement (owner, 2026-10-16; recording-summary.md,
+    // "The page's changes during a visit").
+    private static List<string> Changes(
+        ISummaryEvidence evidence, Visit visit, PageSnapshot? page, CollationSettings settings, Func<long, string, string?, string?, string> cite)
+    {
+        var start = visit.Start;
+        bool Within(long time) => time >= start.Time && time < visit.End;
+        var changes = new List<(long Time, string Text, string? EventId, string? Key)>();
+        var token = start.DocumentToken;
+        if (token is not null)
         {
-            Line(popup.Time, popup.Text, popup.EventId);
+            foreach (var change in evidence.LiveRegions.Where(fact => fact.DocumentToken == token && Within(fact.Time)))
+            {
+                changes.Add((change.Time, LiveRegionChanges.Reason(change) + $" Its politeness: {change.Politeness}.", change.EventId, null));
+            }
         }
 
-        More(popups.Count - limits.Popups, "popups");
-        return new VisitCollation(visit, title, lines, references, leftOut);
+        foreach (var popup in evidence.Popups.Where(fact => Within(fact.Time)))
+        {
+            changes.Add((popup.Time, popup.Text, popup.EventId, null));
+        }
+
+        foreach (var popup in evidence.PopupsClosed.Where(fact => Within(fact.Time)))
+        {
+            changes.Add((popup.Time, popup.Text, popup.EventId, null));
+        }
+
+        foreach (var window in evidence.NvdaWindows)
+        {
+            if (Within(window.Start))
+            {
+                changes.Add((window.Start, $"NVDA's window {Quote(window.Name)} came to the front.", window.StartEventId,
+                    window.StartEventId ?? $"nvda-window:{window.Start}:{window.Name}"));
+            }
+
+            if (Within(window.End) && window.End > window.Start)
+            {
+                changes.Add((window.End, $"NVDA's window {Quote(window.Name)} left the front.", window.EndEventId,
+                    window.EndEventId ?? $"nvda-window-end:{window.End}:{window.Name}"));
+            }
+        }
+
+        if (token is not null)
+        {
+            changes.AddRange(ScrollMovements(evidence, token, start.Time, visit.End, page, settings));
+        }
+
+        return [.. changes.OrderBy(change => change.Time).Select(change => $"[{cite(change.Time, change.Text, change.EventId, change.Key)}] {Time(change.Time)} {change.Text}")];
+    }
+
+    // Each scroll as a movement: one scroller's records with no pause
+    // between them longer than the setting, from the position before it
+    // where one is recorded to its last, with what was on the screen at
+    // its end where the scroller is the page's own.
+    private static IEnumerable<(long Time, string Text, string? EventId, string? Key)> ScrollMovements(
+        ISummaryEvidence evidence, string token, long start, long end, PageSnapshot? page, CollationSettings settings)
+    {
+        var records = evidence.Scrolls.Where(item => item.DocumentToken == token && item.Time < end).OrderBy(item => item.Time).ToList();
+        foreach (var scroller in records.GroupBy(item => item.NodeId is { } node ? "node:" + node.ToString(CultureInfo.InvariantCulture) : item.Scroller, StringComparer.Ordinal))
+        {
+            var all = scroller.ToList();
+            var movement = new List<ScrollFact>();
+            ScrollFact? before = null;
+            foreach (var record in all)
+            {
+                if (record.Time < start)
+                {
+                    before = record;
+                    continue;
+                }
+
+                if (movement.Count > 0 && record.Time - movement[^1].Time > settings.ScrollPauseNanoseconds)
+                {
+                    yield return Movement(evidence, token, before, movement, page);
+                    before = movement[^1];
+                    movement = [];
+                }
+
+                movement.Add(record);
+            }
+
+            if (movement.Count > 0)
+            {
+                yield return Movement(evidence, token, before, movement, page);
+            }
+        }
+    }
+
+    private static (long Time, string Text, string? EventId, string? Key) Movement(
+        ISummaryEvidence evidence, string token, ScrollFact? before, List<ScrollFact> movement, PageSnapshot? page)
+    {
+        var first = movement[0];
+        var last = movement[^1];
+        var node = first.NodeId is { } id ? page?.Node(id) : null;
+        var isPage = node is not null && (node.Kind == "document" || node.Tag is "html" or "body");
+        var what = isPage ? "The page"
+            : node is not null ? "The scroller " + Describe(page!, node)
+            : "A scroller not in the page as recorded at the visit's end";
+        var from = before is not null
+            ? string.Create(CultureInfo.InvariantCulture, $"from {before.Y:0}")
+            : "from a position not recorded in the visit";
+        var count = movement.Count == 1 ? "1 position recorded" : $"{movement.Count.ToString(CultureInfo.InvariantCulture)} positions recorded";
+        var text = string.Create(CultureInfo.InvariantCulture,
+            $"{what} scrolled {from} to {last.Y:0} CSS pixels from the top, from {Time(first.Time)} to {Time(last.Time)}, {count}.");
+        if (isPage && evidence.ViewportHeightAt(token, last.Time) is { } height && height > 0)
+        {
+            text += string.Create(CultureInfo.InvariantCulture, $" With a viewport {height:0} CSS pixels high, CSS pixels {last.Y:0} to {last.Y + height:0} were then in it.");
+        }
+
+        return (first.Time, text, first.EventId, null);
     }
 
     // The periods another program's window was in front: from each front
@@ -519,8 +621,8 @@ public static class SummaryCollator
         return lines;
     }
 
-    /// <summary>The whole recording's facts: each visit's URL, title, and headings, as the overall request is given them.</summary>
-    public static string Overview(RecordingCollation collation, int headingsPerVisit = 10)
+    /// <summary>The whole recording's facts: each visit's URL, title, and every heading, as the overall request is given them.</summary>
+    public static string Overview(RecordingCollation collation)
     {
         ArgumentNullException.ThrowIfNull(collation);
         var builder = new StringBuilder();
@@ -531,7 +633,7 @@ public static class SummaryCollator
             builder.Append(CultureInfo.InvariantCulture, $"Visit {visit.Visit.Number} [{reference}], {Time(start.Time)} to {Time(visit.Visit.End)}, {visit.Visit.Label}, {start.Url}");
             builder.Append(visit.Title is { } title ? $", title {Quote(title)}" : ", no title recorded").Append('\n');
             var headings = visit.Lines.SkipWhile(line => !line.StartsWith("  Headings, in order:", StringComparison.Ordinal)).Skip(1)
-                .TakeWhile(line => line.StartsWith("    ", StringComparison.Ordinal)).Take(headingsPerVisit).ToList();
+                .TakeWhile(line => line.StartsWith("    ", StringComparison.Ordinal)).ToList();
             if (headings.Count > 0)
             {
                 var structure = collation.Evidence.Entries.FirstOrDefault(entry => entry.Text == $"The page as recorded at the end of visit {visit.Visit.Number}");

@@ -83,14 +83,14 @@ public static class LayeredReport
         RecordingCollation collation,
         ParticipantCapabilities capabilities,
         IReadOnlyList<AttemptRecord> attempts,
-        CollationLimits limits,
+        CollationSettings settings,
         DateTime nowUtc,
         VisionReportParts parts)
     {
         ArgumentNullException.ThrowIfNull(collation);
         ArgumentNullException.ThrowIfNull(capabilities);
         ArgumentNullException.ThrowIfNull(attempts);
-        ArgumentNullException.ThrowIfNull(limits);
+        ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(parts);
         var citations = new ReportCitations(collation);
         var builder = new StringBuilder();
@@ -357,8 +357,8 @@ public static class LayeredReport
             builder.Append('\n');
         }
 
-        builder.Append("### G.6 The limits, the steps reused, and the attempts\n\n");
-        SummaryReport.AppendLimitsAndAttempts(builder, collation, limits, attempts);
+        builder.Append("### G.6 The facts given, the steps reused, and the attempts\n\n");
+        SummaryReport.AppendLimitsAndAttempts(builder, collation, settings, attempts);
         return builder.ToString();
     }
 

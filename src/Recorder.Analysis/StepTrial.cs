@@ -37,6 +37,22 @@ public sealed record StepTrial(
     /// <summary>Where the trial kept the pictures it took, in the recording's folder.</summary>
     public string? PicturesFolder { get; init; }
 
+    /// <summary>
+    /// What the step was asked: its instructions and its input as sent, and
+    /// the form its answer was held to, so that the trial shows what the
+    /// model was given (owner, 2026-10-17).
+    /// </summary>
+    public string? Instructions { get; init; }
+
+    /// <summary>The step's input as sent, with its pictures named, not given.</summary>
+    public string? Input { get; init; }
+
+    /// <summary>The pictures sent with the input, one line each.</summary>
+    public IReadOnlyList<string> Pictures { get; init; } = [];
+
+    /// <summary>The form the answer was held to, as sent: the schema, or the grammar with --one-line.</summary>
+    public string? AnswerForm { get; init; }
+
     /// <summary>The trial as a text file for the owner to read.</summary>
     public string Describe()
     {
@@ -95,6 +111,30 @@ public sealed record StepTrial(
         text.Append(Parameters.ToJsonString(indented)).Append("\n\n");
         text.Append("The answer, exactly as it arrived:\n");
         text.Append(Response?.Content ?? "").Append("\n");
+        if (Instructions is not null)
+        {
+            text.Append("\nThe step's instructions, as sent:\n").Append(Instructions).Append('\n');
+        }
+
+        if (Input is not null)
+        {
+            text.Append("\nThe step's input, as sent:\n").Append(Input).Append('\n');
+        }
+
+        if (Pictures.Count > 0)
+        {
+            text.Append("\nThe pictures sent with the input:\n");
+            foreach (var picture in Pictures)
+            {
+                text.Append("- ").Append(picture).Append('\n');
+            }
+        }
+
+        if (AnswerForm is not null)
+        {
+            text.Append("\nThe form the answer was held to, as sent:\n").Append(AnswerForm).Append('\n');
+        }
+
         return text.ToString();
     }
 

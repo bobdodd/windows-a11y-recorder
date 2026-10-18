@@ -382,6 +382,28 @@ player's controls are step 3, below.
   ([llama.cpp server](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md)).
   A load the router marks failed, or one not finished after 15 minutes,
   fails the step, saying which.
+- **Unloading a model:** the router answers `POST /models/unload` at
+  once and stops the model's process in the background, and until it has
+  exited the model counts against the server's limit of one model
+  (`--models-max 1`). On the target machine, on 2026-10-16, a summary and
+  vision ran in one worker for the first time, and the image model's load,
+  sent straight after the text model's unload, was refused: "model limit
+  reached, try again later". The worker now reads the unloaded model's
+  state in `GET /models` until it is no longer "loaded", "loading", or
+  "sleeping", for at most the load time, before loading the next
+  ([llama.cpp b11607, server-models.cpp](https://github.com/ggml-org/llama.cpp/blob/b11607/tools/server/server-models.cpp)).
+- **The output of a failed step:** where a step fails a task with output
+  from the model, the worker saves that output, as the model gave it, as
+  `failed-step-output.txt` in the task's folder, and the player's "Why it
+  failed" gives the file's path and offers to open it in Notepad. A task
+  run again that fails at once, as the same request at temperature 0
+  would give the same output, saves the earlier output the same way. On
+  the target machine, on 2026-10-16, vision stopped at moment 8, layer 2,
+  at the output limit of 8,192 tokens; the output could not be read from
+  the player, so whether the model ran on or the answer was long is
+  unknown. The owner chose to see the output before any fix: "yes build
+  step 1". A test: a step cut off at the output limit saves its output,
+  and a run again that fails without asking saves it too.
 - **A worker killed during an attempt:** the next worker closes the
   attempt as failed, "The worker stopped during the attempt.", and it
   counts against the attempt limit. Steps already accepted are not asked
@@ -612,6 +634,19 @@ catalog. It does not run while the worker is running.
   it is the same request. On the target machine on 2026-10-14 a trial of a
   step that had repeated a statement passed, and nothing showed whether
   it had sent the same request (owner, the same day).
+- **It shows what the step was asked:** after the answer, the file gives
+  the step's instructions and its input as sent, each picture sent with
+  the input by its reference, media type, and size, and the form the
+  answer was held to as sent: the schema, or the grammar with
+  `--one-line`. Added on 2026-10-17, after the report of that day's run
+  on the target machine accepted an empty story of visit 1, 29 output
+  tokens from 17,261 prompt tokens, and so an empty opening and an empty
+  executive summary built on it, for a reason unknown without the
+  request (owner, the same day: "yes", to making the trial file include
+  the request with no change to how any step is asked). As built: in
+  `StepTrial` and `AnalysisWorker.TrialStepAsync`; the trial test checks
+  the instructions, the input, the form, and that no picture is listed
+  for a step sent none.
 
 - **Tests:** the sampling options read, sent, recorded, and refused; the
   repeat watch, letting through a conclusion restated later, two repeats
@@ -939,6 +974,57 @@ b11607-ff026f8c0:
   shared wording therefore cannot say which answers are very close, so
   the vote first agreed was not built, and the owner chose the first
   answer that passes (decision 2).
+
+### Sampling options left out, and answers that need a statement (built)
+
+Built on 2026-10-17 (recording-summary.md, "The empty story and the page
+not rebuilt"; the owner, the same day: "I agree with both").
+
+- **A step's request may leave out options of its profile's sampling,**
+  by name, in `SamplingLeftOut`; they are neither sent nor recorded with
+  its attempts. The steps that write the vision report leave out the
+  presence penalty.
+- **A step's request may need a statement,** with `NeedsStatements`: an
+  answer that passes the checks with no statement in any section fails,
+  "The answer gave no statement, and this step needs at least one.", and
+  at temperature 0 is recovered from as an answer at the output limit is
+  (see the next section).
+
+### An answer that reached the output limit (built)
+
+On the target machine, on 2026-10-16, vision stopped at moment 8, layer 2,
+at the output limit of 8,192 tokens. Its saved output (see "The output of
+a failed step") held 110 statements: the first nine added what the frame
+showed, and from the tenth the model counted down the visit's knowledge,
+one statement for nearly each of K127 to K15, restating it and citing
+only the frame. Nothing was repeated word for word, so it was not stopped
+as a loop. A higher limit was not recommended: the count would likely
+have finished and passed the checks, adding about a hundred statements
+restating the knowledge.
+
+The owner, 2026-10-17: "No!  We already have a solution for loops that
+uses voting, re-use that strategy". The loop recovery as built takes the
+first answer that passes, not a vote (see "Recovering from a loop",
+decision 2). Asked to choose, the owner: "ok, let's try that", for the
+recommendation: the recovery as built, started by the output limit.
+
+1. **An answer at temperature 0 that reaches the output limit is
+   recovered from as a loop is:** sampled at temperature 0.7 at seed 1,
+   then 2, then 3, the first that passes being the step's answer.
+2. **Where none passes, the step fails,** saying why each sample failed,
+   as there is no loop to cut the answer at. Its output is saved as for
+   any failed step.
+3. **A task run again restarts where it failed.** The answer that reached
+   the limit is not sent again; the failure is found in the task run
+   again, or in the tasks that one ran again in turn, as a task that
+   failed at once, without asking, made no attempt of its own.
+- **As built:** in `AnalysisWorker`. Tests: an answer at the limit is
+  sampled again and the first that passes kept; with no sample that
+  passes the step fails, saying why each failed; a task run again after
+  an answer at the limit samples without sending it again; and the
+  failed answer is found through the tasks run again in turn. Two tests
+  that used the output limit as their refused answer now use an answer
+  citing a reference not in the input.
 
 ## Decisions (2026-10-14)
 

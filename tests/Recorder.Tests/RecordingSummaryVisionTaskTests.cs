@@ -239,6 +239,47 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Equal(["visit-0001-moment-01-page-01", "visit-0001-moment-01-page-02", "visit-0001-moment-02-page-01", "visit-0001-moment-02-page-02"],
             await TileStepsSentAsync("ABCDE", "ABCDE@900", "-", "-"));
 
+    // The steps that write the report leave out the presence penalty, kept
+    // for the steps that describe a moment (owner, 2026-10-17), and the
+    // story, its opening, and the executive summary need a statement.
+    [Fact]
+    public async Task Only_the_steps_that_describe_a_moment_are_sent_the_presence_penalty()
+    {
+        var (catalog, _, vision) = await QueueBothAsync();
+        var endpoint = VisionEndpoint();
+        var settings = VisionSettings();
+        settings = settings with
+        {
+            Profiles = [.. settings.Profiles.Select(profile => profile with
+            {
+                Generation = profile.Generation with { Sampling = profile.Generation.Sampling.SetItem("presence_penalty", 1.5) }
+            })]
+        };
+        await new AnalysisWorker(catalog, settings,
+                [new RecordingSummaryKind(), new RecordingSummaryVisionKind { Pages = (_, _) => new PlannedPages("ABCDE", "ABCDE", "ABCDE", "ABCDE") }], endpoint, options: Fast)
+            .RunUntilEmptyAsync(Token);
+        Assert.Equal((AnalysisTaskStates.Done, (string?)null), await StateAsync(vision));
+
+        string[] writing =
+        [
+            RecordingSummaryVisionKind.PageChapterInstructions, RecordingSummaryVisionKind.StoryInstructions,
+            RecordingSummaryVisionKind.OpeningInstructions, RecordingSummaryVisionKind.ExecutiveInstructions
+        ];
+        var sent = endpoint.Bodies.Select(body => JsonDocument.Parse(body).RootElement.Clone())
+            .Select(body => (Instructions: body.GetProperty("messages")[0].GetProperty("content").GetString(), Penalty: body.TryGetProperty("presence_penalty", out _)))
+            .ToList();
+        var vision1 = sent.Where(item => item.Instructions is { } instructions &&
+            (instructions == RecordingSummaryVisionKind.MomentInstructions || instructions == RecordingSummaryVisionKind.Layer2Instructions)).ToList();
+        Assert.NotEmpty(vision1);
+        Assert.All(vision1, item => Assert.True(item.Penalty));
+        foreach (var instructions in writing)
+        {
+            var steps = sent.Where(item => item.Instructions == instructions).ToList();
+            Assert.NotEmpty(steps);
+            Assert.All(steps, item => Assert.False(item.Penalty));
+        }
+    }
+
     // The integration test of the store: the same unchanging page at every
     // moment of both visits, its tiles sent at the first moment only, each
     // picture kept once, and a run again keeping no new picture.
@@ -277,9 +318,10 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Equal(20, ImageIndex.Read(Path.Combine(_session, "analysis", again.ToString("D"), "images.json")).Count);
     }
 
-    private async Task<(AnalysisCatalog Catalog, Guid Summary, Guid Vision)> QueueBothAsync(bool frames = true)
+    private async Task<(AnalysisCatalog Catalog, Guid Summary, Guid Vision)> QueueBothAsync(
+        bool frames = true, IEnumerable<(long Time, string Channel, string EventType, string Json)>? extra = null)
     {
-        WriteRecording(frames);
+        WriteRecording(frames, extra);
         var (catalog, recording) = await CatalogAsync();
         await catalog.SaveCapabilitiesAsync(recording, "Uses NVDA with speech and a magnifier at 200%.", Token);
         var summary = await catalog.QueueTaskAsync(
@@ -390,7 +432,12 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Contains("Page 1 of the report's chapter on the pages, derived by the recorder:", page, StringComparison.Ordinal);
         Assert.DoesNotContain("[K", page, StringComparison.Ordinal);
         Assert.Contains("(layer 2, the captured frame at moment 1, elaborating the statement before it, inferred) An elaboration from layer 2.", page, StringComparison.Ordinal);
+        // The page chapter and the story are given the page's changes; the
+        // moments are not (owner, 2026-10-16).
+        Assert.Contains("\nThe page's changes during the visit", page, StringComparison.Ordinal);
+        Assert.DoesNotContain(bodies.Take(11), body => Input(body).Contains("The page's changes during the visit", StringComparison.Ordinal));
         var story = Input(bodies[13]);
+        Assert.Contains("\nThe page's changes during the visit", story, StringComparison.Ordinal);
         Assert.Contains("The visit's page is described in the report's chapter on the pages, section 3.1.", story, StringComparison.Ordinal);
         Assert.Contains("The changes during the visit to the accessibility settings, the assistive technology, and the Magnifier's view, found by the recorder:\nNone were recorded.\n", story, StringComparison.Ordinal);
         Assert.Matches(@"Moment 1, at 00:00:02\.500: the captured frame \[E\d+\]; the page as the recorder rebuilt it, in tiles: tile 1 \[E\d+\], CSS pixels 0 to 925; .*tile 3 \[E\d+\], CSS pixels 1850 to 2775, on the screen;", story);
@@ -451,7 +498,7 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Contains("No change was recorded.\n\n## Appendix E. Other windows\n\n", text, StringComparison.Ordinal);
         Assert.Contains("\n## Appendix F. Evidence\n\n| Ref | Time | Evidence |", text, StringComparison.Ordinal);
         Assert.Contains("\n## Appendix G. How this was made\n\n### G.1 How the report is built\n\n- Every statement", text, StringComparison.Ordinal);
-        foreach (var heading in new[] { "### G.2 The model", "### G.3 The prompt templates", "### G.4 The settings", "### G.5 The moments and their pictures", "### G.6 The limits, the steps reused, and the attempts" })
+        foreach (var heading in new[] { "### G.2 The model", "### G.3 The prompt templates", "### G.4 The settings", "### G.5 The moments and their pictures", "### G.6 The facts given, the steps reused, and the attempts" })
         {
             Assert.Contains("\n" + heading + "\n\n- ", text, StringComparison.Ordinal);
         }
@@ -578,7 +625,7 @@ public sealed partial class RecordingSummaryTaskTests
     [Fact]
     public void Every_template_shows_a_statement_with_its_text_before_its_kind()
     {
-        Assert.Equal((4, 3, 4, 1, 4, 4, 3), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+        Assert.Equal((4, 3, 4, 1, 5, 5, 3), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
             RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.LayerTemplateVersion, RecordingSummaryVisionKind.PageChapterTemplateVersion,
             RecordingSummaryVisionKind.StoryTemplateVersion, RecordingSummaryVisionKind.ExecutiveTemplateVersion));
         foreach (var instructions in new[]
@@ -733,6 +780,87 @@ public sealed partial class RecordingSummaryTaskTests
         var (state, failure) = await StateAsync(vision);
         Assert.Equal(AnalysisTaskStates.Failed, state);
         Assert.Contains("Summarise the recording first", failure, StringComparison.Ordinal);
+    }
+
+    // The page's changes read from the recording file, here a scroll, are
+    // in the summary's facts as in the vision task's, so vision is added to
+    // it (target machine, 2026-10-16: a summary of a page that scrolled was
+    // written without them, and vision failed). The records are the least
+    // the reading needs, not whole records, so the page's DOM is not
+    // rebuilt from them; the test is of the two tasks' facts agreeing.
+    [Fact]
+    public async Task Vision_is_added_to_a_summary_of_a_page_that_scrolled()
+    {
+        const string context = "\"context\":{\"documentToken\":\"token-a\"}";
+        var (catalog, summary, vision) = await QueueBothAsync(extra:
+        [
+            (3 * Second, "browser.layout", "layout-scroll-offset-changed", "{" + context + ",\"nodeId\":1,\"scrollElementId\":\"root\",\"scrollOffset\":{\"x\":0,\"y\":900}}"),
+            (4 * Second, "browser.interaction", "page-popup-closed", "{" + context + "}")
+        ]);
+        var endpoint = VisionEndpoint();
+
+        await RunAsync(catalog, endpoint);
+
+        Assert.Equal(AnalysisTaskStates.Done, (await StateAsync(summary)).State);
+        Assert.Equal(AnalysisTaskStates.Done, (await StateAsync(vision)).State);
+        var first = Input(endpoint.Bodies.First());
+        Assert.Contains("scrolled from a position not recorded in the visit to 900 CSS pixels from the top", first, StringComparison.Ordinal);
+        Assert.Contains("A page popup closed.", first, StringComparison.Ordinal);
+    }
+
+    // Adding vision starts from the beginning: after a summary written from
+    // other facts, a new summary is queued first, as a run again of it, and
+    // vision after the new one, and both finish (target machine,
+    // 2026-10-16: vision added to a summary written from other facts
+    // failed, run again or not).
+    [Fact]
+    public async Task Adding_vision_after_a_summary_of_other_facts_summarises_again_first()
+    {
+        WriteRecording(frames: true);
+        var (catalog, recording) = await CatalogAsync();
+        var old = await catalog.QueueTaskAsync(
+            recording, RecordingSummaryKind.Name, 1, new Dictionary<string, string> { [ModelCapabilities.Text] = "This PC" },
+            sessionDirectory: _session, cancellationToken: Token);
+        await RunAsync(catalog, VisionEndpoint());
+
+        // As if the summary had been written from the facts before a change
+        // to the recorder: other references, from another request.
+        await using (var connection = await fixture.Server.DataSource.OpenConnectionAsync(Token))
+        await using (var command = new NpgsqlCommand(
+            "UPDATE analysis_attempts SET input_references = ARRAY['E1'], input_sha256 = 'earlier' WHERE task_id = $1 AND step_key = 'visit-0001'", connection))
+        {
+            command.Parameters.AddWithValue(old);
+            Assert.Equal(1, await command.ExecuteNonQueryAsync(Token));
+        }
+
+        var (summary, vision, queued) = await AnalysisPlayer.QueueVisionAsync(catalog, recording, _session, "This PC", WithImages, null, Token);
+        await RunAsync(catalog, VisionEndpoint());
+
+        Assert.True(queued);
+        Assert.NotEqual(old, summary);
+        Assert.Equal(AnalysisTaskStates.Done, (await StateAsync(summary)).State);
+        Assert.Equal(AnalysisTaskStates.Done, (await StateAsync(vision)).State);
+        var task = await catalog.TaskAsync(summary, Token);
+        Assert.Equal((old, "This PC"), (task!.RerunOfTaskId, task.StageProfiles[ModelCapabilities.Text]));
+        Assert.Equal(summary, (await catalog.TaskAsync(vision, Token))!.AfterTaskId);
+    }
+
+    // A summary still queued is the one vision is added to; no other is queued.
+    [Fact]
+    public async Task Adding_vision_while_a_summary_is_queued_adds_it_to_that_summary()
+    {
+        WriteRecording(frames: true);
+        var (catalog, recording) = await CatalogAsync();
+        var pending = await catalog.QueueTaskAsync(
+            recording, RecordingSummaryKind.Name, 1, new Dictionary<string, string> { [ModelCapabilities.Text] = "This PC" },
+            sessionDirectory: _session, cancellationToken: Token);
+
+        var (summary, vision, queued) = await AnalysisPlayer.QueueVisionAsync(catalog, recording, _session, "This PC", WithImages, null, Token);
+
+        Assert.False(queued);
+        Assert.Equal(pending, summary);
+        Assert.Equal(pending, (await catalog.TaskAsync(vision, Token))!.AfterTaskId);
+        Assert.Single(await catalog.TasksAsync(recording, Token), task => task.Kind == RecordingSummaryKind.Name);
     }
 
     [Fact]

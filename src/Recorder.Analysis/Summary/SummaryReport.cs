@@ -33,14 +33,14 @@ public static class SummaryReport
         IReadOnlyList<(VisitCollation Visit, AcceptedStep Step)> visits,
         AcceptedStep? overall,
         IReadOnlyList<AttemptRecord> attempts,
-        CollationLimits limits,
+        CollationSettings settings,
         DateTime nowUtc)
     {
         ArgumentNullException.ThrowIfNull(collation);
         ArgumentNullException.ThrowIfNull(capabilities);
         ArgumentNullException.ThrowIfNull(visits);
         ArgumentNullException.ThrowIfNull(attempts);
-        ArgumentNullException.ThrowIfNull(limits);
+        ArgumentNullException.ThrowIfNull(settings);
         var citations = new ReportCitations(collation);
         var builder = new StringBuilder();
         string Refs(IEnumerable<string> references) => citations.Refs(references);
@@ -129,7 +129,7 @@ public static class SummaryReport
         builder.Append(CultureInfo.InvariantCulture,
             $"- Prompt templates: {RecordingSummaryKind.VisitTemplate} version {RecordingSummaryKind.TemplateVersion} for each visit, " +
             $"{RecordingSummaryKind.RecordingTemplate} version {RecordingSummaryKind.TemplateVersion} for the whole recording.\n");
-        AppendLimitsAndAttempts(builder, collation, limits, attempts);
+        AppendLimitsAndAttempts(builder, collation, settings, attempts);
         return builder.ToString();
     }
 
@@ -256,19 +256,13 @@ public static class SummaryReport
         builder.Append(CultureInfo.InvariantCulture, $"- Generation settings: `{accepted.Parameters}`.\n");
     }
 
-    /// <summary>The collation limits, the facts left out, the reused steps, and the attempts.</summary>
-    internal static void AppendLimitsAndAttempts(StringBuilder builder, RecordingCollation collation, CollationLimits limits, IReadOnlyList<AttemptRecord> attempts)
+    /// <summary>The facts given, the reused steps, and the attempts.</summary>
+    internal static void AppendLimitsAndAttempts(StringBuilder builder, RecordingCollation collation, CollationSettings settings, IReadOnlyList<AttemptRecord> attempts)
     {
+        builder.Append("- Every fact of each visit is given in full, with no limit on how many or how long: a request longer than the server's context is refused by the server, " +
+            "and the step then fails with the server's message, which gives the request's tokens and the context's, in the attempts below.\n");
         builder.Append(CultureInfo.InvariantCulture,
-            $"- Collation limits: {limits.Landmarks} landmarks, {limits.Headings} headings, {limits.Fields} form fields, {limits.Buttons} buttons, " +
-            $"{limits.MainTextCharacters} characters of opening text, {limits.KeyKinds} kinds of key, {limits.Commands} NVDA commands, " +
-            $"{limits.Clicks} clicks, {limits.FocusChanges} focus changes, {limits.Announcements} NVDA announcements, {limits.TypedFields} text fields, " +
-            $"{limits.Steps} in-page jumps and {limits.Popups} popups for each visit.\n");
-        var leftOut = collation.Visits.Where(visit => visit.LeftOut > 0).ToList();
-        builder.Append(leftOut.Count == 0
-            ? "- Nothing was left out of any visit's facts.\n"
-            : "- Facts left out to keep within the limits: " + string.Join("; ", leftOut.Select(visit =>
-                string.Create(CultureInfo.InvariantCulture, $"visit {visit.Visit.Number}, {visit.LeftOut}"))) + ".\n");
+            $"- An input counts as the one before a visit within {Seconds(settings.InputBeforeNanoseconds)} before it; one scroller's scroll records with no pause longer than {Seconds(settings.ScrollPauseNanoseconds)} between them are one scroll.\n");
         builder.Append("- What NVDA had to announce is the recorder's inference from the page, not a recording of speech.\n");
         var reused = attempts.Where(attempt => attempt.ReusedFromTaskId is not null).ToList();
         if (reused.Count > 0)

@@ -465,13 +465,21 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
         ArgumentNullException.ThrowIfNull(identity);
         return UseAsync(async connection =>
         {
+            // The task and those it ran again, in turn: a task run again
+            // that failed at once, without asking, has no attempt of its
+            // own, and the failure is the task's it ran again (target
+            // machine, 2026-10-16). A task runs again only a task queued
+            // before it, so the chain ends.
             await using var command = new NpgsqlCommand(
-                "SELECT attempt_id, failure, raw_output FROM analysis_attempts WHERE task_id = $1 AND step_key = $2 AND outcome = 'failed' " +
-                "AND input_sha256 = $3 AND model_sha256 = $4 AND server_build = $5 AND parameters = $6 " +
-                "AND failure IS DISTINCT FROM 'Its input changed, so the step ran again.' " +
-                "AND failure IS DISTINCT FROM 'The worker stopped during the attempt.' " +
-                "AND raw_output IS NOT NULL " +
-                "ORDER BY attempt_number DESC LIMIT 1",
+                "WITH RECURSIVE chain (task_id, depth) AS (SELECT $1::uuid, 0 UNION ALL " +
+                "SELECT t.rerun_of_task_id, c.depth + 1 FROM analysis_tasks t JOIN chain c ON t.task_id = c.task_id WHERE t.rerun_of_task_id IS NOT NULL) " +
+                "SELECT a.attempt_id, a.failure, a.raw_output FROM analysis_attempts a JOIN chain c ON a.task_id = c.task_id " +
+                "WHERE a.step_key = $2 AND a.outcome = 'failed' " +
+                "AND a.input_sha256 = $3 AND a.model_sha256 = $4 AND a.server_build = $5 AND a.parameters = $6 " +
+                "AND a.failure IS DISTINCT FROM 'Its input changed, so the step ran again.' " +
+                "AND a.failure IS DISTINCT FROM 'The worker stopped during the attempt.' " +
+                "AND a.raw_output IS NOT NULL " +
+                "ORDER BY c.depth, a.attempt_number DESC LIMIT 1",
                 connection);
             command.Parameters.AddWithValue(taskId);
             command.Parameters.AddWithValue(stepKey);

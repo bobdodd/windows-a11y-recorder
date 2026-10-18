@@ -8,8 +8,8 @@ public sealed record CapturedFrame(long Time, string Path, string AbsolutePath, 
 /// <summary>A layout change set of a document, and how many of its elements it changed; null where not recorded.</summary>
 public sealed record LayoutChangeFact(long Time, string? EventId, string DocumentToken, long? ChangedNodes);
 
-/// <summary>A scroller of a document scrolling to a vertical position, in CSS pixels.</summary>
-public sealed record ScrollFact(long Time, string? EventId, string DocumentToken, string Scroller, double Y);
+/// <summary>A scroller of a document scrolling to a vertical position, in CSS pixels, with the scroller's DOM node where it is recorded.</summary>
+public sealed record ScrollFact(long Time, string? EventId, string DocumentToken, string Scroller, double Y, long? NodeId = null);
 
 /// <summary>An animation on the compositor: its start, and its end where it was recorded.</summary>
 public sealed record AnimationFact(long Start, string? StartEventId, long? End, string? EndEventId);

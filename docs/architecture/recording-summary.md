@@ -114,9 +114,10 @@ while building it:
 The Analysis menu has two items:
 
 - **Summarise the recording** writes `summary.md`.
-- **Add vision to the summary** writes `summary-with-vision.md`. It needs a
-  finished summary of the same recording. Chosen before the summary has
-  finished, it is queued to run after it.
+- **Add vision to the summary** writes `summary-with-vision.md`. It starts
+  from the beginning: it queues a summary first and vision after it,
+  unless a summary is already queued or running, when vision runs after
+  that one (see "Vision starts from the beginning").
 
 Both files are written to the task's folder under the session folder's
 `analysis` folder, as the runner design describes.
@@ -278,6 +279,8 @@ kind `recording-summary-vision`, version 1, shown in the player as
   has finished, and fails it if the summary does not finish. Run again
   does the same. Where there is no summary, the player says to summarise
   the recording first. A task naming no summary fails, saying so.
+  Changed on 2026-10-16: adding vision now queues a summary first; see
+  "Vision starts from the beginning".
 - **The summary must have been written from the same facts.** The vision
   task collates the recording again, with the summary's limits, and
   compares each visit's references with those given to the summary's
@@ -1540,6 +1543,206 @@ As built, 2026-10-16:
 - The executive summary's template is unchanged, but its input, which
   holds the story, is not, so a run again sends it too.
 
+### The page's changes during a visit (built)
+
+The owner, 2026-10-16, the next of the planned work: "Page changes during
+each visit, not just its end state: live regions, popups opening and
+closing, NVDA windows, scrolls."
+
+What is built: the recorder already reads each of these, but only to
+choose the vision stage's moments (`MomentChooser.Choose`): each change to
+a live region, each popup opening and closing, each of NVDA's windows
+coming to the front and leaving it, and each scroll that moves a scroller
+by at least the viewport's height. Each is a reason for a moment, and
+`MomentLimits.PerVisit` is unlimited, so none is lost. But only the
+moment's own request is given its reasons. The story is given the visit's
+facts from the collation, which have the popups opening and what NVDA
+had to announce, but not the other changes themselves, and the visit's
+knowledge, which is the model's descriptions of
+the moments. The page chapter is given the knowledge only, so "How the
+page changed" rests on inferences alone. Scrolls smaller than the
+viewport are in no request.
+
+Proposed, to be agreed:
+
+- **Each visit's facts gain the page's changes, in time order,** each
+  with its time and its evidence reference, in the collation
+  (`SummaryCollator`), so that stage 1's visit step and the vision
+  stage's story are given them:
+  - each change to a live region: the region, its politeness, whether it
+    was added, changed, or an alert, and its text in full;
+  - each popup opening, as now, and each popup closing;
+  - each of NVDA's windows coming to the front and leaving it, with its
+    name;
+  - each scroll, as a movement: one scroller's records with no pause
+    between them longer than a setting are one scroll, from its first
+    position to its last, with the part of the page it brought onto the
+    screen in CSS pixels. Every record is in one movement, so none is
+    left out.
+- **The page chapter is given each visit's changes** as well as its
+  knowledge, so that 3.N.5, "How the page changed", rests on the
+  recorder's facts.
+- **A reference for each change** is the same as its moment's reason's,
+  as the evidence register numbers each record once.
+- **What a run again sends:** stage 1's visit steps, and the vision
+  stage's story, opening, page chapter, and executive summary, whose
+  inputs change. Whether the moments' steps are sent again depends on
+  whether their input, "the recorder's facts of the visit since the
+  moment before", is given the changes too: an open question.
+
+The owner's answers, 2026-10-16:
+
+1. **Scrolls:** "As movements".
+2. **Whether the moments' requests are given the changes:** "What is
+   your recommendation here?" The recommendation: not to give them, as a
+   moment describes its frame and its reasons already name every change
+   that chose it, and the story, which tells the order of events, is given
+   every change; the moments are still given the visit's other facts in
+   full, with no limit.
+3. **Whether the page chapter is given the changes:** "Again, I don't
+   know enough to answer. What is your recommendation here?" The
+   recommendation: to give them, as 3.N.5 asks for what changed, in
+   order, with when, which is what the recorder's facts are, and the
+   knowledge can miss a change between two moments or off the screen.
+4. Of both recommendations: "I agree to both".
+
+As built, 2026-10-16:
+
+- `VisitCollation` gains `Changes`, the page's changes during the visit
+  in time order, each `[E..] time text`, and `ChangesText`, them under
+  their heading, or a line that none was recorded. `Text`, which stage
+  1's visit step and the story are given, is the visit's lines then
+  `ChangesText`. `Lines`, from which each moment's "facts since the
+  moment before" are taken, does not hold them.
+- The changes: each change to a live region, with its region, its text
+  in full, and its politeness; each popup opening, moved from the lines,
+  and each popup closing; each of NVDA's windows coming to the front and
+  leaving it; and each scroll movement. `ISummaryEvidence` gains the
+  popups closing, NVDA's windows, the live regions, the scrolls, and the
+  viewport's height, none by default; `RecordedSummaryEvidence` already
+  read them for the moments.
+- A scroll movement is one scroller's records with no pause longer than
+  `CollationSettings.ScrollPauseNanoseconds`, 1 second, between them. Its
+  text gives the scroller, "The page" where its DOM node, which each
+  scroll record names
+  ([layout and style checkpoint evidence model](layout-and-style-checkpoint-evidence-model.md),
+  `nodeId`), is the document, the html element, or the body, otherwise
+  the element by its role and name; the position before it, the last
+  record of the scroller before the movement, or "a position not recorded
+  in the visit"; its last position; its times; how many positions were
+  recorded; and, for the page's own scroller, the part of the page then
+  in the viewport. `ScrollFact` gains the node.
+- The page chapter's request gives each visit's `ChangesText` before its
+  knowledge; its template, version 5, says so, and asks for "changes"
+  from the recorder's changes and the knowledge. The story's template,
+  version 5, which the opening shares, says that the visit's facts have
+  the changes.
+- **What a run again sends, corrected:** every step of the vision task.
+  The evidence references are numbered once for the recording, the
+  collation's first and the moments' after, so a fact added to the
+  collation renumbers every moment's references, and each moment's
+  request differs from the one before. The recommendation said the
+  moments would be reused; that was wrong.
+- **The first run on the target machine,** build f16277d on 2026-10-16:
+  the vision task failed, as it should after the change, as the summary
+  it named was written from the facts before it. The owner summarised the
+  recording again and added vision, and it failed the same way: "The
+  recorder's facts for visit 1 are not the ones its summary was written
+  from". The cause: stage 1 read the recording without its file, and the
+  scrolls and live regions are read from the file only, so its facts had
+  no scrolls, while the vision task's, read with the file, had the
+  page's. Stage 1 now gives the file as the vision task does. The test
+  that would have shown it, a recording with a scroll summarised and then
+  given vision, failed before the fix and passes after it.
+- **The second run on the target machine,** build 0425071 on
+  2026-10-16: vision, run again, failed with the same message. Which
+  summary it was added to, and how its facts differed, could not be
+  read from the target machine, so the cause is unknown. The owner:
+  "Still fails. You are wasting my time here. Either fix this so we can
+  restart or start from ther beginning". See "Vision starts from the
+  beginning".
+
+### Vision starts from the beginning (built)
+
+The owner, 2026-10-16: "Either fix this so we can restart or start from
+ther beginning".
+
+- **Adding vision queues a summary first.** Add vision to the summary,
+  on the Analysis menu, and Run again or Run again from scratch on a
+  Summary with vision, queue a new summary of the recording and then
+  vision after it. The new summary is a run again of the newest finished
+  summary, with its profiles, so its steps whose requests are unchanged
+  are reused and take no model time; a step whose request changed, as
+  when the recorder's facts changed, is sent again. Where no summary has
+  finished, the profile chosen in the Analysis tab is used.
+- **A summary already queued or running is used.** Vision runs after it,
+  and no other summary is queued.
+- **The facts are still checked.** Where the new summary's facts and
+  vision's still differ, vision fails, and its reason now gives how many
+  references each was given and which are only in one, so that the
+  failure says what changed.
+- **As built:** in `AnalysisPlayer.QueueVisionAsync`, called by the
+  player. Two tests: adding vision after a summary written from other
+  facts queues a new summary, as a run again of it, and both finish; and
+  adding vision while a summary is queued adds it to that summary and
+  queues no other.
+
+### The collation limits removed (built)
+
+The owner, 2026-10-16: "Removing the collation limits, or showing they're
+forced by the context size", after "I don't like artificial limits unless
+absolutely forced by the platform and resources".
+
+What is built: `CollationLimits` caps each visit's facts at 20 landmarks,
+40 headings, 30 form fields, 30 buttons, 1,500 characters of opening
+text, 20 kinds of key, 30 NVDA commands, 20 clicks, 30 focus changes, 20
+announcements, 20 typed fields, 20 in-page jumps, and 10 popups, each cut
+stated with "(N more ... left out)". Names are cut at 80 characters, and
+headings at 160. Stage 1's overall step is given 10 headings a visit. None
+of these was measured against a context; they were set in advance.
+
+What the platform gives: a llama.cpp server refuses a request longer than
+its context, saying "request (N tokens) exceeds the available context
+size (M tokens), try increasing it"
+([llama.cpp server-context.cpp at b11607](https://github.com/ggml-org/llama.cpp/blob/b11607/tools/server/server-context.cpp)).
+The worker records that failure and does not send the request again, and
+it records each accepted attempt's prompt tokens, which Appendix G.6
+gives. The image profile's context is 32,768 tokens.
+
+Proposed, to be agreed:
+
+- **Every limit removed:** each count, the opening text's length, the
+  shortening of names and headings, and the overall step's 10 headings.
+  `CollationLimits` keeps only the 3 seconds in which an input counts as
+  the one before a visit, which says what the fact is, not how many.
+  The "(N more ... left out)" lines and the prompt's note on facts left
+  out go.
+- **A limit shown to be forced only by a refusal:** where a real request
+  is longer than the context, the step fails with the server's message,
+  giving the request's tokens and the context's, as now, and the run
+  stops there. A way to fit it, such as splitting the request, is then
+  designed for that case with the owner, not set in advance.
+- **What a run again sends:** every step whose input holds the visit's
+  facts: stage 1's visit and overall steps, and the vision stage's story,
+  opening, and executive summary. Whether the moments' steps are sent
+  again is the same open question as above.
+
+The owner's answer, 2026-10-16: "Remove all".
+
+As built, 2026-10-16:
+
+- `CollationLimits` becomes `CollationSettings`, with the 3 seconds for
+  the input before a visit and the scroll pause only; the kinds'
+  `Limits` property becomes `Collation`. Every count, the opening text's
+  length, now "the text of the main landmark, in full", the shortening of
+  names and headings, and the overall step's 10 headings a visit are
+  removed, with the "(N more ... left out)" lines, `VisitCollation.LeftOut`,
+  and the request's note on facts left out.
+- Appendix G.6 becomes "The facts given, the steps reused, and the
+  attempts". It says that every fact is given in full, and that a
+  request longer than the server's context is refused, the step failing
+  with the server's message, which gives both sizes, in the attempts.
+
 ### The recreated page at the recorded viewport and scroll
 
 The owner's decision, from a review of what the tiles are for.
@@ -1743,6 +1946,89 @@ As built:
   so the comparison is that of the stored pictures. The page so far is to
   be changed, more radically, after this work (owner, 2026-10-15), so it
   was not changed here.
+
+### The empty story and the page not rebuilt (built)
+
+The report of the run on the target machine on 2026-10-17 had every part
+of chapter 4 and of the executive summary saying "The model gave nothing
+for this part." The story of visit 1 had answered 17,261 prompt tokens
+with 29 output tokens, every section empty, and the checks accepted it;
+the opening and the executive summary are built from the story's parts,
+and had nothing to tell. Two trials of the story, with the request in the
+trial's file (analysis-runner.md, "Trying a step with other sampling
+options"), showed:
+
+| Request | Presence penalty | Outcome |
+|---|---|---|
+| The task's own, the same SHA-256 | 1.5 | 29 output tokens, every section empty |
+| The task's own, the same SHA-256 | 0 | 2,526 output tokens, 27 statements, passes the checks |
+| Without moment 3's tiles, 183 prompt tokens fewer | 1.5 | 1,887 output tokens, 21 statements, passes the checks |
+
+So with the penalty, whether the story was written turned on a small
+difference in the input. Why is not known. The penalty acts on the last
+`repeat_last_n` tokens, 64 by default
+([llama.cpp server README](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md)),
+and in this answer those are mostly the brackets and field names every
+statement repeats, which may lead the model to close each section empty;
+that is an inference, not a finding.
+
+In the first trial the page at moment 3 was not rebuilt. The trial's
+moments file gave why: "the recreation failed: InvalidOperationException:
+The DevTools protocol connection closed." The browser rebuilding the
+page, without a window, closed its control connection part way through;
+the other nine moments were rebuilt, and all ten in the task and the
+second trial. The moment was described from its frame alone, and every
+reference after it moved by 8, so the steps after it were given other
+input, silently. Why the browser closed it was not kept.
+
+Proposed: the presence penalty sent only with the steps that describe a
+moment; an empty story, opening, or executive summary refused and
+recovered from as a loop is; and a fault of the browser rebuilding a page
+recorded, the page built once more in a new browser, and the step failed
+where it faults again. The owner, 2026-10-17: "I agree with both".
+
+1. **The presence penalty is sent only with the steps that describe a
+   moment:** the frame, the groups of tiles, and layers 2 and 3. The page
+   chapter, the story of each visit, its opening, and the executive
+   summary leave it out of their requests, and their attempts record the
+   sampling sent without it. It was added for answers that looped, which
+   were the steps that describe a moment. Other sampling options of the
+   profile are sent with every step as before.
+2. **An answer with no statement is refused for the story of each visit,
+   its opening, and the executive summary,** and recovered from as an
+   answer at the output limit is: sampled at temperature 0.7 at seed 1,
+   then 2, then 3, the first that passes being the step's answer, and
+   where none passes the step fails, saying why each failed. A section
+   left empty in an answer that has statements is accepted, as before.
+3. **A fault of the browser rebuilding a page is told from a page that
+   cannot be rebuilt.** A reason of the recording, as before: no token
+   for the visit's document, the page not recorded at the frame, a page
+   that measures nothing, or content that cannot be read from the
+   recording; the moment is then described from its frame, and says why.
+   A failure once the browser is started, such as its connection closing,
+   is a fault: the page is built once more in a new browser, as a build
+   that completes gives the same page. Where it faults again the step
+   fails, saying why each build faulted, and run again restarts there.
+   Once, not more, is a choice, not a limit of the platform: a browser
+   that faults every time would otherwise be started without end.
+4. **A fault says what happened:** the failure, the failure under it,
+   and whether the browser had exited, with its exit code, or was still
+   running, or had not yet started.
+- **As built:** the requests' `SamplingLeftOut` and `NeedsStatements`
+  in `ModelRequest`, applied in `AnalysisWorker`; the steps that write
+  the report in `RecordingSummaryVisionKind.WritingLeavesOut`; the
+  rebuild in `RecordedMomentPages.RebuildAsync` and `Fault`, with the
+  browser's exit code from `RecreationSession.BrowserExitCode`. Tests:
+  a step that leaves out an option neither sends nor records it; only
+  the steps that describe a moment are sent the penalty in a run of the
+  vision task; an answer with no statement is sampled again for a step
+  that needs one, fails the step where no sample passes, and is accepted
+  for a step that does not; a page whose browser faulted is built again
+  and kept, fails the step where it faults twice, and is not built again
+  for a reason of the recording; and a fault's text.
+- **What runs again:** the steps that write the report send other
+  settings, so they run again in a task run again; the steps that
+  describe a moment are reused.
 
 ## Decisions (2026-10-14)
 

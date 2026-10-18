@@ -198,13 +198,17 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // the recorder gives and heads, each its own section of the answer,
     // and the executive summary interpreting and explaining, after the
     // owner's example (recording-summary.md, "The executive summary and
-    // the pages rewritten"). Version 4 of the story and its opening: each
+    // the pages rewritten"). Version 5 of the page chapter: given each
+    // visit's changes as the recorder found them (recording-summary.md,
+    // "The page's changes during a visit"). Version 4 of the story and its opening: each
     // visit's part in three subsections the recorder gives and heads, the
     // opening an introduction the recorder heads, and no headings of the
     // model's own (recording-summary.md, "The story in subsections").
-    public const int PageChapterTemplateVersion = 4;
+    // Version 5 of the story and its opening: the story told that the
+    // visit's facts have the page's changes in time order.
+    public const int PageChapterTemplateVersion = 5;
 
-    public const int StoryTemplateVersion = 4;
+    public const int StoryTemplateVersion = 5;
 
     public const int ExecutiveTemplateVersion = 3;
 
@@ -323,7 +327,8 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     public const string PageChapterInstructions =
         "You write the description of one web page for the chapter on the pages of a professional report for accessibility and usability engineers on an accessibility test recording. " +
         "The chapter describes each page from everything known of it from every visit to it, independent of the participant's journey, which the chapter on the user experience tells. " +
-        "You are given the page's address and title, the visits to it with what the recorder derived of them, and each visit's knowledge in layers: " +
+        "You are given the page's address and title, the visits to it with what the recorder derived of them, the page's changes during each visit as the recorder found them, " +
+        "each beginning with an evidence reference such as [E3]: its live regions, its popups opening and closing, NVDA's windows, and its scrolls; and each visit's knowledge in layers: " +
         "layer 1 from the recorded data, layer 2 from captured frames of the screen, and layer 3 from the web page as the recorder rebuilt it, each statement with the evidence references it rests on, such as [E3]. " +
         "The knowledge is inference, not fact. " +
         "Describe the page as an engineer needs to know it, as an overview and not a list of every element, in prose whose sentences connect, each paragraph one topic. " +
@@ -335,7 +340,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "\"layout\", its layout and regions from top to bottom, with their landmarks, and its imagery, colour, and emphasis; " +
         "\"content\", what its regions hold: its headings, sections, text, and images, as an overview; " +
         "\"controls\", the controls, links, forms, dialogs, menus, widgets, and messages it has or showed, with where they are and how they behave; " +
-        "and \"changes\", what appeared, went, moved, or changed on the page during the visits, in order, each with when. " +
+        "and \"changes\", what appeared, went, moved, or changed on the page during the visits, in order, each with when, from the recorder's changes and the knowledge. " +
         "Do not repeat in one section what another holds. " +
         "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " + ParagraphRule +
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
@@ -354,9 +359,19 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "or {\"form\": ..., \"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets +
         "Write plain sentences without Markdown.";
 
+    /// <summary>
+    /// The profile's sampling options the steps that write the report leave
+    /// out: the presence penalty, kept for the steps that describe a moment,
+    /// where answers looped. Sent with the story of visit 1 on the target
+    /// machine on 2026-10-17, it gave every section empty; the same request
+    /// without it gave 27 statements (owner, the same day).
+    /// </summary>
+    public static readonly IReadOnlySet<string> WritingLeavesOut = new HashSet<string>(StringComparer.Ordinal) { "presence_penalty" };
+
     public const string StoryInstructions =
         "You write one part of the chapter on the user experience of a professional report for accessibility and usability engineers on an accessibility test recording: the story of the user experience. " +
-        "This part is one page visit. You are given the participant's capabilities; the recorder's facts about the visit, each beginning with an evidence reference such as [E3]; " +
+        "This part is one page visit. You are given the participant's capabilities; the recorder's facts about the visit, each beginning with an evidence reference such as [E3], " +
+        "with the page's changes during it in time order: its live regions, its popups opening and closing, NVDA's windows, and its scrolls; " +
         "the visit's knowledge in layers: layer 1 from the recorded data, layer 2 from captured frames of the screen, and layer 3 from the web page as the recorder rebuilt it, each statement with the references it rests on; " +
         "the moments of the visit, each with its captured frame's reference and its tiles' references; which section of the chapter on the pages describes the visit's page; " +
         "the changes during the visit to the accessibility settings, the assistive technology, and the Magnifier's view, found by the recorder, each with its references; " +
@@ -431,7 +446,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     public int Version => 3;
 
     /// <summary>The summary's collation limits, which must be the summary's own for its references to match.</summary>
-    public CollationLimits Limits { get; init; } = CollationLimits.Default;
+    public CollationSettings Collation { get; init; } = CollationSettings.Default;
 
     public MomentLimits Moments { get; init; } = MomentLimits.Default;
 
@@ -544,7 +559,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     {
         var task = context.Task;
         var capabilities = await RecordingSummaryKind.CapabilitiesAsync(context, cancellationToken).ConfigureAwait(false);
-        var collation = SummaryCollator.Collate(evidence, capabilities, Limits);
+        var collation = SummaryCollator.Collate(evidence, capabilities, Collation);
         if (collation.Visits.Count == 0)
         {
             throw new StepFailedException("The recording has no page visits, so there is nothing to add vision to.");
@@ -563,11 +578,21 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                 throw new StepFailedException($"The summary has no accepted description of visit {visit.Visit.Number}, so vision cannot be added to it.");
             }
 
-            if (!RecordingSummaryKind.VisitReferences(collation, visit).SetEquals(given))
+            var now = RecordingSummaryKind.VisitReferences(collation, visit);
+            if (!now.SetEquals(given))
             {
+                // How they differ, so that a failure says what changed.
+                static string Listed(IEnumerable<string> references)
+                {
+                    var list = references.OrderBy(reference => int.TryParse(reference.AsSpan(1), out var number) ? number : int.MaxValue).ToList();
+                    return list.Count == 0 ? "none" : string.Join(", ", list);
+                }
+
                 throw new StepFailedException(
                     $"The recorder's facts for visit {visit.Visit.Number} are not the ones its summary was written from, so vision cannot be added to that summary. " +
-                    "Summarise the recording again, then add vision to the new summary.");
+                    $"The summary was given {given.Count.ToString(CultureInfo.InvariantCulture)} references and the recorder now gives " +
+                    $"{now.Count.ToString(CultureInfo.InvariantCulture)}; only now: {Listed(now.Except(given))}; only then: {Listed(given.Except(now))}. " +
+                    "Add vision again: it summarises the recording again first.");
             }
 
             described.Add((visit, step));
@@ -705,7 +730,10 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             var (pageInput, pageReferences) = PageChapterInput(collation, number, visitsTo.Select(seen => (seen.Visit, seen.Knowledge)).ToList());
             var pageStep = await context.RunStepAsync(
                 $"page-{number.ToString("D2", CultureInfo.InvariantCulture)}",
-                new ModelRequest(PageChapterTemplate, PageChapterTemplateVersion, PageChapterInstructions, pageInput, [], PageChapterSections, pageReferences),
+                new ModelRequest(PageChapterTemplate, PageChapterTemplateVersion, PageChapterInstructions, pageInput, [], PageChapterSections, pageReferences)
+                {
+                    SamplingLeftOut = WritingLeavesOut
+                },
                 cancellationToken).ConfigureAwait(false);
             chapterPages.Add(new PageChapter(number, byUrl.Key, visitsTo.Select(seen => seen.Visit.Title).LastOrDefault(title => title is { Length: > 0 }),
                 [.. visitsTo.Select(seen => seen.Visit.Visit.Number)], pageStep));
@@ -730,7 +758,10 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                 changesOf.GetValueOrDefault(visit.Visit.Number) ?? [], settingReferences);
             var story = await context.RunStepAsync(
                 $"{RecordingSummaryKind.VisitStepKey(visit)}-story",
-                new ModelRequest(StoryTemplate, StoryTemplateVersion, StoryInstructions, storyInput, [], StorySections, storyReferences) { Forms = StoryForms },
+                new ModelRequest(StoryTemplate, StoryTemplateVersion, StoryInstructions, storyInput, [], StorySections, storyReferences)
+                {
+                    Forms = StoryForms, SamplingLeftOut = WritingLeavesOut, NeedsStatements = true
+                },
                 cancellationToken).ConfigureAwait(false);
             storySoFar.Add((visit, story));
             parts[visit.Visit.Number] = new VisitVision(moments, leftOut, knowledge, story);
@@ -739,14 +770,20 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         var (openingInput, openingReferences) = OpeningInput(collation, chapterPages, storySoFar, changesOf.GetValueOrDefault(0) ?? [], settingReferences);
         var opening = await context.RunStepAsync(
             "story-opening",
-            new ModelRequest(OpeningTemplate, StoryTemplateVersion, OpeningInstructions, openingInput, [], OpeningSections, openingReferences) { Forms = StoryForms },
+            new ModelRequest(OpeningTemplate, StoryTemplateVersion, OpeningInstructions, openingInput, [], OpeningSections, openingReferences)
+            {
+                Forms = StoryForms, SamplingLeftOut = WritingLeavesOut, NeedsStatements = true
+            },
             cancellationToken).ConfigureAwait(false);
 
         // Chapter 1: the executive summary, written last.
         var (executiveInput, executiveReferences) = ExecutiveInput(collation, chapterPages, opening, storySoFar, settings, settingReferences);
         var executive = await context.RunStepAsync(
             "executive-summary",
-            new ModelRequest(ExecutiveTemplate, ExecutiveTemplateVersion, ExecutiveInstructions, executiveInput, [], ExecutiveSections, executiveReferences) { Forms = ExecutiveForms },
+            new ModelRequest(ExecutiveTemplate, ExecutiveTemplateVersion, ExecutiveInstructions, executiveInput, [], ExecutiveSections, executiveReferences)
+            {
+                Forms = ExecutiveForms, SamplingLeftOut = WritingLeavesOut, NeedsStatements = true
+            },
             cancellationToken).ConfigureAwait(false);
 
         var recording = await context.Catalog.RecordingAsync(task.RecordingId, cancellationToken).ConfigureAwait(false);
@@ -756,7 +793,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             collation,
             capabilities,
             attempts,
-            Limits,
+            Collation,
             DateTime.UtcNow,
             new VisionReportParts(parts, chapterPages, opening, pictures, Moments, summaryTask, ImageTokensPerRequest, context.ImagesFolder, context.MomentIndexFile, layersNotSent)
             {
@@ -1070,8 +1107,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     /// <summary>
     /// A page's request for chapter 3: its address and titles, the visits to
-    /// it with what the recorder derived of them, and each visit's
-    /// knowledge in layers, without the statements' numbers.
+    /// it with what the recorder derived of them, the page's changes during
+    /// each, and each visit's knowledge in layers, without the statements'
+    /// numbers.
     /// </summary>
     internal static (string Input, HashSet<string> References) PageChapterInput(
         RecordingCollation collation, int number, IReadOnlyList<(VisitCollation Visit, Knowledge Knowledge)> visits)
@@ -1086,6 +1124,15 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         {
             input.Append(CultureInfo.InvariantCulture,
                 $"\nVisit {visit.Visit.Number}, derived by the recorder: from {SummaryCollator.Time(visit.Visit.Start.Time)} to {SummaryCollator.Time(visit.Visit.End)}.\n");
+            input.Append(visit.ChangesText).Append('\n');
+            foreach (var line in visit.Changes)
+            {
+                foreach (Match match in Reference().Matches(line))
+                {
+                    references.Add(match.Groups[1].Value);
+                }
+            }
+
             input.Append("The visit's knowledge, in layers. These are inferences, not facts:\n");
             knowledge.Append(input, references, withNumbers: false);
         }

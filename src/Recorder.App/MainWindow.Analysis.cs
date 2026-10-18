@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
@@ -336,9 +337,11 @@ public partial class MainWindow
         await QueueVisionAsync();
     }
 
-    // Vision is added to the newest summary of the recording that is
-    // queued, running, or finished, and runs after it; all of it on the
-    // image profile (recording-summary.md, "Decisions (2026-10-14)").
+    // Vision starts from the beginning: a summary is queued first, reusing
+    // the newest finished summary's unchanged steps, and vision after it,
+    // unless a summary is already queued or running, when vision is added
+    // to that one; all of vision on the image profile (owner, 2026-10-16;
+    // recording-summary.md, "Vision starts from the beginning").
     private async Task QueueVisionAsync(Guid? rerunOfTaskId = null)
     {
         if (AnalysisPlayer.DefaultProfile(_analysisSettings, ModelCapabilities.Image) is not { } profile)
@@ -347,38 +350,34 @@ public partial class MainWindow
             return;
         }
 
-        if (AnalysisCatalogOrNull is not { } catalog || _analysisRecordingId is not { } recording)
+        if (AnalysisCatalogOrNull is not { } catalog || _analysisRecordingId is not { } recording || _analysisSessionDirectory is not { } session)
         {
             ShowAnalysisStatus("Open a recording that is in the catalog to queue its analysis.");
             return;
         }
 
-        AnalysisTaskSummary? summary;
+        var text = SelectedProfile ?? AnalysisPlayer.DefaultProfile(_analysisSettings, ModelCapabilities.Text)?.Name;
+        if (text is null)
+        {
+            ShowAnalysisStatus("There is no model profile for text. Open Model profiles... from the Analysis menu.");
+            return;
+        }
+
         try
         {
-            summary = (await catalog.TasksAsync(recording, CancellationToken.None))
-                .Where(task => task.Kind == RecordingSummaryKind.Name &&
-                    task.State is AnalysisTaskStates.Queued or AnalysisTaskStates.Running or AnalysisTaskStates.Done)
-                .OrderByDescending(task => task.QueuedUtc)
-                .FirstOrDefault();
+            var (_, _, summaryQueued) = await AnalysisPlayer.QueueVisionAsync(
+                catalog, recording, session, text, profile.Name, rerunOfTaskId, CancellationToken.None);
+            ShowAnalysisStatus(summaryQueued
+                ? $"Recording summary queued, and Summary with vision after it, with {profile.Name}."
+                : $"Summary with vision queued with {profile.Name}, after the summary already queued.");
+            _busy.AnnounceCompleted(AnalysisStatusTextBlock.Text);
+            StartWorker();
+            await ReadAnalysisAsync();
         }
         catch (NpgsqlException exception)
         {
             ShowAnalysisStatus($"The task could not be queued: {exception.Message}");
-            return;
         }
-
-        if (summary is null)
-        {
-            ShowAnalysisStatus("Summarise the recording first: vision is added to a summary.");
-            return;
-        }
-
-        await QueueAsync(
-            RecordingSummaryVisionKind.Name,
-            new Dictionary<string, string> { [ModelCapabilities.Text] = profile.Name, [ModelCapabilities.Image] = profile.Name },
-            summary.TaskId,
-            rerunOfTaskId);
     }
 
     private async void RefreshAnalysisButton_Click(object sender, RoutedEventArgs e)
@@ -399,7 +398,7 @@ public partial class MainWindow
 
     // Run again queues a new task of the same kind with the same profiles;
     // the earlier one and its report stay (owner, 2026-10-13).
-    // Vision run again is added to the newest summary, as from the menu.
+    // Vision run again starts from the beginning, as from the menu.
     // Run again reuses the earlier task's accepted steps whose requests are
     // unchanged; Run again from scratch runs every step (owner, 2026-10-14;
     // analysis-runner.md, "Reusing steps when run again").
@@ -419,8 +418,30 @@ public partial class MainWindow
         if (task.State == AnalysisTaskStates.Failed)
         {
             await catalog.MarkReadAsync(task.TaskId, CancellationToken.None);
-            MessageBox.Show(this, task.Failure ?? "No reason was recorded.", $"Why {AnalysisPlayer.KindName(task.Kind)} failed",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            var reason = task.Failure ?? "No reason was recorded.";
+            var output = AnalysisPlayer.FailedOutputPath(session, task.TaskId);
+            if (File.Exists(output))
+            {
+                // The model's output for the step that failed, opened in
+                // Notepad on Yes (owner, 2026-10-16).
+                if (MessageBox.Show(this, $"{reason}\n\nThe model's output for that step is saved in {output}. Open it in Notepad?",
+                        $"Why {AnalysisPlayer.KindName(task.Kind)} failed", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
+                {
+                    try
+                    {
+                        using var process = Process.Start(new ProcessStartInfo("notepad.exe", $"\"{output}\"") { UseShellExecute = false });
+                    }
+                    catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
+                    {
+                        ShowAnalysisStatus($"Notepad could not open {output}: {exception.Message}");
+                    }
+                }
+            }
+            else
+            {
+                MessageBox.Show(this, reason, $"Why {AnalysisPlayer.KindName(task.Kind)} failed", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+
             await ReadAnalysisAsync();
             return;
         }

@@ -87,6 +87,9 @@ internal sealed class StandInKind(params string[] steps) : IAnalysisTaskKind
     /// <summary>Each step's input, so that a test can change one.</summary>
     public Func<string, string> Input { get; init; } = step => $"E1: fact for {step}";
 
+    /// <summary>Each step's request as sent, so that a test can mark one.</summary>
+    public Func<string, ModelRequest, ModelRequest> Request { get; init; } = (_, request) => request;
+
     public async Task RunAsync(AnalysisTaskContext context, CancellationToken cancellationToken)
     {
         foreach (var step in steps)
@@ -96,7 +99,7 @@ internal sealed class StandInKind(params string[] steps) : IAnalysisTaskKind
                 : [];
             await context.RunStepAsync(
                 step,
-                new ModelRequest("stand-in-template", 3, "Describe.", Input(step), images, ["description"], new HashSet<string> { "E1", "E2" }),
+                Request(step, new ModelRequest("stand-in-template", 3, "Describe.", Input(step), images, ["description"], new HashSet<string> { "E1", "E2" })),
                 cancellationToken);
             Ran.Enqueue($"{context.Task.TaskId}:{step}");
         }
@@ -319,21 +322,270 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         var calls = 0;
         var endpoint = new StandInEndpoint
         {
-            Answer = (_, _, _) => Task.FromResult(++calls == 1
-                ? StandInEndpoint.Valid("E1", "length") with { Content = "{ \"description\": [ [ { \"kind\"" }
-                : StandInEndpoint.Valid("E1"))
+            Answer = (_, _, _) => Task.FromResult(++calls == 1 ? StandInEndpoint.Valid("E7") : StandInEndpoint.Valid("E1"))
         };
 
         await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
 
         Assert.Equal(1, calls);
         Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
-        Assert.Equal(
-            "Step visit-1 failed: The output stopped at the output limit of 2048 tokens. " +
-            "At temperature 0 the same request gives the same output, so it was not asked for again.",
-            await FailureAsync(task));
+        var failure = await FailureAsync(task);
+        Assert.StartsWith("Step visit-1 failed: ", failure, StringComparison.Ordinal);
+        Assert.Contains("cites E7, which was not in the input", failure, StringComparison.Ordinal);
+        Assert.EndsWith("At temperature 0 the same request gives the same output, so it was not asked for again.", failure, StringComparison.Ordinal);
         var attempt = Assert.Single(await AttemptsAsync(task));
-        Assert.Equal("{ \"description\": [ [ { \"kind\"", attempt["raw_output"]);
+        Assert.Equal(StandInEndpoint.Valid("E7").Content, attempt["raw_output"]);
+    }
+
+    // An answer that reached the output limit is recovered from as one
+    // caught in a loop: sampled at seed 1, 2, and 3 in turn, the first that
+    // passes kept (owner, 2026-10-17; analysis-runner.md, "An answer that
+    // reached the output limit").
+    [Fact]
+    public async Task An_answer_that_reached_the_output_limit_is_sampled_again_as_after_a_loop()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var calls = 0;
+        var endpoint = new StandInEndpoint
+        {
+            Answer = (_, _, _) => Task.FromResult(++calls <= 2
+                ? StandInEndpoint.Valid("E1", "length") with { Content = "{ \"description\": [ [ { \"kind\"" }
+                : StandInEndpoint.Valid("E1"))
+        };
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
+        Assert.Equal(3, endpoint.Bodies.Count);
+        Assert.Equal([0d, 0.7, 0.7], endpoint.Bodies.Select(body => Settings(body).GetProperty("temperature").GetDouble()));
+        Assert.Equal([1L, 2L], endpoint.Bodies.Skip(1).Select(body => Settings(body).GetProperty("seed").GetInt64()));
+        var attempts = await AttemptsAsync(task);
+        Assert.Equal([AttemptOutcomes.Failed, AttemptOutcomes.Failed, AttemptOutcomes.Accepted], attempts.Select(attempt => attempt["outcome"]));
+    }
+
+    // Where no sample passes, the step fails, as there is no loop to cut
+    // the answer at, saying why each failed, and its output is saved.
+    [Fact]
+    public async Task An_answer_at_the_output_limit_with_no_sample_that_passes_fails_its_step()
+    {
+        var session = Path.Combine(Path.GetTempPath(), "limit-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var catalog = await CatalogAsync();
+            var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), sessionDirectory: session, cancellationToken: Token);
+            const string cut = "{ \"description\": [ [ { \"kind\"";
+            var endpoint = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(StandInEndpoint.Valid("E1", "length") with { Content = cut }) };
+
+            await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+            Assert.Equal(4, endpoint.Bodies.Count);
+            Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
+            Assert.Equal(
+                "Step visit-1 failed: its answer reached the output limit, and none of the answers sampled after it passed (" +
+                "at seed 1, The output stopped at the output limit of 2048 tokens.; at seed 2, The output stopped at the output limit of 2048 tokens.; " +
+                "at seed 3, The output stopped at the output limit of 2048 tokens.).",
+                await FailureAsync(task));
+            Assert.Equal(cut, File.ReadAllText(AnalysisPlayer.FailedOutputPath(session, task)));
+        }
+        finally
+        {
+            if (Directory.Exists(session))
+            {
+                Directory.Delete(session, recursive: true);
+            }
+        }
+    }
+
+    // A task whose step failed at the output limit before this, run again,
+    // samples without sending the request at temperature 0 again, as on the
+    // target machine (2026-10-16, moment 8, layer 2).
+    [Fact]
+    public async Task A_task_run_again_after_an_answer_at_the_output_limit_samples_without_sending_it_again()
+    {
+        var catalog = await CatalogAsync();
+        var recording = await RecordingAsync();
+        var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var once = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(StandInEndpoint.Valid("E1", "length") with { Content = "{" }) };
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], once, options: Fast).RunUntilEmptyAsync(Token);
+
+        // As before 2026-10-17: the step failed at once, with no samples.
+        await using (var connection = await fixture.Server.DataSource.OpenConnectionAsync(Token))
+        await using (var command = new NpgsqlCommand("DELETE FROM analysis_attempts WHERE task_id = $1 AND attempt_number > 1", connection))
+        {
+            command.Parameters.AddWithValue(first);
+            await command.ExecuteNonQueryAsync(Token);
+        }
+
+        var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), rerunOfTaskId: first, cancellationToken: Token);
+        var endpoint = Answers(Answer("A fact at seed 1."));
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(again));
+        var body = Assert.Single(endpoint.Bodies);
+        Assert.Equal((0.7, 1L), (Settings(body).GetProperty("temperature").GetDouble(), Settings(body).GetProperty("seed").GetInt64()));
+    }
+
+    // The output of the step that failed a task is saved in the task's
+    // folder, and so is it when the task is run again and fails at once
+    // without asking (owner, 2026-10-16).
+    [Fact]
+    public async Task The_output_of_a_step_that_failed_a_task_is_saved_in_its_folder()
+    {
+        var session = Path.Combine(Path.GetTempPath(), "failed-output-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var catalog = await CatalogAsync();
+            var recording = await RecordingAsync();
+            var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), sessionDirectory: session, cancellationToken: Token);
+            var cut = StandInEndpoint.Valid("E7").Content;
+            var endpoint = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(StandInEndpoint.Valid("E7")) };
+            await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+            var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), sessionDirectory: session, rerunOfTaskId: first, cancellationToken: Token);
+            var none = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(StandInEndpoint.Valid("E1")) };
+            await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], none, options: Fast).RunUntilEmptyAsync(Token);
+
+            Assert.Equal(cut, File.ReadAllText(AnalysisPlayer.FailedOutputPath(session, first)));
+            Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(again));
+            Assert.Empty(none.Bodies);
+            Assert.Contains("so it was not asked for again", await FailureAsync(again), StringComparison.Ordinal);
+            Assert.Equal(cut, File.ReadAllText(AnalysisPlayer.FailedOutputPath(session, again)));
+        }
+        finally
+        {
+            if (Directory.Exists(session))
+            {
+                Directory.Delete(session, recursive: true);
+            }
+        }
+    }
+
+    // A task run again from a task that failed at once, without asking,
+    // finds the failed answer in the task that one ran again, and samples
+    // without sending the request at temperature 0 (target machine,
+    // 2026-10-16: the vision task run again failed at once, so its own
+    // run again would have sent moment 8's request again).
+    [Fact]
+    public async Task A_failed_answer_is_found_through_the_tasks_run_again_in_turn()
+    {
+        var catalog = await CatalogAsync();
+        var recording = await RecordingAsync();
+        var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var once = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(StandInEndpoint.Valid("E1", "length") with { Content = "{" }) };
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], once, options: Fast).RunUntilEmptyAsync(Token);
+        await using (var connection = await fixture.Server.DataSource.OpenConnectionAsync(Token))
+        await using (var command = new NpgsqlCommand("DELETE FROM analysis_attempts WHERE task_id = $1 AND attempt_number > 1", connection))
+        {
+            command.Parameters.AddWithValue(first);
+            await command.ExecuteNonQueryAsync(Token);
+        }
+
+        // The second task, as before 2026-10-17, failed at once and made no attempt.
+        var second = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), rerunOfTaskId: first, cancellationToken: Token);
+        await catalog.FinishTaskAsync(second, AnalysisTaskStates.Failed, "Failed at once.", Token);
+        Assert.Empty(await AttemptsAsync(second));
+        var third = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), rerunOfTaskId: second, cancellationToken: Token);
+        var endpoint = Answers(Answer("A fact at seed 1."));
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(third));
+        var body = Assert.Single(endpoint.Bodies);
+        Assert.Equal((0.7, 1L), (Settings(body).GetProperty("temperature").GetDouble(), Settings(body).GetProperty("seed").GetInt64()));
+    }
+
+    // The steps that write the report leave out the presence penalty
+    // (owner, 2026-10-17): a step's request leaves out the profile's
+    // sampling options it names, and its attempt records it so.
+    [Fact]
+    public async Task A_step_that_leaves_out_a_sampling_option_neither_sends_nor_records_it()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var penalised = Profile("This PC", "qwen") with
+        {
+            Generation = GenerationSettings.Default with
+            {
+                Sampling = GenerationSettings.Default.Sampling.SetItem("presence_penalty", 1.5).SetItem("repeat_last_n", 64)
+            }
+        };
+        var kind = new StandInKind("visit-1", "visit-2")
+        {
+            Request = (step, request) => step == "visit-2"
+                ? request with { SamplingLeftOut = new HashSet<string>(StringComparer.Ordinal) { "presence_penalty" } }
+                : request
+        };
+        var endpoint = new StandInEndpoint();
+
+        await new AnalysisWorker(catalog, SettingsWith(3, penalised), [kind], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
+        var bodies = endpoint.Bodies.ToArray();
+        Assert.Equal(1.5, Settings(bodies[0]).GetProperty("presence_penalty").GetDouble());
+        Assert.False(Settings(bodies[1]).TryGetProperty("presence_penalty", out _));
+        Assert.Equal(64, Settings(bodies[1]).GetProperty("repeat_last_n").GetDouble());
+        var attempts = await AttemptsAsync(task);
+        Assert.Contains("\"sampling\": {\"repeat_last_n\": 64, \"presence_penalty\": 1.5}", (string)attempts[0]["parameters"]!, StringComparison.Ordinal);
+        Assert.Contains("\"sampling\": {\"repeat_last_n\": 64}", (string)attempts[1]["parameters"]!, StringComparison.Ordinal);
+    }
+
+    // The story, its opening, and the executive summary need a statement:
+    // an answer with none is refused and recovered from as a loop is
+    // (target machine, 2026-10-17: the story of visit 1 came back with
+    // every section empty; owner, the same day).
+    private static readonly string NoStatement = "{ \"description\": [] }";
+
+    private static StandInKind Needing(params string[] steps) =>
+        new(steps) { Request = (_, request) => request with { NeedsStatements = true } };
+
+    [Fact]
+    public async Task An_answer_with_no_statement_for_a_step_that_needs_one_is_asked_for_at_seed_1_above_temperature_0()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var endpoint = Answers(NoStatement, Answer("A sampled fact."));
+
+        await new AnalysisWorker(catalog, SettingsWith(), [Needing("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
+        var bodies = endpoint.Bodies.ToArray();
+        Assert.Equal(2, bodies.Length);
+        Assert.Equal((0.7, 1L), (Settings(bodies[1]).GetProperty("temperature").GetDouble(), Settings(bodies[1]).GetProperty("seed").GetInt64()));
+        var attempts = await AttemptsAsync(task);
+        Assert.Equal(AnalysisWorker.EmptyFailure, attempts[0]["failure"]);
+        Assert.Equal(AttemptOutcomes.Accepted, attempts[1]["outcome"]);
+        Assert.Contains("A sampled fact.", (string)attempts[1]["output"]!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_answer_with_no_statement_fails_the_step_where_no_answer_sampled_after_it_passes()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var endpoint = Answers(NoStatement);
+
+        await new AnalysisWorker(catalog, SettingsWith(), [Needing("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
+        Assert.Equal(4, endpoint.Bodies.Count);
+        var failure = (string?)(await RowsAsync("SELECT failure FROM analysis_tasks WHERE task_id = $1", task))[0]["failure"];
+        Assert.StartsWith("Step visit-1 failed: its answer gave no statement, and none of the answers sampled after it passed (at seed 1, ", failure, StringComparison.Ordinal);
+        Assert.Contains("at seed 3, " + AnalysisWorker.EmptyFailure, failure, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_answer_with_no_statement_is_accepted_for_a_step_that_does_not_need_one()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var endpoint = Answers(NoStatement);
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
+        Assert.Single(endpoint.Bodies);
     }
 
     // Recovering from a loop: analysis-runner.md, "Decisions (2026-10-15)".
@@ -527,7 +779,7 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         var calls = 0;
         var endpoint = new StandInEndpoint
         {
-            Answer = (_, _, _) => Task.FromResult(++calls == 1 ? StandInEndpoint.Valid("E1") : StandInEndpoint.Valid("E1", "length"))
+            Answer = (_, _, _) => Task.FromResult(++calls == 1 ? StandInEndpoint.Valid("E1") : StandInEndpoint.Valid("E7"))
         };
         var kind = new StandInKind("visit-1", "visit-2", "visit-3");
         await new AnalysisWorker(catalog, SettingsWith(), [kind], endpoint, options: Fast).RunUntilEmptyAsync(Token);
@@ -562,6 +814,12 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Assert.Equal((1, AttemptOutcomes.Failed, trial.RequestSha256), (failed.AttemptNumber, failed.Outcome, failed.InputSha256));
         Assert.Contains($"The task's attempt 1, failed: SHA-256 {trial.RequestSha256}, the same request.", trial.Describe(), StringComparison.Ordinal);
         Assert.Contains($"The request the trial sent: SHA-256 {trial.SentSha256}, with the trial's options.", trial.Describe(), StringComparison.Ordinal);
+        // The trial shows what the step was asked (owner, 2026-10-17).
+        Assert.Contains("\nThe step's instructions, as sent:\nDescribe.\n", trial.Describe(), StringComparison.Ordinal);
+        Assert.Contains("\nThe step's input, as sent:\nE1: fact for visit-2\n", trial.Describe(), StringComparison.Ordinal);
+        Assert.Contains("\nThe form the answer was held to, as sent:\n", trial.Describe(), StringComparison.Ordinal);
+        Assert.Contains("\"description\"", trial.AnswerForm, StringComparison.Ordinal);
+        Assert.Empty(trial.Pictures);
         Assert.Equal(before.Count, (await AttemptsAsync(task)).Count);
         Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
 
@@ -1271,9 +1529,11 @@ public sealed class HttpModelEndpointTests
         Assert.Equal(("POST", "/models/load", "{\"model\":\"qwen3.6-35b-a3b\"}", null), seen[0]);
         Assert.Equal(["/models", "/models", "/models"], seen.Skip(1).Select(request => request.Path));
 
-        var unloading = ServeOnceAsync(listener, 200, "{\"success\": true}");
+        // The unload is answered at once; the worker waits until the model
+        // is no longer listed as loaded, as the router counts it till then.
+        var unloading = ServeAsync(listener, "{\"success\": true}", Models("loaded"), Models("loaded"), Models("unloaded"));
         await endpoint.UnloadAsync(profile, Token);
-        Assert.Equal("/models/unload", (await unloading).Path);
+        Assert.Equal(["/models/unload", "/models", "/models", "/models"], (await unloading).Select(request => request.Path));
     }
 
     [Fact]

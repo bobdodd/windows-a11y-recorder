@@ -33,6 +33,10 @@ public sealed class RecreationSession : IAsyncDisposable
 
     public bool BrowserHasExited => _browser.HasExited;
 
+    // The browser's exit code once it has exited, or null while it runs, so
+    // that a fault can say how the browser ended (owner, 2026-10-17).
+    public int? BrowserExitCode => _browser.HasExited ? _browser.Process.ExitCode : null;
+
     public IReadOnlyList<BlockedNavigation> Blocked => _server.Blocked;
 
     public Uri DevToolsAddress { get; private init; } = null!;

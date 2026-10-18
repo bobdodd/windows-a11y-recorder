@@ -34,6 +34,24 @@ public sealed record ModelRequest(
     /// layered report", "Chapter 2's form, as built").
     /// </summary>
     public IReadOnlyList<string>? Forms { get; init; }
+
+    /// <summary>
+    /// The profile's sampling options left out of this step's request. The
+    /// steps that write the report leave out the presence penalty, which
+    /// is for the steps that describe a moment, where answers looped: on the
+    /// target machine on 2026-10-17 the story of a visit, sent with it, came
+    /// back with every section empty, and the same request without it gave
+    /// 27 statements (owner, the same day).
+    /// </summary>
+    public IReadOnlySet<string> SamplingLeftOut { get; init; } = NoOptions;
+
+    /// <summary>
+    /// Whether the answer must hold at least one statement: an answer with
+    /// none is refused, and recovered from as a loop is (owner, 2026-10-17).
+    /// </summary>
+    public bool NeedsStatements { get; init; }
+
+    private static readonly IReadOnlySet<string> NoOptions = new HashSet<string>(StringComparer.Ordinal);
 }
 
 /// <summary>
@@ -537,11 +555,35 @@ public sealed class HttpModelEndpoint(
                 "models/unload",
                 new JsonObject { ["model"] = profile.Model }.ToJsonString(),
                 cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return;
+            }
+
+            // The router answers at once and stops the model's process in
+            // the background; until it has exited the model counts against
+            // the server's limit of one model, and a load is refused with
+            // "model limit reached, try again later" (target machine,
+            // 2026-10-16; llama.cpp b11607, tools/server/server-models.cpp,
+            // server_models::unload and server_models::load). So the worker
+            // waits for the model to be listed as no longer running.
+            var waited = System.Diagnostics.Stopwatch.StartNew();
+            while (waited.Elapsed < _loadTimeout)
+            {
+                var (state, _, _) = await ModelStateAsync(profile, cancellationToken).ConfigureAwait(false);
+                if (state is not ("loaded" or "loading" or "sleeping"))
+                {
+                    return;
+                }
+
+                await Task.Delay(_loadPoll, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (Exception exception) when (exception is HttpRequestException or ModelEndpointException)
         {
             // A model that cannot be unloaded is left for the server to
-            // close when the worker stops it.
+            // close when the worker stops it; a load that then finds the
+            // limit reached fails saying so.
         }
     }
 

@@ -50,7 +50,7 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
 
     public int Version => 1;
 
-    public CollationLimits Limits { get; init; } = CollationLimits.Default;
+    public CollationSettings Collation { get; init; } = CollationSettings.Default;
 
     private static async Task<(Recorder.Session.SessionPlaybackArchive, RecordingFileDocuments)> OpenAsync(
         string sessionDirectory,
@@ -102,10 +102,10 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
     public async Task RunAsync(AnalysisTaskContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
-        var (archive, documents, session, _) = await OpenRecordingAsync(context, _open, cancellationToken).ConfigureAwait(false);
+        var (archive, documents, session, filePath) = await OpenRecordingAsync(context, _open, cancellationToken).ConfigureAwait(false);
         try
         {
-            await SummarizeAsync(context, session, archive, documents, cancellationToken).ConfigureAwait(false);
+            await SummarizeAsync(context, session, archive, documents, filePath, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -119,11 +119,17 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
         string session,
         Recorder.Session.SessionPlaybackArchive archive,
         RecordingFileDocuments documents,
+        string filePath,
         CancellationToken cancellationToken)
     {
         var task = context.Task;
         var capabilities = await CapabilitiesAsync(context, cancellationToken).ConfigureAwait(false);
-        var collation = SummaryCollator.Collate(new RecordedSummaryEvidence(archive, documents), capabilities, Limits);
+        // The recording file is given, as the vision task gives it, so that
+        // the scrolls and live regions, which are read from it, are in both
+        // collations: without it, the summary of a page that scrolled was
+        // written from other facts than the vision task's (target machine,
+        // 2026-10-16).
+        var collation = SummaryCollator.Collate(new RecordedSummaryEvidence(archive, documents, filePath), capabilities, Collation);
 
         var visits = new List<(VisitCollation Visit, AcceptedStep Step)>();
         foreach (var visit in collation.Visits)
@@ -154,7 +160,7 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
             visits,
             overall,
             attempts,
-            Limits,
+            Collation,
             DateTime.UtcNow);
         await WriteReportAsync(context, session, FileName, report, cancellationToken).ConfigureAwait(false);
     }
@@ -182,11 +188,6 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
             .Append(string.Join('\n', collation.CapabilityLines)).Append("\n\n")
             .Append(CultureInfo.InvariantCulture, $"Page visit {visit.Visit.Number}, derived by the recorder:\n")
             .Append(visit.Text);
-        if (visit.LeftOut > 0)
-        {
-            input.Append(CultureInfo.InvariantCulture, $"\n\nThe recorder left {visit.LeftOut} facts out of this visit to keep it within the limit; do not describe what was left out as absent.");
-        }
-
         return input.ToString();
     }
 

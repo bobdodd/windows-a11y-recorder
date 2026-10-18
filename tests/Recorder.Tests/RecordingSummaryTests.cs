@@ -92,6 +92,26 @@ internal sealed class FakeSummaryEvidence : ISummaryEvidence
     public List<TimedFact> PopupList { get; } = [];
 
     public IReadOnlyList<TimedFact> Popups => PopupList;
+
+    public List<TimedFact> ClosedList { get; } = [];
+
+    public IReadOnlyList<TimedFact> PopupsClosed => ClosedList;
+
+    public List<NvdaWindowFact> WindowList { get; } = [];
+
+    public IReadOnlyList<NvdaWindowFact> NvdaWindows => WindowList;
+
+    public List<LiveRegionFact> LiveList { get; } = [];
+
+    public IReadOnlyList<LiveRegionFact> LiveRegions => LiveList;
+
+    public List<ScrollFact> ScrollList { get; } = [];
+
+    public IReadOnlyList<ScrollFact> Scrolls => ScrollList;
+
+    public double? Viewport { get; set; } = 800;
+
+    public double? ViewportHeightAt(string documentToken, long time) => Viewport;
 }
 
 public sealed class RecordingSummaryTests
@@ -462,7 +482,7 @@ public sealed class RecordingSummaryTests
         Assert.Contains("Title: \"Example page\".", text, StringComparison.Ordinal);
         Assert.Contains("Landmarks: navigation \"Site\"; main.", text, StringComparison.Ordinal);
         Assert.Contains("level 1: \"Welcome\"", text, StringComparison.Ordinal);
-        Assert.Contains("The opening text of the main landmark: \"Welcome Some opening text. Details\"", text, StringComparison.Ordinal);
+        Assert.Contains("The text of the main landmark, in full: \"Welcome Some opening text. Details\"", text, StringComparison.Ordinal);
         Assert.Contains("Keys pressed during the visit, 2 in all: Tab, passed to the page x2.", text, StringComparison.Ordinal);
         Assert.Contains("The page's focus moved to link \"Skip to content\".", text, StringComparison.Ordinal);
         Assert.Contains("NVDA had to announce: Skip to content, link", text, StringComparison.Ordinal);
@@ -496,38 +516,99 @@ public sealed class RecordingSummaryTests
     }
 
     [Fact]
-    public void FactsBeyondTheLimitsAreCountedAsLeftOut()
+    public void EveryFactIsGivenWithNoLimitOnHowManyOrHowLong()
     {
         var builder = new PageBuilder();
         var main = builder.Element(builder.Element(builder.Element(builder.Document, "html", "rootWebArea", "Long"), "body", "genericContainer"), "main", "main", "");
-        for (var index = 1; index <= 5; index++)
+        var longName = new string('n', 200);
+        for (var index = 1; index <= 60; index++)
         {
             builder.Element(main, "h2", "heading", $"Heading {index}");
+            builder.Element(main, "button", "button", $"Button {index}");
         }
 
+        builder.Element(main, "h2", "heading", longName);
+        var text = string.Concat(Enumerable.Range(1, 400).Select(index => $"Word{index} "));
+        builder.Text(main, text, "staticText");
         var evidence = new FakeSummaryEvidence();
         evidence.CommitList.Add(Commit(1, "https://example.test/long"));
         evidence.Pages["doc-1"] = [(0, builder.Build("https://example.test/long"))];
+        for (var index = 0; index < 50; index++)
+        {
+            evidence.ClickList.Add(new TimedFact((2 + index) * Second / 10 * 10, $"click-{index}", $"Click {index}."));
+            evidence.AnnouncementList.Add(new TimedFact((2 + index) * Second / 10 * 10, $"say-{index}", $"Announcement {index}."));
+        }
 
-        var visit = SummaryCollator.Collate(evidence, ParticipantCapabilities.Unknown, CollationLimits.Default with { Headings = 3 }).Visits[0];
+        var collation = SummaryCollator.Collate(evidence, ParticipantCapabilities.Unknown);
+        var visit = collation.Visits[0];
 
-        Assert.Contains("(2 more headings left out)", visit.Lines);
-        Assert.DoesNotContain("Heading 4", visit.Text, StringComparison.Ordinal);
-        Assert.Equal(2, visit.LeftOut);
+        Assert.Contains("Heading 60", visit.Text, StringComparison.Ordinal);
+        Assert.Contains("\"Button 60\"", visit.Text, StringComparison.Ordinal);
+        Assert.Contains(longName, visit.Text, StringComparison.Ordinal);
+        Assert.Contains("Word400", visit.Text, StringComparison.Ordinal);
+        Assert.Contains("Click 49.", visit.Text, StringComparison.Ordinal);
+        Assert.Contains("Announcement 49.", visit.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("left out", visit.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("...", visit.Text, StringComparison.Ordinal);
+        Assert.Contains("\"Heading 60\"", SummaryCollator.Overview(collation), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void OpeningTextIsCutAtTheLimitAndCounted()
+    public void ThePageChangesDuringAVisitAreGivenInTimeOrderApartFromItsOtherFacts()
+    {
+        var builder = new PageBuilder();
+        var html = builder.Element(builder.Document, "html", "rootWebArea", "Changes");
+        var body = builder.Element(html, "body", "genericContainer");
+        var list = builder.Element(body, "div", "list", "Results");
+        var evidence = new FakeSummaryEvidence();
+        evidence.CommitList.Add(Commit(1, "https://example.test/changes"));
+        evidence.Pages["doc-1"] = [(0, builder.Build("https://example.test/changes"))];
+        evidence.LiveList.Add(new LiveRegionFact(6 * Second, "live-1", "doc-1", "status \"Cart\"", "polite", "changed", "2 items"));
+        evidence.PopupList.Add(new TimedFact(3 * Second, "popup-1", "A select list opened."));
+        evidence.ClosedList.Add(new TimedFact(4 * Second, "popup-2", "A select list closed."));
+        evidence.WindowList.Add(new NvdaWindowFact("Elements List", 7 * Second, "nvda-1", 9 * Second, "nvda-2"));
+        // The page's own scroller: a record before the visit, then two
+        // movements, the pause between them longer than a second; then a
+        // scroller in the page, one record.
+        evidence.ScrollList.Add(new ScrollFact(Second / 2, "scroll-0", "doc-1", "1", 0, builder.Document));
+        evidence.ScrollList.Add(new ScrollFact(2 * Second, "scroll-1", "doc-1", "1", 100, builder.Document));
+        evidence.ScrollList.Add(new ScrollFact(2 * Second + Second / 2, "scroll-2", "doc-1", "1", 400, builder.Document));
+        evidence.ScrollList.Add(new ScrollFact(5 * Second, "scroll-3", "doc-1", "1", 1_200, builder.Document));
+        evidence.ScrollList.Add(new ScrollFact(8 * Second, "scroll-4", "doc-1", "2", 50, list));
+
+        var visit = SummaryCollator.Collate(evidence, ParticipantCapabilities.Unknown).Visits[0];
+        var changes = visit.Changes.Select(line => System.Text.RegularExpressions.Regex.Replace(line, @"^\[E\d+\] ", "")).ToList();
+
+        Assert.Equal(
+            [
+                "00:00:02.000 The page scrolled from 0 to 400 CSS pixels from the top, from 00:00:02.000 to 00:00:02.500, 2 positions recorded. With a viewport 800 CSS pixels high, CSS pixels 400 to 1200 were then in it.",
+                "00:00:03.000 A select list opened.",
+                "00:00:04.000 A select list closed.",
+                "00:00:05.000 The page scrolled from 400 to 1200 CSS pixels from the top, from 00:00:05.000 to 00:00:05.000, 1 position recorded. With a viewport 800 CSS pixels high, CSS pixels 1200 to 2000 were then in it.",
+                "00:00:06.000 The page changed text in a live region, status \"Cart\", to \"2 items\". Its politeness: polite.",
+                "00:00:07.000 NVDA's window \"Elements List\" came to the front.",
+                "00:00:08.000 The scroller list \"Results\" scrolled from a position not recorded in the visit to 50 CSS pixels from the top, from 00:00:08.000 to 00:00:08.000, 1 position recorded.",
+                "00:00:09.000 NVDA's window \"Elements List\" left the front."
+            ],
+            changes);
+        Assert.StartsWith(VisitCollation.ChangesHeading + "\n[E", visit.ChangesText, StringComparison.Ordinal);
+        Assert.Contains(visit.ChangesText, visit.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(visit.Lines, line => line.Contains("select list", StringComparison.Ordinal) || line.Contains("scrolled", StringComparison.Ordinal));
+        Assert.All(visit.Changes, line => Assert.Contains(System.Text.RegularExpressions.Regex.Match(line, @"^\[(E\d+)\]").Groups[1].Value, visit.References));
+    }
+
+    [Fact]
+    public void AVisitWithNoChangesSaysNoneWasRecorded()
     {
         var (page, _, _, _) = LandmarkPage();
         var evidence = new FakeSummaryEvidence();
         evidence.CommitList.Add(Commit(1, "https://example.test/a"));
         evidence.Pages["doc-1"] = [(0, page)];
 
-        var visit = SummaryCollator.Collate(evidence, ParticipantCapabilities.Unknown, CollationLimits.Default with { MainTextCharacters = 7 }).Visits[0];
+        var visit = SummaryCollator.Collate(evidence, ParticipantCapabilities.Unknown).Visits[0];
 
-        Assert.Contains("\"Welcome\" (", visit.Text, StringComparison.Ordinal);
-        Assert.Contains("more characters left out)", visit.Text, StringComparison.Ordinal);
+        Assert.Empty(visit.Changes);
+        Assert.EndsWith("\nThe page's changes during the visit: no change to a live region, popup opening or closing, NVDA window, or scroll was recorded.", visit.Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -621,7 +702,7 @@ public sealed class RecordingSummaryTests
             [(visit, step)],
             overall,
             [Attempt("visit-0001"), Attempt("recording")],
-            CollationLimits.Default,
+            CollationSettings.Default,
             new DateTime(2026, 10, 13, 12, 0, 0, DateTimeKind.Utc));
 
         Assert.StartsWith("# Summary of recording 2026-10-13-120000\n\nInferred by qwen3.6-35b-a3b (Q4_K_M), profile \"This PC\", 2026-10-13.", report, StringComparison.Ordinal);
@@ -645,7 +726,7 @@ public sealed class RecordingSummaryTests
         evidence.Running.Add("NVDA 2026.2");
         var collation = SummaryCollator.Collate(evidence, ParticipantCapabilities.Unknown);
 
-        var report = SummaryReport.Write("key", collation, ParticipantCapabilities.Unknown, [], null, [], CollationLimits.Default, DateTime.UtcNow);
+        var report = SummaryReport.Write("key", collation, ParticipantCapabilities.Unknown, [], null, [], CollationSettings.Default, DateTime.UtcNow);
 
         Assert.Contains(
             "Observed running at the start of the recording: NVDA 2026.2. This shows what was running, not what the participant is able to do. [E1]",
@@ -660,7 +741,7 @@ public sealed class RecordingSummaryTests
     {
         var collation = SummaryCollator.Collate(new FakeSummaryEvidence(), ParticipantCapabilities.Unknown);
 
-        var report = SummaryReport.Write("key", collation, ParticipantCapabilities.Unknown, [], null, [], CollationLimits.Default, DateTime.UtcNow);
+        var report = SummaryReport.Write("key", collation, ParticipantCapabilities.Unknown, [], null, [], CollationSettings.Default, DateTime.UtcNow);
 
         Assert.Contains("No model was asked, because no page visits were recorded.", report, StringComparison.Ordinal);
         Assert.Contains("No page visits were recorded", report, StringComparison.Ordinal);
@@ -678,7 +759,7 @@ public sealed class RecordingSummaryTests
             "stand-in-template", 1, 120, 40, 500, 1500);
         AttemptRecord[] attempts = [Attempt("visit-0001") with { ReusedFromTaskId = source }, Attempt("recording")];
 
-        var report = SummaryReport.Write("key", collation, ParticipantCapabilities.Unknown, [], null, attempts, CollationLimits.Default, DateTime.UtcNow);
+        var report = SummaryReport.Write("key", collation, ParticipantCapabilities.Unknown, [], null, attempts, CollationSettings.Default, DateTime.UtcNow);
 
         Assert.Contains($"- Steps reused, unchanged, from an earlier run: 1 of 2. Their answers were written in task {source}: visit-0001.", report, StringComparison.Ordinal);
         Assert.Contains($"| visit-0001 | 1 | accepted, reused from task {source} |", report, StringComparison.Ordinal);

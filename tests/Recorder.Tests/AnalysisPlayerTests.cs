@@ -101,7 +101,7 @@ public sealed class AnalysisPlayerTests
         var step = new AcceptedStep(Guid.NewGuid(), "input", JsonDocument.Parse("{}").RootElement.Clone(),
             [new Claim("page", 0, 0, Claim.ClaimKind, "A page. | With a pipe.", ["E2"])]);
         var written = SummaryReport.Write("key", collation, new ParticipantCapabilities("Uses NVDA.", DateTime.UtcNow), [(visit, step)], null, [],
-            CollationLimits.Default, DateTime.UtcNow);
+            CollationSettings.Default, DateTime.UtcNow);
 
         var report = ReportDocument.Parse(written);
 

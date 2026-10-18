@@ -87,7 +87,12 @@ public interface ILocalServerHost
 }
 
 /// <summary>A step that cannot succeed, which fails its task.</summary>
-public sealed class StepFailedException(string message) : Exception(message);
+/// <summary>A step that failed, with the model's output where it gave one.</summary>
+public sealed class StepFailedException(string message, string? output = null) : Exception(message)
+{
+    /// <summary>The output the checks refused, saved beside the task's report (owner, 2026-10-16).</summary>
+    public string? Output { get; } = output;
+}
 
 internal sealed class ModelSwitchNeededException(string profile) : Exception($"The task needs profile {profile}.")
 {
@@ -260,6 +265,7 @@ public sealed class AnalysisWorker
         catch (StepFailedException exception)
         {
             _waitingFor.Remove(task.TaskId);
+            SaveFailedOutput(task, exception.Output);
             await Catalog.FinishTaskAsync(task.TaskId, AnalysisTaskStates.Failed, exception.Message, cancellationToken).ConfigureAwait(false);
             _status($"{task.Kind} failed.");
         }
@@ -349,16 +355,18 @@ public sealed class AnalysisWorker
                 // A loop is not sent again either, but recovered from, as
                 // the task it runs again did or would have (owner,
                 // 2026-10-15).
-                if (LoopRecovery.IsLoop(failed.RawOutput))
+                if (Recoverable(failed.RawOutput, failed.Failure) is { } caught)
                 {
                     return await RecoverFromLoopAsync(
-                        task, stepKey, request, profile, failed.RawOutput!, inputSha, parameters, modelSha, basis, build, cancellationToken)
+                        task, stepKey, request, profile, failed.RawOutput ?? "", inputSha, parameters, modelSha, basis, build,
+                        caught, cancellationToken)
                         .ConfigureAwait(false);
                 }
 
                 throw new StepFailedException(
                     $"Step {stepKey} failed in task {source} with the same request, model, server build, and settings, " +
-                    $"so it was not asked for again: at temperature 0 it would give the same output. It failed: {failed.Failure}");
+                    $"so it was not asked for again: at temperature 0 it would give the same output. It failed: {failed.Failure}",
+                    failed.RawOutput);
             }
         }
 
@@ -368,21 +376,24 @@ public sealed class AnalysisWorker
             await Catalog.UnchangedFailureAsync(
                 task.TaskId, stepKey, new StepIdentity(inputSha, modelSha, build, (JsonObject)parameters.DeepClone()), cancellationToken)
                 .ConfigureAwait(false) is { } own &&
-            LoopRecovery.IsLoop(own.RawOutput))
+            Recoverable(own.RawOutput, own.Failure) is { } ownCaught)
         {
             return await RecoverFromLoopAsync(
-                task, stepKey, request, profile, own.RawOutput!, inputSha, parameters, modelSha, basis, build, cancellationToken)
+                task, stepKey, request, profile, own.RawOutput ?? "", inputSha, parameters, modelSha, basis, build,
+                ownCaught, cancellationToken)
                 .ConfigureAwait(false);
         }
 
         string? lastFailure = null;
+        string? lastOutput = null;
         while (true)
         {
             var failed = await Catalog.FailedAttemptCountAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false);
             if (failed >= _settings.MaxAttempts)
             {
                 throw new StepFailedException(
-                    $"Step {stepKey} failed {failed} times, the limit. The last failure: {lastFailure ?? "see the step's attempts"}");
+                    $"Step {stepKey} failed {failed} times, the limit. The last failure: {lastFailure ?? "see the step's attempts"}",
+                    lastOutput);
             }
 
             var number = await Catalog.AttemptCountAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false) + 1;
@@ -427,17 +438,18 @@ public sealed class AnalysisWorker
             }
             else if (failure is null && response!.FinishReason == "length")
             {
-                failure = $"The output stopped at the output limit of {profile.Generation.MaxTokens} tokens.";
+                failure = $"{OutputLimitFailure}{profile.Generation.MaxTokens} tokens.";
             }
 
             if (failure is null)
             {
-                (claims, output, failure) = ClaimCheck.Check(response!.Content, request.Sections, request.InputReferences);
+                (claims, output, failure) = Check(response!.Content, request);
             }
 
             if (failure is not null)
             {
                 lastFailure = failure;
+                lastOutput = response?.Content ?? lastOutput;
                 await Catalog.FinishAttemptAsync(
                     attemptId,
                     new AttemptEnd(AttemptOutcomes.Failed, failure, response, null, []),
@@ -455,13 +467,37 @@ public sealed class AnalysisWorker
                     if (response.StoppedBecause is not null)
                     {
                         return await RecoverFromLoopAsync(
-                            task, stepKey, request, profile, response.Content ?? "", inputSha, parameters, modelSha, basis, build, cancellationToken)
+                            task, stepKey, request, profile, response.Content ?? "", inputSha, parameters, modelSha, basis, build, Caught.Loop, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+
+                    // An answer that reached the output limit is recovered
+                    // from the same way, as it may have run on without
+                    // repeating itself (target machine, 2026-10-16: a
+                    // countdown through the knowledge's statements; owner,
+                    // 2026-10-17, "ok, let's try that").
+                    if (ReachedLimit(failure))
+                    {
+                        return await RecoverFromLoopAsync(
+                            task, stepKey, request, profile, response.Content ?? "", inputSha, parameters, modelSha, basis, build, Caught.Limit, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+
+                    // An answer with no statement, for a step that needs
+                    // one, the same way (target machine, 2026-10-17: the
+                    // story of a visit came back with every section empty;
+                    // owner, the same day).
+                    if (WasEmpty(failure))
+                    {
+                        return await RecoverFromLoopAsync(
+                            task, stepKey, request, profile, response.Content ?? "", inputSha, parameters, modelSha, basis, build, Caught.Empty, cancellationToken)
                             .ConfigureAwait(false);
                     }
 
                     throw new StepFailedException(
                         $"Step {stepKey} failed: {failure} At temperature 0 the same request gives the same output, " +
-                        "so it was not asked for again.");
+                        "so it was not asked for again.",
+                        response.Content);
                 }
 
                 // A request the server refused itself, such as one longer
@@ -507,8 +543,21 @@ public sealed class AnalysisWorker
         string? modelSha,
         string basis,
         string? build,
+        Caught kind,
         CancellationToken cancellationToken)
     {
+        var after = kind switch
+        {
+            Caught.Limit => "an answer that reached the output limit",
+            Caught.Empty => "an answer with no statement",
+            _ => "a loop"
+        };
+        var caught = kind switch
+        {
+            Caught.Limit => "its answer reached the output limit",
+            Caught.Empty => "its answer gave no statement",
+            _ => "its answer was caught in a loop"
+        };
         var failures = new List<string>();
         foreach (var seed in LoopRecovery.Seeds)
         {
@@ -533,7 +582,7 @@ public sealed class AnalysisWorker
 
             var attempt = await AttemptAsync(
                 task, stepKey, request, sample, body, sha, sampleParameters, modelSha, basis, build,
-                $"answer sampled at seed {seedName} after a loop", cancellationToken).ConfigureAwait(false);
+                $"answer sampled at seed {seedName} after {after}", cancellationToken).ConfigureAwait(false);
             if (attempt.Failure is null)
             {
                 return new AcceptedStep(attempt.AttemptId, sha, attempt.Output, attempt.Claims);
@@ -544,10 +593,19 @@ public sealed class AnalysisWorker
             if (attempt.Response is null)
             {
                 throw new StepFailedException(
-                    $"Step {stepKey} failed: its answer was caught in a loop, and the server gave no answer at seed {seedName}: {attempt.Failure}");
+                    $"Step {stepKey} failed: {caught}, and the server gave no answer at seed {seedName}: {attempt.Failure}", loopContent);
             }
 
             failures.Add($"at seed {seedName}, {attempt.Failure}");
+        }
+
+        // An answer that reached the output limit, or gave no statement, has
+        // no loop to cut it at, so where no sample passed, the step fails.
+        if (kind != Caught.Loop)
+        {
+            throw new StepFailedException(
+                $"Step {stepKey} failed: {caught}, and none of the answers sampled after it passed ({string.Join("; ", failures)}).",
+                loopContent);
         }
 
         var cutParameters = (JsonObject)parameters.DeepClone();
@@ -561,7 +619,7 @@ public sealed class AnalysisWorker
         var cut = LoopRecovery.CutAtLoop(loopContent, request.Sections);
         var (claims, output, failure) = cut is null
             ? ([], default, "No loop was found in its answer.")
-            : ClaimCheck.Check(cut, request.Sections, request.InputReferences);
+            : Check(cut, request);
         var number = await Catalog.AttemptCountAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false) + 1;
         var attemptId = await Catalog.BeginAttemptAsync(
             new AttemptStart(
@@ -589,6 +647,43 @@ public sealed class AnalysisWorker
     }
 
     private sealed record EarlierAttempt(AcceptedStep? Accepted, string? Failure);
+
+    // How an attempt that reached the output limit is recorded as failing.
+    private const string OutputLimitFailure = "The output stopped at the output limit of ";
+
+    private static bool ReachedLimit(string? failure) =>
+        failure is not null && failure.StartsWith(OutputLimitFailure, StringComparison.Ordinal);
+
+    // How an answer with no statement, for a step that needs one, is
+    // recorded as failing (owner, 2026-10-17).
+    internal const string EmptyFailure = "The answer gave no statement, and this step needs at least one.";
+
+    private static bool WasEmpty(string? failure) => failure == EmptyFailure;
+
+    // What an answer that failed was caught at, where it is recovered from
+    // by sampling: a loop, the output limit, or no statement.
+    private enum Caught
+    {
+        Loop,
+        Limit,
+        Empty
+    }
+
+    private static Caught? Recoverable(string? rawOutput, string? failure) =>
+        LoopRecovery.IsLoop(rawOutput) ? Caught.Loop
+        : ReachedLimit(failure) ? Caught.Limit
+        : WasEmpty(failure) ? Caught.Empty
+        : null;
+
+    // The checks of an answer: ClaimCheck's, then, for a step that needs a
+    // statement, that it gave one.
+    private static (IReadOnlyList<Claim> Claims, System.Text.Json.JsonElement Output, string? Failure) Check(string? content, ModelRequest request)
+    {
+        var (claims, output, failure) = ClaimCheck.Check(content, request.Sections, request.InputReferences);
+        return failure is null && request.NeedsStatements && claims.Count == 0
+            ? ([], default, EmptyFailure)
+            : (claims, output, failure);
+    }
 
     // An attempt made before with the same request, model, server build, and
     // settings: in the task this one runs again, whose accepted answer is
@@ -691,7 +786,7 @@ public sealed class AnalysisWorker
         System.Text.Json.JsonElement output = default;
         if (failure is null)
         {
-            (claims, output, failure) = ClaimCheck.Check(response!.Content, request.Sections, request.InputReferences);
+            (claims, output, failure) = Check(response!.Content, request);
         }
 
         await Catalog.FinishAttemptAsync(
@@ -718,7 +813,13 @@ public sealed class AnalysisWorker
             throw new StepFailedException($"The model profile \"{profileName}\" cannot take {capability}.");
         }
 
-        return profile;
+        // The profile's sampling options this step leaves out, such as the
+        // presence penalty for the steps that write the report (owner,
+        // 2026-10-17). They are neither sent nor recorded with the attempt.
+        var left = profile.Generation.Sampling.Where(option => request.SamplingLeftOut.Contains(option.Key)).Select(option => option.Key).ToList();
+        return left.Count == 0
+            ? profile
+            : profile with { Generation = profile.Generation with { Sampling = profile.Generation.Sampling.RemoveRange(left) } };
     }
 
     /// <summary>
@@ -847,7 +948,7 @@ public sealed class AnalysisWorker
             response = await _endpoint.CompleteAsync(profile, body, watch.Check, cancellationToken).ConfigureAwait(false);
             failure = response.StoppedBecause ??
                 (response.FinishReason == "length" ? $"The output stopped at the output limit of {profile.Generation.MaxTokens} tokens." : null) ??
-                ClaimCheck.Check(response.Content, request.Sections, request.InputReferences).Failure;
+                Check(response.Content, request).Failure;
         }
         catch (ModelEndpointException exception)
         {
@@ -862,8 +963,26 @@ public sealed class AnalysisWorker
             SentSha256 = ChatRequest.Sha256(body),
             TaskAttempts = attempts,
             PicturesFolder = trial.PicturesFolder,
-            OneLine = trial.OneLine
+            OneLine = trial.OneLine,
+            Instructions = request.Instructions,
+            Input = request.Input,
+            Pictures = [.. request.Images.Select(image =>
+                $"{image.Reference}, {image.MediaType}, {image.Content.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)} bytes")],
+            AnswerForm = AnswerForm(body)
         });
+    }
+
+    // The schema or grammar a request body holds its answer to, indented.
+    private static string? AnswerForm(string body)
+    {
+        var node = JsonNode.Parse(body) as JsonObject;
+        var form = node?["response_format"] ?? node?["grammar"] ?? node?["json_schema"];
+        return form switch
+        {
+            null => null,
+            JsonValue value when value.TryGetValue<string>(out var text) => text,
+            _ => form.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true })
+        };
     }
 
     /// <summary>Whether a profile's output is repeatable: the same request gives the same output.</summary>
@@ -934,6 +1053,29 @@ public sealed class AnalysisWorker
             return interruption is null
                 ? new RequestResult(null, exception.Message, null, exception.Refused)
                 : new RequestResult(null, null, interruption);
+        }
+    }
+
+    // The output of the step that failed the task, as the model gave it, in
+    // the task's folder, so that it can be read (owner, 2026-10-16: "yes
+    // build step 1"; analysis-runner.md, "The output of a failed step").
+    private static void SaveFailedOutput(AnalysisTask task, string? output)
+    {
+        if (output is null || task.SessionDirectory is not { } session)
+        {
+            return;
+        }
+
+        try
+        {
+            var path = AnalysisPlayer.FailedOutputPath(session, task.TaskId);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, output, new System.Text.UTF8Encoding(false));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // The failure is recorded in the catalog whether or not its
+            // output could be saved.
         }
     }
 

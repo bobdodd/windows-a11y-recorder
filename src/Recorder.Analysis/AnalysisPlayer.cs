@@ -25,6 +25,63 @@ public static class AnalysisPlayer
         _ => kind
     };
 
+    /// <summary>
+    /// Queues vision for a recording, from the beginning: a summary first,
+    /// then vision after it, so that vision is added to a summary written
+    /// from the recorder's facts as they are now. Where a summary is queued
+    /// or running, vision is added to it and no other is queued; otherwise
+    /// a new summary is queued, as a run again of the newest finished one,
+    /// so that its steps whose requests are unchanged are reused, with that
+    /// summary's profiles, or the text profile given where there is none.
+    /// Returns the summary's and the vision task's IDs (owner, 2026-10-16:
+    /// "Either fix this so we can restart or start from ther beginning";
+    /// recording-summary.md, "Vision starts from the beginning").
+    /// </summary>
+    public static async Task<(Guid Summary, Guid Vision, bool SummaryQueued)> QueueVisionAsync(
+        AnalysisCatalog catalog,
+        Guid recordingId,
+        string sessionDirectory,
+        string textProfile,
+        string imageProfile,
+        Guid? rerunOfTaskId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        var summaries = (await catalog.TasksAsync(recordingId, cancellationToken).ConfigureAwait(false))
+            .Where(task => task.Kind == Summary.RecordingSummaryKind.Name)
+            .OrderByDescending(task => task.QueuedUtc)
+            .ToList();
+        var summaryVersion = new Summary.RecordingSummaryKind().Version;
+        Guid summary;
+        var queued = false;
+        if (summaries.FirstOrDefault(task => task.State is AnalysisTaskStates.Queued or AnalysisTaskStates.Running) is { } pending)
+        {
+            summary = pending.TaskId;
+        }
+        else
+        {
+            var finished = summaries.FirstOrDefault(task => task.State == AnalysisTaskStates.Done);
+            var profiles = finished?.StageProfiles ?? new Dictionary<string, string> { [ModelCapabilities.Text] = textProfile };
+            summary = await catalog.QueueTaskAsync(
+                recordingId, Summary.RecordingSummaryKind.Name, summaryVersion, profiles,
+                sessionDirectory: sessionDirectory, rerunOfTaskId: finished?.TaskId, cancellationToken: cancellationToken).ConfigureAwait(false);
+            queued = true;
+        }
+
+        var vision = await catalog.QueueTaskAsync(
+            recordingId, Summary.RecordingSummaryVisionKind.Name, new Summary.RecordingSummaryVisionKind().Version,
+            new Dictionary<string, string> { [ModelCapabilities.Text] = imageProfile, [ModelCapabilities.Image] = imageProfile },
+            afterTaskId: summary, sessionDirectory: sessionDirectory, rerunOfTaskId: rerunOfTaskId, cancellationToken: cancellationToken).ConfigureAwait(false);
+        return (summary, vision, queued);
+    }
+
+    /// <summary>
+    /// Where the worker saves the output of the step that failed a task: in
+    /// the task's folder, beside where its report would be.
+    /// </summary>
+    public static string FailedOutputPath(string sessionDirectory, Guid taskId) =>
+        Path.Combine(sessionDirectory, "analysis", taskId.ToString("D"), "failed-step-output.txt");
+
     /// <summary>A task's state as the player shows it.</summary>
     public static string StateName(string state) => state switch
     {

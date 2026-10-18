@@ -164,7 +164,7 @@ public sealed class RecordedSummaryEvidence : ISummaryEvidence, IMomentEvidence
                         case BrowserEvidenceEventTypes.LayoutScrollOffsetChanged when Context(payload, "documentToken") is { } token &&
                             payload.TryGetProperty("scrollOffset", out var offset) && offset.ValueKind == JsonValueKind.Object &&
                             offset.TryGetProperty("y", out var y) && y.ValueKind == JsonValueKind.Number:
-                            scrolls.Add(new ScrollFact(time, item.EventId, token, Text(payload, "scrollElementId") ?? "a scroller not named", y.GetDouble()));
+                            scrolls.Add(new ScrollFact(time, item.EventId, token, Text(payload, "scrollElementId") ?? "a scroller not named", y.GetDouble(), Number(payload, "nodeId")));
                             break;
                         case BrowserEvidenceEventTypes.CompositorAnimationStarted:
                             started.Add((time, item.EventId, Number(payload, "compositorAnimationId")));

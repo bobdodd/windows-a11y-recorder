@@ -369,6 +369,10 @@ before it is built.
      stage's moments; stage 1 gives the page at the end of the visit only;
    - NVDA's own windows, now used only to choose moments;
    - page popups closing, and the other page interaction records;
+   - of these, the live regions, the popups opening and closing, NVDA's
+     windows, and the scrolls are built, 2026-10-16: see
+     [recording summary](recording-summary.md), "The page's changes
+     during a visit";
    - the mouse's movement and hover, and NVDA's tracking of the mouse,
      which matter for a participant using a head pointer or eye tracking;
      stage 1 gives the presses of its buttons only;
@@ -385,7 +389,9 @@ before it is built.
    changes, announcements, typed fields, in-page jumps, and popups: to be
    removed, or shown to be forced by the context size (owner: "I don't
    like artificial limits unless absolutely forced by the platform and
-   resources").
+   resources"). Removed, 2026-10-16: see
+   [recording summary](recording-summary.md), "The collation limits
+   removed".
 5. **A better test recording,** made by the owner: more than one page,
    and at least one session marker, as the recordings so far have none
    and the cnib.ca recording has one page.

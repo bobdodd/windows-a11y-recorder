@@ -315,7 +315,7 @@ public sealed partial class RecordingSummaryTaskTests(EmbeddedPostgresFixture fi
         Assert.Contains("Title: \"Example shop\".", first, StringComparison.Ordinal);
         Assert.Contains("Landmarks: main.", first, StringComparison.Ordinal);
         Assert.Contains("level 1: \"Welcome to the shop\"", first, StringComparison.Ordinal);
-        Assert.Contains("The opening text of the main landmark: \"Welcome to the shop\"", first, StringComparison.Ordinal);
+        Assert.Contains("The text of the main landmark, in full: \"Welcome to the shop\"", first, StringComparison.Ordinal);
         Assert.DoesNotContain("Basket", first, StringComparison.Ordinal);
         var last = Input(endpoint.Bodies.Last());
         Assert.Contains("These are inferences, not facts", last, StringComparison.Ordinal);
