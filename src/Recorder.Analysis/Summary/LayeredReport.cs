@@ -17,7 +17,7 @@ namespace Recorder.Analysis.Summary;
 /// docs/architecture/recording-summary.md, "The layered report" and "The
 /// executive summary and the settings in use".
 /// </summary>
-public static class LayeredReport
+public static partial class LayeredReport
 {
     /// <summary>
     /// The form the model gave a statement, read from the step's answer as
@@ -75,6 +75,38 @@ public static class LayeredReport
         return $"{when} {what}" + (change.Detail is { } detail ? $", {detail}" : "") + ".";
     }
 
+    /// <summary>
+    /// A statement's text without the references written in it that the
+    /// statement also cites, such as "[E2]", "(E29)" or "[E31] [E30]", and
+    /// how many were taken out. A run of references any of which the
+    /// statement does not cite is left as written. The owner accepted this
+    /// on 2026-10-18: the story of the 88464e7 report wrote them in nearly
+    /// every sentence, which the recorder then cited again.
+    /// </summary>
+    public static (string Text, int Removed) WithoutCitedReferences(string text, IReadOnlyCollection<string> evidence)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(evidence);
+        var removed = 0;
+        var result = InlineReferences().Replace(text, match =>
+        {
+            var references = System.Text.RegularExpressions.Regex.Matches(match.Value, @"E\d+").Select(item => item.Value).ToList();
+            if (!references.All(evidence.Contains))
+            {
+                return match.Value;
+            }
+
+            removed += references.Count;
+            return "";
+        });
+        return (removed == 0 ? text : result.Trim(), removed);
+    }
+
+    // One or more groups such as "[E2]", "(E29)", "[E1, E2]", "(E3 and E4)",
+    // with the space before them.
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?:\s*[\[(]\s*E\d+(?:\s*(?:,|;|and)?\s*E\d+)*\s*[\])])+")]
+    private static partial System.Text.RegularExpressions.Regex InlineReferences();
+
     /// <summary>A picture's path from the report, in the task's folder under analysis, with spaces escaped.</summary>
     public static string PicturePath(string file) => "../../" + (file ?? "").Replace(" ", "%20", StringComparison.Ordinal);
 
@@ -96,6 +128,22 @@ public static class LayeredReport
         var builder = new StringBuilder();
         string Refs(IEnumerable<string> references) => citations.Refs(references);
 
+        // A statement's text without the references it also cites, counted
+        // for G.1 (owner, 2026-10-18).
+        var cleaned = 0;
+        var removed = 0;
+        string TextOf(Claim claim)
+        {
+            var (text, count) = WithoutCitedReferences(SummaryReport.OneLine(claim.Text), claim.Evidence);
+            if (count > 0)
+            {
+                cleaned++;
+                removed += count;
+            }
+
+            return text;
+        }
+
         // A section's statements, paragraph by paragraph.
         void Claims(AcceptedStep step, string section)
         {
@@ -109,7 +157,7 @@ public static class LayeredReport
             foreach (var paragraph in claims.GroupBy(claim => claim.Paragraph).OrderBy(group => group.Key))
             {
                 builder.Append(string.Join(' ', paragraph.OrderBy(claim => claim.Ordinal)
-                    .Select(claim => SummaryReport.OneLine(claim.Text) + Refs(claim.Evidence))));
+                    .Select(claim => TextOf(claim) + Refs(claim.Evidence))));
                 builder.Append("\n\n");
             }
         }
@@ -158,7 +206,7 @@ public static class LayeredReport
                 foreach (var claim in paragraph.OrderBy(claim => claim.Ordinal))
                 {
                     var form = FormOf(step, claim);
-                    var text = SummaryReport.OneLine(claim.Text);
+                    var text = TextOf(claim);
                     if (form is RecordingSummaryVisionKind.Bullet or RecordingSummaryVisionKind.Numbered)
                     {
                         if (sentences.Count > 0 || list != form)
@@ -274,6 +322,10 @@ public static class LayeredReport
         // "The pages" here contradicted the line above, which gives the
         // pages' sections to the model (target report, 2026-10-18).
         builder.Append("- Each page's list of its visits in chapter 3, the headings, where each figure goes and its file, and Appendices A to F are derived by the recorder from the recording, not by a model.\n");
+        builder.Append(cleaned == 0
+            ? "- No statement's text held a reference of its own: the references after each statement are the recorder's.\n"
+            : string.Create(CultureInfo.InvariantCulture,
+                $"- References the model wrote in the text of {cleaned} {(cleaned == 1 ? "statement" : "statements")}, each one the statement also cites, were taken out of the text, as the recorder cites them after it: {removed} {(removed == 1 ? "reference" : "references")} in all. Each statement's words are otherwise as the model wrote them.\n"));
         builder.Append(CultureInfo.InvariantCulture,
             $"- The report is built in layers. Each visit's knowledge starts as layer 1, its description from the recorded data, in the summary of task {parts.SummaryTaskId:D}.\n");
         builder.Append("- At each moment of the visit the recorder chose, a model adds layer 2, what the captured frame of the screen shows.\n");

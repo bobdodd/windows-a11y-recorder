@@ -65,9 +65,15 @@ checked on the target machine:
   recording's ending, sources, settings at their defaults, what the
   rebuilt page lacks, the layout section as the page alone, the
   experience interpreted, and what an engineer would want noticed.
-- Item 1.1, in the templates: references in a statement's evidence only,
-  never its text. What the recorder does with one written in the text
-  waits on the owner's decision.
+- Item 1.1: the templates ask for references in a statement's evidence
+  only, never its text. Where the model still writes in the text a
+  reference the statement also cites, such as "[E2]", "(E29)" or "[E31]
+  [E30]", the report takes it out of the text, and G.1 gives how many
+  statements and references; a run of references any of which the
+  statement does not cite is left as written. The owner accepted this on
+  2026-10-18. Whether a statement citing in its text what it does not
+  cite, or saying NVDA spoke, fails the answer, and whether such a
+  failure is recovered as an empty answer is, waits on the owner.
 
 Templates: layers version 2, page chapter and story version 6, executive
 summary version 4.

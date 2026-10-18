@@ -514,6 +514,7 @@ public sealed partial class RecordingSummaryTaskTests
              "## Appendix D. Changes during the recording", "## Appendix E. Other windows", "## Appendix F. Evidence", "## Appendix G. How this was made"],
             chapters);
         Assert.Contains("Figure 2. A picture of the story.", text, StringComparison.Ordinal);
+        Assert.Contains("- No statement's text held a reference of its own: the references after each statement are the recorder's.\n", text, StringComparison.Ordinal);
         Assert.DoesNotContain("[K", text, StringComparison.Ordinal);
         Assert.Contains($"- {RecordingSummaryVisionKind.Layer2Template} and {RecordingSummaryVisionKind.Layer3Template} version 2, for each moment's layers.\n", text, StringComparison.Ordinal);
         Assert.Contains("- Layer 3 steps not sent, as every group of the moment's tiles was already in the visit's knowledge: visit-0001-moment-02-layer-3.\n", text, StringComparison.Ordinal);
@@ -662,6 +663,23 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Contains(RecordingSummaryVisionKind.RecreationIsEvidence, RecordingSummaryVisionKind.StoryInstructions, StringComparison.Ordinal);
         Assert.Contains("numbered steps taken from the visit in time order", RecordingSummaryVisionKind.StoryInstructions, StringComparison.Ordinal);
         Assert.Contains("not the screen, the browser's window, or other programs' windows", RecordingSummaryVisionKind.PageChapterInstructions, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("The visit began [E2].", "The visit began.", 1)]
+    [InlineData("The layout changed in 565 elements [E31] [E30].", "The layout changed in 565 elements.", 2)]
+    [InlineData("A frame (E29) shows the page.", "A frame shows the page.", 1)]
+    [InlineData("Both [E2, E31] say so.", "Both say so.", 2)]
+    [InlineData("[E2] Text first.", "Text first.", 1)]
+    [InlineData("Not cited [E99].", "Not cited [E99].", 0)]
+    [InlineData("Partly cited [E2] [E99].", "Partly cited [E2] [E99].", 0)]
+    [InlineData("A list (E2 and E30) here.", "A list here.", 2)]
+    [InlineData("Plain text with no reference.", "Plain text with no reference.", 0)]
+    public void A_reference_written_in_a_statement_that_also_cites_it_is_taken_out(string text, string expected, int removed)
+    {
+        // Owner, 2026-10-18: the 88464e7 story wrote "[E2]. [E2]".
+        var result = LayeredReport.WithoutCitedReferences(text, ["E2", "E30", "E31", "E29"]);
+        Assert.Equal((expected, removed), result);
     }
 
     [Fact]
