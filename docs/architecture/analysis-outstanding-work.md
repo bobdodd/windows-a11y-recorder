@@ -412,3 +412,25 @@ before it is built.
     report, if stage 1 is still run, is then input to stage 2 only,
     structured for the model's understanding; whether it is needed at all
     is open.
+
+### Fixes for the next build (owner, 2026-10-18)
+
+The target report of build 88464e7 on the cnib.ca recording filled the
+story, its opening and the executive summary, and no K-number note
+appeared in chapter 3. Its review found the faults listed in
+[report fixes, 2026-10-18](report-fixes-2026-10-18.md), with the checks
+for the next target report. Two decisions by the owner are recorded
+there:
+
+- **Visual styling and semantics:** "The point of vision to see what the
+  user sees, and often web pages render links to look like buttons.
+  That's important information. In cases where the visual styling
+  conflicts with the underlying semantics, we describe as visual and note
+  it is built on other semantics."
+- **The report limited to the browser:** "a recorder setting to limit the
+  report to the browser only when that is open, and not report on the
+  other windows or background, just to clean up the report. Without the
+  browser open, we would still describe everything in that case." The
+  owner's answers: NVDA's own windows stay in scope; the browser counts
+  when it is in front; the setting is on by default, as "most testing
+  doesn't involve other windows". A new feature, not a fix.
