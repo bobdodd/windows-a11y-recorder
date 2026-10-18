@@ -294,13 +294,17 @@ public sealed class AssistiveTechnologyTimeline
     {
         var running = new Dictionary<int, (long Time, bool AtStart, string Description)>();
         long? setAt = null;
+        // A process running at the start counts from the start, though its
+        // record is written a moment later, as ScreenReadersRunningAt counts
+        // it: read at 0, the row said NVDA was not running while the
+        // summary's facts said it was (target report, 2026-10-18).
         var changes = state.Starts
             .Select(start => (start.Time, Started: true, start.AtStart, start.ProcessId, start.Description))
             .Concat(state.Exits.Select(exit => (exit.Time, Started: false, AtStart: false, exit.ProcessId, Description: string.Empty)))
-            .OrderBy(change => change.Time);
+            .OrderBy(change => change.AtStart ? long.MinValue : change.Time);
         foreach (var (at, started, atStart, processId, description) in changes)
         {
-            if (at > time)
+            if (!atStart && at > time)
             {
                 break;
             }

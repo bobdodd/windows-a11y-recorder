@@ -40,7 +40,7 @@ public sealed record PropertyRow(
 /// and the rows of the properties panel. See
 /// docs/architecture/accessibility-preferences.md, "The properties panel".
 /// </summary>
-public sealed class WindowsPreferenceTimeline
+public sealed partial class WindowsPreferenceTimeline
 {
     public const string MagnifierGroup = "Magnifier";
     public const string MagnifierKeyPrefix = "magnifier.";
@@ -191,10 +191,21 @@ public sealed class WindowsPreferenceTimeline
             var whenSet = setAt is { } at
                 ? Clock(at)
                 : setting.Name == WindowsPreferenceSettings.CaretBlinkTime ? "at start, read once" : "at start";
+            var shown = reading is { } value ? Describe(setting, value) : "not recorded";
+            // The theme chosen is not in use while the contrast theme is
+            // off; without saying so the name was read as the theme in use
+            // (target report, 2026-10-18).
+            if (setting.Name == "highContrastScheme" && shown != "none" && shown != "not recorded" &&
+                ReadingAt("highContrast", time) is { ValueKind: JsonValueKind.Object } contrast &&
+                contrast.TryGetProperty("value", out var on) && on.ValueKind == JsonValueKind.False)
+            {
+                shown += ", chosen but not in use, as the contrast theme is off";
+            }
+
             rows.Add(new PropertyRow(
                 group,
                 label,
-                reading is { } value ? Describe(setting, value) : "not recorded",
+                shown,
                 whenSet,
                 setAt,
                 setAt is { } changedAt && time - changedAt < ChangedWindowNanoseconds,
@@ -290,9 +301,15 @@ public sealed class WindowsPreferenceTimeline
 
         if (value.ValueKind == JsonValueKind.Null)
         {
-            return reading.TryGetProperty("problem", out var problem) && problem.ValueKind == JsonValueKind.String
-                ? $"not read: {problem.GetString()}"
-                : "none";
+            if (reading.TryGetProperty("problem", out var problem) && problem.ValueKind == JsonValueKind.String)
+            {
+                // A registry value that does not exist is not set, which is
+                // not a failure to read it: "not read: The value FilterType
+                // does not exist." (target report, 2026-10-18).
+                return AbsentValue().IsMatch(problem.GetString()!) ? "not set" : $"not read: {problem.GetString()}";
+            }
+
+            return "none";
         }
 
         var culture = CultureInfo.CurrentCulture;
@@ -353,4 +370,7 @@ public sealed class WindowsPreferenceTimeline
             CultureInfo.InvariantCulture,
             $"{(int)value.TotalHours:00}:{value.Minutes:00}:{value.Seconds:00}.{value.Milliseconds:000}");
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^The value \S+ does not exist\.?$")]
+    private static partial System.Text.RegularExpressions.Regex AbsentValue();
 }

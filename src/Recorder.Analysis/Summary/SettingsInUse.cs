@@ -176,7 +176,7 @@ public static class SettingsReader
         var changes = new List<SettingChange>();
         var (windows, windowsNote) = ReadWindows(archive, EventIdOf, changes);
         var (browser, browserNote) = ReadBrowser(archive, records, firstPageTime, EventIdOf, changes);
-        var (assistive, assistiveNote) = ReadAssistive(archive, records, EventIdOf, changes);
+        var (assistive, assistiveNote) = ReadAssistive(archive, records, firstPageTime, EventIdOf, changes);
         ReadMagnifier(archive, changes);
         return new RecordedSettings(
             windows, windowsNote, browser, browserNote, assistive, assistiveNote,
@@ -356,7 +356,7 @@ public static class SettingsReader
             : (DefaultState.NotDefault, value);
 
     private static (List<SettingRow>, string?) ReadAssistive(
-        SessionPlaybackArchive archive, IReadOnlyList<PlaybackIndexEvent> records, Func<string, long, string?, string?> eventIdOf, List<SettingChange> changes)
+        SessionPlaybackArchive archive, IReadOnlyList<PlaybackIndexEvent> records, long? firstPageTime, Func<string, long, string?, string?> eventIdOf, List<SettingChange> changes)
     {
         var rows = new List<SettingRow>();
         var timeline = archive.AssistiveTechnology;
@@ -369,10 +369,28 @@ public static class SettingsReader
         {
             // Each product's rows at the start, but its sound, which is
             // activity rather than a setting.
+            // Whether a product's module was in the browser is read at the
+            // first page visit, as the browser starts after the recording
+            // does: read at 0, it was never loaded (target report,
+            // 2026-10-18).
+            var browserAt = firstPageTime ?? 0;
             foreach (var row in timeline.RowsAt(0))
             {
                 if (row.Key.EndsWith(".sound", StringComparison.Ordinal))
                 {
+                    continue;
+                }
+
+                if (row.Key.EndsWith(".browser", StringComparison.Ordinal) && browserAt > 0)
+                {
+                    var atVisit = timeline.RowsAt(browserAt).First(item => item.Key == row.Key);
+                    var visitSource = atVisit.SetAt is { } loadedAt
+                        ? new SettingSource(loadedAt, $"settings:at:{loadedAt.ToString(CultureInfo.InvariantCulture)}",
+                            "Recorded: an assistive technology record (system.assistive-technology).",
+                            eventIdOf(AssistiveTechnologyRecords.Channel, loadedAt, null))
+                        : new SettingSource(browserAt, "settings:at-first-page",
+                            "Derived by the recorder: the assistive technology at the first page visit (system.assistive-technology).", null);
+                    rows.Add(new SettingRow(AssistiveAppendix, atVisit.Group, atVisit.Setting, atVisit.Value + ", at the first page visit", DefaultState.NotASetting, null, visitSource));
                     continue;
                 }
 
@@ -487,14 +505,15 @@ public static class SettingsReader
             }
 
             var written = Text(member);
+            var shownDefault = ShownNvdaValue(key, defaultValue);
             if (written is null)
             {
-                rows.Add(new(AssistiveAppendix, group, label, defaultValue + ", not written in nvda.ini", DefaultState.Default, defaultValue, source));
+                rows.Add(new(AssistiveAppendix, group, label, shownDefault + ", not written in nvda.ini", DefaultState.Default, shownDefault, source));
                 continue;
             }
 
-            rows.Add(new(AssistiveAppendix, group, label, written,
-                SameNvdaValue(written, defaultValue) ? DefaultState.Default : DefaultState.NotDefault, defaultValue, source));
+            rows.Add(new(AssistiveAppendix, group, label, ShownNvdaValue(key, written),
+                SameNvdaValue(written, defaultValue) ? DefaultState.Default : DefaultState.NotDefault, shownDefault, source));
         }
 
         if (read)
@@ -525,6 +544,40 @@ public static class SettingsReader
 
     // A value as configobj reads it against its default: booleans in any
     // of their spellings, numbers and words as written.
+    /// <summary>
+    /// An NVDA value as the appendix shows it: NVDAModifierKeys, a sum of
+    /// "1: CapsLock, 2: NumpadInsert, 4: ExtendedInsert", is given with the
+    /// keys it names, as 7 alone did not say Caps Lock was added (target
+    /// report, 2026-10-18).
+    /// </summary>
+    internal static string ShownNvdaValue(string key, string value)
+    {
+        if (key != "NVDAModifierKeys" || !int.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var keys) ||
+            keys < 1 || keys > 7)
+        {
+            return value;
+        }
+
+        var names = new List<string>();
+        if ((keys & NvdaSettings.CapsLockModifier) != 0)
+        {
+            names.Add("Caps Lock");
+        }
+
+        if ((keys & NvdaSettings.NumpadInsertModifier) != 0)
+        {
+            names.Add("numpad Insert");
+        }
+
+        if ((keys & NvdaSettings.ExtendedInsertModifier) != 0)
+        {
+            names.Add("extended Insert");
+        }
+
+        var list = names.Count == 1 ? names[0] : string.Join(", ", names.Take(names.Count - 1)) + " and " + names[^1];
+        return $"{keys.ToString(CultureInfo.InvariantCulture)}: {list}";
+    }
+
     private static bool SameNvdaValue(string written, string defaultValue)
     {
         if (defaultValue is "true" or "false")

@@ -177,7 +177,12 @@ public static class LayeredReport
                         Flush();
                         figures++;
                         var caption = string.Create(CultureInfo.InvariantCulture, $"Figure {figures}. {text}");
-                        var alt = caption.Replace('[', '(').Replace(']', ')');
+                        // The alternative text names the picture and leaves
+                        // its description to the caption, so a screen reader
+                        // does not read the same words twice (target report,
+                        // 2026-10-18).
+                        var alt = string.Create(CultureInfo.InvariantCulture, $"Figure {figures}: {picture.What}, described in the caption below")
+                            .Replace('[', '(').Replace(']', ')');
                         builder.Append("![").Append(alt).Append("](").Append(PicturePath(picture.File)).Append(")\n\n");
                         builder.Append(caption).Append(Refs(claim.Evidence)).Append("\n\n");
                     }
@@ -266,7 +271,9 @@ public static class LayeredReport
         builder.Append("### G.1 How the report is built\n\n");
         builder.Append("- Every statement in chapters 1 and 4 and in the pages of chapter 3 is a model's inference from the recorded evidence cited after it.\n");
         builder.Append("- Chapter 2 quotes the participant's capabilities as the auditor gave them, and the assistive technology the recorder observed running.\n");
-        builder.Append("- The page visits, the pages, and Appendices A to F are derived by the recorder from the recording, not by a model.\n");
+        // "The pages" here contradicted the line above, which gives the
+        // pages' sections to the model (target report, 2026-10-18).
+        builder.Append("- Each page's list of its visits in chapter 3, the headings, where each figure goes and its file, and Appendices A to F are derived by the recorder from the recording, not by a model.\n");
         builder.Append(CultureInfo.InvariantCulture,
             $"- The report is built in layers. Each visit's knowledge starts as layer 1, its description from the recorded data, in the summary of task {parts.SummaryTaskId:D}.\n");
         builder.Append("- At each moment of the visit the recorder chose, a model adds layer 2, what the captured frame of the screen shows.\n");
@@ -281,7 +288,7 @@ public static class LayeredReport
             builder.Append("No step was accepted, so no model is named.\n");
         }
 
-        SummaryReport.AppendModel(builder, accepted);
+        SummaryReport.AppendModelPerStep(builder, attempts);
         builder.Append('\n');
 
         builder.Append("### G.3 The prompt templates\n\n");
@@ -445,7 +452,7 @@ public static class LayeredReport
             settings.Browser, settings.BrowserNote);
         Table("## Appendix C. Assistive technology at the start",
             "The assistive technology at the start of the recording, as the recorder read it:\n\n" +
-            "- The products the recorder watched for, and whether each was running.\n" +
+            "- The products the recorder watched for, whether each was running, and whether its module was in the browser at the first page visit, as the browser starts after the recording does.\n" +
             "- NVDA's settings, as first read from its configuration folder. A setting not written in nvda.ini is at NVDA's default.\n" +
             "- The Magnifier, as read with the first captured frame.",
             settings.Assistive, settings.AssistiveNote);

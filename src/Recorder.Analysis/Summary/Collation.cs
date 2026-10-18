@@ -354,7 +354,7 @@ public static class SummaryCollator
             var buttons = page.Buttons;
             lines.Add(buttons.Count == 0
                 ? "  Buttons: none."
-                : "  Buttons: " + string.Join("; ", buttons.Select(item => item.Name.Length > 0 ? Quote(item.Name) : "a button with no name")) + ".");
+                : $"  Buttons, {buttons.Count.ToString(CultureInfo.InvariantCulture)}: " + string.Join("; ", buttons.Select(item => item.Name.Length > 0 ? Quote(item.Name) : "a button with no name")) + ".");
             lines.Add($"  Links: {page.LinkCount.ToString(CultureInfo.InvariantCulture)}. Images: {page.ImageCount.ToString(CultureInfo.InvariantCulture)}.");
             if (page.Dialogs is { Count: > 0 } dialogs)
             {
@@ -554,9 +554,13 @@ public static class SummaryCollator
         var from = before is not null
             ? string.Create(CultureInfo.InvariantCulture, $"from {before.Y:0}")
             : "from a position not recorded in the visit";
-        var count = movement.Count == 1 ? "1 position recorded" : $"{movement.Count.ToString(CultureInfo.InvariantCulture)} positions recorded";
-        var text = string.Create(CultureInfo.InvariantCulture,
-            $"{what} scrolled {from} to {last.Y:0} CSS pixels from the top, from {Time(first.Time)} to {Time(last.Time)}, {count}.");
+        // One record is a scroll at one time, not one "from 00:00:40.661 to
+        // 00:00:40.661, 1 position recorded" (target report, 2026-10-18).
+        var text = movement.Count == 1
+            ? string.Create(CultureInfo.InvariantCulture,
+                $"{what} scrolled {from} to {last.Y:0} CSS pixels from the top at {Time(first.Time)}, 1 position recorded.")
+            : string.Create(CultureInfo.InvariantCulture,
+                $"{what} scrolled {from} to {last.Y:0} CSS pixels from the top, from {Time(first.Time)} to {Time(last.Time)}, {movement.Count} positions recorded.");
         if (isPage && evidence.ViewportHeightAt(token, last.Time) is { } height && height > 0)
         {
             text += string.Create(CultureInfo.InvariantCulture, $" With a viewport {height:0} CSS pixels high, CSS pixels {last.Y:0} to {last.Y + height:0} were then in it.");

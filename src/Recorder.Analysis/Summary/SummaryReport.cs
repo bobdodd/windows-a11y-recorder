@@ -213,7 +213,10 @@ public static class SummaryReport
         foreach (var window in collation.OtherWindows)
         {
             builder.Append(CultureInfo.InvariantCulture,
-                $"- {Clock(window.Start)} to {Clock(window.End)}: {window.Process}, \"{OneLine(window.Title)}\".{citations.Refs([window.Reference])}\n");
+                // To the millisecond, as a window in front for less than a
+                // second read "00:00:00 to 00:00:00" (target report,
+                // 2026-10-18).
+                $"- {SummaryCollator.Time(window.Start)} to {SummaryCollator.Time(window.End)}: {window.Process}, \"{OneLine(window.Title)}\".{citations.Refs([window.Reference])}\n");
         }
 
         builder.Append('\n');
@@ -223,6 +226,9 @@ public static class SummaryReport
     internal static void AppendEvidence(StringBuilder builder, RecordingCollation collation, ReportCitations citations, string heading = "## Evidence")
     {
         builder.Append(heading).Append("\n\n");
+        // Only cited evidence is listed, so the numbers have gaps (target
+        // report, 2026-10-18).
+        builder.Append("The evidence the report cites, in the order of its numbers. Evidence given to the model but not cited is not listed, so some numbers are missing.\n\n");
         builder.Append("| Ref | Time | Evidence |\n| --- | --- | --- |\n");
         foreach (var number in citations.Cited)
         {
@@ -255,6 +261,88 @@ public static class SummaryReport
         builder.Append(CultureInfo.InvariantCulture, $"- Server build: {accepted.ServerBuild ?? "unknown"}.\n");
         builder.Append(CultureInfo.InvariantCulture, $"- Generation settings: `{accepted.Parameters}`.\n");
     }
+
+    /// <summary>
+    /// The model, then the generation settings of the accepted answers, once
+    /// where all steps share them and otherwise each set with its steps: one
+    /// line for the whole report hid that the presence penalty is given to
+    /// the moment descriptions only (target report, 2026-10-18).
+    /// </summary>
+    internal static void AppendModelPerStep(StringBuilder builder, IReadOnlyList<AttemptRecord> attempts)
+    {
+        var accepted = Accepted(attempts);
+        if (accepted is null)
+        {
+            return;
+        }
+
+        var answers = attempts.Where(attempt => attempt.Outcome == AttemptOutcomes.Accepted).ToList();
+        if (answers.Count == 0)
+        {
+            answers = [accepted];
+        }
+
+        var models = answers.GroupBy(attempt => (attempt.ProfileName, attempt.Model, attempt.ModelFileName, attempt.ModelQuantization, attempt.ModelSha256, attempt.ModelSha256Basis, attempt.ServerBuild)).ToList();
+        foreach (var model in models)
+        {
+            var first = model.First();
+            if (models.Count > 1)
+            {
+                builder.Append(CultureInfo.InvariantCulture, $"- For steps {string.Join(", ", model.Select(attempt => attempt.StepKey).Distinct(StringComparer.Ordinal))}:\n");
+            }
+
+            builder.Append(CultureInfo.InvariantCulture, $"- Model profile: \"{first.ProfileName}\", model {first.Model}.\n");
+            builder.Append(CultureInfo.InvariantCulture, $"- Model file: {first.ModelFileName ?? "unknown"}, quantization {first.ModelQuantization ?? "unknown"}.\n");
+            builder.Append(CultureInfo.InvariantCulture, $"- Model SHA-256: {first.ModelSha256 ?? "unknown"} ({BasisText(first.ModelSha256Basis)}).\n");
+            builder.Append(CultureInfo.InvariantCulture, $"- Server build: {first.ServerBuild ?? "unknown"}.\n");
+        }
+
+        // The number of images and the answer's sections belong to the
+        // step's request, not to how the model generated it, so they are
+        // left out of the comparison and the settings shown.
+        var settings = answers.GroupBy(attempt => GenerationOnly(attempt.Parameters), StringComparer.Ordinal).ToList();
+        if (settings.Count == 1)
+        {
+            builder.Append(CultureInfo.InvariantCulture, $"- Generation settings, the same for every step: `{settings[0].Key}`.\n");
+            return;
+        }
+
+        builder.Append("- Generation settings of each accepted answer, which differ between steps:\n");
+        foreach (var group in settings)
+        {
+            builder.Append(CultureInfo.InvariantCulture,
+                $"  - For {string.Join(", ", group.Select(attempt => attempt.StepKey).Distinct(StringComparer.Ordinal))}: `{group.Key}`.\n");
+        }
+    }
+
+    private static string GenerationOnly(string parameters)
+    {
+        try
+        {
+            if (System.Text.Json.Nodes.JsonNode.Parse(parameters) is System.Text.Json.Nodes.JsonObject json)
+            {
+                json.Remove("images");
+                json.Remove("sections");
+                return Spaced(json);
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+        }
+
+        return parameters;
+    }
+
+    // As the catalog writes the parameters: a space after each colon and
+    // comma.
+    private static string Spaced(System.Text.Json.Nodes.JsonNode? node) => node switch
+    {
+        System.Text.Json.Nodes.JsonObject json => "{" + string.Join(", ", json.Select(item =>
+            System.Text.Json.JsonSerializer.Serialize(item.Key) + ": " + Spaced(item.Value))) + "}",
+        System.Text.Json.Nodes.JsonArray array => "[" + string.Join(", ", array.Select(Spaced)) + "]",
+        null => "null",
+        _ => node.ToJsonString()
+    };
 
     /// <summary>The facts given, the reused steps, and the attempts.</summary>
     internal static void AppendLimitsAndAttempts(StringBuilder builder, RecordingCollation collation, CollationSettings settings, IReadOnlyList<AttemptRecord> attempts)

@@ -228,6 +228,18 @@ public sealed class AssistiveTechnologyTests
     }
 
     [Fact]
+    public void ACopyRunningAtTheStartIsRunningFromTheStart()
+    {
+        // Its record is written 10 ms in; read at 0, the row said NVDA was
+        // not running while the summary said it was (target report,
+        // 2026-10-18).
+        var timeline = new AssistiveTechnologyTimeline(Records());
+        var atZero = RowAt(timeline, 0, AssistiveTechnologyTimeline.RunningKey("NVDA"));
+        Assert.StartsWith("running, version 2026.2, portable copy, started before the recording", atZero.Value, StringComparison.Ordinal);
+        Assert.Equal("at start", atZero.WhenSet);
+    }
+
+    [Fact]
     public void TheRowsStepThroughTheirOwnChanges()
     {
         var timeline = new AssistiveTechnologyTimeline(Records());

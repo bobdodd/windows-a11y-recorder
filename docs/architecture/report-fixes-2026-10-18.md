@@ -2,6 +2,47 @@
 
 Based on the target report of build 88464e7 (in commit 8ea8693) (recording 20261013-173155-6672eb45f4314526936fac89c814cffd, CNIB home page), reviewed 2026-10-18.
 
+## Progress
+
+The first batch, built 2026-10-18 and not yet checked on the target
+machine, makes these changes, each with a test:
+
+- Item 1.5: a product running at the start counts as running from 0, as
+  the summary's facts count it, so Appendix C and chapter 2 agree. Whether
+  its module was in the browser is read at the first page visit, as the
+  browser starts after the recording does.
+- Item 1.6: "High Contrast Black, chosen but not in use, as the contrast
+  theme is off" while the contrast theme is off.
+- Item 1.7: the buttons fact gives their number, "Buttons, 3: ...". The
+  garbled sentence in 3.1.4 was the model's; this makes the fact plainer.
+- Item 1.8: a scroll of one record reads "scrolled from 0 to 2086 CSS
+  pixels from the top at 00:00:40.661, 1 position recorded". "Scrolled",
+  not "jumped", as a scroll from a position not recorded may not have
+  been a jump.
+- Item 1.9: inferred announcements are given to the model and listed with
+  commas; the player keeps NVDA's two-space separator.
+- Item 1.10: a registry value that does not exist is "not set"; page
+  colors are named from `PageColors` in
+  `chrome/browser/accessibility/page_colors_controller.h` of Chromium
+  156.0.8065.0 ("no preference, as the Windows theme (0)"); NVDA's
+  modifier keys are named ("7: Caps Lock, numpad Insert and extended
+  Insert", default "6: numpad Insert and extended Insert").
+- Item 1.11, in part: Appendix E gives times to the millisecond, so a
+  window in front for under a second no longer reads "00:00:00 to
+  00:00:00". Why the recorder coming to the front at about 00:00:54.9 has
+  no front-window record is not yet known.
+- Item 1.12: Appendix F says only cited evidence is listed.
+- Item 1.13: alternative text names the picture, "Figure 1: The captured
+  frame at 00:00:06.944, described in the caption below", and leaves the
+  description to the caption.
+- Items 3.1 and 3.2: G.2 gives the model once and the generation settings
+  of the accepted answers once where every step shares them, otherwise
+  each set with its steps; the number of images and the answer's sections
+  are left out, as they belong to the request. G.1 no longer says "the
+  pages" are both the model's and the recorder's.
+
+Because the facts' wording changed, no step of an earlier run is reused.
+
 ## Confirmed by the 88464e7 report
 
 - Story, opening and executive summary are populated on the first attempt: 2,526, 463 and 1,452 output tokens, against 29, 12 and 42 before.
@@ -17,7 +58,7 @@ Based on the target report of build 88464e7 (in commit 8ea8693) (recording 20261
 5. **NVDA presence contradiction.** Chapter 2 and [E1] say NVDA 2026.2 was running at 00:00:00.000; Appendix C says "not running" and "its module not loaded" at the same time [E142], then reads NVDA's settings "when it was seen running" at 00:00:00.341. Use one presence state per time across chapter 2, Appendix C and the facts.
 6. **Contrast theme labelling.** Label the row "Contrast theme name (selected, not in use)" when the contrast theme is off, so the name is not read as an active theme.
 7. **Control list wording.** Write the chapter 3 control fact as "no form fields; 3 buttons: Reset, Show Display Preferences and Toggle navigation; 55 links; 14 images".
-8. **Single-record scrolls.** Write "jumped from 0 to 2086 CSS pixels from the top at 00:00:40.661" rather than "from 00:00:40.661 to 00:00:40.661, 1 position recorded".
+8. **Single-record scrolls.** Write "scrolled from 0 to 2086 CSS pixels from the top at 00:00:40.661" rather than "from 00:00:40.661 to 00:00:40.661, 1 position recorded".
 9. **Announcement separators.** Render the double-space separators in inferred announcements as commas: "main landmark, Bright futures start here!, heading, level 2".
 10. **Raw values.** "Color filter type: not read: The value FilterType does not exist" becomes "not set"; "Page colors: value 0" gets its meaning; NVDAModifierKeys 7 is decoded as "Caps Lock added to both Insert keys" (default 6, both Insert keys).
 11. **Appendix E.** Fix the zero-length "00:00:00 to 00:00:00" range and include the recorder coming to the front at about 00:00:54.9 shown by [E117] and [E128].

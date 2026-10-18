@@ -218,6 +218,17 @@ public sealed class SettingsReaderTests
     }
 
     [Fact]
+    public void NVDAs_modifier_keys_are_named()
+    {
+        // 7 alone did not say Caps Lock was added (target report, 2026-10-18).
+        Assert.Equal("7: Caps Lock, numpad Insert and extended Insert", SettingsReader.ShownNvdaValue("NVDAModifierKeys", "7"));
+        Assert.Equal("6: numpad Insert and extended Insert", SettingsReader.ShownNvdaValue("NVDAModifierKeys", "6"));
+        Assert.Equal("1: Caps Lock", SettingsReader.ShownNvdaValue("NVDAModifierKeys", "1"));
+        Assert.Equal("9", SettingsReader.ShownNvdaValue("NVDAModifierKeys", "9"));
+        Assert.Equal("7", SettingsReader.ShownNvdaValue("linesPerPage", "7"));
+    }
+
+    [Fact]
     public void An_NVDA_setting_that_differs_when_NVDA_starts_again_is_a_change()
     {
         var at = Read(assistive: Nvda(",'enableMouseTracking':null", ",'enableMouseTracking':'False'"));

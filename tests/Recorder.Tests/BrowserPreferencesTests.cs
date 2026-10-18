@@ -331,6 +331,19 @@ public sealed class BrowserPreferencesTests
     }
 
     [Fact]
+    public void ThePageColorsAreNamed()
+    {
+        // "value 0" said nothing (target report, 2026-10-18); the names are
+        // PageColors in page_colors_controller.h, Chromium 156.0.8065.0.
+        var setting = BrowserPreferenceSettings.FindBrowser("requestedPageColors")!;
+        string Describe(int value) => BrowserPreferenceTimeline.DescribeValue(setting, JsonDocument.Parse(value.ToString(System.Globalization.CultureInfo.InvariantCulture)).RootElement);
+        Assert.Equal("no preference, as the Windows theme (0)", Describe(0));
+        Assert.Equal("off (1)", Describe(1));
+        Assert.Equal("High Contrast White (6)", Describe(6));
+        Assert.Equal("value 7", Describe(7));
+    }
+
+    [Fact]
     public void TheThemeInUseIsNamed()
     {
         var setting = BrowserPreferenceSettings.FindBrowser("themeId")!;

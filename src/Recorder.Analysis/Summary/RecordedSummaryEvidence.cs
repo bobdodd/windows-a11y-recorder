@@ -99,7 +99,11 @@ public sealed class RecordedSummaryEvidence : ISummaryEvidence, IMomentEvidence
             command.Time,
             null,
             $"NVDA kept {command.Gesture} as its command: {string.Join(", ", command.Names)}."))];
-        Announcements = [.. archive.NvdaAnnouncements.Announcements.Select(item => new TimedFact(item.Time, item.Step.EventId, item.Line))];
+        // The player keeps NVDA's two-space separator; a fact reads as a
+        // list, "main landmark, Bright futures start here!, heading, level 2"
+        // (target report, 2026-10-18).
+        Announcements = [.. archive.NvdaAnnouncements.Announcements.Select(item =>
+            new TimedFact(item.Time, item.Step.EventId, item.Line.Replace(NvdaAnnouncementTimeline.Separator, ", ", StringComparison.Ordinal)))];
     }
 
     public long Duration => _archive.DurationNanoseconds;

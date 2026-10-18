@@ -187,6 +187,37 @@ public sealed class WindowsPreferencesTests
     }
 
     [Fact]
+    public void AValueThatDoesNotExistIsNotSetAndAThemeChosenButOffIsNotInUse()
+    {
+        // The target report of 2026-10-18 read "not read: The value
+        // FilterType does not exist." and took the contrast theme's name for
+        // the theme in use.
+        var timeline = new WindowsPreferenceTimeline(
+        [
+            Record(Second / 10, WindowsPreferenceSettings.SnapshotEventType, Snapshot(readings =>
+            {
+                readings["colorFilterType"] = WindowsPreferenceReading.Failed("The value FilterType does not exist.");
+                readings["highContrast"] = WindowsPreferenceReading.Read(JsonValue.Create(false));
+                readings["highContrastScheme"] = WindowsPreferenceReading.Read(JsonValue.Create("High Contrast Black"));
+            }))
+        ]);
+
+        var rows = timeline.RowsAt(Second, null);
+        Assert.Equal("not set", Row(rows, "Color filter type").Value);
+        Assert.Equal("High Contrast Black, chosen but not in use, as the contrast theme is off", Row(rows, "Contrast theme name").Value);
+
+        var on = new WindowsPreferenceTimeline(
+        [
+            Record(Second / 10, WindowsPreferenceSettings.SnapshotEventType, Snapshot(readings =>
+            {
+                readings["highContrast"] = WindowsPreferenceReading.Read(JsonValue.Create(true));
+                readings["highContrastScheme"] = WindowsPreferenceReading.Read(JsonValue.Create("High Contrast Black"));
+            }))
+        ]);
+        Assert.Equal("High Contrast Black", Row(on.RowsAt(Second, null), "Contrast theme name").Value);
+    }
+
+    [Fact]
     public void AnOlderRecordingShowsEachSettingAsNotRecorded()
     {
         var rows = WindowsPreferenceTimeline.Empty.RowsAt(Second, null);

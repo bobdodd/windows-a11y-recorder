@@ -548,7 +548,9 @@ public sealed class BrowserPreferenceTimeline
 
                 if (setting.Name == "requestedPageColors")
                 {
-                    return $"value {number.ToString(CultureInfo.InvariantCulture)}";
+                    return number >= 0 && number < PageColors.Length
+                        ? $"{PageColors[number]} ({number.ToString(CultureInfo.InvariantCulture)})"
+                        : $"value {number.ToString(CultureInfo.InvariantCulture)}";
                 }
 
                 return setting.Name.EndsWith("FontSize", StringComparison.Ordinal)
@@ -578,6 +580,13 @@ public sealed class BrowserPreferenceTimeline
                 return value.GetRawText();
         }
     }
+
+    // PageColors in chrome/browser/accessibility/page_colors_controller.h,
+    // lines 21 to 38, in the owner's checkout of Chromium 156.0.8065.0:
+    // kNoPreference "forced colors state and CSS color values match the UI
+    // theme"; kOff disables forced colors; the rest force the named theme.
+    private static readonly string[] PageColors =
+        ["no preference, as the Windows theme", "off", "Dusk", "Desert", "Night Sky", "Aquatic", "High Contrast White"];
 
     /// <summary>
     /// The browser's theme color: an SkColor, ARGB, kept in an integer

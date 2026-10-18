@@ -584,10 +584,10 @@ public sealed class RecordingSummaryTests
                 "00:00:02.000 The page scrolled from 0 to 400 CSS pixels from the top, from 00:00:02.000 to 00:00:02.500, 2 positions recorded. With a viewport 800 CSS pixels high, CSS pixels 400 to 1200 were then in it.",
                 "00:00:03.000 A select list opened.",
                 "00:00:04.000 A select list closed.",
-                "00:00:05.000 The page scrolled from 400 to 1200 CSS pixels from the top, from 00:00:05.000 to 00:00:05.000, 1 position recorded. With a viewport 800 CSS pixels high, CSS pixels 1200 to 2000 were then in it.",
+                "00:00:05.000 The page scrolled from 400 to 1200 CSS pixels from the top at 00:00:05.000, 1 position recorded. With a viewport 800 CSS pixels high, CSS pixels 1200 to 2000 were then in it.",
                 "00:00:06.000 The page changed text in a live region, status \"Cart\", to \"2 items\". Its politeness: polite.",
                 "00:00:07.000 NVDA's window \"Elements List\" came to the front.",
-                "00:00:08.000 The scroller list \"Results\" scrolled from a position not recorded in the visit to 50 CSS pixels from the top, from 00:00:08.000 to 00:00:08.000, 1 position recorded.",
+                "00:00:08.000 The scroller list \"Results\" scrolled from a position not recorded in the visit to 50 CSS pixels from the top at 00:00:08.000, 1 position recorded.",
                 "00:00:09.000 NVDA's window \"Elements List\" left the front."
             ],
             changes);
@@ -764,5 +764,35 @@ public sealed class RecordingSummaryTests
         Assert.Contains($"- Steps reused, unchanged, from an earlier run: 1 of 2. Their answers were written in task {source}: visit-0001.", report, StringComparison.Ordinal);
         Assert.Contains($"| visit-0001 | 1 | accepted, reused from task {source} |", report, StringComparison.Ordinal);
         Assert.Contains("| recording | 1 | accepted |", report, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheModelsGenerationSettingsAreGivenWithTheStepsThatUsedThem()
+    {
+        // One line for the whole report hid that the presence penalty is
+        // given to the moment descriptions only (target report, 2026-10-18).
+        AttemptRecord Attempt(string step, string parameters) => new(step, 1, AttemptOutcomes.Accepted, null, "This PC", "qwen", "q.gguf", "Q4", "aa", "hashed", "b1", parameters,
+            "stand-in-template", 1, 120, 40, 500, 1500);
+        const string Moment = "{\"seed\": 1, \"images\": 1, \"sampling\": {\"presence_penalty\": 1.5}, \"sections\": [\"screen\"], \"temperature\": 0}";
+        const string Page = "{\"seed\": 1, \"images\": 4, \"sampling\": {\"presence_penalty\": 1.5}, \"sections\": [\"page\"], \"temperature\": 0}";
+        const string Story = "{\"seed\": 1, \"images\": 0, \"sampling\": {}, \"sections\": [\"arriving\"], \"temperature\": 0}";
+        var builder = new System.Text.StringBuilder();
+        SummaryReport.AppendModelPerStep(builder,
+        [
+            Attempt("visit-0001-moment-01", Moment),
+            Attempt("visit-0001-moment-01-page-01", Page),
+            Attempt("visit-0001-story", Story) with { AttemptNumber = 2 },
+            Attempt("visit-0001-story", Story) with { Outcome = AttemptOutcomes.Failed }
+        ]);
+
+        Assert.Equal(
+            "- Model profile: \"This PC\", model qwen.\n" +
+            "- Model file: q.gguf, quantization Q4.\n" +
+            "- Model SHA-256: aa (computed from the file).\n" +
+            "- Server build: b1.\n" +
+            "- Generation settings of each accepted answer, which differ between steps:\n" +
+            "  - For visit-0001-moment-01, visit-0001-moment-01-page-01: `{\"seed\": 1, \"sampling\": {\"presence_penalty\": 1.5}, \"temperature\": 0}`.\n" +
+            "  - For visit-0001-story: `{\"seed\": 1, \"sampling\": {}, \"temperature\": 0}`.\n",
+            builder.ToString());
     }
 }

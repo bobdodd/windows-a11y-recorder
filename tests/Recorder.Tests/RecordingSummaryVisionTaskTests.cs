@@ -486,7 +486,7 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Contains("## 4. The user experience\n\n### 4.1 Introduction\n\nThe site and the session. [E", text, StringComparison.Ordinal);
         Assert.Matches(@"\]\n\nThe course of the session\. \[E\d+\]\n\n### 4\.2 Visit 1: [^\n]+, 00:00:0\d to 00:00:\d\d\n\n", text);
         Assert.Matches(
-            @"### 4\.2 Visit 1: [^\n]+\n\n#### 4\.2\.1 Arriving\n\nHow the participant arrived\. \[E\d+\]\n\n!\[Figure 1\. A picture of the story\.\]\(\.\./\.\./frames/desktop/\d+\.png\)\n\nFigure 1\. A picture of the story\. \[E\d+\]\n\n" +
+            @"### 4\.2 Visit 1: [^\n]+\n\n#### 4\.2\.1 Arriving\n\nHow the participant arrived\. \[E\d+\]\n\n!\[Figure 1: The captured frame at [^\]]+, described in the caption below\]\(\.\./\.\./frames/desktop/\d+\.png\)\n\nFigure 1\. A picture of the story\. \[E\d+\]\n\n" +
             @"What was on the screen\. \[E\d+\]\n\n#### 4\.2\.2 What the participant did\n\n1\. An action and how the page responded\. \[E\d+\]\n2\. Another action and how the page responded\. \[E\d+\]\n\n" +
             @"#### 4\.2\.3 What worked and what got in the way\n\nWhat worked, and why it matters\. \[E\d+\]\n\nWhat got in the way, and why it matters\. \[E\d+\]\n\n### 4\.3 Visit 2: ", text);
 
@@ -496,8 +496,11 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Contains("## Appendix C. Assistive technology at the start\n\n", text, StringComparison.Ordinal);
         Assert.Contains("## Appendix D. Changes during the recording\n\n", text, StringComparison.Ordinal);
         Assert.Contains("No change was recorded.\n\n## Appendix E. Other windows\n\n", text, StringComparison.Ordinal);
-        Assert.Contains("\n## Appendix F. Evidence\n\n| Ref | Time | Evidence |", text, StringComparison.Ordinal);
+        Assert.Contains("\n## Appendix F. Evidence\n\nThe evidence the report cites, in the order of its numbers. Evidence given to the model but not cited is not listed, so some numbers are missing.\n\n| Ref | Time | Evidence |", text, StringComparison.Ordinal);
         Assert.Contains("\n## Appendix G. How this was made\n\n### G.1 How the report is built\n\n- Every statement", text, StringComparison.Ordinal);
+        // Every step of this profile has the same generation settings, the
+        // images and sections apart.
+        Assert.Contains("- Generation settings, the same for every step: `{\"seed\": 1, \"sampling\": {}, ", text, StringComparison.Ordinal);
         foreach (var heading in new[] { "### G.2 The model", "### G.3 The prompt templates", "### G.4 The settings", "### G.5 The moments and their pictures", "### G.6 The facts given, the steps reused, and the attempts" })
         {
             Assert.Contains("\n" + heading + "\n\n- ", text, StringComparison.Ordinal);
