@@ -131,8 +131,20 @@ public sealed record CollationSettings(
 /// are given the lines only, as each moment's reasons already name the
 /// changes that chose it (owner, 2026-10-16).
 /// </summary>
+/// <summary>A fact of a visit at its time, as its line is given, and whether it is the participant's input.</summary>
+public sealed record TimedLine(long Time, string Line, bool Input);
+
 public sealed record VisitCollation(Visit Visit, string? Title, IReadOnlyList<string> Lines, IReadOnlySet<string> References, IReadOnlyList<string> Changes)
 {
+    /// <summary>
+    /// The visit's inputs and what was recorded after each, in time order:
+    /// each key and click, then the focus moves, NVDA's commands and
+    /// inferred announcements, in-page jumps, and page changes before the
+    /// next, so that the story pairs each action with its response (target
+    /// report, 2026-10-18).
+    /// </summary>
+    public IReadOnlyList<TimedLine> Timeline { get; init; } = [];
+
     /// <summary>The heading of the changes, as each request that is given them has it.</summary>
     public const string ChangesHeading = "The page's changes during the visit, in time order: its live regions, its popups opening and closing, NVDA's windows, and its scrolls:";
 
@@ -270,8 +282,16 @@ public static class SummaryCollator
             return reference;
         }
 
+        var timeline = new List<TimedLine>();
         void Line(long time, string text, string? eventId, string? key = null) =>
             lines.Add($"[{Cite(time, text, eventId, key)}] {Time(time)} {text}");
+
+        void Timed(long time, string text, string? eventId, bool input = false, string? key = null)
+        {
+            var line = $"[{Cite(time, text, eventId, key)}] {Time(time)} {text}";
+            lines.Add(line);
+            timeline.Add(new TimedLine(time, line, input));
+        }
 
         var how = visit.Kind switch
         {
@@ -355,7 +375,18 @@ public static class SummaryCollator
             lines.Add(buttons.Count == 0
                 ? "  Buttons: none."
                 : $"  Buttons, {buttons.Count.ToString(CultureInfo.InvariantCulture)}: " + string.Join("; ", buttons.Select(item => item.Name.Length > 0 ? Quote(item.Name) : "a button with no name")) + ".");
-            lines.Add($"  Links: {page.LinkCount.ToString(CultureInfo.InvariantCulture)}. Images: {page.ImageCount.ToString(CultureInfo.InvariantCulture)}.");
+            // Each link and image by name, not their numbers alone, so that
+            // what a picture shows as a button can be set beside what it is
+            // built as (owner, 2026-10-18: "we describe as visual and note it
+            // is built on other semantics").
+            var links = page.Links;
+            lines.Add(links.Count == 0
+                ? "  Links: none."
+                : $"  Links, {links.Count.ToString(CultureInfo.InvariantCulture)}, in order: " + string.Join("; ", links.Select(item => item.Name.Length > 0 ? Quote(item.Name) : "a link with no name")) + ".");
+            var images = page.Images;
+            lines.Add(images.Count == 0
+                ? "  Images: none."
+                : $"  Images, {images.Count.ToString(CultureInfo.InvariantCulture)}, in order, by name: " + string.Join("; ", images.Select(item => item.Name.Length > 0 ? Quote(item.Name) : "an image with no name")) + ".");
             if (page.Dialogs is { Count: > 0 } dialogs)
             {
                 lines.Add("  Dialogs in the page: " + string.Join("; ", dialogs.Select(item => item.Name.Length > 0 ? $"{item.Role} {Quote(item.Name)}" : item.Role)) + ".");
@@ -377,7 +408,7 @@ public static class SummaryCollator
         foreach (var step in visit.Steps)
         {
             var link = step.LinkName is { Length: > 0 } name ? $" {Quote(name)}" : "";
-            Line(step.Commit.Time, $"In-page jump to #{step.Fragment}, {step.Target}: a {step.Name}{link} ({step.Rule}).", step.Commit.EventId);
+            Timed(step.Commit.Time, $"In-page jump to #{step.Fragment}, {step.Target}: a {step.Name}{link} ({step.Rule}).", step.Commit.EventId);
         }
 
         bool Within(long time) => time >= start.Time && time < visit.End;
@@ -402,13 +433,13 @@ public static class SummaryCollator
         var commands = evidence.Commands.Where(fact => Within(fact.Time)).ToList();
         foreach (var command in commands)
         {
-            Line(command.Time, command.Text, command.EventId);
+            Timed(command.Time, command.Text, command.EventId);
         }
 
         var clicks = evidence.Clicks.Where(fact => Within(fact.Time)).ToList();
         foreach (var click in clicks)
         {
-            Line(click.Time, click.Text, click.EventId);
+            Timed(click.Time, click.Text, click.EventId, input: true);
         }
 
         if (start.DocumentToken is { } document)
@@ -419,7 +450,7 @@ public static class SummaryCollator
                 var what = change.NodeId is { } node && page?.Node(node) is { } focused
                     ? Describe(page, focused)
                     : change.NodeId is null ? "the document itself" : "an element no longer in the page at the visit's end";
-                Line(change.Time, $"The page's focus moved to {what}.", change.EventId);
+                Timed(change.Time, $"The page's focus moved to {what}.", change.EventId);
             }
 
             // Text typed: each text control whose value at the end differs
@@ -443,10 +474,83 @@ public static class SummaryCollator
         var announcements = evidence.Announcements.Where(fact => Within(fact.Time)).ToList();
         foreach (var announcement in announcements)
         {
-            Line(announcement.Time, announcement.Text, announcement.EventId);
+            Timed(announcement.Time, announcement.Text, announcement.EventId);
         }
 
-        return new VisitCollation(visit, title, lines, references, Changes(evidence, visit, page, settings, Cite));
+        var changes = Changes(evidence, visit, page, settings, Cite);
+        timeline.AddRange(changes.Select(change => new TimedLine(change.Time, change.Line, false)));
+
+        // Each key at its time for the timeline alone, as the facts above
+        // give the keys counted: a run of characters typed one after another
+        // is one input, citing its first key.
+        foreach (var (time, text, eventId) in KeyInputs(keys))
+        {
+            var line = $"[{Cite(time, text, eventId, $"key:{time.ToString(CultureInfo.InvariantCulture)}")}] {Time(time)} {text}";
+            timeline.Add(new TimedLine(time, line, true));
+        }
+
+        return new VisitCollation(visit, title, lines, references, [.. changes.Select(change => change.Line)])
+        {
+            Timeline = [.. timeline.OrderBy(item => item.Time).ThenBy(item => item.Input ? 0 : 1)]
+        };
+    }
+
+    // The keys as inputs: each key "Key pressed: Tab, passed to the page.",
+    // and a run of single characters with nothing else between them as one,
+    // "Characters typed, 12 keys, from "h" to "o", passed to the page.".
+    internal static IEnumerable<(long Time, string Text, string? EventId)> KeyInputs(IReadOnlyList<TimedFact> keys)
+    {
+        static (string Key, string Tail) Split(string text)
+        {
+            var comma = text.IndexOf(", ", StringComparison.Ordinal);
+            return comma < 0 ? (text, "") : (text[..comma], text[comma..]);
+        }
+
+        var run = new List<TimedFact>();
+        IEnumerable<(long, string, string?)> Flush()
+        {
+            if (run.Count == 1)
+            {
+                yield return (run[0].Time, $"Key pressed: {run[0].Text}.", run[0].EventId);
+            }
+            else if (run.Count > 1)
+            {
+                var (first, rest) = Split(run[0].Text);
+                var last = Split(run[^1].Text).Key;
+                yield return (run[0].Time, string.Create(CultureInfo.InvariantCulture,
+                    $"Characters typed, {run.Count} keys, from {Quote(first)} to {Quote(last)}{(run.All(item => Split(item.Text).Tail == rest) ? rest : ", each as the keys' facts give it")}."), run[0].EventId);
+            }
+
+            run.Clear();
+        }
+
+        foreach (var key in keys)
+        {
+            var (name, rest) = Split(key.Text);
+            if (name.Length == 1 && (run.Count == 0 || Split(run[0].Text).Tail == rest))
+            {
+                run.Add(key);
+                continue;
+            }
+
+            foreach (var item in Flush())
+            {
+                yield return item;
+            }
+
+            if (name.Length == 1)
+            {
+                run.Add(key);
+                continue;
+            }
+
+            yield return (key.Time, $"Key pressed: {key.Text}.", key.EventId);
+        }
+
+        foreach (var item in Flush())
+        {
+            yield return item;
+        }
     }
 
     // The page's changes during a visit, in time order, each with its
@@ -455,7 +559,7 @@ public static class SummaryCollator
     // it, and each scroll, one scroller's records with no pause longer than
     // the setting being one movement (owner, 2026-10-16; recording-summary.md,
     // "The page's changes during a visit").
-    private static List<string> Changes(
+    private static List<(long Time, string Line)> Changes(
         ISummaryEvidence evidence, Visit visit, PageSnapshot? page, CollationSettings settings, Func<long, string, string?, string?, string> cite)
     {
         var start = visit.Start;
@@ -500,7 +604,7 @@ public static class SummaryCollator
             changes.AddRange(ScrollMovements(evidence, token, start.Time, visit.End, page, settings));
         }
 
-        return [.. changes.OrderBy(change => change.Time).Select(change => $"[{cite(change.Time, change.Text, change.EventId, change.Key)}] {Time(change.Time)} {change.Text}")];
+        return [.. changes.OrderBy(change => change.Time).Select(change => (change.Time, $"[{cite(change.Time, change.Text, change.EventId, change.Key)}] {Time(change.Time)} {change.Text}"))];
     }
 
     // Each scroll as a movement: one scroller's records with no pause

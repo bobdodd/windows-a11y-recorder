@@ -554,6 +554,53 @@ public sealed class RecordingSummaryTests
     }
 
     [Fact]
+    public void TheVisitInTimeOrderGivesEachInputWithWhatFollowedIt()
+    {
+        // The story's steps gave the inputs alone, their responses gathered
+        // in another subsection (target report, 2026-10-18).
+        var builder = new PageBuilder();
+        var html = builder.Element(builder.Document, "html", "rootWebArea", "Timeline");
+        var body = builder.Element(html, "body", "genericContainer");
+        var skip = builder.Element(body, "a", "link", "Skip to main content");
+        var evidence = new FakeSummaryEvidence();
+        evidence.CommitList.Add(Commit(1, "https://example.test/timeline"));
+        evidence.Pages["doc-1"] = [(0, builder.Build("https://example.test/timeline"))];
+        evidence.ScrollList.Add(new ScrollFact(Second, "scroll-1", "doc-1", "1", 0, builder.Document));
+        evidence.KeyList.Add(new TimedFact(2 * Second, "key-1", "Tab, passed to the page"));
+        evidence.FocusList.Add(new FocusFact(2 * Second + Second / 10, "focus-1", "doc-1", skip));
+        evidence.KeyList.Add(new TimedFact(3 * Second, "key-2", "h, kept by NVDA"));
+        evidence.CommandList.Add(new TimedFact(3 * Second, null, "NVDA kept h as its command: next heading."));
+        evidence.AnnouncementList.Add(new TimedFact(3 * Second + Second / 10, "say-1", "NVDA had to announce (inferred, uncertain): heading, level 2"));
+        foreach (var (at, letter) in new[] { (4L, "a"), (5L, "b"), (6L, "c") })
+        {
+            evidence.KeyList.Add(new TimedFact(at * Second, $"key-{letter}", $"{letter}, passed to the page"));
+        }
+
+        evidence.ClickList.Add(new TimedFact(7 * Second, "click-1", "Mouse left button pressed at screen point (5, 5)"));
+
+        var visit = SummaryCollator.Collate(evidence, ParticipantCapabilities.Unknown).Visits[0];
+        var input = new System.Text.StringBuilder();
+        var references = new HashSet<string>(StringComparer.Ordinal);
+        RecordingSummaryVisionKind.AppendTimeline(input, visit, references);
+        var lines = System.Text.RegularExpressions.Regex.Replace(input.ToString(), @"\[E\d+\] ", "").Split('\n');
+
+        Assert.Equal(
+            [
+                "Before the first input: 00:00:01.000 The page scrolled from a position not recorded in the visit to 0 CSS pixels from the top at 00:00:01.000, 1 position recorded. With a viewport 800 CSS pixels high, CSS pixels 0 to 800 were then in it.",
+                "Input: 00:00:02.000 Key pressed: Tab, passed to the page.",
+                "  then: 00:00:02.100 The page's focus moved to link \"Skip to main content\".",
+                "Input: 00:00:03.000 Key pressed: h, kept by NVDA.",
+                "  then: 00:00:03.000 NVDA kept h as its command: next heading.",
+                "  then: 00:00:03.100 NVDA had to announce (inferred, uncertain): heading, level 2",
+                "Input: 00:00:04.000 Characters typed, 3 keys, from \"a\" to \"c\", passed to the page.",
+                "Input: 00:00:07.000 Mouse left button pressed at screen point (5, 5)"
+            ],
+            lines.Skip(1).Take(8));
+        Assert.All(System.Text.RegularExpressions.Regex.Matches(input.ToString(), @"\[(E\d+)\]"), match => Assert.Contains(match.Groups[1].Value, references));
+        Assert.All(references, reference => Assert.Contains(reference, visit.References));
+    }
+
+    [Fact]
     public void ThePageChangesDuringAVisitAreGivenInTimeOrderApartFromItsOtherFacts()
     {
         var builder = new PageBuilder();

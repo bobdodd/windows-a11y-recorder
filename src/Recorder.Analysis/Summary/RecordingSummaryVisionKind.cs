@@ -135,6 +135,65 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     /// <summary>How a reference is cited, said in the templates of version 2.</summary>
     public const string CiteWithoutBrackets = "Cite each reference as it is written without its brackets, such as \"E3\". ";
 
+    /// <summary>
+    /// That references go in a statement's evidence and not its text, said
+    /// in the templates that write knowledge or the report: the target
+    /// report of 2026-10-18 wrote "[E2]" in nearly every sentence of the
+    /// story, which the recorder then cited again.
+    /// </summary>
+    public const string ReferencesOutOfText =
+        "Put references in a statement's evidence only, never in its text: the recorder cites them after it. ";
+
+    /// <summary>
+    /// How what is seen is set beside what the page is built as (owner,
+    /// 2026-10-18: "often web pages render links to look like buttons.
+    /// That's important information. In cases where the visual styling
+    /// conflicts with the underlying semantics, we describe as visual and
+    /// note it is built on other semantics").
+    /// </summary>
+    public const string VisualAndSemantics =
+        "Describe what a picture shows as it looks. Where the recorder's facts give the element another role, say both in one statement, the look first, " +
+        "such as \"a red Donate Now button, built as a link\" or \"styled as buttons, built as headings with no control recorded\"; " +
+        "where its visible label differs from its name in the facts, give both, such as \"labelled + show preferences, named Show Display Preferences\". " +
+        "Do not give an element one role in one statement and another in the next. ";
+
+    /// <summary>
+    /// The rules of the report's prose that the target report of
+    /// 2026-10-18 broke: order, causes, counts, the recording's ending, and
+    /// where facts come from (report-fixes-2026-10-18.md, part 2).
+    /// </summary>
+    public const string EvidenceRules =
+        "Keep the recorded order: put each fact at its time, and never say that something earlier disrupted, followed, or answered something later. " +
+        "A change before the participant's first input belongs to the page loading, not to what the participant did. " +
+        "Do not infer an intent, a reason, or an attempt to recover from inputs alone. Count as the facts count: one press of a key is one, not several. " +
+        "The recording ends when the auditor stops it: the recorder or another program coming to the front at its end ends the session; it is not something that got in the way. " +
+        "Give each fact its own source: a layout change comes from the recorded layout, not from a picture; a picture shows only what is in it. ";
+
+    /// <summary>
+    /// What a setting at its default shows (target report, 2026-10-18:
+    /// defaults read as a preference for structure, and a theme chosen but
+    /// off read as in use).
+    /// </summary>
+    public const string SettingsRules =
+        "A setting at its default shows no choice, preference, or need: do not say it does. " +
+        "A setting not at its default was set by whoever set up the computer: do not take it as evidence of what the participant is able to do or needs. " +
+        "A theme or other value said to be chosen but not in use is not in use. Do not call a value large, small, high, or low unless the facts compare it. ";
+
+    /// <summary>
+    /// What the recreation lacks, which is a limit of the evidence, not of
+    /// the participant's experience (target report, 2026-10-18).
+    /// </summary>
+    public const string RecreationIsEvidence =
+        "What the rebuilt page lacks, such as an image that was not recorded, is a limit of the evidence, not part of the participant's experience: leave it out of what the participant met. ";
+
+    /// <summary>
+    /// What an engineer would want noticed, where the facts show it
+    /// (target report, 2026-10-18).
+    /// </summary>
+    public const string Noticing =
+        "Notice what an engineer would want to know where the facts show it, such as a heading with no name, a skip link passed over, an input with no recorded response, " +
+        "an image with no name, or a visible label that differs from the name. ";
+
     // Version 2 asks for an overview of the screen, after a moment showing
     // the recorder's own player was answered with every control and time
     // on it, 128 statements, until the output limit (recording-summary.md,
@@ -182,7 +241,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     /// <summary>Chapter 1, the executive summary, written last.</summary>
     public const string ExecutiveTemplate = "recording-summary-vision-executive-summary";
 
-    public const int LayerTemplateVersion = 1;
+    // Version 2: references out of the text, and what is seen set beside
+    // what the page is built as (report-fixes-2026-10-18.md).
+    public const int LayerTemplateVersion = 2;
 
     // Version 2 of the chapters' templates: the executive summary becomes
     // chapter 1, so the pages are chapter 2 and the story chapter 3, named
@@ -206,11 +267,16 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // model's own (recording-summary.md, "The story in subsections").
     // Version 5 of the story and its opening: the story told that the
     // visit's facts have the page's changes in time order.
-    public const int PageChapterTemplateVersion = 5;
+    // Version 6 of the page chapter and the story, and version 4 of the
+    // executive summary: the rules the target report of 2026-10-18 broke,
+    // the story given the visit in time order to take its steps from, and
+    // what is seen set beside what the page is built as
+    // (report-fixes-2026-10-18.md).
+    public const int PageChapterTemplateVersion = 6;
 
-    public const int StoryTemplateVersion = 5;
+    public const int StoryTemplateVersion = 6;
 
-    public const int ExecutiveTemplateVersion = 3;
+    public const int ExecutiveTemplateVersion = 4;
 
     /// <summary>The executive summary's subsections, each a section of its answer, with the heading the recorder gives it.</summary>
     public static readonly IReadOnlyList<(string Section, string Heading)> ExecutiveParts =
@@ -285,7 +351,8 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     public const string ParticipantRules =
         "A captured frame shows what was on the screen, not what the participant saw: say that the participant saw something only if the participant's capabilities, " +
         "as given, say that they work by sight; otherwise do not say what the participant saw. " +
-        "What NVDA had to announce is the recorder's inference from the page, not a recording of speech: never say that NVDA said it or that the participant heard it. " +
+        "What NVDA had to announce is the recorder's inference from the page, not a recording of speech: never say that NVDA announced, said, read, or spoke anything, that its speech stopped, or that the participant heard it. " +
+        "Say what NVDA had to announce, inferred, or what NVDA would do, inferred, such as \"NVDA had to announce the main landmark (inferred)\" or \"which NVDA treats as a command to stop speech (inferred)\". " +
         "Assistive technology observed running shows what was running, not what the participant is able to do. ";
 
     /// <summary>How a layer's answer is given, said in both layers' templates.</summary>
@@ -297,7 +364,8 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "This is about the user experience, not a list of the page's elements: do not list each control, link, or line of text. " +
         "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
-        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown.";
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + ReferencesOutOfText +
+        VisualAndSemantics + "Write plain sentences without Markdown.";
 
     public const string Layer2Instructions =
         "You add to what is known of one page visit from an accessibility test recording, for accessibility and usability engineers, what a captured frame of the screen shows of the visual user experience. " +
@@ -337,14 +405,16 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Describe only what the knowledge supports, name sites and pages only as they are named, and say that something is unknown where it does not settle it. " +
         "Answer in JSON with five sections, each a subsection of the page's description that the recorder heads, so that each holds only its own topic: " +
         "\"purpose\", what the page is for and who it appears to be for; " +
-        "\"layout\", its layout and regions from top to bottom, with their landmarks, and its imagery, colour, and emphasis; " +
+        "\"layout\", the page's own regions from top to bottom, with their landmarks, and its imagery, colour, and emphasis: the page alone, not the screen, the browser's window, or other programs' windows; " +
         "\"content\", what its regions hold: its headings, sections, text, and images, as an overview; " +
         "\"controls\", the controls, links, forms, dialogs, menus, widgets, and messages it has or showed, with where they are and how they behave; " +
         "and \"changes\", what appeared, went, moved, or changed on the page during the visits, in order, each with when, from the recorder's changes and the knowledge. " +
         "Do not repeat in one section what another holds. " +
+        VisualAndSemantics + Noticing + EvidenceRules +
+        "What the rebuilt page lacks, such as an image that was not recorded, is not part of the page: do not describe it as the page's content. " +
         "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " + ParagraphRule +
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
-        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + "Write plain sentences without Markdown.";
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + ReferencesOutOfText + "Write plain sentences without Markdown.";
 
     /// <summary>How chapter 4's answers are given, said in its templates.</summary>
     public const string StoryAnswer =
@@ -356,7 +426,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "\"sentence\", a sentence of prose; " + ListForms +
         "or \"picture\", a picture the recorder puts in, its text the picture's caption, citing the one captured frame or tile it shows and what the caption rests on. " +
         "A statement is {\"form\": ..., \"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
-        "or {\"form\": ..., \"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets +
+        "or {\"form\": ..., \"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + ReferencesOutOfText +
         "Write plain sentences without Markdown.";
 
     /// <summary>
@@ -372,6 +442,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "You write one part of the chapter on the user experience of a professional report for accessibility and usability engineers on an accessibility test recording: the story of the user experience. " +
         "This part is one page visit. You are given the participant's capabilities; the recorder's facts about the visit, each beginning with an evidence reference such as [E3], " +
         "with the page's changes during it in time order: its live regions, its popups opening and closing, NVDA's windows, and its scrolls; " +
+        "the visit in time order, each input of the participant with what the recorder found after it and before the next; " +
         "the visit's knowledge in layers: layer 1 from the recorded data, layer 2 from captured frames of the screen, and layer 3 from the web page as the recorder rebuilt it, each statement with the references it rests on; " +
         "the moments of the visit, each with its captured frame's reference and its tiles' references; which section of the chapter on the pages describes the visit's page; " +
         "the changes during the visit to the accessibility settings, the assistive technology, and the Magnifier's view, found by the recorder, each with its references; " +
@@ -381,10 +452,12 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Where the Magnifier panned, say which part of the screen it showed, from the parts given: that is what was on the screen, not necessarily what the participant looked at. " +
         "Follow on from the story so far without repeating it, and do not describe the page again: refer to its section of the chapter on the pages. " +
         "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
-        ParticipantRules +
+        ParticipantRules + EvidenceRules + RecreationIsEvidence + VisualAndSemantics + Noticing +
         "Answer in JSON with three sections: \"arriving\", how the participant came to the page and what was on the screen when they arrived; " +
-        "\"actions\", what the participant did, in order, as numbered steps, each step an action and how the page responded to it, with what appeared or changed; " +
-        "and \"experience\", what worked and what got in the way for this participant, interpreted, each with why it matters. " +
+        "\"actions\", what the participant did, in order, as numbered steps taken from the visit in time order: each step an input and what the recorder found after it, citing both, " +
+        "and where nothing was found after it, saying so; inputs one after another with the same kind of response may be one step; " +
+        "and \"experience\", what worked and what got in the way for this participant, interpreted: what helped or hindered them and why it matters, with the facts as support, " +
+        "without restating the steps, the scrolls, or what was on the screen. " +
         "Do not repeat in one section what another holds. " + StoryAnswer;
 
     public const string OpeningInstructions =
@@ -397,7 +470,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "so that the parts that follow read as one story. The participant, their capabilities, and their assistive technology are described in the executive summary and the chapter on the participant: " +
         "refer to them in a phrase, and do not describe them again. Do not repeat the parts. The settings at the start are given in the report's appendices; do not list them. " +
         "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
-        ParticipantRules +
+        ParticipantRules + EvidenceRules + RecreationIsEvidence +
         "Answer in JSON with one section, \"opening\", the introduction, which the recorder heads. " + StoryAnswer;
 
     public const string ExecutiveInstructions =
@@ -409,9 +482,11 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Say what the facts mean and why they matter, for this participant and for the engineers who will act on the report, not the facts alone; the chapters and appendices give the facts. " +
         "Judge how the journey went for this participant, where the experience worked and where it got in the way, and why, as the evidence and the chapter on the user experience show; " +
         "do not grade the site, rank findings, or map them to WCAG, which the report does not yet do. " +
-        "A setting whose default is unknown may still be significant, such as a larger text size or a contrast theme: name it with its value, and do not say whether it is the default. " +
+        "A setting whose default is unknown may still be significant, such as a text size above 100 percent or a contrast theme in use: name it with its value, and do not say whether it is the default. " +
+        SettingsRules +
         "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
-        ParticipantRules +
+        ParticipantRules + EvidenceRules +
+        "What the rebuilt page lacks is a limit of the evidence: give it, if at all, in what the evidence does not show, not in the journey. " +
         "Answer in JSON with four sections, each a subsection of the summary that the recorder heads, so that each holds only its own topic: " +
         "\"overview\", the overall picture in one paragraph: who the participant is, what they did, and your judgement of how it went, with its main reason; " +
         "\"participant\", the participant and their set-up: the assistive technology they used and the significant accessibility settings in use and their changes, and what these mean for how the participant works and for what the report can say; " +
@@ -422,7 +497,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Write prose by default. Each statement has a form: \"sentence\", a sentence of prose; \"bullet\", a point of a list whose order does not matter, its text the point and why it matters, in two or three sentences, never a bare fact; " +
         "or \"numbered\", a step of a sequence whose order matters, which the recorder numbers. Use a list only where its points are distinct and each needs explaining; otherwise write sentences. " +
         "A statement is {\"form\": ..., \"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
-        "or {\"form\": ..., \"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets +
+        "or {\"form\": ..., \"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + ReferencesOutOfText +
         "Write clean, readable prose for a professional report, without Markdown.";
     private readonly Func<string, string, CancellationToken, Task<(Recorder.Session.SessionPlaybackArchive Archive, RecordingFileDocuments Documents)>> _open;
 
@@ -1158,8 +1233,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         IReadOnlyDictionary<string, string>? settingReferences = null)
     {
         var references = new HashSet<string>(RecordingSummaryKind.VisitReferences(collation, visit), StringComparer.Ordinal);
-        var input = new StringBuilder(RecordingSummaryKind.VisitInput(collation, visit)).Append("\n\n")
-            .Append(CultureInfo.InvariantCulture, $"The visit's page is described in the report's chapter on the pages, section 3.{section}.\n\n")
+        var input = new StringBuilder(RecordingSummaryKind.VisitInput(collation, visit)).Append("\n\n");
+        AppendTimeline(input, visit, references);
+        input.Append(CultureInfo.InvariantCulture, $"The visit's page is described in the report's chapter on the pages, section 3.{section}.\n\n")
             .Append("The visit's knowledge, in layers. These are inferences, not facts:\n");
         knowledge.Append(input, references, withNumbers: false);
         input.Append(moments.Count == 0
@@ -1209,6 +1285,43 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         }
 
         return (input.ToString(), references);
+    }
+
+    /// <summary>
+    /// The visit's inputs in time order, each with what the recorder found
+    /// after it and before the next, so that each numbered step is an
+    /// action with its response (target report, 2026-10-18: the steps gave
+    /// the inputs alone, their responses gathered in another subsection).
+    /// </summary>
+    internal static void AppendTimeline(StringBuilder input, VisitCollation visit, ISet<string> references)
+    {
+        if (visit.Timeline.Count == 0)
+        {
+            return;
+        }
+
+        input.Append("The visit in time order, derived by the recorder: each input of the participant, and under it what the recorder found after it and before the next input. ")
+            .Append("What follows an input was found after it; that the input caused it is shown only where a fact says so:\n");
+        var any = false;
+        foreach (var item in visit.Timeline)
+        {
+            if (item.Input)
+            {
+                any = true;
+                input.Append("Input: ").Append(item.Line).Append('\n');
+            }
+            else
+            {
+                input.Append(any ? "  then: " : "Before the first input: ").Append(item.Line).Append('\n');
+            }
+
+            foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(item.Line, @"^\[(E\d+)\]"))
+            {
+                references.Add(match.Groups[1].Value);
+            }
+        }
+
+        input.Append('\n');
     }
 
     /// <summary>

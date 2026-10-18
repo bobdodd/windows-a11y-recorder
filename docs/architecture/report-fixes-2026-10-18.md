@@ -43,6 +43,37 @@ machine, makes these changes, each with a test:
 
 Because the facts' wording changed, no step of an earlier run is reused.
 
+The second batch, the model's side, also built 2026-10-18 and not yet
+checked on the target machine:
+
+- Item 1.2: the story is given the visit in time order, each input with
+  what the recorder found after it and before the next: focus moves,
+  NVDA's commands and inferred announcements, in-page jumps and the
+  page's changes. Each key is an input at its time, a run of characters
+  typed one input, so the Tab presses are no longer known only from a
+  count. The story's numbered steps are asked to come from it, each an
+  input and what followed, citing both, and to say where nothing
+  followed. What follows an input is not said to be caused by it.
+- Item 1.3, in the templates: never "announced, said, read, or spoke",
+  nor that speech stopped; what NVDA had to announce or would do,
+  inferred. The check that refuses such a statement waits on the owner's
+  decision on recovery (below).
+- Item 1.4: the page's facts list every link and image by name, not their
+  numbers alone, and the layer, page and story templates set what is seen
+  beside what the page is built as, as the owner decided.
+- Part 2, items 2.1 to 2.10: the rules of order, causes, counts, the
+  recording's ending, sources, settings at their defaults, what the
+  rebuilt page lacks, the layout section as the page alone, the
+  experience interpreted, and what an engineer would want noticed.
+- Item 1.1, in the templates: references in a statement's evidence only,
+  never its text. What the recorder does with one written in the text
+  waits on the owner's decision.
+
+Templates: layers version 2, page chapter and story version 6, executive
+summary version 4.
+
+Item 1.14: the owner kept the model's choice of pictures (2026-10-18).
+
 ## Confirmed by the 88464e7 report
 
 - Story, opening and executive summary are populated on the first attempt: 2,526, 463 and 1,452 output tokens, against 29, 12 and 42 before.

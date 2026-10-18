@@ -260,6 +260,14 @@ public sealed class PageSnapshot
 
     public int LinkCount => _order.Count(node => RoleOf(node) == "link");
 
+    /// <summary>The links in order with their names, so that a link drawn as a button can be told from a button.</summary>
+    public IReadOnlyList<PageItem> Links =>
+        [.. _order.Where(node => RoleOf(node) == "link").Select(node => new PageItem("link", NameOf(node)))];
+
+    /// <summary>The images in order with their names, the text NVDA has for each.</summary>
+    public IReadOnlyList<PageItem> Images =>
+        [.. _order.Where(node => RoleOf(node) == "image").Select(node => new PageItem("image", NameOf(node)))];
+
     public int ImageCount => _order.Count(node => RoleOf(node) == "image");
 
     /// <summary>Whether a dialog is in the page: a role of dialog or alert dialog.</summary>

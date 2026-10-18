@@ -515,7 +515,7 @@ public sealed partial class RecordingSummaryTaskTests
             chapters);
         Assert.Contains("Figure 2. A picture of the story.", text, StringComparison.Ordinal);
         Assert.DoesNotContain("[K", text, StringComparison.Ordinal);
-        Assert.Contains($"- {RecordingSummaryVisionKind.Layer2Template} and {RecordingSummaryVisionKind.Layer3Template} version 1, for each moment's layers.\n", text, StringComparison.Ordinal);
+        Assert.Contains($"- {RecordingSummaryVisionKind.Layer2Template} and {RecordingSummaryVisionKind.Layer3Template} version 2, for each moment's layers.\n", text, StringComparison.Ordinal);
         Assert.Contains("- Layer 3 steps not sent, as every group of the moment's tiles was already in the visit's knowledge: visit-0001-moment-02-layer-3.\n", text, StringComparison.Ordinal);
         Assert.Contains(
             "\n2 groups of tiles were not sent, as their tiles were the same pictures, pixel for pixel, at the same places as a group already described, whose answer each uses unchanged:\n\n" +
@@ -559,7 +559,7 @@ public sealed partial class RecordingSummaryTaskTests
         {
             Assert.Contains("\"elaborations\", statements that add detail to a numbered statement", instructions, StringComparison.Ordinal);
             Assert.Contains("Where it adds nothing, give the three sections empty.", instructions, StringComparison.Ordinal);
-            Assert.Contains("never say that NVDA said it or that the participant heard it", instructions, StringComparison.Ordinal);
+            Assert.Contains("never say that NVDA announced, said, read, or spoke anything, that its speech stopped, or that the participant heard it", instructions, StringComparison.Ordinal);
         }
 
         Assert.Contains("however small", RecordingSummaryVisionKind.Layer3Instructions, StringComparison.Ordinal);
@@ -573,7 +573,7 @@ public sealed partial class RecordingSummaryTaskTests
 
         Assert.Equal(["sentence", "bullet", "numbered", "picture"], RecordingSummaryVisionKind.StoryForms);
         Assert.Equal(["arriving", "actions", "experience"], RecordingSummaryVisionKind.StorySections);
-        Assert.Contains("as numbered steps, each step an action and how the page responded to it", RecordingSummaryVisionKind.StoryInstructions, StringComparison.Ordinal);
+        Assert.Contains("as numbered steps taken from the visit in time order: each step an input and what the recorder found after it", RecordingSummaryVisionKind.StoryInstructions, StringComparison.Ordinal);
         Assert.Contains("Introduce the story in one or two paragraphs", RecordingSummaryVisionKind.OpeningInstructions, StringComparison.Ordinal);
         Assert.Equal(["sentence", "bullet", "numbered"], RecordingSummaryVisionKind.ExecutiveForms);
         foreach (var instructions in new[]
@@ -626,9 +626,48 @@ public sealed partial class RecordingSummaryTaskTests
     }
 
     [Fact]
+    public void The_report_templates_carry_the_rules_the_88464e7_report_broke()
+    {
+        // Target report, 2026-10-18 (report-fixes-2026-10-18.md, items 1.1,
+        // 1.3, 1.4 and part 2).
+        foreach (var instructions in new[]
+        {
+            RecordingSummaryVisionKind.PageChapterInstructions, RecordingSummaryVisionKind.StoryInstructions,
+            RecordingSummaryVisionKind.OpeningInstructions, RecordingSummaryVisionKind.ExecutiveInstructions,
+            RecordingSummaryVisionKind.Layer2Instructions, RecordingSummaryVisionKind.Layer3Instructions
+        })
+        {
+            Assert.Contains(RecordingSummaryVisionKind.ReferencesOutOfText, instructions, StringComparison.Ordinal);
+        }
+
+        foreach (var instructions in new[]
+        {
+            RecordingSummaryVisionKind.PageChapterInstructions, RecordingSummaryVisionKind.StoryInstructions,
+            RecordingSummaryVisionKind.OpeningInstructions, RecordingSummaryVisionKind.ExecutiveInstructions
+        })
+        {
+            Assert.Contains(RecordingSummaryVisionKind.EvidenceRules, instructions, StringComparison.Ordinal);
+        }
+
+        foreach (var instructions in new[]
+        {
+            RecordingSummaryVisionKind.PageChapterInstructions, RecordingSummaryVisionKind.StoryInstructions,
+            RecordingSummaryVisionKind.Layer2Instructions, RecordingSummaryVisionKind.Layer3Instructions
+        })
+        {
+            Assert.Contains(RecordingSummaryVisionKind.VisualAndSemantics, instructions, StringComparison.Ordinal);
+        }
+
+        Assert.Contains(RecordingSummaryVisionKind.SettingsRules, RecordingSummaryVisionKind.ExecutiveInstructions, StringComparison.Ordinal);
+        Assert.Contains(RecordingSummaryVisionKind.RecreationIsEvidence, RecordingSummaryVisionKind.StoryInstructions, StringComparison.Ordinal);
+        Assert.Contains("numbered steps taken from the visit in time order", RecordingSummaryVisionKind.StoryInstructions, StringComparison.Ordinal);
+        Assert.Contains("not the screen, the browser's window, or other programs' windows", RecordingSummaryVisionKind.PageChapterInstructions, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Every_template_shows_a_statement_with_its_text_before_its_kind()
     {
-        Assert.Equal((4, 3, 4, 1, 5, 5, 3), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+        Assert.Equal((4, 3, 4, 2, 6, 6, 4), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
             RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.LayerTemplateVersion, RecordingSummaryVisionKind.PageChapterTemplateVersion,
             RecordingSummaryVisionKind.StoryTemplateVersion, RecordingSummaryVisionKind.ExecutiveTemplateVersion));
         foreach (var instructions in new[]
