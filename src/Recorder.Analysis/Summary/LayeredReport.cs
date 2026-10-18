@@ -90,7 +90,7 @@ public static partial class LayeredReport
 
         builder.Append(CultureInfo.InvariantCulture,
             $"- The setting \"Limit the report to the browser while it is in front\" was on. At a moment when the window last recorded in front, other than NVDA's, was the browser's, the frame is cut to the browser's window and NVDA's windows, at their bounds as recorded when each came to the front, and, under full screen magnification, to the part of them in the magnified view; what lies in the cut outside every one of them is painted grey. NVDA's windows recorded in front earlier in the recording are kept, as whether they were closed is not recorded. Each cut is kept in {parts.ImagesFolder} as a picture of its own; the captured frames are unchanged.\n");
-        builder.Append("- The recorder's own windows are not in the front window records, so at a moment with the recorder in front, the window recorded before it is taken as the front window.\n");
+        builder.Append("- The recorder's own windows are a window like any other: at a moment with the recorder in front, the frame is sent whole. A recording made by a recorder built before 2026-10-18 leaves them out of the front window records after the first, so at such a moment the window recorded before it is taken as the front window.\n");
         var whole = scope.Moments.Where(moment => !moment.Scope.Limited).ToList();
         builder.Append(whole.Count == 0
             ? (scope.Moments.Count == 0 ? "- No moment was described.\n" : "- Every moment's frame was cut, as the browser was in front at each.\n")

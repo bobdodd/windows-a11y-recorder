@@ -40,6 +40,16 @@ public sealed class ReportScopeTests
     }
 
     [Fact]
+    public void With_the_recorder_in_front_the_whole_frame_is_described()
+    {
+        // Owner, 2026-10-18: "The recorder is a window like any other:
+        // ignored if the browser window has focus, otherwise reported on".
+        var scope = ReportScope.At([Window(1, "chrome", 0, 0, 1000, 800), Window(2, "Recorder.App", 100, 100, 900, 700)], "chrome", Frame(3));
+        Assert.Equal((false, "Recorder.App was in front, not the browser"), (scope.Limited, scope.Why));
+        Assert.True(ReportScope.At([Window(1, "Recorder.App", 100, 100, 900, 700), Window(2, "chrome", 0, 0, 1000, 800)], "chrome", Frame(3)).Limited);
+    }
+
+    [Fact]
     public void A_browser_minimized_or_without_bounds_gives_the_whole_frame()
     {
         Assert.False(ReportScope.At([Window(1, "chrome", 0, 0, 1000, 800, minimized: true)], "chrome", Frame(2)).Limited);

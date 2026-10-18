@@ -2036,7 +2036,13 @@ where it faults again. The owner, 2026-10-17: "I agree with both".
    facts given to the model. The owner's decision, from the first report
    on the target machine, which gave "Recorder.App, \"Windows
    Accessibility Recorder\"" there and in the session: the recorder is a
-   genuine window in the recording.
+   genuine window in the recording. Restated on 2026-10-18, on finding
+   that the front window hook had left the recorder's own process out
+   since its first commit, which was never the owner's decision: "The
+   recorder is a window like any other: ignored if the browser window has
+   focus, otherwise reported on, I expect to test the recorder with
+   people, I need it recorded". The hook now records it; see
+   report-fixes-2026-10-18.md, part 4.
 
 The owner's answers, the same day, to the questions raised before
 building stage 2:

@@ -115,15 +115,26 @@ request ("add it now please"), not yet checked on the target machine:
   cut, and the moments sent whole and why; Appendix E keeps every window
   that came to the front, saying they are left out of the pictures and
   prose while the browser was in front.
-- **Limits:** the recorder's own windows are not in the front window
-  records, as its front window hook is set with
-  WINEVENT_SKIPOWNPROCESS (`ForegroundWindowCollector`). This explains
+- **The recorder's own windows:** until 2026-10-18 the front window hook
+  was set with WINEVENT_SKIPOWNPROCESS (`ForegroundWindowCollector`,
+  since its first commit, 5659f53), so after the record at the start,
+  the recorder's own windows were not recorded in front. This explains
   item 1.11, the recorder coming to the front at about 00:00:54.9 with
-  no record, and Appendix E now says so. With the setting on, a moment
-  with the recorder in front is taken with the window before it, so its
-  frame is cut to the browser's window. A window's bounds are those
-  recorded when it came to the front; a window moved later is cut where
-  it was.
+  no record. It was never the owner's decision, and contradicted the
+  decision of 2026-10-14 that the recorder is a genuine window. The
+  owner, 2026-10-18: "The recorder is a window like any other: ignored
+  if the browser window has focus, otherwise reported on, I expect to
+  test the recorder with people, I need it recorded". The hook now
+  records the recorder's process like any other; its windows' titles are
+  read with InternalGetWindowText, which sends no message to the
+  recorder's own interface thread. With the setting on, a moment with the
+  recorder in front is sent whole. The recording does not say which build
+  made it, so Appendix E and G.1 say that one made before 2026-10-18
+  leaves them out, and that there a moment with the recorder in front is
+  taken with the window before it. The cnib.ca recording of 2026-10-13 is
+  one such.
+- **Limits:** a window's bounds are those recorded when it came to the
+  front; a window moved later is cut where it was.
 
 ## Confirmed by the 88464e7 report
 

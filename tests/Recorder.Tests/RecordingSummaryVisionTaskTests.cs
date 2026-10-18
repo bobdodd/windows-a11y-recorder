@@ -378,6 +378,8 @@ public sealed partial class RecordingSummaryTaskTests
         var report = await File.ReadAllTextAsync(Path.Combine(_session, Assert.Single(await catalog.ReportsAsync(vision, Token)).RelativePath), Token);
         Assert.Contains("- The setting \"Limit the report to the browser while it is in front\" was on.", report, StringComparison.Ordinal);
         Assert.Contains("- Every moment's frame was cut, as the browser was in front at each.\n", report, StringComparison.Ordinal);
+        Assert.Contains("- The recorder's own windows are a window like any other: at a moment with the recorder in front, the frame is sent whole.", report, StringComparison.Ordinal);
+        Assert.Contains("A recording made by a recorder built before 2026-10-18 leaves the recorder's own windows out of the front window records after the first; one made since records them like any other.", report, StringComparison.Ordinal);
         Assert.Contains("these windows are left out of the report's pictures and prose while the browser was in front", report, StringComparison.Ordinal);
     }
 

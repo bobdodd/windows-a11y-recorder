@@ -68,9 +68,10 @@ public static class ReportScope
     /// and not minimized. The windows kept are the browser's, at its bounds
     /// as last recorded in front, and every NVDA window recorded in front
     /// before the frame, at its bounds then, as whether it was closed is not
-    /// recorded. The recorder's own windows are not in the front window
-    /// records, so a frame with the recorder in front is taken as the
-    /// window before it.
+    /// recorded. The recorder's own windows are a window like any other
+    /// (owner, 2026-10-18); a recording made by a recorder built before
+    /// 2026-10-18 leaves them out after the first, so there a frame with
+    /// the recorder in front is taken as the window before it.
     /// </summary>
     public static FrameScope At(IReadOnlyList<ForegroundFact> foreground, string? browserProcess, CapturedFrame frame)
     {

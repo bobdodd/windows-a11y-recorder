@@ -204,10 +204,13 @@ public static class SummaryReport
     {
         builder.Append(heading).Append("\n\n");
 
-        // Why the recorder coming to the front has no record (target
-        // report, 2026-10-18, at about 00:00:54.9): the front window hook
-        // is set with WINEVENT_SKIPOWNPROCESS (ForegroundWindowCollector).
-        const string Own = "The recorder's own windows are not in the front window records, as the recorder leaves its own process out of them.";
+        // Why the recorder coming to the front had no record (target
+        // report, 2026-10-18, at about 00:00:54.9): until 2026-10-18 the
+        // front window hook was set with WINEVENT_SKIPOWNPROCESS. The
+        // recording does not say which build made it, so the report says
+        // both (ForegroundWindowCollector; owner, 2026-10-18: "The recorder
+        // is a window like any other").
+        const string Own = "A recording made by a recorder built before 2026-10-18 leaves the recorder's own windows out of the front window records after the first; one made since records them like any other.";
         if (collation.OtherWindows.Count == 0)
         {
             builder.Append("No other program's window was recorded in front. ").Append(Own).Append("\n\n");

@@ -18,7 +18,6 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
     private const uint DesktopReadObjects = 0x0001;
     private const int UoiName = 2;
     private const uint WineventOutOfContext = 0x0000;
-    private const uint WineventSkipOwnProcess = 0x0002;
     private const uint WmQuit = 0x0012;
     private const uint ProcessQueryLimitedInformation = 0x1000;
     private const uint MonitorDefaultToNearest = 0x00000002;
@@ -244,7 +243,12 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
                 _callback,
                 0,
                 0,
-                WineventOutOfContext | WineventSkipOwnProcess);
+                // The recorder's own windows are recorded like any other
+                // (owner, 2026-10-14: "the recorder is a genuine window in
+                // the recording"; 2026-10-18: "The recorder is a window
+                // like any other ... I need it recorded"). The hook left
+                // the recorder's process out until 2026-10-18.
+                WineventOutOfContext);
             if (hook == nint.Zero)
             {
                 throw new Win32Exception(
@@ -588,7 +592,13 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
     {
         var window = observation.Window;
         var threadId = GetWindowThreadProcessId(window, out var processId);
-        var title = GetWindowString(window, GetWindowTextLengthW, GetWindowTextW);
+        // A window of the recorder's own process is read with
+        // InternalGetWindowText, which sends no message: GetWindowText
+        // sends WM_GETTEXT to a window of the calling process, and would
+        // wait on the recorder's own interface thread.
+        var title = processId == (uint)Environment.ProcessId
+            ? GetWindowString(window, _ => OwnTitleCapacity, InternalGetWindowText)
+            : GetWindowString(window, GetWindowTextLengthW, GetWindowTextW);
         var className = GetWindowString(window, _ => 255, GetClassNameW);
         var processPath = TryGetProcessPath(processId);
         var processName = TryGetProcessName(processId);
@@ -917,6 +927,15 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowTextW(
+        nint window,
+        StringBuilder value,
+        int maximumCount);
+
+    // The longest title read from a window of the recorder's own process.
+    private const int OwnTitleCapacity = 1024;
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int InternalGetWindowText(
         nint window,
         StringBuilder value,
         int maximumCount);
