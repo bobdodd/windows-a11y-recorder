@@ -348,6 +348,38 @@ public sealed partial class RecordingSummaryTaskTests
     }
 
     [Fact]
+    public async Task Vision_checks_the_wording_of_the_layers_the_pages_the_story_and_the_summary_alone()
+    {
+        // Every answer at temperature 0 says NVDA announced something: the
+        // steps that write the report or its knowledge are refused and
+        // asked for again at seed 1; the moments and their tiles, which
+        // describe pictures, are not (owner, 2026-10-18).
+        var (catalog, _, vision) = await QueueBothAsync();
+        var endpoint = VisionEndpoint();
+        var answer = endpoint.Answer;
+        endpoint.Answer = async (profile, body, token) =>
+        {
+            var response = await answer(profile, body, token);
+            return JsonDocument.Parse(body).RootElement.GetProperty("temperature").GetDouble() == 0
+                ? response with { Content = response.Content!.Replace("\"text\":\"", "\"text\":\"NVDA announced it. ", StringComparison.Ordinal) }
+                : response;
+        };
+
+        await RunAsync(catalog, endpoint, new StandInPages());
+
+        Assert.Equal((AnalysisTaskStates.Done, (string?)null), await StateAsync(vision));
+        var failed = (await RowsAsync("SELECT step_key, failure FROM analysis_attempts WHERE task_id = $1 AND outcome = 'failed' ORDER BY started_utc", vision))
+            .Select(row => (string)row["step_key"]!).ToList();
+        Assert.Equal(
+            [
+                "visit-0001-moment-01-layer-2", "visit-0001-moment-01-layer-3", "visit-0001-moment-02-layer-2",
+                "visit-0002-moment-01-layer-2", "visit-0002-moment-02-layer-2",
+                "page-01", "page-02", "visit-0001-story", "visit-0002-story", "story-opening", "executive-summary"
+            ],
+            failed);
+    }
+
+    [Fact]
     public async Task Vision_records_each_moment_adds_its_layers_then_writes_each_page_and_the_story()
     {
         var (catalog, summary, vision) = await QueueBothAsync();

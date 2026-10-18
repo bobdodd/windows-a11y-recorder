@@ -51,6 +51,14 @@ public sealed record ModelRequest(
     /// </summary>
     public bool NeedsStatements { get; init; }
 
+    /// <summary>
+    /// Whether the answer's wording is checked by <see cref="WordingCheck"/>:
+    /// no reference in a statement's text that it does not cite, and NVDA's
+    /// speech never stated as fact. An answer that fails is recovered from
+    /// as one with no statement is (owner, 2026-10-18).
+    /// </summary>
+    public bool ChecksWording { get; init; }
+
     private static readonly IReadOnlySet<string> NoOptions = new HashSet<string>(StringComparer.Ordinal);
 }
 

@@ -494,6 +494,16 @@ public sealed class AnalysisWorker
                             .ConfigureAwait(false);
                     }
 
+                    // An answer whose wording broke the report's rules, the
+                    // same way (target report of 88464e7; owner, 2026-10-18,
+                    // "yes, build as proposed").
+                    if (WasMisworded(failure))
+                    {
+                        return await RecoverFromLoopAsync(
+                            task, stepKey, request, profile, response.Content ?? "", inputSha, parameters, modelSha, basis, build, Caught.Wording, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+
                     throw new StepFailedException(
                         $"Step {stepKey} failed: {failure} At temperature 0 the same request gives the same output, " +
                         "so it was not asked for again.",
@@ -550,12 +560,14 @@ public sealed class AnalysisWorker
         {
             Caught.Limit => "an answer that reached the output limit",
             Caught.Empty => "an answer with no statement",
+            Caught.Wording => "an answer whose wording broke the report's rules",
             _ => "a loop"
         };
         var caught = kind switch
         {
             Caught.Limit => "its answer reached the output limit",
             Caught.Empty => "its answer gave no statement",
+            Caught.Wording => "its answer's wording broke the report's rules",
             _ => "its answer was caught in a loop"
         };
         var failures = new List<string>();
@@ -599,8 +611,9 @@ public sealed class AnalysisWorker
             failures.Add($"at seed {seedName}, {attempt.Failure}");
         }
 
-        // An answer that reached the output limit, or gave no statement, has
-        // no loop to cut it at, so where no sample passed, the step fails.
+        // An answer that reached the output limit, gave no statement, or
+        // broke the wording rules has no loop to cut it at, so where no
+        // sample passed, the step fails.
         if (kind != Caught.Loop)
         {
             throw new StepFailedException(
@@ -660,29 +673,43 @@ public sealed class AnalysisWorker
 
     private static bool WasEmpty(string? failure) => failure == EmptyFailure;
 
+    private static bool WasMisworded(string? failure) =>
+        failure is not null && failure.StartsWith(WordingCheck.Failure, StringComparison.Ordinal);
+
     // What an answer that failed was caught at, where it is recovered from
-    // by sampling: a loop, the output limit, or no statement.
+    // by sampling: a loop, the output limit, no statement, or its wording.
     private enum Caught
     {
         Loop,
         Limit,
-        Empty
+        Empty,
+        Wording
     }
 
     private static Caught? Recoverable(string? rawOutput, string? failure) =>
         LoopRecovery.IsLoop(rawOutput) ? Caught.Loop
         : ReachedLimit(failure) ? Caught.Limit
         : WasEmpty(failure) ? Caught.Empty
+        : WasMisworded(failure) ? Caught.Wording
         : null;
 
     // The checks of an answer: ClaimCheck's, then, for a step that needs a
-    // statement, that it gave one.
+    // statement, that it gave one, then, for a step whose wording is
+    // checked, its wording.
     private static (IReadOnlyList<Claim> Claims, System.Text.Json.JsonElement Output, string? Failure) Check(string? content, ModelRequest request)
     {
         var (claims, output, failure) = ClaimCheck.Check(content, request.Sections, request.InputReferences);
-        return failure is null && request.NeedsStatements && claims.Count == 0
-            ? ([], default, EmptyFailure)
-            : (claims, output, failure);
+        if (failure is null && request.NeedsStatements && claims.Count == 0)
+        {
+            return ([], default, EmptyFailure);
+        }
+
+        if (failure is null && request.ChecksWording && WordingCheck.Check(claims) is { } misworded)
+        {
+            return ([], default, misworded);
+        }
+
+        return (claims, output, failure);
     }
 
     // An attempt made before with the same request, model, server build, and

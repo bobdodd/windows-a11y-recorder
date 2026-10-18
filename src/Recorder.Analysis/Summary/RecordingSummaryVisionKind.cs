@@ -763,7 +763,10 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                 var (layer2Input, layer2References) = Layer2Input(collation, visit, momentDescribed, FactsSince(visit, previous, frame.Time), knowledge);
                 var layer2 = await context.RunStepAsync(
                     $"{key}-layer-2",
-                    new ModelRequest(Layer2Template, LayerTemplateVersion, Layer2Instructions, layer2Input, [], Knowledge.LayerSections, layer2References),
+                    new ModelRequest(Layer2Template, LayerTemplateVersion, Layer2Instructions, layer2Input, [], Knowledge.LayerSections, layer2References)
+                    {
+                        ChecksWording = true
+                    },
                     cancellationToken).ConfigureAwait(false);
                 knowledge.Add(layer2.Claims, 2, moment.Number);
 
@@ -783,7 +786,10 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                         var (layer3Input, layer3References) = Layer3Input(collation, visit, momentDescribed, groups, groupsKnown, knowledge);
                         var layer3 = await context.RunStepAsync(
                             $"{key}-layer-3",
-                            new ModelRequest(Layer3Template, LayerTemplateVersion, Layer3Instructions, layer3Input, [], Knowledge.LayerSections, layer3References),
+                            new ModelRequest(Layer3Template, LayerTemplateVersion, Layer3Instructions, layer3Input, [], Knowledge.LayerSections, layer3References)
+                            {
+                                ChecksWording = true
+                            },
                             cancellationToken).ConfigureAwait(false);
                         knowledge.Add(layer3.Claims, 3, moment.Number);
                         groupsKnown.UnionWith(unknown.Select(group => group.Key));
@@ -807,7 +813,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                 $"page-{number.ToString("D2", CultureInfo.InvariantCulture)}",
                 new ModelRequest(PageChapterTemplate, PageChapterTemplateVersion, PageChapterInstructions, pageInput, [], PageChapterSections, pageReferences)
                 {
-                    SamplingLeftOut = WritingLeavesOut
+                    SamplingLeftOut = WritingLeavesOut, ChecksWording = true
                 },
                 cancellationToken).ConfigureAwait(false);
             chapterPages.Add(new PageChapter(number, byUrl.Key, visitsTo.Select(seen => seen.Visit.Title).LastOrDefault(title => title is { Length: > 0 }),
@@ -835,7 +841,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                 $"{RecordingSummaryKind.VisitStepKey(visit)}-story",
                 new ModelRequest(StoryTemplate, StoryTemplateVersion, StoryInstructions, storyInput, [], StorySections, storyReferences)
                 {
-                    Forms = StoryForms, SamplingLeftOut = WritingLeavesOut, NeedsStatements = true
+                    Forms = StoryForms, SamplingLeftOut = WritingLeavesOut, NeedsStatements = true, ChecksWording = true
                 },
                 cancellationToken).ConfigureAwait(false);
             storySoFar.Add((visit, story));
@@ -847,7 +853,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             "story-opening",
             new ModelRequest(OpeningTemplate, StoryTemplateVersion, OpeningInstructions, openingInput, [], OpeningSections, openingReferences)
             {
-                Forms = StoryForms, SamplingLeftOut = WritingLeavesOut, NeedsStatements = true
+                Forms = StoryForms, SamplingLeftOut = WritingLeavesOut, NeedsStatements = true, ChecksWording = true
             },
             cancellationToken).ConfigureAwait(false);
 
@@ -857,7 +863,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             "executive-summary",
             new ModelRequest(ExecutiveTemplate, ExecutiveTemplateVersion, ExecutiveInstructions, executiveInput, [], ExecutiveSections, executiveReferences)
             {
-                Forms = ExecutiveForms, SamplingLeftOut = WritingLeavesOut, NeedsStatements = true
+                Forms = ExecutiveForms, SamplingLeftOut = WritingLeavesOut, NeedsStatements = true, ChecksWording = true
             },
             cancellationToken).ConfigureAwait(false);
 

@@ -575,6 +575,60 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Assert.Contains("at seed 3, " + AnalysisWorker.EmptyFailure, failure, StringComparison.Ordinal);
     }
 
+    // The steps that write the report have their wording checked: an
+    // answer saying NVDA spoke, or writing in a statement a reference it
+    // does not cite, is refused and recovered from as one with no
+    // statement is (owner, 2026-10-18).
+    private static StandInKind Worded(params string[] steps) =>
+        new(steps) { Request = (_, request) => request with { ChecksWording = true } };
+
+    [Fact]
+    public async Task An_answer_saying_NVDA_spoke_is_asked_for_at_seed_1_above_temperature_0()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var endpoint = Answers(Answer("NVDA announced the heading."), Answer("NVDA had to announce the heading (inferred)."));
+
+        await new AnalysisWorker(catalog, SettingsWith(), [Worded("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
+        var bodies = endpoint.Bodies.ToArray();
+        Assert.Equal(2, bodies.Length);
+        Assert.Equal((0.7, 1L), (Settings(bodies[1]).GetProperty("temperature").GetDouble(), Settings(bodies[1]).GetProperty("seed").GetInt64()));
+        var attempts = await AttemptsAsync(task);
+        Assert.StartsWith(WordingCheck.Failure + "statement 1 of paragraph 1 of \"description\" says \"NVDA announced\"", (string)attempts[0]["failure"]!, StringComparison.Ordinal);
+        Assert.Equal(AttemptOutcomes.Accepted, attempts[1]["outcome"]);
+    }
+
+    [Fact]
+    public async Task An_answer_writing_a_reference_it_does_not_cite_fails_the_step_where_no_answer_sampled_after_it_passes()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var endpoint = Answers(Answer("The page loaded [E7]."));
+
+        await new AnalysisWorker(catalog, SettingsWith(), [Worded("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
+        Assert.Equal(4, endpoint.Bodies.Count);
+        var failure = (string?)(await RowsAsync("SELECT failure FROM analysis_tasks WHERE task_id = $1", task))[0]["failure"];
+        Assert.StartsWith("Step visit-1 failed: its answer's wording broke the report's rules, and none of the answers sampled after it passed (at seed 1, ", failure, StringComparison.Ordinal);
+        Assert.Contains("writes in its text E7, which it does not cite", failure, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_answer_saying_NVDA_spoke_is_accepted_for_a_step_whose_wording_is_not_checked()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var endpoint = Answers(Answer("NVDA announced the heading."));
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind(["visit-1"])], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
+        Assert.Single(endpoint.Bodies);
+    }
+
     [Fact]
     public async Task An_answer_with_no_statement_is_accepted_for_a_step_that_does_not_need_one()
     {

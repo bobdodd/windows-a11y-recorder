@@ -54,10 +54,9 @@ checked on the target machine:
   count. The story's numbered steps are asked to come from it, each an
   input and what followed, citing both, and to say where nothing
   followed. What follows an input is not said to be caused by it.
-- Item 1.3, in the templates: never "announced, said, read, or spoke",
+- Item 1.3: the templates say never "announced, said, read, or spoke",
   nor that speech stopped; what NVDA had to announce or would do,
-  inferred. The check that refuses such a statement waits on the owner's
-  decision on recovery (below).
+  inferred. The recorder's check refuses such a statement (below).
 - Item 1.4: the page's facts list every link and image by name, not their
   numbers alone, and the layer, page and story templates set what is seen
   beside what the page is built as, as the owner decided.
@@ -71,9 +70,13 @@ checked on the target machine:
   [E30]", the report takes it out of the text, and G.1 gives how many
   statements and references; a run of references any of which the
   statement does not cite is left as written. The owner accepted this on
-  2026-10-18. Whether a statement citing in its text what it does not
-  cite, or saying NVDA spoke, fails the answer, and whether such a
-  failure is recovered as an empty answer is, waits on the owner.
+  2026-10-18. A statement writing in its text a reference it does not
+  cite fails the answer, as does one saying NVDA announced, said, or
+  spoke, or that its speech stopped (item 1.3); the answer is then
+  sampled at temperature 0.7, seeds 1 to 3, the first that passes kept,
+  and the step fails where none passes. The owner, 2026-10-18: "yes,
+  build as proposed". See analysis-runner.md, "Answers whose wording
+  breaks the report's rules".
 
 Templates: layers version 2, page chapter and story version 6, executive
 summary version 4.

@@ -990,6 +990,38 @@ not rebuilt"; the owner, the same day: "I agree with both").
   at temperature 0 is recovered from as an answer at the output limit is
   (see the next section).
 
+### Answers whose wording breaks the report's rules (built)
+
+Built on 2026-10-18 from the target report of 88464e7
+(report-fixes-2026-10-18.md, items 1.1 and 1.3; the owner, the same day:
+"yes, build as proposed").
+
+- **A step's request may have its wording checked,** with
+  `ChecksWording`, in `WordingCheck`: an answer fails where a statement's
+  text holds a reference, such as "E9" or "K3", that the statement does
+  not cite, or says that NVDA announced, said, spoke, read out, or voiced
+  something, that its speech stopped, or that someone heard it. A
+  statement that says it is inferred, unknown, or not recorded, or names
+  NVDA's Speech Viewer, whose text is recorded, passes. The failure begins
+  "The answer's wording broke the report's rules: ", and names up to
+  three statements and their words, counting the rest.
+- **Such an answer is recovered from as one with no statement is:**
+  sampled at temperature 0.7 at seed 1, then 2, then 3, the first that
+  passes being the step's answer; where none passes the step fails,
+  saying why each failed. Every failed attempt and its failure are in the
+  report's attempts, Appendix G.6.
+- **The steps checked:** layers 2 and 3, the page chapter, the story of
+  each visit, its opening, and the executive summary. The moments and
+  their groups of tiles, which describe pictures, are not.
+- **A reference in a statement's text that it also cites passes,** and
+  is taken out of the text when the report is written, counted in G.1
+  (`LayeredReport.WithoutCitedReferences`).
+- **Tests:** an answer saying NVDA spoke is sampled again at seed 1; an
+  answer writing a reference it does not cite fails the step where no
+  sample passes; a step whose wording is not checked accepts it; in a run
+  of the vision task, only the steps above are refused; and the words
+  found and passed (`WordingCheckTests`).
+
 ### An answer that reached the output limit (built)
 
 On the target machine, on 2026-10-16, vision stopped at moment 8, layer 2,
