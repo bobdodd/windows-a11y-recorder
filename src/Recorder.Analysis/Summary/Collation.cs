@@ -8,7 +8,17 @@ namespace Recorder.Analysis.Summary;
 public sealed record TimedFact(long Time, string? EventId, string Text);
 
 /// <summary>A window coming to the front: its process and title, as recorded.</summary>
-public sealed record ForegroundFact(long Time, string? EventId, string? Process, string? Title);
+public sealed record ForegroundFact(long Time, string? EventId, string? Process, string? Title)
+{
+    /// <summary>The window's bounds on the screen as recorded when it came to the front, or null.</summary>
+    public ScreenRect? Bounds { get; init; }
+
+    /// <summary>Whether the window was recorded minimized.</summary>
+    public bool Minimized { get; init; }
+
+    /// <summary>Whether the window is NVDA's, its process being NVDA's at the time.</summary>
+    public bool Nvda { get; init; }
+}
 
 /// <summary>The page's focus moving to a node of a document.</summary>
 public sealed record FocusFact(long Time, string? EventId, string DocumentToken, long? NodeId);

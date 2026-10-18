@@ -97,6 +97,15 @@ public sealed record AnalysisSettings(
 
     public ModelProfile? Profile(string name) =>
         Profiles.FirstOrDefault(profile => string.Equals(profile.Name, name, StringComparison.Ordinal));
+
+    /// <summary>
+    /// "Limit the report to the browser while it is in front": while the
+    /// browser is the front window, the report describes only it and
+    /// NVDA's windows, not other windows or the desktop. On by default
+    /// (owner, 2026-10-18: "On. Most testing doesn't involve other
+    /// windows"). Written in the file as "reportBrowserOnly".
+    /// </summary>
+    public bool BrowserOnly { get; init; } = true;
 }
 
 /// <summary>
@@ -248,7 +257,46 @@ public static class AnalysisSettingsFile
             }
         }
 
-        return (new AnalysisSettings(profiles, defaults, localServer, maxAttempts), problems);
+        var browserOnly = true;
+        if (document[BrowserOnlyName] is { } browserOnlyNode)
+        {
+            if (browserOnlyNode.GetValueKind() is JsonValueKind.True or JsonValueKind.False)
+            {
+                browserOnly = browserOnlyNode.GetValue<bool>();
+            }
+            else
+            {
+                problems.Add($"\"{BrowserOnlyName}\" is not true or false, so the report is limited to the browser while it is in front, the default.");
+            }
+        }
+
+        return (new AnalysisSettings(profiles, defaults, localServer, maxAttempts) { BrowserOnly = browserOnly }, problems);
+    }
+
+    /// <summary>The name of the setting "Limit the report to the browser while it is in front" in the file.</summary>
+    public const string BrowserOnlyName = "reportBrowserOnly";
+
+    /// <summary>
+    /// The settings file's text with "reportBrowserOnly" set, the rest as
+    /// it was; a file that is not a JSON object is left as it is, and null
+    /// returned.
+    /// </summary>
+    public static string? WithBrowserOnly(string? text, bool on)
+    {
+        JsonObject document;
+        try
+        {
+            document = string.IsNullOrWhiteSpace(text)
+                ? new JsonObject { ["version"] = Version }
+                : JsonNode.Parse(text) as JsonObject ?? throw new JsonException();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        document[BrowserOnlyName] = on;
+        return document.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }
 
     private static ModelProfile? ReadProfile(JsonNode? node, LocalServerSettings? localServer, List<string> problems)

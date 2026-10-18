@@ -158,6 +158,14 @@
                 Style="{StaticResource AnalysisMenuItem}"
                 Header="_Model profiles..."
                 Click="ModelProfilesMenuItem_Click" />
+      <!-- On by default; saved in the analysis settings file as
+           "reportBrowserOnly" (report-fixes-2026-10-18.md, part 4). -->
+      <MenuItem x:Name="BrowserOnlyMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="Limit the report to the _browser while it is in front"
+                IsCheckable="True"
+                IsChecked="True"
+                Click="BrowserOnlyMenuItem_Click" />
     </MenuItem>
   </Menu>
   <Grid>

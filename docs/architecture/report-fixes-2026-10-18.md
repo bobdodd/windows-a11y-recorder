@@ -78,10 +78,52 @@ checked on the target machine:
   build as proposed". See analysis-runner.md, "Answers whose wording
   breaks the report's rules".
 
-Templates: layers version 2, page chapter and story version 6, executive
-summary version 4.
+Templates: moments version 4, layers version 2, page chapter and story
+version 6, executive summary version 4.
 
 Item 1.14: the owner kept the model's choice of pictures (2026-10-18).
+
+Part 4, the browser-only report scope, built 2026-10-18 at the owner's
+request ("add it now please"), not yet checked on the target machine:
+
+- **The setting:** Analysis menu, "Limit the report to the browser while
+  it is in front", a checkable item, on by default, saved at once in the
+  analysis settings file as `"reportBrowserOnly"`. A worker already
+  running keeps the setting it started with; each report's G.1 says
+  which was used.
+- **When it applies:** at a moment whose window last recorded in front,
+  other than NVDA's, is the browser's, with its bounds recorded and not
+  minimized (`ReportScope.At`).
+- **What is kept:** the browser's window at its bounds as recorded when
+  it came to the front, and every NVDA window recorded in front earlier
+  in the recording, at its bounds then, as whether it was closed is not
+  recorded. Under full screen magnification, only the part in the
+  magnified view, as the player draws it.
+- **The cut:** the frame is cut to the bounding rectangle of those
+  windows, and what lies in it outside every one of them is painted mid
+  grey (`FrameCut`). The cut is a new PNG with the frame's colour
+  chunks, kept in the store of unique images and keyed as its own; the
+  frame is unchanged. The model gets the cut, and the report's figure
+  shows it. A frame whose pixels cannot be read is sent whole, and G.1
+  lists it.
+- **What the models are told:** the frame's evidence says it was cut,
+  with the pixels and the file it was cut from; with the setting on,
+  the moment, layer 2, page chapter, story, opening, and executive
+  summary inputs end with a note that other windows, the taskbar, and
+  the desktop are left out and not to be described.
+- **The report:** G.1 says whether the setting was on, how frames were
+  cut, and the moments sent whole and why; Appendix E keeps every window
+  that came to the front, saying they are left out of the pictures and
+  prose while the browser was in front.
+- **Limits:** the recorder's own windows are not in the front window
+  records, as its front window hook is set with
+  WINEVENT_SKIPOWNPROCESS (`ForegroundWindowCollector`). This explains
+  item 1.11, the recorder coming to the front at about 00:00:54.9 with
+  no record, and Appendix E now says so. With the setting on, a moment
+  with the recorder in front is taken with the window before it, so its
+  frame is cut to the browser's window. A window's bounds are those
+  recorded when it came to the front; a window moved later is cut where
+  it was.
 
 ## Confirmed by the 88464e7 report
 

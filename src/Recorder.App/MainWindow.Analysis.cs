@@ -62,6 +62,7 @@ public partial class MainWindow
     private void ReadAnalysisSettings()
     {
         (_analysisSettings, _analysisSettingsProblems) = AnalysisSettingsFile.Read(AnalysisSettingsFile.DefaultPath);
+        BrowserOnlyMenuItem.IsChecked = _analysisSettings.BrowserOnly;
         var chosen = (ProfileComboBox.SelectedItem as ComboBoxItem)?.Tag as string;
         ProfileComboBox.Items.Clear();
         foreach (var profile in _analysisSettings.Profiles.Where(profile => profile.Supports(ModelCapabilities.Text)))
@@ -539,6 +540,33 @@ public partial class MainWindow
     private void ModelProfilesMenuItem_Click(object sender, RoutedEventArgs e)
     {
         new ModelProfilesWindow(this, AnalysisSettingsFile.DefaultPath).ShowDialog();
+        ReadAnalysisSettings();
+        UpdateAnalysisControls();
+    }
+
+    // "Limit the report to the browser while it is in front", saved in
+    // the analysis settings file at once. A worker already running keeps
+    // the setting it started with; each report says which it used.
+    private void BrowserOnlyMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        var path = AnalysisSettingsFile.DefaultPath;
+        var on = BrowserOnlyMenuItem.IsChecked;
+        try
+        {
+            var text = File.Exists(path) ? File.ReadAllText(path) : null;
+            if (AnalysisSettingsFile.WithBrowserOnly(text, on) is not { } written)
+            {
+                throw new IOException("The analysis settings file is not a JSON object, so the setting was not saved.");
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, written);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, exception.Message, "The setting was not saved", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
         ReadAnalysisSettings();
         UpdateAnalysisControls();
     }

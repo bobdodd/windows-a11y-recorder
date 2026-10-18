@@ -76,7 +76,15 @@ public sealed class RecordedSummaryEvidence : ISummaryEvidence, IMomentEvidence
             }
             else if (item.Channel == "window.foreground" && item.EventType == "foreground-window")
             {
-                foreground.Add(new ForegroundFact(item.MonotonicNanoseconds, item.EventId, Text(payload, "processName"), Text(payload, "title")));
+                // With the window's bounds and whether it is NVDA's, for the
+                // report's scope (report-fixes-2026-10-18.md, part 4).
+                var processId = Number(payload, "processId");
+                foreground.Add(new ForegroundFact(item.MonotonicNanoseconds, item.EventId, Text(payload, "processName"), Text(payload, "title"))
+                {
+                    Bounds = Rect(payload, "bounds"),
+                    Minimized = payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("isMinimized", out var minimized) && minimized.ValueKind == JsonValueKind.True,
+                    Nvda = processId is { } id && archive.AssistiveTechnology.ScreenReaderAt(AssistiveTechnologyRecords.Nvda.Product, item.MonotonicNanoseconds)?.ProcessId == id
+                });
             }
             else if (item.EventType == BrowserEvidenceEventTypes.PagePopupOpened && payload.ValueKind == JsonValueKind.Object)
             {
@@ -92,7 +100,10 @@ public sealed class RecordedSummaryEvidence : ISummaryEvidence, IMomentEvidence
         Popups = popups;
         PopupsClosed = closed;
         Frames = [.. archive.Frames.Select(frame => new CapturedFrame(
-            frame.MonotonicNanoseconds, frame.Path, frame.AbsolutePath, frame.Width, frame.Height, frame.Magnification?.Level))];
+            frame.MonotonicNanoseconds, frame.Path, frame.AbsolutePath, frame.Width, frame.Height, frame.Magnification?.Level)
+        {
+            X = frame.X, Y = frame.Y, MagnifiedX = frame.Magnification?.X ?? 0, MagnifiedY = frame.Magnification?.Y ?? 0
+        })];
         NvdaWindows = [.. archive.ScreenReaderWindows.Spans.Select(span => new NvdaWindowFact(
             span.Name, span.Start, span.Events.FirstOrDefault()?.EventId, span.End, span.Events.Count > 1 ? span.Events[^1].EventId : null))];
         Commands = [.. archive.KeyDispositions.KeptCommands.Select(command => new TimedFact(
@@ -338,6 +349,12 @@ public sealed class RecordedSummaryEvidence : ISummaryEvidence, IMomentEvidence
 
     private static bool Flag(JsonElement payload, string name) =>
         payload.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
+
+    private static ScreenRect? Rect(JsonElement payload, string name) =>
+        payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty(name, out var rect) && rect.ValueKind == JsonValueKind.Object &&
+        Number(rect, "x") is { } x && Number(rect, "y") is { } y && Number(rect, "width") is { } width && Number(rect, "height") is { } height
+            ? new ScreenRect((int)x, (int)y, (int)width, (int)height)
+            : null;
 
     private static string? Text(JsonElement payload, string name) =>
         payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String

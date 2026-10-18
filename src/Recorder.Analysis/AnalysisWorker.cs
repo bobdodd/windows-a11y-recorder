@@ -66,6 +66,9 @@ public sealed class AnalysisTaskContext
 
     public AnalysisCatalog Catalog => _worker.Catalog;
 
+    /// <summary>The analysis settings the worker runs with, such as whether the report is limited to the browser.</summary>
+    public AnalysisSettings Settings => _worker.Settings;
+
     /// <summary>
     /// Runs one model step, or gives back its accepted attempt. A step
     /// whose input has changed since it was accepted runs again.
@@ -122,6 +125,8 @@ internal sealed class TaskCancelledException() : Exception("The task was cancell
 public sealed class AnalysisWorker
 {
     private readonly AnalysisSettings _settings;
+
+    internal AnalysisSettings Settings => _settings;
     private readonly IReadOnlyDictionary<string, IAnalysisTaskKind> _kinds;
     private readonly IModelEndpoint _endpoint;
     private readonly ILocalServerHost? _localServer;

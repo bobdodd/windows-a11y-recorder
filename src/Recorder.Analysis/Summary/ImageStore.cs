@@ -63,6 +63,9 @@ public sealed class ImageStore(string sessionFolder, string relativeFolder)
 /// 2). A PNG the recorder cannot read the pixels of, such as an interlaced
 /// one, is keyed by its bytes instead, which can only match the same file.
 /// </summary>
+/// <summary>A PNG's pixels, each row red, green, blue, and alpha, and its colour chunks as written.</summary>
+public sealed record PngPixels(int Width, int Height, bool Wide, IReadOnlyList<byte[]> Rows, IReadOnlyDictionary<string, byte[]> ColourChunks);
+
 public static class PngKey
 {
     private static readonly byte[] Signature = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -90,6 +93,60 @@ public static class PngKey
     // says that the PNG cannot be read.
     private static bool TryPixels(byte[] png, IncrementalHash hash)
     {
+        var chunks = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        if (!TryRead(png, chunks, (width, height, wide) =>
+            {
+                hash.AppendData(Encoding.ASCII.GetBytes("png-pixels-1\n"));
+                Span<byte> head = stackalloc byte[9];
+                BinaryPrimitives.WriteInt32BigEndian(head, width);
+                BinaryPrimitives.WriteInt32BigEndian(head[4..], height);
+                head[8] = (byte)(wide ? 16 : 8);
+                hash.AppendData(head);
+            },
+            hash.AppendData))
+        {
+            return false;
+        }
+
+        Span<byte> size = stackalloc byte[4];
+        foreach (var type in ColourChunks)
+        {
+            var value = chunks.TryGetValue(type, out var body) ? Profile(type, body) : null;
+            hash.AppendData(Encoding.ASCII.GetBytes(type));
+            BinaryPrimitives.WriteInt32BigEndian(size, value?.Length ?? -1);
+            hash.AppendData(size);
+            if (value is not null)
+            {
+                hash.AppendData(value);
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// A PNG's pixels as red, green, blue, and alpha rows, 8 bits each, or
+    /// 16 bits each big-endian, with its colour chunks as written; null
+    /// where the recorder cannot read them, such as an interlaced PNG.
+    /// </summary>
+    public static PngPixels? Decode(byte[] png)
+    {
+        ArgumentNullException.ThrowIfNull(png);
+        var chunks = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        int width = 0, height = 0;
+        var wide = false;
+        var rows = new List<byte[]>();
+        return TryRead(png, chunks, (w, h, sixteen) => (width, height, wide) = (w, h, sixteen), row => rows.Add(row.ToArray()))
+            ? new PngPixels(width, height, wide, rows, chunks)
+            : null;
+    }
+
+    // Reads a PNG's rows as red, green, blue, and alpha, giving its size,
+    // then each row, and keeping its colour chunks.
+    private delegate void RowsStart(int width, int height, bool wide);
+
+    private static bool TryRead(byte[] png, Dictionary<string, byte[]> chunks, RowsStart start, Action<byte[]> each)
+    {
         if (png.Length < 8 || !png.AsSpan(0, 8).SequenceEqual(Signature))
         {
             return false;
@@ -98,7 +155,6 @@ public static class PngKey
         int width = 0, height = 0, depth = 0, colour = -1, interlace = -1;
         byte[]? palette = null;
         byte[]? transparency = null;
-        var chunks = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         using var data = new MemoryStream();
         var at = 8;
         var ended = false;
@@ -175,12 +231,7 @@ public static class PngKey
         }
 
         var wide = depth == 16;
-        hash.AppendData(Encoding.ASCII.GetBytes("png-pixels-1\n"));
-        Span<byte> head = stackalloc byte[9];
-        BinaryPrimitives.WriteInt32BigEndian(head, width);
-        BinaryPrimitives.WriteInt32BigEndian(head[4..], height);
-        head[8] = (byte)(wide ? 16 : 8);
-        hash.AppendData(head);
+        start(width, height, wide);
 
         var previous = new byte[rowBytes];
         var current = new byte[rowBytes];
@@ -204,26 +255,13 @@ public static class PngKey
                     return false;
                 }
 
-                hash.AppendData(output);
+                each(output);
                 (previous, current) = (current, previous);
             }
         }
         catch (Exception exception) when (exception is InvalidDataException or EndOfStreamException)
         {
             return false;
-        }
-
-        Span<byte> size = stackalloc byte[4];
-        foreach (var type in ColourChunks)
-        {
-            var value = chunks.TryGetValue(type, out var body) ? Profile(type, body) : null;
-            hash.AppendData(Encoding.ASCII.GetBytes(type));
-            BinaryPrimitives.WriteInt32BigEndian(size, value?.Length ?? -1);
-            hash.AppendData(size);
-            if (value is not null)
-            {
-                hash.AppendData(value);
-            }
         }
 
         return true;

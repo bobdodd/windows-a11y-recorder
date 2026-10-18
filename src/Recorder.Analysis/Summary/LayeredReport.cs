@@ -75,6 +75,29 @@ public static partial class LayeredReport
         return $"{when} {what}" + (change.Detail is { } detail ? $", {detail}" : "") + ".";
     }
 
+    // The report's scope in G.1: whether the setting was on, how each
+    // frame was cut, and the moments described whole and why
+    // (report-fixes-2026-10-18.md, part 4).
+    private static void AppendScope(StringBuilder builder, VisionReportParts parts)
+    {
+        if (parts.Scope is not { BrowserOnly: true } scope)
+        {
+            builder.Append(parts.Scope is null
+                ? "- Each captured frame is sent to the model whole, as recorded.\n"
+                : "- The setting \"Limit the report to the browser while it is in front\" was off: each captured frame is sent to the model whole, as recorded.\n");
+            return;
+        }
+
+        builder.Append(CultureInfo.InvariantCulture,
+            $"- The setting \"Limit the report to the browser while it is in front\" was on. At a moment when the window last recorded in front, other than NVDA's, was the browser's, the frame is cut to the browser's window and NVDA's windows, at their bounds as recorded when each came to the front, and, under full screen magnification, to the part of them in the magnified view; what lies in the cut outside every one of them is painted grey. NVDA's windows recorded in front earlier in the recording are kept, as whether they were closed is not recorded. Each cut is kept in {parts.ImagesFolder} as a picture of its own; the captured frames are unchanged.\n");
+        builder.Append("- The recorder's own windows are not in the front window records, so at a moment with the recorder in front, the window recorded before it is taken as the front window.\n");
+        var whole = scope.Moments.Where(moment => !moment.Scope.Limited).ToList();
+        builder.Append(whole.Count == 0
+            ? (scope.Moments.Count == 0 ? "- No moment was described.\n" : "- Every moment's frame was cut, as the browser was in front at each.\n")
+            : "- Moments whose frame was sent whole: " + string.Join("; ", whole.Select(moment => string.Create(CultureInfo.InvariantCulture,
+                $"visit {moment.Visit}, moment {moment.Moment} at {SummaryCollator.Time(moment.FrameTime)}, as {moment.Scope.Why}"))) + ".\n");
+    }
+
     /// <summary>
     /// A statement's text without the references written in it that the
     /// statement also cites, such as "[E2]", "(E29)" or "[E31] [E30]", and
@@ -312,7 +335,10 @@ public static partial class LayeredReport
         }
 
         AppendAppendices(builder, parts, citations);
-        SummaryReport.AppendOtherWindows(builder, collation, citations, "## Appendix E. Other windows");
+        SummaryReport.AppendOtherWindows(builder, collation, citations, "## Appendix E. Other windows",
+            parts.Scope is { BrowserOnly: true }
+                ? "With the setting \"Limit the report to the browser while it is in front\" on, these windows are left out of the report's pictures and prose while the browser was in front; they are listed here in full, as recorded."
+                : null);
         SummaryReport.AppendEvidence(builder, collation, citations, "## Appendix F. Evidence");
 
         builder.Append("## Appendix G. How this was made\n\n");
@@ -383,7 +409,7 @@ public static partial class LayeredReport
                 .Append(".\n");
         }
 
-        builder.Append("- Each captured frame is sent to the model whole, as recorded.\n");
+        AppendScope(builder, parts);
         builder.Append("- Each moment's page is rebuilt at its frame in the instrumented Chromium without a window, and pictured whole in tiles the height of its viewport, each sent at full size.\n");
         builder.Append(CultureInfo.InvariantCulture,
             $"- Each request holds as many tiles as fit {parts.ImageTokensPerRequest} image tokens, counted as one token for each 32 by 32 pixels, and at least one.\n");

@@ -347,6 +347,55 @@ public sealed partial class RecordingSummaryTaskTests
         return ((string)row["state"]!, (string?)row["failure"]);
     }
 
+    // With the browser in front from the start, each moment's frame is cut
+    // to its window, and the report says so (owner, 2026-10-18;
+    // report-fixes-2026-10-18.md, part 4).
+    [Fact]
+    public async Task With_the_browser_in_front_each_frame_is_cut_to_its_window_and_the_report_says_so()
+    {
+        // The sample frames' virtual screen starts at x -1920.
+        var browser = EvidenceSamples.Sample("window.foreground", "foreground-window")
+            .Replace("\"notepad\"", "\"chrome\"", StringComparison.Ordinal)
+            .Replace("\"bounds\":{\"x\":-8,\"y\":10,\"width\":800,\"height\":600}", "\"bounds\":{\"x\":-1920,\"y\":0,\"width\":1,\"height\":1}", StringComparison.Ordinal);
+        // Notepad in front after the last frame, so listed in Appendix E.
+        var (catalog, _, vision) = await QueueBothAsync(extra:
+        [
+            (Second / 2, "window.foreground", "foreground-window", browser),
+            (16 * Second, "window.foreground", "foreground-window", EvidenceSamples.Sample("window.foreground", "foreground-window"))
+        ]);
+        var endpoint = VisionEndpoint();
+
+        await RunAsync(catalog, endpoint);
+
+        Assert.Equal((AnalysisTaskStates.Done, (string?)null), await StateAsync(vision));
+        var moments = endpoint.Bodies.Select(body => JsonDocument.Parse(body).RootElement.Clone())
+            .Where(body => body.GetProperty("messages")[0].GetProperty("content").GetString() == RecordingSummaryVisionKind.MomentInstructions).ToList();
+        Assert.NotEmpty(moments);
+        static string Said(JsonElement body) => string.Concat(body.GetProperty("messages")[1].GetProperty("content").EnumerateArray()
+            .Where(part => part.GetProperty("type").GetString() == "text").Select(part => part.GetProperty("text").GetString()));
+        Assert.All(moments, body => Assert.Contains("cut to the browser's window and NVDA's windows: pixels (0, 0) to (1, 1) of the screen's 1920 by 1080", Said(body), StringComparison.Ordinal));
+        Assert.All(moments, body => Assert.Contains(RecordingSummaryVisionKind.ScopeNote, Said(body), StringComparison.Ordinal));
+        var report = await File.ReadAllTextAsync(Path.Combine(_session, Assert.Single(await catalog.ReportsAsync(vision, Token)).RelativePath), Token);
+        Assert.Contains("- The setting \"Limit the report to the browser while it is in front\" was on.", report, StringComparison.Ordinal);
+        Assert.Contains("- Every moment's frame was cut, as the browser was in front at each.\n", report, StringComparison.Ordinal);
+        Assert.Contains("these windows are left out of the report's pictures and prose while the browser was in front", report, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task With_the_setting_off_each_frame_is_sent_whole_and_the_report_says_so()
+    {
+        var (catalog, _, vision) = await QueueBothAsync();
+        var endpoint = VisionEndpoint();
+        await new AnalysisWorker(catalog, VisionSettings() with { BrowserOnly = false },
+                [new RecordingSummaryKind(), new RecordingSummaryVisionKind { Pages = (_, _) => new StandInPages() }], endpoint, options: Fast)
+            .RunUntilEmptyAsync(Token);
+
+        Assert.Equal((AnalysisTaskStates.Done, (string?)null), await StateAsync(vision));
+        var report = await File.ReadAllTextAsync(Path.Combine(_session, Assert.Single(await catalog.ReportsAsync(vision, Token)).RelativePath), Token);
+        Assert.Contains("- The setting \"Limit the report to the browser while it is in front\" was off: each captured frame is sent to the model whole, as recorded.\n", report, StringComparison.Ordinal);
+        Assert.DoesNotContain(RecordingSummaryVisionKind.ScopeNote[..40], string.Concat(endpoint.Bodies), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Vision_checks_the_wording_of_the_layers_the_pages_the_story_and_the_summary_alone()
     {
@@ -717,7 +766,7 @@ public sealed partial class RecordingSummaryTaskTests
     [Fact]
     public void Every_template_shows_a_statement_with_its_text_before_its_kind()
     {
-        Assert.Equal((4, 3, 4, 2, 6, 6, 4), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+        Assert.Equal((4, 4, 4, 2, 6, 6, 4), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
             RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.LayerTemplateVersion, RecordingSummaryVisionKind.PageChapterTemplateVersion,
             RecordingSummaryVisionKind.StoryTemplateVersion, RecordingSummaryVisionKind.ExecutiveTemplateVersion));
         foreach (var instructions in new[]

@@ -69,6 +69,12 @@ public sealed record PageChapter(int Number, string Url, string? Title, IReadOnl
 /// </summary>
 public sealed record ReportPicture(string Reference, string File, string What);
 
+/// <summary>The report's scope at a moment: whether its frame was cut, and its cut's file.</summary>
+public sealed record MomentScope(int Visit, int Moment, long FrameTime, FrameScope Scope, string? CutFile);
+
+/// <summary>Whether the setting "Limit the report to the browser while it is in front" was on, and each moment's scope.</summary>
+public sealed record ReportScopeRecord(bool BrowserOnly, IReadOnlyList<MomentScope> Moments);
+
 /// <summary>What the report adds for the vision stage.</summary>
 public sealed record VisionReportParts(
     IReadOnlyDictionary<int, VisitVision> Visits,
@@ -87,6 +93,9 @@ public sealed record VisionReportParts(
 
     /// <summary>The settings at the start and their changes, for the appendices and the story.</summary>
     public RecordedSettings Settings { get; init; } = RecordedSettings.None;
+
+    /// <summary>The report's scope; null in a report written before the setting.</summary>
+    public ReportScopeRecord? Scope { get; init; }
 
     /// <summary>The reference each setting's record is cited by, by its key.</summary>
     public IReadOnlyDictionary<string, string> SettingReferences { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -200,7 +209,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // "Stage 2 implementation status").
     // Version 3 puts the statement's fields in the order text, kind,
     // evidence, as analysis-runner.md, decision 7, gives.
-    public const int MomentTemplateVersion = 3;
+    // Version 4: the frame may be cut to the browser's window and NVDA's
+    // windows (report-fixes-2026-10-18.md, part 4).
+    public const int MomentTemplateVersion = 4;
 
     public static readonly IReadOnlyList<string> MomentSections = ["screen", "change"];
 
@@ -371,7 +382,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "You add to what is known of one page visit from an accessibility test recording, for accessibility and usability engineers, what a captured frame of the screen shows of the visual user experience. " +
         "You are given the visit's knowledge so far, each statement numbered, such as [K3], and labelled with its layer: layer 1 from the recorded data, layer 2 from captured frames of the screen, " +
         "and layer 3 from the web page as the recorder rebuilt it; why the recorder chose this moment, and the recorder's facts since the moment before, each beginning with an evidence reference such as [E3]; " +
-        "and a model's description of this moment's captured frame, a picture of the whole screen, with the picture's reference. The knowledge and the description are inferences, not facts. " +
+        "and a model's description of this moment's captured frame, a picture of the whole screen or of the part of it its evidence says, with the picture's reference. The knowledge and the description are inferences, not facts. " +
         "Add what the frame adds to the knowledge of the visual user experience: what was on the screen and how it looked, what stood out, what was open, such as a dialog, a menu, or a popup, " +
         "which part of the page was in view, what was hard to see or read, any other window in view, and what changed since the moment before. " +
         "Every statement from the frame's description cites the frame's reference. " +
@@ -551,7 +562,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     public const string MomentInstructions =
         "You describe one moment of a page visit from an accessibility test recording, for an accessibility auditor. " +
-        "You are given a captured frame, a picture of the whole screen at that moment, labelled with its evidence reference; " +
+        "You are given a captured frame, a picture of the whole screen at that moment or of the part of it its evidence says, labelled with its evidence reference; " +
         "why the recorder chose the moment; and the recorder's facts about the visit up to that moment, each beginning with an evidence reference such as [E3]. " +
         "Describe only what the picture and the facts support. Name sites, programs, windows, and pages only as the picture or the facts name them. " +
         "Where they do not settle something, say that it is unknown; do not guess. " +
@@ -694,6 +705,12 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         var groupsDescribed = new Dictionary<string, DescribedGroup>(StringComparer.Ordinal);
         var pictures = new Dictionary<string, ReportPicture>(StringComparer.Ordinal);
         var layersNotSent = new List<string>();
+
+        // The report's scope at each moment, with the setting "Limit the
+        // report to the browser while it is in front" (report-fixes-
+        // 2026-10-18.md, part 4).
+        var browserOnly = context.Settings.BrowserOnly;
+        var scopes = new List<MomentScope>();
         var visitsSeen = new List<(VisitCollation Visit, IReadOnlyList<MomentDescription> Moments, int LeftOut, Knowledge Knowledge)>();
         foreach (var (visit, summary) in described)
         {
@@ -708,19 +725,45 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             foreach (var moment in moments.Moments)
             {
                 var frame = moment.Frame;
-                var frameReference = register.Add(frame.Time, FrameText(frame), null, $"frame:{frame.Time.ToString(CultureInfo.InvariantCulture)}");
-                pictures[frameReference] = new ReportPicture(frameReference, frame.Path, $"The captured frame at {SummaryCollator.Time(frame.Time)}");
+                var frameBytes = await ReadFrameAsync(frame, cancellationToken).ConfigureAwait(false);
+                var frameMedia = MediaType(frame.AbsolutePath);
+                FrameScope? scope = null;
+                StoredImage? cut = null;
+                var painted = false;
+                if (browserOnly)
+                {
+                    scope = ReportScope.At(evidence.Foreground, evidence.BrowserProcess, frame);
+                    if (scope.Limited)
+                    {
+                        if (FrameCut.Cut(frameBytes, scope) is { } picture)
+                        {
+                            cut = await store.KeepAsync(picture.Png, cancellationToken).ConfigureAwait(false);
+                            (frameBytes, frameMedia, painted) = (picture.Png, "image/png", picture.Painted);
+                        }
+                        else
+                        {
+                            scope = FrameScope.Whole("its pixels could not be read to cut it");
+                        }
+                    }
+
+                    scopes.Add(new MomentScope(visit.Visit.Number, moment.Number, frame.Time, scope, cut?.Path));
+                }
+
+                var frameReference = register.Add(frame.Time, FrameText(frame, scope, cut?.Path, painted), null, $"frame:{frame.Time.ToString(CultureInfo.InvariantCulture)}");
+                pictures[frameReference] = new ReportPicture(frameReference, cut?.Path ?? frame.Path,
+                    cut is null ? $"The captured frame at {SummaryCollator.Time(frame.Time)}" : $"The captured frame at {SummaryCollator.Time(frame.Time)}, cut to the browser's window and NVDA's windows");
                 var reasonReferences = moment.Reasons.Select(reason => register.Add(
                     reason.Time,
                     "Derived by the recorder, a reason for a moment: " + reason.Text,
                     reason.EventId,
                     $"moment:{visit.Visit.Number}:{reason.Kind}:{reason.Time.ToString(CultureInfo.InvariantCulture)}")).ToList();
                 var (input, references) = MomentInput(collation, visit, moment, frameReference, reasonReferences, previous);
+                input = WithScope(input, browserOnly);
                 var key = $"{RecordingSummaryKind.VisitStepKey(visit)}-moment-{moment.Number.ToString("D2", CultureInfo.InvariantCulture)}";
                 var frameStep = await context.RunStepAsync(
                     key,
                     new ModelRequest(MomentTemplate, MomentTemplateVersion, MomentInstructions, input,
-                        [new ModelImage(frameReference, MediaType(frame.AbsolutePath), await ReadFrameAsync(frame, cancellationToken).ConfigureAwait(false))],
+                        [new ModelImage(frameReference, frameMedia, frameBytes)],
                         MomentSections, references),
                     cancellationToken).ConfigureAwait(false);
 
@@ -761,6 +804,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
                 // Layer 2: what the frame adds to the visit's knowledge.
                 var (layer2Input, layer2References) = Layer2Input(collation, visit, momentDescribed, FactsSince(visit, previous, frame.Time), knowledge);
+                layer2Input = WithScope(layer2Input, browserOnly);
                 var layer2 = await context.RunStepAsync(
                     $"{key}-layer-2",
                     new ModelRequest(Layer2Template, LayerTemplateVersion, Layer2Instructions, layer2Input, [], Knowledge.LayerSections, layer2References)
@@ -809,6 +853,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             var number = chapterPages.Count + 1;
             var visitsTo = byUrl.ToList();
             var (pageInput, pageReferences) = PageChapterInput(collation, number, visitsTo.Select(seen => (seen.Visit, seen.Knowledge)).ToList());
+            pageInput = WithScope(pageInput, browserOnly);
             var pageStep = await context.RunStepAsync(
                 $"page-{number.ToString("D2", CultureInfo.InvariantCulture)}",
                 new ModelRequest(PageChapterTemplate, PageChapterTemplateVersion, PageChapterInstructions, pageInput, [], PageChapterSections, pageReferences)
@@ -837,6 +882,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             var section = chapterPages.First(pageOf => pageOf.Visits.Contains(visit.Visit.Number)).Number;
             var (storyInput, storyReferences) = StoryInput(collation, visit, moments, leftOut, knowledge, section, storySoFar,
                 changesOf.GetValueOrDefault(visit.Visit.Number) ?? [], settingReferences);
+            storyInput = WithScope(storyInput, browserOnly);
             var story = await context.RunStepAsync(
                 $"{RecordingSummaryKind.VisitStepKey(visit)}-story",
                 new ModelRequest(StoryTemplate, StoryTemplateVersion, StoryInstructions, storyInput, [], StorySections, storyReferences)
@@ -849,6 +895,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         }
 
         var (openingInput, openingReferences) = OpeningInput(collation, chapterPages, storySoFar, changesOf.GetValueOrDefault(0) ?? [], settingReferences);
+        openingInput = WithScope(openingInput, browserOnly);
         var opening = await context.RunStepAsync(
             "story-opening",
             new ModelRequest(OpeningTemplate, StoryTemplateVersion, OpeningInstructions, openingInput, [], OpeningSections, openingReferences)
@@ -859,6 +906,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
         // Chapter 1: the executive summary, written last.
         var (executiveInput, executiveReferences) = ExecutiveInput(collation, chapterPages, opening, storySoFar, settings, settingReferences);
+        executiveInput = WithScope(executiveInput, browserOnly);
         var executive = await context.RunStepAsync(
             "executive-summary",
             new ModelRequest(ExecutiveTemplate, ExecutiveTemplateVersion, ExecutiveInstructions, executiveInput, [], ExecutiveSections, executiveReferences)
@@ -878,6 +926,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             DateTime.UtcNow,
             new VisionReportParts(parts, chapterPages, opening, pictures, Moments, summaryTask, ImageTokensPerRequest, context.ImagesFolder, context.MomentIndexFile, layersNotSent)
             {
+                Scope = new ReportScopeRecord(browserOnly, scopes),
                 Executive = executive,
                 Settings = settings,
                 SettingReferences = settingReferences
@@ -1119,7 +1168,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             }
         }
 
-        input.Append(CultureInfo.InvariantCulture, $"\nThe captured frame: [{moment.FrameReference}] {FrameText(moment.Moment.Frame)}.\n")
+        input.Append(CultureInfo.InvariantCulture, $"\nThe captured frame: [{moment.FrameReference}] {collation.Evidence.Of(moment.FrameReference)?.Text ?? FrameText(moment.Moment.Frame)}.\n")
             .Append("The frame as a model described it, from the picture and the recorder's facts. These are inferences, not facts:\n");
         RecordingSummaryKind.AppendClaims(input, moment.FrameStep.Claims, references);
         return (input.ToString(), references);
@@ -1534,15 +1583,42 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     }
 
     /// <summary>A captured frame as the evidence list gives it.</summary>
-    public static string FrameText(CapturedFrame frame)
+    public static string FrameText(CapturedFrame frame) => FrameText(frame, null, null, false);
+
+    /// <summary>
+    /// The frame as the evidence list gives it: the whole screen, or, with
+    /// the report limited to the browser, the part of it cut to the
+    /// browser's window and NVDA's windows, with the cut's file.
+    /// </summary>
+    public static string FrameText(CapturedFrame frame, FrameScope? scope, string? cutFile, bool painted)
     {
         ArgumentNullException.ThrowIfNull(frame);
         var magnified = frame.Magnification is > 1 and var level
             ? string.Create(CultureInfo.InvariantCulture, $", recorded with full screen magnification at {level * 100:0}%")
             : "";
+        if (scope is { Limited: true } && cutFile is not null)
+        {
+            var visible = frame.Magnification is > 1 ? " and to the part of them in the magnified view" : "";
+            var grey = painted ? ", with what lies between them, not theirs, painted grey by the recorder" : "";
+            return string.Create(CultureInfo.InvariantCulture,
+                $"The captured frame at {SummaryCollator.Time(frame.Time)}, cut to the browser's window and NVDA's windows{visible}: pixels {scope.Crop} of the screen's {frame.Width} by {frame.Height}{magnified}{grey}, file {cutFile}, cut from {frame.Path}");
+        }
+
         return string.Create(CultureInfo.InvariantCulture,
             $"The captured frame at {SummaryCollator.Time(frame.Time)}: the whole screen, {frame.Width} by {frame.Height} pixels{magnified}, file {frame.Path}");
     }
+
+    /// <summary>
+    /// What a model is told of the report's scope with the setting on,
+    /// given in its input after the rest, so that the templates are the
+    /// same with the setting on or off.
+    /// </summary>
+    public const string ScopeNote =
+        "The report is limited to the browser while it is in front, a setting of the recorder: at the moments whose frame was cut to the browser's window and NVDA's windows, " +
+        "other programs' windows, the taskbar, and the desktop are left out of the report. Do not describe them, nor the grey the recorder painted between the windows.";
+
+    internal static string WithScope(string input, bool browserOnly) =>
+        browserOnly ? input.TrimEnd() + "\n\n" + ScopeNote + "\n" : input;
 
     /// <summary>
     /// A tile of a recreated page as the evidence list gives it, with its
@@ -1681,7 +1757,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             }
         }
 
-        input.Append(CultureInfo.InvariantCulture, $"\nThe picture: [{frameReference}] {FrameText(moment.Frame)}. It is labelled Picture {frameReference}.");
+        input.Append(CultureInfo.InvariantCulture, $"\nThe picture: [{frameReference}] {collation.Evidence.Of(frameReference)?.Text ?? FrameText(moment.Frame)}. It is labelled Picture {frameReference}.");
         return (input.ToString(), references);
     }
 

@@ -200,14 +200,21 @@ public static class SummaryReport
         }
     }
 
-    internal static void AppendOtherWindows(StringBuilder builder, RecordingCollation collation, ReportCitations citations, string heading = "## Other windows")
+    internal static void AppendOtherWindows(StringBuilder builder, RecordingCollation collation, ReportCitations citations, string heading = "## Other windows", string? scopeNote = null)
     {
         builder.Append(heading).Append("\n\n");
+
+        // Why the recorder coming to the front has no record (target
+        // report, 2026-10-18, at about 00:00:54.9): the front window hook
+        // is set with WINEVENT_SKIPOWNPROCESS (ForegroundWindowCollector).
+        const string Own = "The recorder's own windows are not in the front window records, as the recorder leaves its own process out of them.";
         if (collation.OtherWindows.Count == 0)
         {
-            builder.Append("No other program's window was recorded in front.\n\n");
+            builder.Append("No other program's window was recorded in front. ").Append(Own).Append("\n\n");
             return;
         }
+
+        builder.Append(Own).Append(scopeNote is null ? "" : " " + scopeNote).Append("\n\n");
 
         builder.Append("Other programs' windows the recorder found in front, derived from the front window records:\n\n");
         foreach (var window in collation.OtherWindows)

@@ -3,7 +3,18 @@ using System.Globalization;
 namespace Recorder.Analysis.Summary;
 
 /// <summary>A captured frame: its time, its picture file, and its size in pixels.</summary>
-public sealed record CapturedFrame(long Time, string Path, string AbsolutePath, int Width, int Height, double? Magnification);
+public sealed record CapturedFrame(long Time, string Path, string AbsolutePath, int Width, int Height, double? Magnification)
+{
+    /// <summary>The screen point of the frame's top left pixel: the virtual screen's origin.</summary>
+    public int X { get; init; }
+
+    public int Y { get; init; }
+
+    /// <summary>The offsets of the full screen magnified view, in unmagnified screen pixels, where magnified.</summary>
+    public int MagnifiedX { get; init; }
+
+    public int MagnifiedY { get; init; }
+}
 
 /// <summary>A layout change set of a document, and how many of its elements it changed; null where not recorded.</summary>
 public sealed record LayoutChangeFact(long Time, string? EventId, string DocumentToken, long? ChangedNodes);
