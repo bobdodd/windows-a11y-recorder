@@ -1,11 +1,11 @@
 # Design: the test data model
 
 Date: 2026-10-19. Status: agreed with the owner in conversation, 2026-10-19;
-not built. It corrects the design of the summary with
-vision as built, and the reading of "The layered report" of 2026-10-15 in
-`recording-summary.md` on which that build rests. It is the frame for the
-work in `intermediate-outputs-review-2026-10-19.md` and
-`model-load-review-2026-10-18.md`.
+not built; where it is stored is proposed, not decided. It corrects the
+design of the summary with vision as built, and the reading of "The layered
+report" of 2026-10-15 in `recording-summary.md` on which that build rests.
+It is the frame for the work in `intermediate-outputs-review-2026-10-19.md`
+and `model-load-review-2026-10-18.md`.
 
 ## The owner's words
 
@@ -218,21 +218,76 @@ visits.
   1 is the recorder's, and the analysis of the whole test is built into
   the model and the report.
 
-## Open questions
+## Decided, 2026-10-19
 
-1. **Who speaks:** whether the supervisor and the participant are on
-   separate microphones, or on one, so that a speaker must be told apart;
-   and whether a remote supervisor's audio reaches the recorder.
-2. **Where interpretation of the recorded evidence happens:** step 1 is the
-   recorder's code; whether a model interprets the recorded evidence
-   within step 1, after the recorder has built the model, or only once
-   steps 2 and 3 are done.
-3. **Where the model is stored:** in the PostgreSQL catalog, beside each
-   recording's file, or both.
-4. **The URL rule's default:** whether a query string or a fragment makes
-   a new URL.
-5. **The order of building,** given the trials of proposals A and C, and
-   the full run still to come.
+1. **Who speaks:** "For now I was trying to keep it simple and assume the
+   testing is in person in a lab, and I assumed an open shared mic rather
+   than headsets. So yes, we do need user identification as we may hear
+   the screen-reader too" (owner). One microphone hears the supervisor,
+   the participant, and the screen reader through the speakers, so each
+   utterance in a transcript carries its speaker (supervisor, participant,
+   or screen reader) with a score for how sure that is. The recorder's
+   audio collector has two sources, the microphone and the system's audio
+   (`AudioCaptureOptions`); the system's audio carries the screen reader's
+   speech on its own, and is evidence of which sounds on the microphone
+   are the screen reader's. Speech the screen reader is heard to give is
+   observed evidence, where today the report can only say what NVDA had to
+   announce. Remote sessions are left for later.
+2. **When interpretation happens:** "interpretation can happen at any step
+   where the information is available. Typically I expect that to be at
+   the earliest point that the interpretation can be performed without
+   rework later" (owner). An interpretation that rests only on the recorded
+   evidence belongs in step 1, after the recorder has built the model; one
+   that needs a frame or the browser's page waits for step 2 or 3. A later
+   step that disagrees adds a correction beside it.
+3. **Pages:** "I suspect we have to give a score to the accuracy of our
+   \"page\" identification. I've seen CMS based sites that use the query to
+   identify pages, It's something that I think we will develop over time,
+   analyzing pages with the same base URL but different get params to see
+   if they are the same page or not" (owner). Every placing of a visit at a
+   level of the page hierarchy carries a score for how sure it is. As a
+   starting rule, a URL is the origin and the path; each distinct query
+   string under it is a candidate page, scored for whether it is the same
+   page as its siblings; a fragment is a place or state within a page,
+   unless the recorder's rule on fragment routes makes it a new visit. The
+   rule is to be developed by comparing pages with the same path and
+   different queries.
+4. **The order of work:** "We should do the full run of what we have
+   first, just to know where we are before starting" (owner). The full run
+   of c8384b7 comes before any building toward this model.
+
+## Proposed: where the model is stored
+
+The owner asked for a suggestion: "The content sounds kind of relational,
+but there is also a tree-like hierarchy to it as well." The proposal, not
+yet decided:
+
+- **The raw recorded evidence stays in each recording's file,** unchanged
+  and complete in itself, as now.
+- **Everything else goes in the PostgreSQL catalog** the recorder already
+  bundles and runs: the recorder's evidence register (each item pointing to
+  its events in the recording's file), the frame and browser evidence, the
+  transcripts, the test process, and the model.
+- **Relational where it is relational:** people, roles, sessions, tests,
+  tasks, and the references between items are tables and link tables. A
+  link table lets one interpretation rest on many items and one item
+  support many interpretations, and a foreign key makes "the model holds no
+  facts" a rule the database keeps: a model entry can only name an item, it
+  has no column to copy one into.
+- **Trees as parent references:** the page hierarchy, and project,
+  recording, visit, and event, are rows with a parent. Recursive queries
+  walk them; the catalog already uses one, for the chain of a task's
+  prerequisites (`AnalysisCatalog`).
+- **Each item's own content** (a fact's text, an interpretation and its
+  score, a transcript's words) is a column of its row, in `jsonb` where its
+  shape varies by kind, as several catalog tables already do.
+- **Versions are added, never overwritten:** each row names the step run
+  that made it; the model refers to a version; a later run adds rows.
+- **Why not another kind of store:** a graph or document database would be
+  a second server beside the one the recorder bundles, and reports across a
+  project's recordings need one store that sees them all, which files
+  beside each recording would not give. An export of one recording's model
+  and evidence to a file, for archiving or sharing, can be added on top.
 
 ## Sources
 
@@ -241,7 +296,9 @@ visits.
 - The design of 2026-10-15: `recording-summary.md`, "The layered report
   (built)".
 - The catalog: `src/Recorder.Database/Migrations/0001_core.sql` (projects,
-  recordings), `0035_recording_summary.sql` (participant capabilities).
+  recordings), `0035_recording_summary.sql` (participant capabilities);
+  the recursive query in `src/Recorder.Analysis/AnalysisCatalog.cs`.
+- The audio sources: `src/Recorder.Collectors.Audio/AudioCaptureOptions.cs`.
 - The collation and its evidence register: `SummaryCollator` and
   `EvidenceRegister` in `src/Recorder.Analysis/Summary/Collation.cs`.
 - The inputs: `RecordingSummaryKind.VisitInput`, and `MomentInput`,
