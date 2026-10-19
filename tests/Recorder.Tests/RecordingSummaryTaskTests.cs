@@ -185,6 +185,31 @@ public sealed partial class RecordingSummaryTaskTests(EmbeddedPostgresFixture fi
     }
 
     // The text of a request's user message.
+    // Every JSON given to a model is on one line, so as not to spend its
+    // context on indentation (owner, 2026-10-18): the request itself is
+    // written compact, and no instruction or input holds JSON laid out over
+    // lines. The answer's form goes as a grammar, not as text in the context.
+    private static void AssertJsonOnOneLine(IEnumerable<string> bodies)
+    {
+        var indented = new System.Text.RegularExpressions.Regex(@"^\s*([\[\]{}],?|""[^""\n]*""\s*:.*)$", System.Text.RegularExpressions.RegexOptions.Multiline);
+        foreach (var body in bodies)
+        {
+            Assert.DoesNotContain('\n', body);
+            using var document = JsonDocument.Parse(body);
+            foreach (var message in document.RootElement.GetProperty("messages").EnumerateArray())
+            {
+                var content = message.GetProperty("content");
+                var texts = content.ValueKind == JsonValueKind.String
+                    ? [content.GetString()!]
+                    : content.EnumerateArray().Where(part => part.GetProperty("type").GetString() == "text").Select(part => part.GetProperty("text").GetString()!).ToList();
+                foreach (var text in texts)
+                {
+                    Assert.False(indented.IsMatch(text), $"JSON laid out over lines in a request: {indented.Match(text).Value}");
+                }
+            }
+        }
+    }
+
     private static string Input(string body)
     {
         using var document = JsonDocument.Parse(body);
@@ -309,6 +334,7 @@ public sealed partial class RecordingSummaryTaskTests(EmbeddedPostgresFixture fi
 
         await new AnalysisWorker(catalog, Settings(), [new RecordingSummaryKind()], endpoint, options: Fast).RunUntilEmptyAsync(Token);
 
+        AssertJsonOnOneLine(endpoint.Bodies);
         var first = Input(endpoint.Bodies.First());
         Assert.Contains("The participant's capabilities are unknown", first, StringComparison.Ordinal);
         Assert.Contains("Navigation committed, a new document, https://shop.example.test/.", first, StringComparison.Ordinal);

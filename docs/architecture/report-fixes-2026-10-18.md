@@ -156,6 +156,13 @@ request ("add it now please"), not yet checked on the target machine:
 - **Limits:** a window's bounds are those recorded when it came to the
   front; a window moved later is cut where it was.
 
+The second batch, built 2026-10-18 after the model-load review: the
+recorder writes each visit's numbered steps, counted, and the recording's
+ending in 4.N.2, and lists the settings not at their defaults in 1.2
+(proposal 4 of `model-load-review-2026-10-18.md`). Check 2 below is now the
+recorder's, not the model's. See `recording-summary.md`, "The recorder
+writes the steps and the settings list (built)".
+
 ## Confirmed by the 88464e7 report
 
 - Story, opening and executive summary are populated on the first attempt: 2,526, 463 and 1,452 output tokens, against 29, 12 and 42 before.

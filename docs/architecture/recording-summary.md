@@ -2030,6 +2030,72 @@ where it faults again. The owner, 2026-10-17: "I agree with both".
   settings, so they run again in a task run again; the steps that
   describe a moment are reused.
 
+### The recorder writes the steps and the settings list (built)
+
+The owner, 2026-10-18, on proposal 4 of
+`model-load-review-2026-10-18.md`: "Of the proposals, the only one I want
+you to act on for now is (4). We clearly need to reduce the workload of
+the model, and counts are something models traditionally struggle with."
+
+What changes, as built:
+
+- **The steps of a visit.** "What the participant did" (4.N.2) is written
+  by the recorder (`VisitSteps`), not by the model, from the visit in time
+  order (`VisitCollation.Timeline`). It gives, in order:
+  - The inputs counted, by what was given: "The recorder recorded 8 inputs
+    from the participant during the visit, in 5 steps: Tab, 3 presses; h,
+    1 press; characters typed, 3 keys; the mouse's left button, 1 press."
+  - What the recorder found before the first input, as a list.
+  - Each input as a numbered step, with what the recorder found after it
+    and before the next as a list under it, or "The recorder found nothing
+    after it before the next input." The same input given again with
+    nothing found between is one step, counted: "00:00:07.500 to
+    00:00:08.000, 2 times: Key pressed: Tab, passed to the page." A run of
+    typed characters is already one input in the collation.
+  - How the visit ended: "The recording ended at 00:00:20.000." for the
+    last visit, and "The visit ended at ..., when the next visit began."
+    for the others.
+- **The story's answer.** The story is answered in two sections,
+  `arriving` and `experience` (`StorySections`); `actions` stays one of
+  `StoryParts` for its heading only. The story's input gives the steps as
+  the report numbers them ("Step 1: ...", "  then: ..."), and the model is
+  asked to refer to a step by its number and not to count the inputs or
+  list the steps again.
+- **The rules.** The story, the opening, and the executive summary share
+  `ReportEvidenceRules`, which replace "Count as the facts count" with the
+  recorder's counts. The page chapter keeps `EvidenceRules`, as it is
+  given no steps.
+- **The opening and the executive summary.** The opening is given each
+  visit's counts and ending with its part; the executive summary is given
+  each visit's steps as the recorder writes them, with its part.
+- **The settings.** 1.2 begins with the recorder's list of the settings
+  not at their defaults at the start, each with its value, its default
+  where it is known, and its reference. Where none is, it says so; where
+  the recording holds no record of the settings, it says which were not at
+  their defaults is unknown. The executive summary's input leaves out the
+  settings at their defaults, saying how many, and the model is asked not
+  to list the others again but to say what they mean. A setting whose
+  default is unknown is still given to the model, which names it where it
+  is significant, as before.
+- **Appendix G.1** says that the steps and the settings list are the
+  recorder's, not a model's inference.
+- **Templates.** The story's template, and so the opening's, goes to
+  version 7, and the executive summary's to version 5, so those steps run
+  again in a task run again. The steps that describe a moment, the layers,
+  and the page chapter are reused.
+
+The JSON given to a model, the same day: "ensure all JSON inputs to a
+model are single-line JSON". Every request is written compact
+(`ModelEndpoint`, `JsonNode.ToJsonString()` with no indentation), and the
+instructions and inputs are lines of text whose JSON examples are each on
+one line. The answer's form goes to the server as a schema or a grammar,
+which the server uses to constrain the answer and does not place in the
+context: "The JSON schema is only used to constrain the model output and
+is not injected into the prompt" (llama.cpp, `grammars/README.md`,
+https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md). Nothing needed changing; a test (`AssertJsonOnOneLine`) checks
+every request of both summary tasks, so that it stays so. No rule on the
+answer's JSON is added.
+
 ## Decisions (2026-10-14)
 
 1. **The recorder's own windows stay in "Other windows"**, and in the

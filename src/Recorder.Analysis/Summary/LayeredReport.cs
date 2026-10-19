@@ -288,6 +288,11 @@ public static partial class LayeredReport
             foreach (var (section, heading) in RecordingSummaryVisionKind.ExecutiveParts)
             {
                 builder.Append(CultureInfo.InvariantCulture, $"### 1.{++part} {heading}\n\n");
+                if (section == RecordingSummaryVisionKind.ParticipantPart)
+                {
+                    AppendSettingsNotAtDefault(builder, parts, citations);
+                }
+
                 Story(executive, section);
             }
         }
@@ -329,7 +334,14 @@ public static partial class LayeredReport
                 foreach (var (section, heading) in RecordingSummaryVisionKind.StoryParts)
                 {
                     builder.Append(CultureInfo.InvariantCulture, $"#### 4.{number}.{++sub} {heading}\n\n");
-                    Story(part.Story, section);
+                    if (section == RecordingSummaryVisionKind.RecorderSteps)
+                    {
+                        AppendSteps(builder, RecordingSummaryVisionKind.StepsOf(collation, visit), citations.Refs);
+                    }
+                    else
+                    {
+                        Story(part.Story, section);
+                    }
                 }
             }
         }
@@ -343,7 +355,8 @@ public static partial class LayeredReport
 
         builder.Append("## Appendix G. How this was made\n\n");
         builder.Append("### G.1 How the report is built\n\n");
-        builder.Append("- Every statement in chapters 1 and 4 and in the pages of chapter 3 is a model's inference from the recorded evidence cited after it.\n");
+        builder.Append("- Every statement in chapters 1 and 4 and in the pages of chapter 3 is a model's inference from the recorded evidence cited after it, except what the recorder writes there: each visit's \"What the participant did\", and the list of settings not at their defaults in 1.2.\n");
+        builder.Append("- Each visit's \"What the participant did\" is written by the recorder from the recording, not by a model: the inputs counted, each input a numbered step with what the recorder found after it and before the next, the same input given again with nothing found between counted as one step, and how the visit ended. What follows an input was found after it; that the input caused it is shown only where a fact says so.\n");
         builder.Append("- Chapter 2 quotes the participant's capabilities as the auditor gave them, and the assistive technology the recorder observed running.\n");
         // "The pages" here contradicted the line above, which gives the
         // pages' sections to the model (target report, 2026-10-18).
@@ -487,6 +500,80 @@ public static partial class LayeredReport
 
             builder.Append('\n');
         }
+    }
+
+    // A visit's steps, as the recorder writes them (proposal 4 of the design
+    // review, owner, 2026-10-18): the inputs counted, what was found before
+    // the first, each step numbered with what was found after it, and the
+    // ending.
+    internal static void AppendSteps(StringBuilder builder, VisitSteps steps, Func<IEnumerable<string>, string> refs)
+    {
+        builder.Append(steps.Counts).Append("\n\n");
+        if (steps.Before.Count > 0)
+        {
+            builder.Append("Before the first input, the recorder found:\n\n");
+            foreach (var line in steps.Before)
+            {
+                builder.Append("- ").Append(line.Clock).Append(' ').Append(SummaryReport.OneLine(line.Text)).Append(refs([line.Reference])).Append('\n');
+            }
+
+            builder.Append('\n');
+        }
+
+        foreach (var step in steps.Steps)
+        {
+            builder.Append(step.Number.ToString(CultureInfo.InvariantCulture)).Append(". ")
+                .Append(SummaryReport.OneLine(step.InputText)).Append(refs(step.InputReferences)).Append('\n');
+            if (step.Then.Count == 0)
+            {
+                builder.Append("   - The recorder found nothing after it before the next input.\n");
+            }
+
+            foreach (var line in step.Then)
+            {
+                builder.Append("   - ").Append(line.Clock).Append(' ').Append(SummaryReport.OneLine(line.Text)).Append(refs([line.Reference])).Append('\n');
+            }
+        }
+
+        if (steps.Steps.Count > 0)
+        {
+            builder.Append('\n');
+        }
+
+        builder.Append(steps.Ending).Append("\n\n");
+    }
+
+    // The settings not at their defaults at the start, listed by the
+    // recorder at the head of 1.2, so that the model says what they mean
+    // and does not list them (proposal 4).
+    private static void AppendSettingsNotAtDefault(StringBuilder builder, VisionReportParts parts, ReportCitations citations) =>
+        AppendSettingsNotAtDefault(builder, parts.Settings, key => parts.SettingReferences.TryGetValue(key, out var reference) ? citations.Refs([reference]) : "");
+
+    internal static void AppendSettingsNotAtDefault(StringBuilder builder, RecordedSettings settings, Func<string, string> cite)
+    {
+        var all = settings.Assistive.Concat(settings.Windows).Concat(settings.Browser).ToList();
+        var rows = all.Where(row => row.Default == DefaultState.NotDefault).ToList();
+        if (all.Count == 0)
+        {
+            builder.Append("The recording holds no record of the settings at the start, so which were not at their defaults is unknown.\n\n");
+            return;
+        }
+
+        if (rows.Count == 0)
+        {
+            builder.Append("The recorder found no setting at the start that was not at its default. Settings whose default is unknown are in Appendices A to C.\n\n");
+            return;
+        }
+
+        builder.Append("The settings not at their defaults at the start, found by the recorder; Appendices A to C give every setting, and Appendix D every change:\n\n");
+        foreach (var row in rows)
+        {
+            builder.Append("- ").Append(SummaryReport.OneLine(row.Group)).Append(", ").Append(SummaryReport.OneLine(row.Setting)).Append(": ")
+                .Append(SummaryReport.OneLine(row.Value)).Append(" (").Append(DefaultText(row)).Append(')')
+                .Append(cite(row.Source.Key)).Append('\n');
+        }
+
+        builder.Append('\n');
     }
 
     // The appendices, written by the recorder: the settings at the start,

@@ -179,6 +179,21 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Give each fact its own source: a layout change comes from the recorded layout, not from a picture; a picture shows only what is in it. ";
 
     /// <summary>
+    /// The rules of order, causes, the recording's ending, and sources for
+    /// the story, its opening, and the executive summary, whose inputs give
+    /// the recorder's steps of each visit, counted: the recorder writes the
+    /// steps, the counts, and the ending, so the model is asked to use them,
+    /// not to count (owner, 2026-10-18, the design review's proposal 4).
+    /// </summary>
+    public const string ReportEvidenceRules =
+        "Keep the recorded order: put each fact at its time, and never say that something earlier disrupted, followed, or answered something later. " +
+        "A change before the participant's first input belongs to the page loading, not to what the participant did. " +
+        "Do not infer an intent, a reason, or an attempt to recover from inputs alone. " +
+        "The recorder counts the inputs and writes the steps: refer to a step by its number, such as \"step 3\", and do not count the inputs or list the steps again. " +
+        "The recording ends when the auditor stops it, as the recorder's steps end: the recorder or another program coming to the front at its end ends the session; it is not something that got in the way. " +
+        "Give each fact its own source: a layout change comes from the recorded layout, not from a picture; a picture shows only what is in it. ";
+
+    /// <summary>
     /// What a setting at its default shows (target report, 2026-10-18:
     /// defaults read as a preference for structure, and a theme chosen but
     /// off read as in use).
@@ -291,9 +306,18 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // (report-fixes-2026-10-18.md).
     public const int PageChapterTemplateVersion = 6;
 
-    public const int StoryTemplateVersion = 6;
+    // Version 7 of the story, and so its opening, and version 5 of the
+    // executive summary: the recorder writes each visit's steps, counted,
+    // and the recording's ending, and lists the settings not at their
+    // defaults; the model writes the story's arriving and experience, and
+    // is given only the settings not at their defaults or whose default is
+    // unknown (owner, 2026-10-18, the design review's proposal 4).
+    public const int StoryTemplateVersion = 7;
 
-    public const int ExecutiveTemplateVersion = 4;
+    public const int ExecutiveTemplateVersion = 5;
+
+    /// <summary>The executive summary's subsection the recorder heads with the settings not at their defaults.</summary>
+    public const string ParticipantPart = "participant";
 
     /// <summary>The executive summary's subsections, each a section of its answer, with the heading the recorder gives it.</summary>
     public static readonly IReadOnlyList<(string Section, string Heading)> ExecutiveParts =
@@ -326,7 +350,11 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         ("experience", "What worked and what got in the way")
     ];
 
-    public static readonly IReadOnlyList<string> StorySections = [.. StoryParts.Select(part => part.Section)];
+    /// <summary>The subsection of a visit's story the recorder writes, not the model: its steps (proposal 4).</summary>
+    public const string RecorderSteps = "actions";
+
+    /// <summary>The sections of a story's answer: every subsection but the steps, which the recorder writes.</summary>
+    public static readonly IReadOnlyList<string> StorySections = [.. StoryParts.Select(part => part.Section).Where(section => section != RecorderSteps)];
 
     public static readonly IReadOnlyList<string> OpeningSections = ["opening"];
 
@@ -469,22 +497,21 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "You write one part of the chapter on the user experience of a professional report for accessibility and usability engineers on an accessibility test recording: the story of the user experience. " +
         "This part is one page visit. You are given the participant's capabilities; the recorder's facts about the visit, each beginning with an evidence reference such as [E3], " +
         "with the page's changes during it in time order: its live regions, its popups opening and closing, NVDA's windows, and its scrolls; " +
-        "the visit in time order, each input of the participant with what the recorder found after it and before the next; " +
+        "what the participant did, as the recorder writes it in the report: the inputs counted, then numbered steps, each an input and what the recorder found after it and before the next; " +
         "the visit's knowledge in layers: layer 1 from the recorded data, layer 2 from captured frames of the screen, and layer 3 from the web page as the recorder rebuilt it, each statement with the references it rests on; " +
         "the moments of the visit, each with its captured frame's reference and its tiles' references; which section of the chapter on the pages describes the visit's page; " +
         "the changes during the visit to the accessibility settings, the assistive technology, and the Magnifier's view, found by the recorder, each with its references; " +
         "and the story so far, the parts written for the visits before. The knowledge is inference, not fact. " +
-        "Tell what happened during the visit and what the experience was, in three subsections that the recorder heads, so that each holds only its own topic. " +
+        "Tell how the participant arrived and what the experience was, in two subsections that the recorder heads, so that each holds only its own topic; " +
+        "between them the recorder writes the third, what the participant did, from its steps. " +
         "Tell each change to the settings or the assistive technology where it happened in the story, and what followed it as far as the evidence shows. " +
         "Where the Magnifier panned, say which part of the screen it showed, from the parts given: that is what was on the screen, not necessarily what the participant looked at. " +
         "Follow on from the story so far without repeating it, and do not describe the page again: refer to its section of the chapter on the pages. " +
         "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
-        ParticipantRules + EvidenceRules + RecreationIsEvidence + VisualAndSemantics + Noticing +
-        "Answer in JSON with three sections: \"arriving\", how the participant came to the page and what was on the screen when they arrived; " +
-        "\"actions\", what the participant did, in order, as numbered steps taken from the visit in time order: each step an input and what the recorder found after it, citing both, " +
-        "and where nothing was found after it, saying so; inputs one after another with the same kind of response may be one step; " +
+        ParticipantRules + ReportEvidenceRules + RecreationIsEvidence + VisualAndSemantics + Noticing +
+        "Answer in JSON with two sections: \"arriving\", how the participant came to the page and what was on the screen when they arrived, before the first step; " +
         "and \"experience\", what worked and what got in the way for this participant, interpreted: what helped or hindered them and why it matters, with the facts as support, " +
-        "without restating the steps, the scrolls, or what was on the screen. " +
+        "referring to the steps by number, without restating the steps, the scrolls, or what was on the screen. " +
         "Do not repeat in one section what another holds. " + StoryAnswer;
 
     public const string OpeningInstructions =
@@ -497,13 +524,13 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "so that the parts that follow read as one story. The participant, their capabilities, and their assistive technology are described in the executive summary and the chapter on the participant: " +
         "refer to them in a phrase, and do not describe them again. Do not repeat the parts. The settings at the start are given in the report's appendices; do not list them. " +
         "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
-        ParticipantRules + EvidenceRules + RecreationIsEvidence +
+        ParticipantRules + ReportEvidenceRules + RecreationIsEvidence +
         "Answer in JSON with one section, \"opening\", the introduction, which the recorder heads. " + StoryAnswer;
 
     public const string ExecutiveInstructions =
         "You write the executive summary, the first chapter, of a professional report for accessibility and usability engineers on an accessibility test recording. " +
-        "You are given the participant's capabilities; the assistive technology at the start and the accessibility settings at the start, found by the recorder, each with whether it is at its default; " +
-        "the changes to them during the recording; the page visits and the pages; and the chapter on the user experience, which tells the journey. " +
+        "You are given the participant's capabilities; the assistive technology at the start and the accessibility settings at the start that are not at their defaults or whose default is unknown, found by the recorder; " +
+        "the changes to them during the recording; the page visits and the pages; each visit's steps, as the recorder writes them, counted; and the chapter on the user experience, which tells the journey. " +
         "Each is given with the evidence references it rests on, such as [E3]; the chapter's statements are inferences, not facts. " +
         "Write as the executive summary of a professional report is written: interpret and explain. State a judgement first and then explain it, with its reasons from the evidence and the caveats that temper it. " +
         "Say what the facts mean and why they matter, for this participant and for the engineers who will act on the report, not the facts alone; the chapters and appendices give the facts. " +
@@ -512,11 +539,12 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "A setting whose default is unknown may still be significant, such as a text size above 100 percent or a contrast theme in use: name it with its value, and do not say whether it is the default. " +
         SettingsRules +
         "Describe only what these support, name sites, programs, windows, and pages only as they are named, and say that something is unknown where they do not settle it. " +
-        ParticipantRules + EvidenceRules +
+        ParticipantRules + ReportEvidenceRules +
         "What the rebuilt page lacks is a limit of the evidence: give it, if at all, in what the evidence does not show, not in the journey. " +
         "Answer in JSON with four sections, each a subsection of the summary that the recorder heads, so that each holds only its own topic: " +
         "\"overview\", the overall picture in one paragraph: who the participant is, what they did, and your judgement of how it went, with its main reason; " +
-        "\"participant\", the participant and their set-up: the assistive technology they used and the significant accessibility settings in use and their changes, and what these mean for how the participant works and for what the report can say; " +
+        "\"participant\", the participant and their set-up: the recorder lists the settings not at their defaults at the start of this subsection, so do not list them again; " +
+        "say what the assistive technology, those settings, any significant setting whose default is unknown, and their changes mean for how the participant works and for what the report can say; " +
         "\"journey\", the journey: what the participant did and how it went, where it worked and where it got in the way, and why it matters; " +
         "and \"evidence\", what the evidence shows and does not show: how much the recording covers, what was inferred rather than recorded, and what is unknown, and how that limits the judgement. " +
         "Do not repeat in one section what another holds. " +
@@ -1307,7 +1335,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     {
         var references = new HashSet<string>(RecordingSummaryKind.VisitReferences(collation, visit), StringComparer.Ordinal);
         var input = new StringBuilder(RecordingSummaryKind.VisitInput(collation, visit)).Append("\n\n");
-        AppendTimeline(input, visit, references);
+        StepsOf(collation, visit).AppendInput(input, references);
         input.Append(CultureInfo.InvariantCulture, $"The visit's page is described in the report's chapter on the pages, section 3.{section}.\n\n")
             .Append("The visit's knowledge, in layers. These are inferences, not facts:\n");
         knowledge.Append(input, references, withNumbers: false);
@@ -1360,42 +1388,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         return (input.ToString(), references);
     }
 
-    /// <summary>
-    /// The visit's inputs in time order, each with what the recorder found
-    /// after it and before the next, so that each numbered step is an
-    /// action with its response (target report, 2026-10-18: the steps gave
-    /// the inputs alone, their responses gathered in another subsection).
-    /// </summary>
-    internal static void AppendTimeline(StringBuilder input, VisitCollation visit, ISet<string> references)
-    {
-        if (visit.Timeline.Count == 0)
-        {
-            return;
-        }
-
-        input.Append("The visit in time order, derived by the recorder: each input of the participant, and under it what the recorder found after it and before the next input. ")
-            .Append("What follows an input was found after it; that the input caused it is shown only where a fact says so:\n");
-        var any = false;
-        foreach (var item in visit.Timeline)
-        {
-            if (item.Input)
-            {
-                any = true;
-                input.Append("Input: ").Append(item.Line).Append('\n');
-            }
-            else
-            {
-                input.Append(any ? "  then: " : "Before the first input: ").Append(item.Line).Append('\n');
-            }
-
-            foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(item.Line, @"^\[(E\d+)\]"))
-            {
-                references.Add(match.Groups[1].Value);
-            }
-        }
-
-        input.Append('\n');
-    }
+    /// <summary>The visit's steps as the recorder writes them, the last visit ending with the recording.</summary>
+    internal static VisitSteps StepsOf(RecordingCollation collation, VisitCollation visit) =>
+        VisitSteps.Of(visit, collation.Visits.Count > 0 && collation.Visits[^1].Visit.Number == visit.Visit.Number, collation.Duration);
 
     /// <summary>
     /// Chapter 2's opening request: the capabilities, the visits, the pages
@@ -1427,10 +1422,12 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         }
 
         AppendChanges(input, "before the first visit", changes ?? [], settingReferences, references);
-        input.Append("\nThe chapter's parts, which follow the opening. These are inferences, not facts:\n");
+        input.Append("\nThe chapter's parts, which follow the opening, each with its inputs as the recorder counts them. The parts are inferences, not facts:\n");
         foreach (var (visit, step) in parts)
         {
-            input.Append(CultureInfo.InvariantCulture, $"The part for visit {visit.Visit.Number}:\n");
+            var steps = StepsOf(collation, visit);
+            input.Append(CultureInfo.InvariantCulture, $"The part for visit {visit.Visit.Number}:\n")
+                .Append("  ").Append(steps.Counts).Append(' ').Append(steps.Ending).Append('\n');
             AppendStory(input, step, references);
         }
 
@@ -1454,12 +1451,24 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         var references = new HashSet<string>(RecordingSummaryKind.CapabilityReferences(collation), StringComparer.Ordinal);
         var input = new StringBuilder()
             .Append(string.Join('\n', collation.CapabilityLines)).Append("\n\n");
-        void Rows(string title, IReadOnlyList<SettingRow> rows, string? note)
+        // Only the settings not at their defaults, whose default is
+        // unknown, or that are values read: one at its default shows no
+        // choice, and the recorder lists those not at their defaults in the
+        // report itself (proposal 4).
+        void Rows(string title, IReadOnlyList<SettingRow> all, string? note)
         {
+            var rows = all.Where(row => row.Default != DefaultState.Default).ToList();
             input.Append(title).Append(":\n");
             if (note is not null)
             {
                 input.Append(note).Append('\n');
+            }
+
+            var atDefault = all.Count - rows.Count;
+            if (atDefault > 0)
+            {
+                input.Append(CultureInfo.InvariantCulture,
+                    $"{atDefault} {(atDefault == 1 ? "setting is" : "settings are")} at the default, and left out here: a setting at its default shows no choice.\n");
             }
 
             foreach (var row in rows)
@@ -1497,11 +1506,12 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             input.Append(CultureInfo.InvariantCulture, $"Section 3.{page.Number}: {LayeredReport.PageTitle(page)}, visits {string.Join(", ", page.Visits)}.\n");
         }
 
-        input.Append("\nThe chapter on the user experience. These are inferences, not facts:\nIts opening:\n");
+        input.Append("\nThe chapter on the user experience: each visit's steps, as the recorder writes them, and the parts, which are inferences, not facts.\nIts opening:\n");
         AppendStory(input, opening, references);
         foreach (var (visit, step) in parts)
         {
             input.Append(CultureInfo.InvariantCulture, $"The part for visit {visit.Visit.Number}:\n");
+            StepsOf(collation, visit).AppendInput(input, references);
             AppendStory(input, step, references);
         }
 

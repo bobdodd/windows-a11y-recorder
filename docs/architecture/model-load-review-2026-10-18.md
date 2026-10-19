@@ -223,8 +223,10 @@ In the order recommended: each is measured by trial before the next.
   them exactly.
 - **Cost:** the steps read as the recorder's lines, plainer than a model's
   prose.
-- **Decision needed:** this changes the story's design, which the owner
-  set on 2026-10-16.
+- **Decided,** 2026-10-18: "Of the proposals, the only one I want you to
+  act on for now is (4)." Built as described in `recording-summary.md`,
+  "The recorder writes the steps and the settings list (built)". The other
+  proposals are not acted on for now.
 
 ### 5. Smaller inputs and answers for the layers
 
@@ -287,8 +289,7 @@ can be followed from build to build.
 1. Proposal 1: the click fact's wording, and whether the player's mouse
    panel changes with it.
 2. Proposal 2: one revision at temperature 0 before the seeds.
-3. Proposal 4: the recorder writing the story's numbered steps and the
-   settings list.
+3. Proposal 4: decided and built, 2026-10-18.
 4. Proposal 6: which models to measure.
 
 ## Sources

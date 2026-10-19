@@ -554,10 +554,12 @@ public sealed class RecordingSummaryTests
     }
 
     [Fact]
-    public void TheVisitInTimeOrderGivesEachInputWithWhatFollowedIt()
+    public void TheRecorderWritesTheVisitsStepsEachInputWithWhatFollowedItCounted()
     {
         // The story's steps gave the inputs alone, their responses gathered
-        // in another subsection (target report, 2026-10-18).
+        // in another subsection (target report, 2026-10-18); the recorder
+        // now writes the steps and counts them (owner, 2026-10-18, the
+        // design review's proposal 4).
         var builder = new PageBuilder();
         var html = builder.Element(builder.Document, "html", "rootWebArea", "Timeline");
         var body = builder.Element(html, "body", "genericContainer");
@@ -577,27 +579,87 @@ public sealed class RecordingSummaryTests
         }
 
         evidence.ClickList.Add(new TimedFact(7 * Second, "click-1", "Mouse left button pressed at screen point (5, 5)"));
+        // Tab twice, nothing found between: one step, counted.
+        evidence.KeyList.Add(new TimedFact(7 * Second + Second / 2, "key-3", "Tab, passed to the page"));
+        evidence.KeyList.Add(new TimedFact(8 * Second, "key-4", "Tab, passed to the page"));
 
         var visit = SummaryCollator.Collate(evidence, ParticipantCapabilities.Unknown).Visits[0];
         var input = new System.Text.StringBuilder();
         var references = new HashSet<string>(StringComparer.Ordinal);
-        RecordingSummaryVisionKind.AppendTimeline(input, visit, references);
+        var steps = VisitSteps.Of(visit, last: true, recordingEnd: 10 * Second);
+        steps.AppendInput(input, references);
         var lines = System.Text.RegularExpressions.Regex.Replace(input.ToString(), @"\[E\d+\] ", "").Split('\n');
 
         Assert.Equal(
             [
+                "The recorder recorded 8 inputs from the participant during the visit, in 5 steps: Tab, 3 presses; h, 1 press; characters typed, 3 keys; the mouse's left button, 1 press.",
                 "Before the first input: 00:00:01.000 The page scrolled from a position not recorded in the visit to 0 CSS pixels from the top at 00:00:01.000, 1 position recorded. With a viewport 800 CSS pixels high, CSS pixels 0 to 800 were then in it.",
-                "Input: 00:00:02.000 Key pressed: Tab, passed to the page.",
+                "Step 1: 00:00:02.000 Key pressed: Tab, passed to the page.",
                 "  then: 00:00:02.100 The page's focus moved to link \"Skip to main content\".",
-                "Input: 00:00:03.000 Key pressed: h, kept by NVDA.",
+                "Step 2: 00:00:03.000 Key pressed: h, kept by NVDA.",
                 "  then: 00:00:03.000 NVDA kept h as its command: next heading.",
                 "  then: 00:00:03.100 NVDA had to announce (inferred, uncertain): heading, level 2",
-                "Input: 00:00:04.000 Characters typed, 3 keys, from \"a\" to \"c\", passed to the page.",
-                "Input: 00:00:07.000 Mouse left button pressed at screen point (5, 5)"
+                "Step 3: 00:00:04.000 Characters typed, 3 keys, from \"a\" to \"c\", passed to the page.",
+                "Step 4: 00:00:07.000 Mouse left button pressed at screen point (5, 5)",
+                "Step 5: 00:00:07.500 to 00:00:08.000, 2 times: Key pressed: Tab, passed to the page.",
+                "The recording ended at 00:00:10.000."
             ],
-            lines.Skip(1).Take(8));
+            lines.Skip(1).Take(11));
+        Assert.Equal(2, steps.Steps[4].InputReferences.Count);
+
+        // As the report writes it: the counts, what came before, each step
+        // numbered with what followed it, or that nothing did, and the end.
+        var report = new System.Text.StringBuilder();
+        LayeredReport.AppendSteps(report, steps, references => " " + string.Join(' ', references.Select(_ => "[R]")));
+        Assert.Equal(
+            "The recorder recorded 8 inputs from the participant during the visit, in 5 steps: Tab, 3 presses; h, 1 press; characters typed, 3 keys; the mouse's left button, 1 press.\n\n" +
+            "Before the first input, the recorder found:\n\n" +
+            "- 00:00:01.000 The page scrolled from a position not recorded in the visit to 0 CSS pixels from the top at 00:00:01.000, 1 position recorded. With a viewport 800 CSS pixels high, CSS pixels 0 to 800 were then in it. [R]\n\n" +
+            "1. 00:00:02.000 Key pressed: Tab, passed to the page. [R]\n" +
+            "   - 00:00:02.100 The page's focus moved to link \"Skip to main content\". [R]\n" +
+            "2. 00:00:03.000 Key pressed: h, kept by NVDA. [R]\n" +
+            "   - 00:00:03.000 NVDA kept h as its command: next heading. [R]\n" +
+            "   - 00:00:03.100 NVDA had to announce (inferred, uncertain): heading, level 2 [R]\n" +
+            "3. 00:00:04.000 Characters typed, 3 keys, from \"a\" to \"c\", passed to the page. [R]\n" +
+            "   - The recorder found nothing after it before the next input.\n" +
+            "4. 00:00:07.000 Mouse left button pressed at screen point (5, 5) [R]\n" +
+            "   - The recorder found nothing after it before the next input.\n" +
+            "5. 00:00:07.500 to 00:00:08.000, 2 times: Key pressed: Tab, passed to the page. [R] [R]\n" +
+            "   - The recorder found nothing after it before the next input.\n\n" +
+            "The recording ended at 00:00:10.000.\n\n",
+            report.ToString());
+        Assert.Equal("The visit ended at " + SummaryCollator.Time(visit.Visit.End) + ", when the next visit began.", VisitSteps.Of(visit, last: false, recordingEnd: 10 * Second).Ending);
         Assert.All(System.Text.RegularExpressions.Regex.Matches(input.ToString(), @"\[(E\d+)\]"), match => Assert.Contains(match.Groups[1].Value, references));
         Assert.All(references, reference => Assert.Contains(reference, visit.References));
+    }
+
+    [Fact]
+    public void TheRecorderListsTheSettingsNotAtTheirDefaultsForTheExecutiveSummary()
+    {
+        // The design review's proposal 4 (owner, 2026-10-18): the recorder
+        // lists them; the model says what they mean.
+        SettingRow Row(string group, string setting, string value, DefaultState state, string? defaultValue, string key) =>
+            new("A", group, setting, value, state, defaultValue, new SettingSource(0, key, "", null));
+        var settings = new RecordedSettings(
+            [Row("Display", "Text size", "150%", DefaultState.NotDefault, "100%", "text"), Row("Display", "Theme", "Light", DefaultState.Default, null, "theme")], null,
+            [Row("Fonts", "Minimum font size", "0", DefaultState.Unknown, null, "font")], null,
+            [Row("NVDA", "Speech rate", "60", DefaultState.NotDefault, null, "rate")], null,
+            []);
+        var builder = new System.Text.StringBuilder();
+
+        LayeredReport.AppendSettingsNotAtDefault(builder, settings, key => $" [{key}]");
+
+        Assert.Equal(
+            "The settings not at their defaults at the start, found by the recorder; Appendices A to C give every setting, and Appendix D every change:\n\n" +
+            "- NVDA, Speech rate: 60 (not the default) [rate]\n" +
+            "- Display, Text size: 150% (not the default, which is 100%) [text]\n\n",
+            builder.ToString());
+        builder.Clear();
+        LayeredReport.AppendSettingsNotAtDefault(builder, settings with { Windows = [], Assistive = [] }, key => "");
+        Assert.Equal("The recorder found no setting at the start that was not at its default. Settings whose default is unknown are in Appendices A to C.\n\n", builder.ToString());
+        builder.Clear();
+        LayeredReport.AppendSettingsNotAtDefault(builder, RecordedSettings.None, key => "");
+        Assert.Equal("The recording holds no record of the settings at the start, so which were not at their defaults is unknown.\n\n", builder.ToString());
     }
 
     [Fact]
