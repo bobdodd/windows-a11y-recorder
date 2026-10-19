@@ -599,7 +599,7 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Contains("Figure 2. A picture of the story.", text, StringComparison.Ordinal);
         Assert.Contains("- No statement's text held a reference of its own: the references after each statement are the recorder's.\n", text, StringComparison.Ordinal);
         Assert.DoesNotContain("[K", text, StringComparison.Ordinal);
-        Assert.Contains($"- {RecordingSummaryVisionKind.Layer2Template} and {RecordingSummaryVisionKind.Layer3Template} version 3, for each moment's layers.\n", text, StringComparison.Ordinal);
+        Assert.Contains($"- {RecordingSummaryVisionKind.Layer2Template} and {RecordingSummaryVisionKind.Layer3Template} version 4, for each moment's layers.\n", text, StringComparison.Ordinal);
         Assert.Contains("- Layer 3 steps not sent, as every group of the moment's tiles was already in the visit's knowledge: visit-0001-moment-02-layer-3.\n", text, StringComparison.Ordinal);
         Assert.Contains(
             "\n2 groups of tiles were not sent, as their tiles were the same pictures, pixel for pixel, at the same places as a group already described, whose answer each uses unchanged:\n\n" +
@@ -768,7 +768,7 @@ public sealed partial class RecordingSummaryTaskTests
     [Fact]
     public void Every_template_shows_a_statement_with_its_text_before_its_kind()
     {
-        Assert.Equal((4, 4, 4, 3, 6, 6, 4), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+        Assert.Equal((4, 4, 4, 4, 6, 6, 4), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
             RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.LayerTemplateVersion, RecordingSummaryVisionKind.PageChapterTemplateVersion,
             RecordingSummaryVisionKind.StoryTemplateVersion, RecordingSummaryVisionKind.ExecutiveTemplateVersion));
         foreach (var instructions in new[]

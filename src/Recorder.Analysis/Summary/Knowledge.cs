@@ -38,6 +38,13 @@ public sealed class Knowledge
     /// <summary>The sections a layer's answer has.</summary>
     public static readonly IReadOnlyList<string> LayerSections = ["elaborations", "corrections", "new"];
 
+    /// <summary>
+    /// The sections whose statements name, first, as "about", the statement
+    /// they add to (layer templates version 4). ClaimCheck gives it as the
+    /// first reference of the statement's evidence, which Add reads.
+    /// </summary>
+    public static readonly IReadOnlyList<string> AboutSections = ["elaborations", "corrections"];
+
     private readonly List<KnowledgeStatement> _statements = [];
 
     public IReadOnlyList<KnowledgeStatement> Statements => _statements;

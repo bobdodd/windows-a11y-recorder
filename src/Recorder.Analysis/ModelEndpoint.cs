@@ -36,6 +36,20 @@ public sealed record ModelRequest(
     public IReadOnlyList<string>? Forms { get; init; }
 
     /// <summary>
+    /// The sections whose statements each name, first, the statement of
+    /// the input they are about, as "about", one of the input's
+    /// references beginning with this prefix; null for every step but the
+    /// layers, whose elaborations and corrections name the knowledge
+    /// statement they add to. The 2edb728 and 4048f30 runs on the target
+    /// machine, 2026-10-18: asked to cite that number first in the
+    /// evidence, every answer wrote it in the text instead.
+    /// </summary>
+    public IReadOnlyList<string>? AboutSections { get; init; }
+
+    /// <summary>The prefix of the references an "about" may name, such as "K".</summary>
+    public string AboutPrefix { get; init; } = "K";
+
+    /// <summary>
     /// The profile's sampling options left out of this step's request. The
     /// steps that write the report leave out the presence penalty, which
     /// is for the steps that describe a moment, where answers looped: on the
@@ -195,7 +209,8 @@ public static class ChatRequest
             ["response_format"] = new JsonObject
             {
                 ["type"] = "json_object",
-                ["schema"] = ClaimCheck.Schema(request.Sections, request.Forms)
+                ["schema"] = ClaimCheck.Schema(request.Sections, request.Forms, request.AboutSections,
+                    request.AboutSections is null ? null : [.. request.InputReferences.Where(reference => IsAbout(reference, request.AboutPrefix)).OrderBy(Number)])
             }
         };
         if (oneLine)
@@ -234,6 +249,13 @@ public static class ChatRequest
             ["images"] = request.Images.Count
         };
     }
+
+    // A reference an "about" may name: the prefix, then digits.
+    internal static bool IsAbout(string reference, string prefix) =>
+        reference.Length > prefix.Length && reference.StartsWith(prefix, StringComparison.Ordinal) && reference.AsSpan(prefix.Length).IndexOfAnyExceptInRange('0', '9') < 0;
+
+    private static int Number(string reference) =>
+        int.TryParse(reference.AsSpan(1), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var number) ? number : int.MaxValue;
 
     public static string Sha256(string body) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(body)));

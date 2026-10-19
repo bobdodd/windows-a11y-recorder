@@ -96,6 +96,13 @@ in the text even where cited, and an E reference left outside brackets.
 See analysis-runner.md, "Answers whose wording breaks the report's
 rules".
 
+The 4048f30 run failed at moment 2, layer 2, the same way: "described in
+K34 and K35" in every elaboration. The layer templates, version 4, give
+elaborations and corrections an "about" field before the text, held by
+the answer's form to the input's K numbers, so the link is made in a
+field of its own; the check is unchanged. Trialled on the target machine
+on the two failed steps before another full run.
+
 Part 4, the browser-only report scope, built 2026-10-18 at the owner's
 request ("add it now please"), not yet checked on the target machine:
 

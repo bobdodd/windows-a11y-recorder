@@ -32,7 +32,13 @@ public static class ClaimCheck
     /// after its evidence, so that the schema of every other step is as it
     /// was and a run again reuses those steps.
     /// </param>
-    public static JsonObject Schema(IReadOnlyList<string> sections, IReadOnlyList<string>? forms = null)
+    /// <param name="aboutSections">
+    /// Where given, the statements of these sections each have an "about",
+    /// first, one of <paramref name="about"/>: the statement of the input
+    /// they add to. Where no reference may be named, the sections have none.
+    /// </param>
+    public static JsonObject Schema(IReadOnlyList<string> sections, IReadOnlyList<string>? forms = null,
+        IReadOnlyList<string>? aboutSections = null, IReadOnlyList<string>? about = null)
     {
         ArgumentNullException.ThrowIfNull(sections);
         var statement = new JsonObject
@@ -73,16 +79,45 @@ public static class ClaimCheck
             statement["required"] = new JsonArray("form", "text", "kind", "evidence");
         }
 
+        // The statement it is about comes first, so that the model names
+        // it before writing the statement, and has no need to name it in
+        // the text (target runs of 2026-10-18).
+        JsonObject? aboutStatement = null;
+        if (aboutSections is { Count: > 0 } && about is { Count: > 0 })
+        {
+            var given = statement["properties"]!.AsObject();
+            var aboutFirst = new JsonObject
+            {
+                ["about"] = new JsonObject
+                {
+                    ["type"] = "string",
+                    ["enum"] = new JsonArray([.. about.Select(reference => JsonValue.Create(reference))])
+                }
+            };
+            foreach (var (name, value) in given)
+            {
+                aboutFirst[name] = value!.DeepClone();
+            }
+
+            aboutStatement = new JsonObject
+            {
+                ["type"] = "object",
+                ["properties"] = aboutFirst,
+                ["required"] = new JsonArray([JsonValue.Create("about"), .. statement["required"]!.AsArray().Select(item => item!.DeepClone())])
+            };
+        }
+
         var properties = new JsonObject();
         foreach (var section in sections)
         {
+            var item = aboutStatement is not null && aboutSections!.Contains(section, StringComparer.Ordinal) ? aboutStatement : statement;
             properties[section] = new JsonObject
             {
                 ["type"] = "array",
                 ["items"] = new JsonObject
                 {
                     ["type"] = "array",
-                    ["items"] = statement.DeepClone()
+                    ["items"] = item.DeepClone()
                 }
             };
         }
@@ -168,7 +203,20 @@ public static class ClaimCheck
                             return ([], default, $"{place} has no text.");
                         }
 
+                        // The statement it is about, where the answer names
+                        // one: the first reference of its evidence, as the
+                        // knowledge reads it (Knowledge.Add).
                         var evidence = new List<string>();
+                        if (statement.TryGetProperty("about", out var aboutElement))
+                        {
+                            if (aboutElement.ValueKind != JsonValueKind.String || !inputReferences.Contains(aboutElement.GetString()!))
+                            {
+                                return ([], default, $"{place} is about {aboutElement.GetRawText()}, which was not in the input.");
+                            }
+
+                            evidence.Add(aboutElement.GetString()!);
+                        }
+
                         foreach (var reference in evidenceElement.EnumerateArray())
                         {
                             if (reference.ValueKind != JsonValueKind.String)
@@ -182,7 +230,10 @@ public static class ClaimCheck
                                 return ([], default, $"{place} cites {value}, which was not in the input.");
                             }
 
-                            evidence.Add(value);
+                            if (!evidence.Contains(value, StringComparer.Ordinal))
+                            {
+                                evidence.Add(value);
+                            }
                         }
 
                         if (kind == Claim.ClaimKind && evidence.Count == 0)

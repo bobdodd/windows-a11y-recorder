@@ -1015,6 +1015,15 @@ Built on 2026-10-18 from the target report of 88464e7
   statement cites, such as "as E94 shows", as it cannot be taken out
   cleanly. The layer templates, version 3, ask for the number first in
   the evidence, with an example, and never in the text.
+- **The 4048f30 run, the same day, failed at moment 2's layer 2 the same
+  way**, every elaboration writing "described in K34 and K35" though asked
+  for the number in the evidence. The layer templates, version 4, give
+  elaborations and corrections an "about", first, before the text: the
+  answer's form holds it to one of the K numbers of the input, and
+  ClaimCheck gives it to the knowledge as the first reference of the
+  statement's evidence, which ties the statement to the one it adds to.
+  The instructions give an example of a text without the number, and one
+  with it not to write.
 - **Such an answer is recovered from as one with no statement is:**
   sampled at temperature 0.7 at seed 1, then 2, then 3, the first that
   passes being the step's answer; where none passes the step fails,

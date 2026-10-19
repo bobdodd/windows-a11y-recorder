@@ -255,8 +255,12 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // Version 2: references out of the text, and what is seen set beside
     // what the page is built as (report-fixes-2026-10-18.md).
     // Version 3: the number of the statement elaborated or corrected first
-    // in the evidence, with an example, and never in the text.
-    public const int LayerTemplateVersion = 3;
+    // in the evidence, with an example, and never in the text. Version 4:
+    // named instead as the statement's "about", first, one of the input's
+    // K numbers as the answer's form holds it, with an example of a text
+    // without it (4048f30 run, 2026-10-18, moment 2: every elaboration
+    // still wrote "described in K34 and K35").
+    public const int LayerTemplateVersion = 4;
 
     // Version 2 of the chapters' templates: the executive summary becomes
     // chapter 1, so the pages are chapter 2 and the story chapter 3, named
@@ -376,16 +380,18 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // statement (Knowledge.Add), so the number is asked for there, with an
     // example, and never in the text.
     public const string LayerAnswer =
-        "Answer in JSON with three sections: \"elaborations\", statements that add detail to a numbered statement of the knowledge, each with that statement's number first in its evidence, " +
-        "such as \"evidence\": [\"K3\", \"E94\"]; " +
-        "\"corrections\", statements where this moment shows that a numbered statement is wrong or disagrees with it, each with that statement's number first in its evidence and saying how they disagree, citing both, without settling it; " +
+        "Answer in JSON with three sections: \"elaborations\", statements that add detail to a numbered statement of the knowledge, each naming that statement's number as its \"about\"; " +
+        "\"corrections\", statements where this moment shows that a numbered statement is wrong or disagrees with it, each naming that statement's number as its \"about\" and saying how they disagree, citing what shows it, without settling it; " +
         "and \"new\", statements about what the knowledge does not yet cover. " +
         "Do not repeat what the knowledge already says, and do not restate the recorder's facts: add only what this moment adds. Where it adds nothing, give the three sections empty. " +
         "This is about the user experience, not a list of the page's elements: do not list each control, link, or line of text. " +
         "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
-        "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
-        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + ReferencesOutOfText +
-        "Say what a statement adds, not which statement it adds to: never write a statement's number, such as \"K3\", in the text. " +
+        "A statement of \"new\" is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}; one of \"elaborations\" or \"corrections\" begins with its \"about\", such as {\"about\": \"K3\", \"text\": ..., \"kind\": \"claim\", \"evidence\": [...]}. " +
+        UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + ReferencesOutOfText +
+        "The \"about\" says which statement it adds to, so the text says only what it adds: never write a statement's number, such as \"K3\", in the text. " +
+        "Write, for example, {\"about\": \"K3\", \"text\": \"The hero image shows two people, one in a yellow vest.\", \"kind\": \"claim\", \"evidence\": [\"E53\"]}, " +
+        "not {\"about\": \"K3\", \"text\": \"The frame confirms K3, showing the hero image.\", \"kind\": \"claim\", \"evidence\": [\"E53\"]}. " +
         VisualAndSemantics + "Write plain sentences without Markdown.";
 
     public const string Layer2Instructions =
@@ -819,6 +825,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                     $"{key}-layer-2",
                     new ModelRequest(Layer2Template, LayerTemplateVersion, Layer2Instructions, layer2Input, [], Knowledge.LayerSections, layer2References)
                     {
+                        AboutSections = Knowledge.AboutSections,
                         ChecksWording = true
                     },
                     cancellationToken).ConfigureAwait(false);
@@ -842,6 +849,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                             $"{key}-layer-3",
                             new ModelRequest(Layer3Template, LayerTemplateVersion, Layer3Instructions, layer3Input, [], Knowledge.LayerSections, layer3References)
                             {
+                                AboutSections = Knowledge.AboutSections,
                                 ChecksWording = true
                             },
                             cancellationToken).ConfigureAwait(false);

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using Recorder.Analysis;
+using Recorder.Analysis.Summary;
 
 namespace Recorder.Tests;
 
@@ -37,6 +38,48 @@ public sealed class AnalysisRulesTests
 
         Assert.Equal(["text", "kind", "evidence"], statement["properties"]!.AsObject().Select(property => property.Key));
         Assert.Equal(["text", "kind", "evidence"], statement["required"]!.AsArray().Select(name => (string)name!));
+    }
+
+    [Fact]
+    public void A_layer_elaboration_names_the_statement_it_adds_to_first_from_the_inputs_numbers()
+    {
+        // 4048f30 run on the target machine, 2026-10-18, moment 2, layer 2:
+        // asked to cite the number in the evidence, every elaboration wrote
+        // it in the text ("described in K34 and K35").
+        var (settings, _) = AnalysisSettingsFile.Parse(Settings(LocalProfile));
+        var request = new ModelRequest("layer", 4, "Add.", "[K1] a [K12] b [K2] c", [], Knowledge.LayerSections, new HashSet<string> { "K12", "E5", "K1", "K2" })
+        {
+            AboutSections = Knowledge.AboutSections
+        };
+        using var document = JsonDocument.Parse(ChatRequest.Build(settings.Profiles[0], request));
+        var properties = document.RootElement.GetProperty("response_format").GetProperty("schema").GetProperty("properties");
+        string[] Names(string section) => [.. properties.GetProperty(section).GetProperty("items").GetProperty("items").GetProperty("properties").EnumerateObject().Select(property => property.Name)];
+
+        Assert.Equal(["about", "text", "kind", "evidence"], Names("elaborations"));
+        Assert.Equal(["about", "text", "kind", "evidence"], Names("corrections"));
+        Assert.Equal(["text", "kind", "evidence"], Names("new"));
+        var about = properties.GetProperty("elaborations").GetProperty("items").GetProperty("items");
+        Assert.Equal(["K1", "K2", "K12"], about.GetProperty("properties").GetProperty("about").GetProperty("enum").EnumerateArray().Select(value => value.GetString()));
+        Assert.Equal("about", about.GetProperty("required")[0].GetString());
+    }
+
+    [Fact]
+    public void A_statements_about_is_read_as_the_first_reference_of_its_evidence()
+    {
+        var references = new HashSet<string> { "K1", "K2", "E5" };
+        var answer = """{"elaborations":[[{"about":"K2","text":"The hero image shows two people.","kind":"claim","evidence":["E5","K2"]}]],"corrections":[],"new":[]}""";
+
+        var (claims, _, failure) = ClaimCheck.Check(answer, Knowledge.LayerSections, references);
+
+        Assert.Null(failure);
+        Assert.Equal(["K2", "E5"], claims[0].Evidence);
+        var knowledge = new Knowledge();
+        knowledge.Add([new Claim("new", 0, 0, Claim.ClaimKind, "One.", ["E5"]), new Claim("new", 0, 1, Claim.ClaimKind, "Two.", ["E5"])], 1, 1);
+        var added = knowledge.Add(claims, 2, 1);
+        Assert.Equal((KnowledgeStatement.Elaborates, (int?)2, "E5"), (added[0].Relation, added[0].About, string.Join(' ', added[0].Claim.Evidence)));
+        Assert.Equal(
+            "Statement 1 of paragraph 1 of \"elaborations\" is about \"K9\", which was not in the input.",
+            ClaimCheck.Check(answer.Replace("\"about\":\"K2\"", "\"about\":\"K9\"", StringComparison.Ordinal), Knowledge.LayerSections, references).Failure);
     }
 
     [Fact]
