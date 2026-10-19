@@ -50,6 +50,13 @@ public sealed record StepTrial(
     /// <summary>The pictures sent with the input, one line each.</summary>
     public IReadOnlyList<string> Pictures { get; init; } = [];
 
+    /// <summary>
+    /// For a step whose wording is not checked, what the wording check would
+    /// have found in an answer that passes, or "nothing"; null where the
+    /// step's wording is checked or the answer failed.
+    /// </summary>
+    public string? WordingNotChecked { get; init; }
+
     /// <summary>The form the answer was held to, as sent: the schema, or the grammar with --one-line.</summary>
     public string? AnswerForm { get; init; }
 
@@ -91,6 +98,11 @@ public sealed record StepTrial(
         }
 
         text.Append("Outcome: ").Append(Failure is null ? "passes the checks." : "fails: " + Failure).Append("\n");
+        if (WordingNotChecked is { } wording)
+        {
+            text.Append("The step's wording is not checked; the wording check would have found: ").Append(wording).Append("\n");
+        }
+
         text.Append(CultureInfo.InvariantCulture, $"Statements: {Statements}\n");
         text.Append(CultureInfo.InvariantCulture, $"Time taken, as the worker measured it: {Elapsed.TotalSeconds:0.0} s\n");
         if (Response is { } response)

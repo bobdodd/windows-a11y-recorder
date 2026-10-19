@@ -975,12 +975,21 @@ public sealed class AnalysisWorker
         var clock = System.Diagnostics.Stopwatch.StartNew();
         ModelResponse? response = null;
         string? failure;
+        string? wordingNotChecked = null;
         try
         {
             response = await _endpoint.CompleteAsync(profile, body, watch.Check, cancellationToken).ConfigureAwait(false);
             failure = response.StoppedBecause ??
                 (response.FinishReason == "length" ? $"The output stopped at the output limit of {profile.Generation.MaxTokens} tokens." : null) ??
                 Check(response.Content, request).Failure;
+
+            // What the wording check would have found in a step it does not
+            // check, so that a trial shows what later steps are given
+            // (proposal A).
+            if (failure is null && !request.ChecksWording)
+            {
+                wordingNotChecked = WordingCheck.Check(Check(response.Content, request).Claims) ?? "nothing";
+            }
         }
         catch (ModelEndpointException exception)
         {
@@ -1000,7 +1009,8 @@ public sealed class AnalysisWorker
             Input = request.Input,
             Pictures = [.. request.Images.Select(image =>
                 $"{image.Reference}, {image.MediaType}, {image.Content.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)} bytes")],
-            AnswerForm = AnswerForm(body)
+            AnswerForm = AnswerForm(body),
+            WordingNotChecked = wordingNotChecked
         });
     }
 

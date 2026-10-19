@@ -292,7 +292,12 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // place of a label on every statement (the design review of
     // 2026-10-19, proposal C); the instructions say "under a heading that
     // gives its layer" in place of "labelled with its layer".
-    public const int LayerTemplateVersion = 5;
+    // Version 6: the rules on how the text reads are dropped, as no reader
+    // sees a layer's answer and its wording is no longer checked: the
+    // references in the evidence only, the statement's number never in the
+    // text with its example, and no Markdown (the design review of
+    // 2026-10-19, proposal A). The rules on what is true are kept.
+    public const int LayerTemplateVersion = 6;
 
     // Version 2 of the chapters' templates: the executive summary becomes
     // chapter 1, so the pages are chapter 2 and the story chapter 3, named
@@ -433,11 +438,8 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
         "A statement of \"new\" is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
         "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}; one of \"elaborations\" or \"corrections\" begins with its \"about\", such as {\"about\": \"K3\", \"text\": ..., \"kind\": \"claim\", \"evidence\": [...]}. " +
-        UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + ReferencesOutOfText +
-        "The \"about\" says which statement it adds to, so the text says only what it adds: never write a statement's number, such as \"K3\", in the text. " +
-        "Write, for example, {\"about\": \"K3\", \"text\": \"The hero image shows two people, one in a yellow vest.\", \"kind\": \"claim\", \"evidence\": [\"E53\"]}, " +
-        "not {\"about\": \"K3\", \"text\": \"The frame confirms K3, showing the hero image.\", \"kind\": \"claim\", \"evidence\": [\"E53\"]}. " +
-        VisualAndSemantics + "Write plain sentences without Markdown.";
+        UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets +
+        VisualAndSemantics;
 
     public const string Layer2Instructions =
         "You add to what is known of one page visit from an accessibility test recording, for accessibility and usability engineers, what a captured frame of the screen shows of the visual user experience. " +
@@ -868,8 +870,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                     $"{key}-layer-2",
                     new ModelRequest(Layer2Template, LayerTemplateVersion, Layer2Instructions, layer2Input, [], Knowledge.LayerSections, layer2References)
                     {
-                        AboutSections = Knowledge.AboutSections,
-                        ChecksWording = true
+                        // Its wording is not checked: no reader sees it
+                        // (the design review of 2026-10-19, proposal A).
+                        AboutSections = Knowledge.AboutSections
                     },
                     cancellationToken).ConfigureAwait(false);
                 knowledge.Add(layer2.Claims, 2, moment.Number);
@@ -892,8 +895,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                             $"{key}-layer-3",
                             new ModelRequest(Layer3Template, LayerTemplateVersion, Layer3Instructions, layer3Input, [], Knowledge.LayerSections, layer3References)
                             {
-                                AboutSections = Knowledge.AboutSections,
-                                ChecksWording = true
+                                // Its wording is not checked: no reader sees
+                                // it (proposal A).
+                                AboutSections = Knowledge.AboutSections
                             },
                             cancellationToken).ConfigureAwait(false);
                         knowledge.Add(layer3.Claims, 3, moment.Number);

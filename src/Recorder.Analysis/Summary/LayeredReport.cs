@@ -369,6 +369,7 @@ public static partial class LayeredReport
             $"- The report is built in layers. Each visit's knowledge starts as layer 1, its description from the recorded data, in the summary of task {parts.SummaryTaskId:D}.\n");
         builder.Append("- At each moment of the visit the recorder chose, a model adds layer 2, what the captured frame of the screen shows.\n");
         builder.Append("- It then adds layer 3, what the web page adds that the frame does not show, from the page as the recorder rebuilt it at that frame and pictured whole in tiles.\n");
+        builder.Append("- The wording of layers 2 and 3, which no reader sees, is not checked against the report's rules, such as never writing that NVDA spoke; the wording of chapters 1, 3, and 4 is, and an answer of theirs that breaks a rule is refused and sampled again. Every statement of every step, layers 2 and 3 included, cites only references given to that step.\n");
         builder.Append("- A captured frame shows what was on the screen, not what the participant saw.\n");
         builder.Append("- A recreated page is the page as the recorder rebuilt it from the recorded evidence, not the page itself: what the recording lacks, such as an image, it lacks too.\n");
         builder.Append(CultureInfo.InvariantCulture, $"- Each moment's record, its frame and its tiles with the steps that describe them, is in {parts.MomentIndexFile}.\n\n");

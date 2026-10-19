@@ -397,12 +397,13 @@ public sealed partial class RecordingSummaryTaskTests
     }
 
     [Fact]
-    public async Task Vision_checks_the_wording_of_the_layers_the_pages_the_story_and_the_summary_alone()
+    public async Task Vision_checks_the_wording_of_the_pages_the_story_and_the_summary_alone()
     {
         // Every answer at temperature 0 says NVDA announced something: the
-        // steps that write the report or its knowledge are refused and
-        // asked for again at seed 1; the moments and their tiles, which
-        // describe pictures, are not (owner, 2026-10-18).
+        // steps that write the report are refused and asked for again at
+        // seed 1 (owner, 2026-10-18); the moments, their tiles, and the
+        // layers, whose answers no reader sees, are not (proposal A of the
+        // design review of 2026-10-19).
         var (catalog, _, vision) = await QueueBothAsync();
         var endpoint = VisionEndpoint();
         var answer = endpoint.Answer;
@@ -420,12 +421,10 @@ public sealed partial class RecordingSummaryTaskTests
         var failed = (await RowsAsync("SELECT step_key, failure FROM analysis_attempts WHERE task_id = $1 AND outcome = 'failed' ORDER BY started_utc", vision))
             .Select(row => (string)row["step_key"]!).ToList();
         Assert.Equal(
-            [
-                "visit-0001-moment-01-layer-2", "visit-0001-moment-01-layer-3", "visit-0001-moment-02-layer-2",
-                "visit-0002-moment-01-layer-2", "visit-0002-moment-02-layer-2",
-                "page-01", "page-02", "visit-0001-story", "visit-0002-story", "story-opening", "executive-summary"
-            ],
+            ["page-01", "page-02", "visit-0001-story", "visit-0002-story", "story-opening", "executive-summary"],
             failed);
+        var report = await File.ReadAllTextAsync(Path.Combine(_session, Assert.Single(await catalog.ReportsAsync(vision, Token)).RelativePath), Token);
+        Assert.Contains("- The wording of layers 2 and 3, which no reader sees, is not checked against the report's rules", report, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -725,11 +724,22 @@ public sealed partial class RecordingSummaryTaskTests
         foreach (var instructions in new[]
         {
             RecordingSummaryVisionKind.PageChapterInstructions, RecordingSummaryVisionKind.StoryInstructions,
-            RecordingSummaryVisionKind.OpeningInstructions, RecordingSummaryVisionKind.ExecutiveInstructions,
-            RecordingSummaryVisionKind.Layer2Instructions, RecordingSummaryVisionKind.Layer3Instructions
+            RecordingSummaryVisionKind.OpeningInstructions, RecordingSummaryVisionKind.ExecutiveInstructions
         })
         {
             Assert.Contains(RecordingSummaryVisionKind.ReferencesOutOfText, instructions, StringComparison.Ordinal);
+        }
+
+        // The layers, which no reader sees, keep the rules on what is true
+        // and drop those on how the text reads (proposal A, 2026-10-19).
+        foreach (var instructions in new[] { RecordingSummaryVisionKind.Layer2Instructions, RecordingSummaryVisionKind.Layer3Instructions })
+        {
+            Assert.DoesNotContain(RecordingSummaryVisionKind.ReferencesOutOfText, instructions, StringComparison.Ordinal);
+            Assert.DoesNotContain("never write a statement's number", instructions, StringComparison.Ordinal);
+            Assert.DoesNotContain("Markdown", instructions, StringComparison.Ordinal);
+            Assert.Contains(RecordingSummaryVisionKind.ParticipantRules, instructions, StringComparison.Ordinal);
+            Assert.Contains(RecordingSummaryVisionKind.VisualAndSemantics, instructions, StringComparison.Ordinal);
+            Assert.Contains("Cite only references that appear in the input. ", instructions, StringComparison.Ordinal);
         }
 
         Assert.Contains(RecordingSummaryVisionKind.EvidenceRules, RecordingSummaryVisionKind.PageChapterInstructions, StringComparison.Ordinal);
@@ -788,7 +798,7 @@ public sealed partial class RecordingSummaryTaskTests
     [Fact]
     public void Every_template_shows_a_statement_with_its_text_before_its_kind()
     {
-        Assert.Equal((5, 5, 5, 5, 6, 7, 5), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+        Assert.Equal((5, 5, 5, 6, 6, 7, 5), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
             RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.LayerTemplateVersion, RecordingSummaryVisionKind.PageChapterTemplateVersion,
             RecordingSummaryVisionKind.StoryTemplateVersion, RecordingSummaryVisionKind.ExecutiveTemplateVersion));
         foreach (var instructions in new[]
@@ -905,6 +915,35 @@ public sealed partial class RecordingSummaryTaskTests
         var described = trial.Describe();
         Assert.Contains($"The task's attempt 1, accepted: SHA-256 {trial.RequestSha256}, the same request.", described, StringComparison.Ordinal);
         Assert.Contains("analysis/trials/" + vision.ToString("D") + "-", described, StringComparison.Ordinal);
+    }
+
+    // A trial of a step whose wording is not checked says what the check
+    // would have found, so that it shows what later steps are given
+    // (proposal A of the design review of 2026-10-19).
+    [Fact]
+    public async Task Vision_trial_of_a_layer_says_what_the_wording_check_would_have_found()
+    {
+        var (catalog, _, vision) = await QueueBothAsync();
+        await RunAsync(catalog, VisionEndpoint());
+        Assert.Equal(AnalysisTaskStates.Done, (await StateAsync(vision)).State);
+        var endpoint = VisionEndpoint();
+        var answer = endpoint.Answer;
+        endpoint.Answer = async (profile, body, token) =>
+        {
+            var response = await answer(profile, body, token);
+            return response with { Content = response.Content!.Replace("\"text\":\"", "\"text\":\"NVDA announced it. ", StringComparison.Ordinal) };
+        };
+
+        var worker = new AnalysisWorker(catalog, VisionSettings(), [new RecordingSummaryKind(), new RecordingSummaryVisionKind { Pages = (_, _) => new StandInPages() }], endpoint, options: Fast);
+        var layer = await worker.TrialAsync(vision, "visit-0001-moment-02-layer-2", new Dictionary<string, double>(), Token);
+        var story = await worker.TrialAsync(vision, "visit-0001-story", new Dictionary<string, double>(), Token);
+
+        Assert.Null(layer.Failure);
+        Assert.NotNull(layer.WordingNotChecked);
+        Assert.Contains("announced", layer.WordingNotChecked, StringComparison.Ordinal);
+        Assert.Contains("The step's wording is not checked; the wording check would have found: ", layer.Describe(), StringComparison.Ordinal);
+        Assert.NotNull(story.Failure);
+        Assert.Null(story.WordingNotChecked);
     }
 
     // A group of tiles not sent at a moment has no request to try, so a

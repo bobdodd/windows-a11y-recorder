@@ -1,7 +1,8 @@
 # Design review: the answers only a model reads
 
-Date: 2026-10-19. Status: proposal C decided and built, 2026-10-19;
-proposals A, B, and D not decided. The one change made in the same
+Date: 2026-10-19. Status: proposal C decided, built, and tried,
+2026-10-19; proposal A built for its trial, 2026-10-19; proposals B and D
+not decided. The one change made in the same
 conversation before this review, the one-line rule removed, is recorded
 under "Done alongside this review".
 
@@ -151,8 +152,25 @@ asked; then A, B, and D, each measured by trial before the next.
 - **Overlap:** with proposal 1 (the NVDA click fact) and proposal 2
   (revision before resampling): A makes both unnecessary for the layers,
   and they would still apply to the steps a reader sees.
-- **Decision needed:** this changes a rule set on 2026-10-18, that layer
-  answers are held to the report's wording.
+- **Decided for a trial,** 2026-10-19: "It's defintely an improvement so
+  let's push the changes and then we trial Option A". This changes the rule
+  set on 2026-10-18, that layer answers are held to the report's wording.
+- **Built:** the layer 2 and layer 3 requests no longer set
+  `ChecksWording`. `LayerAnswer` drops `ReferencesOutOfText`, the sentence
+  "never write a statement's number, such as \"K3\", in the text" with its
+  right and wrong example, and "Write plain sentences without Markdown";
+  it keeps `ParticipantRules`, `VisualAndSemantics`, `UnknownIsUnknown`,
+  `CiteWithoutBrackets`, and "Cite only references that appear in the
+  input". The layer templates are version 6. Appendix G.1 says: "The
+  wording of layers 2 and 3, which no reader sees, is not checked against
+  the report's rules, such as never writing that NVDA spoke; the wording of
+  chapters 1, 3, and 4 is, and an answer of theirs that breaks a rule is
+  refused and sampled again. Every statement of every step, layers 2 and 3
+  included, cites only references given to that step."
+- **What a trial shows:** a trial of a step whose wording is not checked
+  says, for an answer that passes, what the wording check would have found
+  ("The step's wording is not checked; the wording check would have found:
+  ..."), so that the trial shows what later steps are given.
 - **Test:** the trials of moment 2 and moment 6, layer 2, should be
   accepted at temperature 0; then a full run, checking that chapters 1, 3,
   and 4 pass their own wording checks.
@@ -320,8 +338,8 @@ What the trial shows:
 
 ## Decisions needed
 
-1. Proposal A: wording checks off for layers 2 and 3, with the rules kept
-   and dropped as listed.
+1. Proposal A: built for its trial, 2026-10-19; whether to keep it follows
+   the trial.
 2. Proposal B: the recorder writes layer 1, and whether the text summary
    task stays as a report of its own.
 3. Proposal C: decided and built, 2026-10-19, and tried: see "The trial of
