@@ -14,6 +14,7 @@ public sealed class WordingCheckTests
     [InlineData("The click stopped NVDA speech.", "stopped NVDA speech")]
     [InlineData("NVDA's speech was interrupted by the click.", "NVDA's speech was interrupted")]
     [InlineData("The participant heard the page title.", "heard")]
+    [InlineData("The click caused NVDA to stop speech.", "stop speech")]
     public void Speech_stated_as_fact_is_found(string text, string found) =>
         Assert.Equal(found, WordingCheck.SpeechAsFact(text));
 
@@ -21,6 +22,7 @@ public sealed class WordingCheckTests
     [InlineData("NVDA had to announce the main landmark (inferred).")]
     [InlineData("The click is one NVDA treats as a command to stop speech (inferred).")]
     [InlineData("What NVDA said is not recorded.")]
+    [InlineData("The participant clicked the link, inferring that any NVDA speech was stopped.")]
     [InlineData("NVDA's Speech Viewer shows \"heading, level 2\".")]
     [InlineData("NVDA was running, and the settings said to be its defaults were in use.")]
     [InlineData("The participant pressed Tab twice.")]

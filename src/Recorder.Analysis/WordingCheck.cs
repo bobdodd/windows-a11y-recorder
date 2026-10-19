@@ -108,7 +108,7 @@ public static partial class WordingCheck
     [GeneratedRegex(@"\bK\d+\b")]
     private static partial Regex StatementNumber();
 
-    [GeneratedRegex(@"\b(?:inferred|unknown|not known|not recorded|no recording|not a recording|does not show|do not show|cannot be known|speech viewer)\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(?:infer(?:red|ring|s)?|unknown|not known|not recorded|no recording|not a recording|does not show|do not show|cannot be known|speech viewer)\b", RegexOptions.IgnoreCase)]
     private static partial Regex Qualified();
 
     [GeneratedRegex(@"\bNVDA(?:'s)?\b[^.;,]{0,40}?\b(?:announced|announces|announcing|said|says|saying|spoke|speaks|speaking|read out|reads out|reading out|read aloud|reads aloud|voiced|voices|voicing)\b", RegexOptions.IgnoreCase)]

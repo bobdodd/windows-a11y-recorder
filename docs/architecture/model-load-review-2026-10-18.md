@@ -286,8 +286,12 @@ can be followed from build to build.
 
 ## Decisions needed
 
-1. Proposal 1: the click fact's wording, and whether the player's mouse
-   panel changes with it.
+1. Proposal 1: the click fact's wording decided, 2026-10-19, after the
+   full run of 9caf25c failed at the story of visit 1 on the same wording
+   in all four answers: the outcome opens with the inference, "inferring
+   that any NVDA speech was stopped", in the player too; the other mouse
+   outcomes the same way (`screen-reader-activity.md`, "The outcomes'
+   wording"). Layer 2 is still given the click facts.
 2. Proposal 2: one revision at temperature 0 before the seeds.
 3. Proposal 4: decided and built, 2026-10-18.
 4. Proposal 6: which models to measure.

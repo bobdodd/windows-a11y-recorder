@@ -286,7 +286,7 @@ public sealed class MouseHookTests
         var mouse = new MouseActivity([hook, Raw(2 * Second + 2 * Millisecond, deltaX: 3)], Nvda(Defaults));
         var outcome = mouse.Of(hook.EventId)!;
         Assert.Equal(
-            "Move to (640, 480), from a device; NVDA notes the position, inferred; it reads what is under the pointer at the latest position the next time it runs its queue, so not every move is read",
+            "Move to (640, 480), from a device; inferring that NVDA noted the position; it reads what is under the pointer at the latest position the next time it runs its queue, so not every move is read",
             outcome.Text);
         Assert.Contains("Raw input: device 0x10045, 2.0 ms after the hook's record", outcome.Details);
         Assert.Contains(
@@ -301,7 +301,7 @@ public sealed class MouseHookTests
         var mouse = new MouseActivity([down], Nvda(Defaults.Replace("'ignoreInjectedMouseInput':null", "'ignoreInjectedMouseInput':'True'", StringComparison.Ordinal)));
         var outcome = mouse.Of(down.EventId)!;
         Assert.Equal(
-            "Left button down at (10, 20), injected by software; NVDA ignores it, inferred: injected, and NVDA ignores mouse input from other applications",
+            "Left button down at (10, 20), injected by software; inferring that NVDA ignored it, as it was injected and NVDA ignores mouse input from other applications",
             outcome.Text);
         Assert.DoesNotContain(outcome.Details, detail => detail.StartsWith("Raw input", StringComparison.Ordinal));
         Assert.Contains("NVDA also ignores injected mouse events while it makes its own mouse clicks; that is not recorded.", outcome.Details);
@@ -313,14 +313,14 @@ public sealed class MouseHookTests
         var down = Hook(3 * Second, MouseHookRecords.RightButtonDown, 10, 20);
         var wheel = Hook(4 * Second, MouseHookRecords.MouseWheel, 10, 20, mouseData: unchecked((int)0xFF100000));
         var on = new MouseActivity([down, wheel], Nvda(Defaults));
-        Assert.EndsWith("; NVDA stops speech, inferred", on.Of(down.EventId)!.Text, StringComparison.Ordinal);
+        Assert.EndsWith("; inferring that any NVDA speech was stopped", on.Of(down.EventId)!.Text, StringComparison.Ordinal);
         Assert.Equal(
-            "Wheel 2 notches toward the user at (10, 20), from a device; NVDA notes the position and does nothing more with it, inferred",
+            "Wheel 2 notches toward the user at (10, 20), from a device; inferring that NVDA noted the position and did nothing more with it",
             on.Of(wheel.EventId)!.Text);
         Assert.Contains("Raw input: no record of it from a device within 50 ms", on.Of(down.EventId)!.Details);
 
         var off = new MouseActivity([down], Nvda(Defaults.Replace("'enableMouseTracking':null", "'enableMouseTracking':'False'", StringComparison.Ordinal)));
-        Assert.EndsWith("; NVDA ignores it, inferred: NVDA's mouse tracking is off", off.Of(down.EventId)!.Text, StringComparison.Ordinal);
+        Assert.EndsWith("; inferring that NVDA ignored it, as NVDA's mouse tracking is off", off.Of(down.EventId)!.Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -330,11 +330,11 @@ public sealed class MouseHookTests
         var touch = Hook(5 * Second, MouseHookRecords.LeftButtonUp, 1, 2, extra: 0xFF515780);
         var mouse = new MouseActivity([before, touch], Nvda(mouse: null));
         Assert.Equal("Move to (1, 2), from a device", mouse.Of(before.EventId)!.Text);
-        Assert.Equal("Left button up at (1, 2), from a touch screen; NVDA running, its mouse settings not recorded", mouse.Of(touch.EventId)!.Text);
+        Assert.Equal("Left button up at (1, 2), from a touch screen; not knowing what NVDA did with it, as NVDA's mouse settings were not recorded", mouse.Of(touch.EventId)!.Text);
 
         // A settings record made before the mouse settings were read.
         var older = new MouseActivity([touch], Nvda(string.Empty));
-        Assert.EndsWith("; NVDA running, its mouse settings not recorded", older.Of(touch.EventId)!.Text, StringComparison.Ordinal);
+        Assert.EndsWith("; not knowing what NVDA did with it, as NVDA's mouse settings were not recorded", older.Of(touch.EventId)!.Text, StringComparison.Ordinal);
         Assert.Equal("not known: NVDA's mouse settings were not recorded", older.NvdaTrackingAt(5 * Second));
     }
 
@@ -408,7 +408,7 @@ public sealed class MouseHookTests
 
         Assert.True(archive.Mouse.Recorded);
         var outcome = archive.Mouse.Of("e4")!;
-        Assert.Equal("Left button down at (640, 480), from a device; NVDA stops speech, inferred", outcome.Text);
+        Assert.Equal("Left button down at (640, 480), from a device; inferring that any NVDA speech was stopped", outcome.Text);
         Assert.Contains("Raw input: device 0x10045, 1.0 ms after the hook's record", outcome.Details);
         Assert.Contains(archive.Mouse.RowsAt(3 * Second), row => row.Setting == MouseActivity.PointerSetting);
     }

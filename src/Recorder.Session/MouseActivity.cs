@@ -297,7 +297,11 @@ public sealed class MouseActivity
     // injected mouse input; every event where mouse tracking is off; a move
     // is noted, and what is under the pointer read at the latest position
     // the next time NVDA runs its queue; a left or right button press stops
-    // speech. Null where NVDA was not running.
+    // speech. Null where NVDA was not running. Each text opens with what is
+    // inferred or not known, so that the claim is not read without it: a
+    // model given "NVDA stops speech, inferred" kept the claim and dropped
+    // "inferred" (owner, 2026-10-19: "change our use of English to avoid the
+    // issue").
     private string? NvdaOutcome(HookEvent item, List<string> details)
     {
         if (_assistiveTechnology.ScreenReaderAt(Nvda, item.Time) is not { } nvda)
@@ -308,7 +312,7 @@ public sealed class MouseActivity
         if (nvda.Settings is not { } settings || !settings.TryGetProperty("enableMouseTracking", out _))
         {
             details.Add("NVDA: its mouse settings were not recorded, so what it did with this event is not known.");
-            return "NVDA running, its mouse settings not recorded";
+            return "not knowing what NVDA did with it, as NVDA's mouse settings were not recorded";
         }
 
         var (tracking, trackingText) = Setting(settings, "enableMouseTracking", NvdaSettings.DefaultEnableMouseTracking);
@@ -323,24 +327,24 @@ public sealed class MouseActivity
         if (item.Injected && ignore != false)
         {
             return ignore == true
-                ? "NVDA ignores it, inferred: injected, and NVDA ignores mouse input from other applications"
-                : "whether NVDA ignores it is not known: injected, and NVDA's setting for mouse input from other applications was not read";
+                ? "inferring that NVDA ignored it, as it was injected and NVDA ignores mouse input from other applications"
+                : "not knowing whether NVDA ignored it, as it was injected and NVDA's setting for mouse input from other applications was not read";
         }
 
         if (tracking != true)
         {
             return tracking == false
-                ? "NVDA ignores it, inferred: NVDA's mouse tracking is off"
-                : "whether NVDA follows it is not known: NVDA's mouse tracking setting was not read";
+                ? "inferring that NVDA ignored it, as NVDA's mouse tracking is off"
+                : "not knowing whether NVDA followed it, as NVDA's mouse tracking setting was not read";
         }
 
         return item.Kind switch
         {
             MouseHookRecords.MoveKind =>
-                "NVDA notes the position, inferred; it reads what is under the pointer at the latest position the next time it runs its queue, so not every move is read",
+                "inferring that NVDA noted the position; it reads what is under the pointer at the latest position the next time it runs its queue, so not every move is read",
             MouseHookRecords.ButtonDownKind when item.Button is "left" or "right" =>
-                "NVDA stops speech, inferred",
-            _ => "NVDA notes the position and does nothing more with it, inferred"
+                "inferring that any NVDA speech was stopped",
+            _ => "inferring that NVDA noted the position and did nothing more with it"
         };
     }
 

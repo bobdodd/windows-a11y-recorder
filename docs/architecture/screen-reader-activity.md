@@ -573,6 +573,33 @@ again at 144 seconds.
   the injected left press at 143.88; in the first, the period from 76.82
   to 85.59 seconds went on through the injected left press at 79.03.
 
+### The outcomes' wording (2026-10-19)
+
+The outcomes quoted in the runs above are as the player showed them then.
+From 2026-10-19 each opens with what is inferred or not known, so that a
+reader, or a model given the outcome as a fact of the recording, cannot
+take the claim without it. In the full run of 9caf25c the story of visit 1
+was given clicks ending "NVDA stops speech, inferred" and, in every one of
+four answers, wrote that the click "caused NVDA to stop speech", which the
+report's wording check refused. The owner: "I assume the model is
+considering the sub-clause (inferred) to be redundant or un-needed
+information and that is not good news. Until we can be sure why this
+happens we need to change our use of English to avoid the issue".
+
+| Before | From 2026-10-19 |
+| --- | --- |
+| NVDA stops speech, inferred | inferring that any NVDA speech was stopped |
+| NVDA notes the position, inferred; it reads ... | inferring that NVDA noted the position; it reads ... |
+| NVDA notes the position and does nothing more with it, inferred | inferring that NVDA noted the position and did nothing more with it |
+| NVDA ignores it, inferred: NVDA's mouse tracking is off | inferring that NVDA ignored it, as NVDA's mouse tracking is off |
+| NVDA ignores it, inferred: injected, and NVDA ignores mouse input from other applications | inferring that NVDA ignored it, as it was injected and NVDA ignores mouse input from other applications |
+| whether NVDA ignores it is not known: injected, and ... | not knowing whether NVDA ignored it, as it was injected and ... |
+| whether NVDA follows it is not known: NVDA's mouse tracking setting was not read | not knowing whether NVDA followed it, as NVDA's mouse tracking setting was not read |
+| NVDA running, its mouse settings not recorded | not knowing what NVDA did with it, as NVDA's mouse settings were not recorded |
+
+The wording check (`WordingCheck`) takes "inferring" and "infers", as it
+took "inferred", as saying that what follows is inferred.
+
 ## Input the recorder cannot receive
 
 Agreed with the owner on 2026-10-10, after the run with an elevated
