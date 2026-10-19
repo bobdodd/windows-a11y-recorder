@@ -1,8 +1,9 @@
 # Design review: the answers only a model reads
 
-Date: 2026-10-19. Status: proposal. Nothing in the recorder has been
-changed by this review; the one change made in the same conversation, the
-one-line rule removed, is recorded under "Done alongside this review".
+Date: 2026-10-19. Status: proposal C decided and built, 2026-10-19;
+proposals A, B, and D not decided. The one change made in the same
+conversation before this review, the one-line rule removed, is recorded
+under "Done alongside this review".
 
 The owner asked, 2026-10-18: "The only report the user will see is the
 final summary markdown. All other intermediate reports are for the benefit
@@ -195,9 +196,26 @@ asked; then A, B, and D, each measured by trial before the next.
 - **Risk:** none to the evidence: every statement keeps its number, its
   layer, its moment, and its references. Whether the model reads grouped
   statements as well as labelled ones is measured by the trial.
-- **Decision needed:** none beyond the trial.
-- **Test:** the trial of moment 6, layer 2; compare its prompt tokens and
-  faults with the 27c9b2b trial.
+- **Decided,** 2026-10-19: "okay, let's implement C and we will then test
+  the result".
+- **Built:** `Knowledge.Key`, said once at the start of the knowledge;
+  `Knowledge.Heading`, for a statement that adds to none ("Layer 1, the
+  recorded data, page:", "Layer 2, the captured frame at moment 5:",
+  "Layer 3, the web page at moment 5:"), given when it changes; and
+  `Knowledge.Tag`, for one that adds to another ("(layer 3, moment 5)", or
+  "(layer 2, moment 1, corrects)"), indented under it as before. The order
+  of the statements, their numbers, and their references are unchanged.
+  The layer templates say "under a heading that gives its layer" in place
+  of "labelled with its layer", and are version 5. The page chapter and the
+  story are given the knowledge in the same layout, without the numbers;
+  their instructions are unchanged.
+- **Expected saving:** the knowledge of the moment 6, layer 2 trial laid
+  out the new way, from the same statements, is 25,426 characters in place
+  of 31,431: 6,005 fewer, 19% of the knowledge and 13% of the input.
+- **Test:** the trials of moment 2 and moment 6, layer 2, at temperature 0
+  and at 0.7 with seeds 1 to 3, as for 27c9b2b; compare prompt tokens and
+  faults. The trial takes the task's accepted answers for the steps before,
+  so the knowledge holds the same statements as in the 27c9b2b trials.
 
 ### D. Notes, not prose, for the answers only a model reads
 
@@ -260,7 +278,7 @@ asked; then A, B, and D, each measured by trial before the next.
    and dropped as listed.
 2. Proposal B: the recorder writes layer 1, and whether the text summary
    task stays as a report of its own.
-3. Proposal C: none beyond the trial.
+3. Proposal C: decided and built, 2026-10-19; its trial is to come.
 4. Proposal D: whether the moment and tile descriptions become notes too,
    or only the layers.
 

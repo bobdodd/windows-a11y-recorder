@@ -37,9 +37,23 @@ public sealed class LayeredReportTests
         var input = new System.Text.StringBuilder();
         var references = new HashSet<string>();
         knowledge.Append(input, references, withNumbers: true);
-        Assert.Contains("  [K1] (layer 1, the recorded data, page, inferred) The page is the home page. [E1]\n", input.ToString(), StringComparison.Ordinal);
-        Assert.Contains("    [K3] (layer 2, the captured frame at moment 1, elaborates K1, inferred) A hero image fills the top. [E9]\n", input.ToString(), StringComparison.Ordinal);
-        Assert.Contains("      [K7] (layer 3, the web page at moment 1, elaborates K3, inferred) The hero image is a carousel. [E12]\n", input.ToString(), StringComparison.Ordinal);
+        // Proposal C of the design review of 2026-10-19: a heading for each
+        // layer and moment, and an addition under its statement with a
+        // short tag, in place of a label on every statement.
+        Assert.Equal(
+            "  " + Knowledge.Key + "\n" +
+            "  Layer 1, the recorded data, page:\n" +
+            "  [K1] The page is the home page. [E1]\n" +
+            "    [K3] (layer 2, moment 1) A hero image fills the top. [E9]\n" +
+            "      [K7] (layer 3, moment 1) The hero image is a carousel. [E12]\n" +
+            "  Layer 1, the recorded data, activity:\n" +
+            "  [K2] The participant tabbed. [E2]\n" +
+            "    [K4] (layer 2, moment 1, corrects) Focus did not move when tabbing. [E9]\n" +
+            "  Layer 2, the captured frame at moment 1:\n" +
+            "  [K5] A cookie notice is open. [E9]\n" +
+            "  [K6] Cites no statement. [E9]\n",
+            input.ToString());
+        Assert.DoesNotContain("inferred", input.ToString(), StringComparison.Ordinal);
         Assert.Contains("K7", references);
         Assert.Contains("E12", references);
 
@@ -48,7 +62,7 @@ public sealed class LayeredReportTests
         knowledge.Append(plain, cited, withNumbers: false);
         Assert.DoesNotContain("[K", plain.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("K1", cited);
-        Assert.Contains("(layer 2, the captured frame at moment 1, correcting or disagreeing with the statement it follows, inferred) Focus did not move", plain.ToString(), StringComparison.Ordinal);
+        Assert.Contains("\n    (layer 2, moment 1, corrects) Focus did not move", plain.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

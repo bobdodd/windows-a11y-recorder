@@ -489,8 +489,8 @@ public sealed partial class RecordingSummaryTaskTests
         // description; no schema of a form.
         var layer2 = Input(bodies[3]);
         Assert.Contains("The visit's knowledge so far, in layers. These are inferences, not facts:", layer2, StringComparison.Ordinal);
-        Assert.Matches(@"  \[K1\] \(layer 1, the recorded data, page, inferred\) A statement about page\. \[E\d+\]\n", layer2);
-        Assert.Contains("[K3] (layer 1, the recorded data, activity, inferred)", layer2, StringComparison.Ordinal);
+        Assert.Matches(@"  Layer 1, the recorded data, page:\n  \[K1\] A statement about page\. \[E\d+\]\n", layer2);
+        Assert.Matches(@"  Layer 1, the recorded data, activity:\n  \[K3\] ", layer2);
         Assert.Contains("The frame as a model described it, from the picture and the recorder's facts. These are inferences, not facts:", layer2, StringComparison.Ordinal);
         Assert.Contains("(screen, inferred) A statement about screen.", layer2, StringComparison.Ordinal);
         Assert.Contains("K1", (string[])attempts[3]["input_references"]!);
@@ -499,21 +499,21 @@ public sealed partial class RecordingSummaryTaskTests
         // Layer 3 is given layer 2's additions in place, under the
         // statement they elaborate, and each group's description.
         var layer3 = Input(bodies[4]);
-        Assert.Matches(@"  \[K1\] \(layer 1, the recorded data, page, inferred\) A statement about page\. \[E\d+\]\n    \[K4\] \(layer 2, the captured frame at moment 1, elaborates K1, inferred\) An elaboration from layer 2\. \[E\d+\]\n", layer3);
-        Assert.Contains("[K5] (layer 2, the captured frame at moment 1, inferred) Something new from layer 2.", layer3, StringComparison.Ordinal);
+        Assert.Matches(@"  \[K1\] A statement about page\. \[E\d+\]\n    \[K4\] \(layer 2, moment 1\) An elaboration from layer 2\. \[E\d+\]\n", layer3);
+        Assert.Matches(@"  Layer 2, the captured frame at moment 1:\n  \[K5\] Something new from layer 2\.", layer3);
         Assert.Contains("The recreated page as a model described it from tile 1 [", layer3, StringComparison.Ordinal);
         Assert.Contains("The recreated page as a model described it from tile 5 [", layer3, StringComparison.Ordinal);
         Assert.Contains("so the part on the screen was CSS pixels 1850 to 2775:", layer3, StringComparison.Ordinal);
 
         // Moment 2's layer 2 has layer 3's additions too.
-        Assert.Contains("(layer 3, the web page at moment 1, elaborates K1, inferred) An elaboration from layer 3.", Input(bodies[6]), StringComparison.Ordinal);
+        Assert.Contains("(layer 3, moment 1) An elaboration from layer 3.", Input(bodies[6]), StringComparison.Ordinal);
 
         // Chapter 1's pages are given the knowledge without numbers, and
         // the story its visit's facts, knowledge, moments, and section.
         var page = Input(bodies[11]);
         Assert.Contains("Page 1 of the report's chapter on the pages, derived by the recorder:", page, StringComparison.Ordinal);
         Assert.DoesNotContain("[K", page, StringComparison.Ordinal);
-        Assert.Contains("(layer 2, the captured frame at moment 1, elaborating the statement before it, inferred) An elaboration from layer 2.", page, StringComparison.Ordinal);
+        Assert.Contains("    (layer 2, moment 1) An elaboration from layer 2.", page, StringComparison.Ordinal);
         // The page chapter and the story are given the page's changes; the
         // moments are not (owner, 2026-10-16).
         Assert.Contains("\nThe page's changes during the visit", page, StringComparison.Ordinal);
@@ -603,7 +603,7 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Contains("Figure 2. A picture of the story.", text, StringComparison.Ordinal);
         Assert.Contains("- No statement's text held a reference of its own: the references after each statement are the recorder's.\n", text, StringComparison.Ordinal);
         Assert.DoesNotContain("[K", text, StringComparison.Ordinal);
-        Assert.Contains($"- {RecordingSummaryVisionKind.Layer2Template} and {RecordingSummaryVisionKind.Layer3Template} version 4, for each moment's layers.\n", text, StringComparison.Ordinal);
+        Assert.Contains($"- {RecordingSummaryVisionKind.Layer2Template} and {RecordingSummaryVisionKind.Layer3Template} version {RecordingSummaryVisionKind.LayerTemplateVersion}, for each moment's layers.\n", text, StringComparison.Ordinal);
         Assert.Contains("- Layer 3 steps not sent, as every group of the moment's tiles was already in the visit's knowledge: visit-0001-moment-02-layer-3.\n", text, StringComparison.Ordinal);
         Assert.Contains(
             "\n2 groups of tiles were not sent, as their tiles were the same pictures, pixel for pixel, at the same places as a group already described, whose answer each uses unchanged:\n\n" +
@@ -788,7 +788,7 @@ public sealed partial class RecordingSummaryTaskTests
     [Fact]
     public void Every_template_shows_a_statement_with_its_text_before_its_kind()
     {
-        Assert.Equal((5, 5, 5, 4, 6, 7, 5), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+        Assert.Equal((5, 5, 5, 5, 6, 7, 5), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
             RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.LayerTemplateVersion, RecordingSummaryVisionKind.PageChapterTemplateVersion,
             RecordingSummaryVisionKind.StoryTemplateVersion, RecordingSummaryVisionKind.ExecutiveTemplateVersion));
         foreach (var instructions in new[]

@@ -146,40 +146,65 @@ public sealed class Knowledge
         return ordered;
     }
 
-    /// <summary>What a statement is, as a request gives it: its layer, its moment, and what it is about.</summary>
-    public static string Label(KnowledgeStatement statement, bool withNumbers)
+    /// <summary>
+    /// How the knowledge is laid out, said once before it (the design
+    /// review of 2026-10-19, proposal C): in place of a label on every
+    /// statement, such as "(layer 3, the web page at moment 5, elaborates
+    /// K3, inferred)", which at moment 6 of the 27c9b2b trial were 21% of
+    /// the knowledge, the statements stand under a heading for each layer
+    /// and moment, and an addition under the statement it adds to, with a
+    /// short tag. That the knowledge is inference is said once, by the
+    /// request, before it.
+    /// </summary>
+    public const string Key =
+        "Each heading gives the layer, and the moment, of the statements under it. " +
+        "A statement indented under another adds to it, with its own layer and moment in brackets; one marked \"corrects\" disagrees with it instead.";
+
+    /// <summary>The heading of a statement that adds to none: its layer, its moment, or for layer 1 its section.</summary>
+    public static string Heading(KnowledgeStatement statement)
     {
         ArgumentNullException.ThrowIfNull(statement);
-        var layer = statement.Layer switch
+        return statement.Layer switch
         {
-            1 => $"layer 1, the recorded data, {statement.Claim.Section}",
-            2 => $"layer 2, the captured frame at moment {statement.Moment}",
-            _ => $"layer 3, the web page at moment {statement.Moment}"
+            1 => $"Layer 1, the recorded data, {statement.Claim.Section}:",
+            2 => string.Create(CultureInfo.InvariantCulture, $"Layer 2, the captured frame at moment {statement.Moment}:"),
+            _ => string.Create(CultureInfo.InvariantCulture, $"Layer 3, the web page at moment {statement.Moment}:")
         };
-        var relation = statement.Relation switch
-        {
-            KnowledgeStatement.Elaborates => withNumbers ? $", elaborates {Reference(statement.About!.Value)}" : ", elaborating the statement before it",
-            KnowledgeStatement.Corrects => withNumbers ? $", corrects {Reference(statement.About!.Value)}" : ", correcting or disagreeing with the statement it follows",
-            _ => ""
-        };
-        return string.Create(CultureInfo.InvariantCulture, $"({layer}{relation}, inferred)");
+    }
+
+    /// <summary>The tag of a statement that adds to another: its layer and moment, and whether it corrects.</summary>
+    public static string Tag(KnowledgeStatement statement)
+    {
+        ArgumentNullException.ThrowIfNull(statement);
+        return string.Create(CultureInfo.InvariantCulture,
+            $"(layer {statement.Layer}, moment {statement.Moment}{(statement.Relation == KnowledgeStatement.Corrects ? ", corrects" : "")})");
     }
 
     /// <summary>
-    /// The knowledge as a request gives it, in reading order, each
-    /// statement with its label and its evidence, and with its number
-    /// where the request's answer may cite it.
+    /// The knowledge as a request gives it, in reading order: the key, then
+    /// each statement that adds to none under its heading, and each that
+    /// adds to another indented under it with its tag; each statement with
+    /// its evidence, and with its number where the request's answer may
+    /// cite it.
     /// </summary>
     public void Append(StringBuilder input, ISet<string> references, bool withNumbers, string indent = "  ")
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(references);
+        input.Append(indent).Append(Key).Append('\n');
+        string? heading = null;
         foreach (var statement in InOrder())
         {
             var depth = 0;
             for (var at = statement; at.About is { } parent; at = _statements[parent - 1])
             {
                 depth++;
+            }
+
+            if (depth == 0 && Heading(statement) is var group && group != heading)
+            {
+                input.Append(indent).Append(group).Append('\n');
+                heading = group;
             }
 
             input.Append(indent).Append(' ', depth * 2);
@@ -189,7 +214,12 @@ public sealed class Knowledge
                 input.Append('[').Append(statement.Reference).Append("] ");
             }
 
-            input.Append(Label(statement, withNumbers)).Append(' ').Append(statement.Claim.Text);
+            if (depth > 0)
+            {
+                input.Append(Tag(statement)).Append(' ');
+            }
+
+            input.Append(statement.Claim.Text);
             references.UnionWith(statement.Claim.Evidence);
             if (statement.Claim.Evidence.Count > 0)
             {

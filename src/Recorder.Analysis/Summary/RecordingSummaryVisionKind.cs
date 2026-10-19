@@ -287,7 +287,12 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // K numbers as the answer's form holds it, with an example of a text
     // without it (4048f30 run, 2026-10-18, moment 2: every elaboration
     // still wrote "described in K34 and K35").
-    public const int LayerTemplateVersion = 4;
+    // Version 5: the knowledge stands under a heading for each layer and
+    // moment, and an addition under its statement with a short tag, in
+    // place of a label on every statement (the design review of
+    // 2026-10-19, proposal C); the instructions say "under a heading that
+    // gives its layer" in place of "labelled with its layer".
+    public const int LayerTemplateVersion = 5;
 
     // Version 2 of the chapters' templates: the executive summary becomes
     // chapter 1, so the pages are chapter 2 and the story chapter 3, named
@@ -436,7 +441,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     public const string Layer2Instructions =
         "You add to what is known of one page visit from an accessibility test recording, for accessibility and usability engineers, what a captured frame of the screen shows of the visual user experience. " +
-        "You are given the visit's knowledge so far, each statement numbered, such as [K3], and labelled with its layer: layer 1 from the recorded data, layer 2 from captured frames of the screen, " +
+        "You are given the visit's knowledge so far, each statement numbered, such as [K3], under a heading that gives its layer: layer 1 from the recorded data, layer 2 from captured frames of the screen, " +
         "and layer 3 from the web page as the recorder rebuilt it; why the recorder chose this moment, and the recorder's facts since the moment before, each beginning with an evidence reference such as [E3]; " +
         "and a model's description of this moment's captured frame, a picture of the whole screen or of the part of it its evidence says, with the picture's reference. The knowledge and the description are inferences, not facts. " +
         "Add what the frame adds to the knowledge of the visual user experience: what was on the screen and how it looked, what stood out, what was open, such as a dialog, a menu, or a popup, " +
@@ -446,7 +451,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     public const string Layer3Instructions =
         "You add to what is known of one page visit from an accessibility test recording, for accessibility and usability engineers, what the web page adds that the captured frame of the screen does not show. " +
-        "You are given the visit's knowledge so far, each statement numbered, such as [K3], and labelled with its layer: layer 1 from the recorded data, layer 2 from captured frames of the screen, " +
+        "You are given the visit's knowledge so far, each statement numbered, such as [K3], under a heading that gives its layer: layer 1 from the recorded data, layer 2 from captured frames of the screen, " +
         "and layer 3 from the web page as the recorder rebuilt it; why the recorder chose this moment, each reason beginning with an evidence reference such as [E3]; " +
         "the page as the recorder rebuilt it at this moment and pictured it whole in tiles, which part of it was on the screen, and what the recreation lacked; " +
         "and a model's descriptions of the groups of tiles not already in the visit's knowledge, with each tile's reference. " +
