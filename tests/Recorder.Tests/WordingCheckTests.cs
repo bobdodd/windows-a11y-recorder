@@ -31,10 +31,30 @@ public sealed class WordingCheckTests
     public void A_reference_in_the_text_passes_only_where_the_statement_cites_it()
     {
         Assert.Null(WordingCheck.Check([new Claim("actions", 0, 0, Claim.ClaimKind, "The page loaded [E2].", ["E2"])]));
-        var failure = WordingCheck.Check([new Claim("actions", 1, 2, Claim.ClaimKind, "The page loaded (E2, E9) and K3.", ["E2"])]);
+        var failure = WordingCheck.Check([new Claim("actions", 1, 2, Claim.ClaimKind, "The page loaded (E2, E9).", ["E2"])]);
         Assert.Equal(
-            WordingCheck.Failure + "statement 3 of paragraph 2 of \"actions\" writes in its text E9, K3, which it does not cite: \"The page loaded (E2, E9) and K3.\".",
+            WordingCheck.Failure + "statement 3 of paragraph 2 of \"actions\" writes in its text E9, which it does not cite: \"The page loaded (E2, E9).\".",
             failure);
+    }
+
+    [Fact]
+    public void A_knowledge_statement_number_in_the_text_fails_even_where_it_is_cited()
+    {
+        // The 2edb728 run, moment 6, layer 2, 2026-10-18.
+        var failure = WordingCheck.Check([new Claim("elaborations", 0, 0, Claim.ClaimKind, "The frame shows eight icons, which elaborates on K52.", ["K52", "E94"])]);
+        Assert.Equal(
+            WordingCheck.Failure + "statement 1 of paragraph 1 of \"elaborations\" writes in its text the knowledge statement number K52, which belongs in its evidence only: \"The frame shows eight icons, which elaborates on K52.\".",
+            failure);
+        Assert.Null(WordingCheck.Check([new Claim("elaborations", 0, 0, Claim.ClaimKind, "The frame shows eight icons.", ["K52", "E94"])]));
+    }
+
+    [Fact]
+    public void A_cited_reference_outside_brackets_fails_as_it_cannot_be_taken_out()
+    {
+        Assert.Null(WordingCheck.Check([new Claim("actions", 0, 0, Claim.ClaimKind, "The current frame (E94) shows the page.", ["E94"])]));
+        Assert.Equal(
+            WordingCheck.Failure + "statement 1 of paragraph 1 of \"actions\" writes in its text E94 outside brackets, where it cannot be taken out: \"As E94 shows, the page scrolled.\".",
+            WordingCheck.Check([new Claim("actions", 0, 0, Claim.ClaimKind, "As E94 shows, the page scrolled.", ["E94"])]));
     }
 
     [Fact]

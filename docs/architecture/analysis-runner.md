@@ -1005,6 +1005,16 @@ Built on 2026-10-18 from the target report of 88464e7
   NVDA's Speech Viewer, whose text is recorded, passes. The failure begins
   "The answer's wording broke the report's rules: ", and names up to
   three statements and their words, counting the rest.
+- **Tightened after the 2edb728 run on the target machine, 2026-10-18,**
+  where every answer of moment 6's layer 2 wrote "which elaborates on
+  K52" in the text and cited only the frame, so the knowledge never tied
+  the addition to K52: a knowledge statement's number in the text fails
+  even where it is cited, as the evidence is what ties a statement to
+  the one it adds to; and an E reference fails where it is left in the
+  text after the report takes out the groups in brackets that the
+  statement cites, such as "as E94 shows", as it cannot be taken out
+  cleanly. The layer templates, version 3, ask for the number first in
+  the evidence, with an example, and never in the text.
 - **Such an answer is recovered from as one with no statement is:**
   sampled at temperature 0.7 at seed 1, then 2, then 3, the first that
   passes being the step's answer; where none passes the step fails,

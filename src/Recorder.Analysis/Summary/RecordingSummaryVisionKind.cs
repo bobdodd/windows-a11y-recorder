@@ -254,7 +254,9 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     // Version 2: references out of the text, and what is seen set beside
     // what the page is built as (report-fixes-2026-10-18.md).
-    public const int LayerTemplateVersion = 2;
+    // Version 3: the number of the statement elaborated or corrected first
+    // in the evidence, with an example, and never in the text.
+    public const int LayerTemplateVersion = 3;
 
     // Version 2 of the chapters' templates: the executive summary becomes
     // chapter 1, so the pages are chapter 2 and the story chapter 3, named
@@ -367,15 +369,23 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Assistive technology observed running shows what was running, not what the participant is able to do. ";
 
     /// <summary>How a layer's answer is given, said in both layers' templates.</summary>
+    // The 2edb728 run on the target machine, 2026-10-18: every answer of
+    // moment 6's layer 2 wrote "which elaborates on K52" in the text and
+    // cited only the frame, as "citing that statement's number first" was
+    // read as in the text. The evidence is what ties an elaboration to its
+    // statement (Knowledge.Add), so the number is asked for there, with an
+    // example, and never in the text.
     public const string LayerAnswer =
-        "Answer in JSON with three sections: \"elaborations\", statements that add detail to a numbered statement of the knowledge, each citing that statement's number, such as \"K3\", first; " +
-        "\"corrections\", statements where this moment shows that a numbered statement is wrong or disagrees with it, each citing that statement's number first and saying how they disagree, citing both, without settling it; " +
+        "Answer in JSON with three sections: \"elaborations\", statements that add detail to a numbered statement of the knowledge, each with that statement's number first in its evidence, " +
+        "such as \"evidence\": [\"K3\", \"E94\"]; " +
+        "\"corrections\", statements where this moment shows that a numbered statement is wrong or disagrees with it, each with that statement's number first in its evidence and saying how they disagree, citing both, without settling it; " +
         "and \"new\", statements about what the knowledge does not yet cover. " +
         "Do not repeat what the knowledge already says, and do not restate the recorder's facts: add only what this moment adds. Where it adds nothing, give the three sections empty. " +
         "This is about the user experience, not a list of the page's elements: do not list each control, link, or line of text. " +
         "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
         "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + ReferencesOutOfText +
+        "Say what a statement adds, not which statement it adds to: never write a statement's number, such as \"K3\", in the text. " +
         VisualAndSemantics + "Write plain sentences without Markdown.";
 
     public const string Layer2Instructions =

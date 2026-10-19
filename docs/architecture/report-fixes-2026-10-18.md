@@ -83,6 +83,19 @@ version 6, executive summary version 4.
 
 Item 1.14: the owner kept the model's choice of pictures (2026-10-18).
 
+The 2edb728 run on the target machine, 2026-10-18, failed at moment 6,
+layer 2: in all four answers each elaboration wrote the number of the
+statement it elaborated, such as "which elaborates on K52", in its text,
+and cited only the frame, so the wording check refused them. As the
+evidence is what ties an elaboration to its statement, the 88464e7 report
+probably had the same fault unseen, with every elaboration taken as new,
+which is a likely source of the K numbers it leaked. The layer templates,
+version 3, now ask for the number first in the evidence, with an example,
+and never in the text; and the check fails a knowledge statement's number
+in the text even where cited, and an E reference left outside brackets.
+See analysis-runner.md, "Answers whose wording breaks the report's
+rules".
+
 Part 4, the browser-only report scope, built 2026-10-18 at the owner's
 request ("add it now please"), not yet checked on the target machine:
 

@@ -30,12 +30,31 @@ public static partial class WordingCheck
         foreach (var claim in claims)
         {
             var place = $"statement {claim.Ordinal + 1} of paragraph {claim.Paragraph + 1} of \"{claim.Section}\"";
+            // What the report would take out of the text, a group of
+            // references the statement cites in brackets, passes; any
+            // reference left after that fails: one not cited, or one
+            // written outside brackets, which cannot be taken out cleanly.
+            // A knowledge statement's number never belongs in the text, as
+            // its evidence is what ties a statement to the one it adds to
+            // (2edb728 run, 2026-10-18: "which elaborates on K52").
+            var numbers = StatementNumber().Matches(claim.Text).Select(match => match.Value).Distinct(StringComparer.Ordinal).ToList();
+            if (numbers.Count > 0)
+            {
+                faults.Add($"{place} writes in its text the knowledge statement number {string.Join(", ", numbers)}, which belongs in its evidence only: \"{Short(claim.Text)}\"");
+            }
+
             var uncited = Reference().Matches(claim.Text).Select(match => match.Value)
-                .Where(reference => !claim.Evidence.Contains(reference, StringComparer.Ordinal))
+                .Where(reference => reference[0] == 'E' && !claim.Evidence.Contains(reference, StringComparer.Ordinal))
                 .Distinct(StringComparer.Ordinal).ToList();
+            var bare = Reference().Matches(Summary.LayeredReport.WithoutCitedReferences(claim.Text, [.. claim.Evidence]).Text)
+                .Select(match => match.Value).Where(reference => reference[0] == 'E').Distinct(StringComparer.Ordinal).ToList();
             if (uncited.Count > 0)
             {
                 faults.Add($"{place} writes in its text {string.Join(", ", uncited)}, which it does not cite: \"{Short(claim.Text)}\"");
+            }
+            else if (bare.Count > 0)
+            {
+                faults.Add($"{place} writes in its text {string.Join(", ", bare)} outside brackets, where it cannot be taken out: \"{Short(claim.Text)}\"");
             }
 
             if (SpeechAsFact(claim.Text) is { } said)
@@ -85,6 +104,9 @@ public static partial class WordingCheck
 
     [GeneratedRegex(@"\b[EK]\d+\b")]
     private static partial Regex Reference();
+
+    [GeneratedRegex(@"\bK\d+\b")]
+    private static partial Regex StatementNumber();
 
     [GeneratedRegex(@"\b(?:inferred|unknown|not known|not recorded|no recording|not a recording|does not show|do not show|cannot be known|speech viewer)\b", RegexOptions.IgnoreCase)]
     private static partial Regex Qualified();
