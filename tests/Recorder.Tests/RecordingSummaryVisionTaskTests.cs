@@ -733,6 +733,16 @@ public sealed partial class RecordingSummaryTaskTests
         }
 
         Assert.Contains(RecordingSummaryVisionKind.EvidenceRules, RecordingSummaryVisionKind.PageChapterInstructions, StringComparison.Ordinal);
+        // The one-line rule was ignored by every answer, and is gone.
+        foreach (var instructions in new[]
+        {
+            RecordingSummaryKind.VisitInstructions, RecordingSummaryKind.RecordingInstructions,
+            RecordingSummaryVisionKind.MomentInstructions, RecordingSummaryVisionKind.PageInstructions
+        })
+        {
+            Assert.DoesNotContain("Write the JSON on one line", instructions, StringComparison.Ordinal);
+        }
+
         foreach (var instructions in new[]
         {
             RecordingSummaryVisionKind.StoryInstructions, RecordingSummaryVisionKind.OpeningInstructions, RecordingSummaryVisionKind.ExecutiveInstructions
@@ -778,7 +788,7 @@ public sealed partial class RecordingSummaryTaskTests
     [Fact]
     public void Every_template_shows_a_statement_with_its_text_before_its_kind()
     {
-        Assert.Equal((4, 4, 4, 4, 6, 7, 5), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+        Assert.Equal((5, 5, 5, 4, 6, 7, 5), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
             RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.LayerTemplateVersion, RecordingSummaryVisionKind.PageChapterTemplateVersion,
             RecordingSummaryVisionKind.StoryTemplateVersion, RecordingSummaryVisionKind.ExecutiveTemplateVersion));
         foreach (var instructions in new[]

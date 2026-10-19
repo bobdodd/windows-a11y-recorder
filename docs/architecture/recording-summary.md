@@ -2096,6 +2096,16 @@ https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md). Nothing n
 every request of both summary tasks, so that it stays so. No rule on the
 answer's JSON is added.
 
+The rule "Write the JSON on one line, with no indentation and no line
+breaks." is removed, the owner, 2026-10-18: "If it is not needed then it
+should go." Every answer ignored it, as the server's grammar for the schema
+allows line breaks and indentation (see "Answers on one line, held by a
+grammar of the recorder's own" above), so it only lengthened the
+instructions. It was in four templates, which change version: the text
+summary's visit and recording templates (`RecordingSummaryKind`, version
+5), and the moment's and the tiles' templates (version 5). Every step of a
+task run again is sent again.
+
 ## Decisions (2026-10-14)
 
 1. **The recorder's own windows stay in "Other windows"**, and in the

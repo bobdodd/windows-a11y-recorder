@@ -27,7 +27,13 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
     // form is held to the schema's order, and twice the model began a
     // statement as a claim and then wrote that something was unknown
     // (agreed with the owner; analysis-runner.md, decision 7).
-    public const int TemplateVersion = 4;
+    // The next version drops "Write the JSON on one line, with no
+    // indentation and no line breaks.": every answer ignored it, as the
+    // server's grammar for the schema allows line breaks and indentation
+    // (recording-summary.md, "Answers on one line"), so it only lengthened
+    // the instructions (owner, 2026-10-18: "If it is not needed then it
+    // should go").
+    public const int TemplateVersion = 5;
 
     public static readonly IReadOnlyList<string> VisitSections = ["page", "purpose", "activity"];
 
@@ -80,8 +86,7 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
         "and group repeated actions into one statement citing each of their references, rather than one statement for each fact. " +
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} for something the facts support, citing every reference it rests on, " +
         "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []} for something the facts leave open. " +
-        "Cite only references that appear in the facts. Write plain sentences without Markdown. " +
-        "Write the JSON on one line, with no indentation and no line breaks.";
+        "Cite only references that appear in the facts. Write plain sentences without Markdown.";
 
     public const string RecordingInstructions =
         "You describe a whole accessibility test recording, for an accessibility auditor. " +
@@ -96,8 +101,7 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
         "Each section holds only its own paragraphs: what the site or application is goes only in \"site\", who it is for only in \"audience\", " +
         "and what the participant did, visit by visit, only in \"session\". Do not repeat a visit's description; say what it adds to the whole. " +
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
-        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. Cite only references that appear in the input. Write plain sentences without Markdown. " +
-        "Write the JSON on one line, with no indentation and no line breaks.";
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. Cite only references that appear in the input. Write plain sentences without Markdown.";
 
     public async Task RunAsync(AnalysisTaskContext context, CancellationToken cancellationToken)
     {

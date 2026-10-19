@@ -130,7 +130,13 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // labeled Read more.", true of each of several cards. Each statement now
     // says which item it is about (agreed with the owner; recording-summary.md,
     // "Step 4b"). The other templates are unchanged.
-    public const int PageTemplateVersion = 4;
+    // The next version drops "Write the JSON on one line, with no
+    // indentation and no line breaks.": every answer ignored it, as the
+    // server's grammar for the schema allows line breaks and indentation
+    // (recording-summary.md, "Answers on one line"), so it only lengthened
+    // the instructions (owner, 2026-10-18: "If it is not needed then it
+    // should go").
+    public const int PageTemplateVersion = 5;
 
     /// <summary>Which item a statement is about, said in the page template from version 4.</summary>
     public const string ItemNamed =
@@ -226,7 +232,13 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // evidence, as analysis-runner.md, decision 7, gives.
     // Version 4: the frame may be cut to the browser's window and NVDA's
     // windows (report-fixes-2026-10-18.md, part 4).
-    public const int MomentTemplateVersion = 4;
+    // The next version drops "Write the JSON on one line, with no
+    // indentation and no line breaks.": every answer ignored it, as the
+    // server's grammar for the schema allows line breaks and indentation
+    // (recording-summary.md, "Answers on one line"), so it only lengthened
+    // the instructions (owner, 2026-10-18: "If it is not needed then it
+    // should go").
+    public const int MomentTemplateVersion = 5;
 
     public static readonly IReadOnlyList<string> MomentSections = ["screen", "change"];
 
@@ -623,8 +635,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
         "with every statement about the picture citing the picture's reference, " +
         "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []} for something the picture and facts leave open. " +
-        "Cite only references that appear in the input. Write plain sentences without Markdown. " +
-        "Write the JSON on one line, with no indentation and no line breaks.";
+        "Cite only references that appear in the input. Write plain sentences without Markdown.";
 
     public const string PageInstructions =
         "You describe part of a web page from an accessibility test recording, for an accessibility auditor. " +
@@ -648,8 +659,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
         "with every statement about a tile citing that tile's reference, " +
         "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []} for something the tiles and facts leave open. " +
-        "Cite only references that appear in the input. Write plain sentences without Markdown. " +
-        "Write the JSON on one line, with no indentation and no line breaks.";
+        "Cite only references that appear in the input. Write plain sentences without Markdown.";
 
 
     [GeneratedRegex(@"^\[(E\d+)\] (\d\d):(\d\d):(\d\d)\.(\d\d\d) ")]
