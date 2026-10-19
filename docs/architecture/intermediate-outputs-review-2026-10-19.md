@@ -1,8 +1,9 @@
 # Design review: the answers only a model reads
 
 Date: 2026-10-19. Status: proposal C decided, built, and tried,
-2026-10-19; proposal A built for its trial, 2026-10-19; proposals B and D
-not decided. The one change made in the same
+2026-10-19; proposal A built for its trial, 2026-10-19; proposal B withdrawn,
+2026-10-19, under the test data model (`test-data-model-2026-10-19.md`);
+proposal D not decided. The one change made in the same
 conversation before this review, the one-line rule removed, is recorded
 under "Done alongside this review".
 
@@ -219,6 +220,11 @@ What the trial shows:
 
 ### B. The recorder writes layer 1
 
+- **Withdrawn,** 2026-10-19. It puts the facts in place of step 1's
+  interpretations, which is against the test data model
+  (`test-data-model-2026-10-19.md`): the model holds no facts, each step
+  adds and replaces nothing, and evidence already analysed is not given
+  again. In the owner's words, "Vision augments, it does not replace".
 - **What changes:** the visit's knowledge starts with the recorder's
   facts of the visit, each with its E reference, as the visit's request in
   the text summary gives them, and labelled as recorded facts, not
@@ -382,8 +388,7 @@ What the trial shows:
 
 1. Proposal A: built and tried, 2026-10-19 (see "The trial of A");
    whether to keep it follows a full run.
-2. Proposal B: the recorder writes layer 1, and whether the text summary
-   task stays as a report of its own.
+2. Proposal B: withdrawn, 2026-10-19 (see `test-data-model-2026-10-19.md`).
 3. Proposal C: decided and built, 2026-10-19, and tried: see "The trial of
    C".
 4. Proposal D: whether the moment and tile descriptions become notes too,
