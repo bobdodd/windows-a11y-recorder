@@ -292,6 +292,13 @@ can be followed from build to build.
 3. Proposal 4: decided and built, 2026-10-18.
 4. Proposal 6: which models to measure.
 
+## Follow-on review
+
+`intermediate-outputs-review-2026-10-19.md` reviews the steps whose
+answers only a later model reads, at the owner's question of 2026-10-18,
+with proposals A to D. Its proposal A overlaps proposals 1 and 2 here, and
+its proposal D overlaps proposal 5.
+
 ## Sources
 
 - Trial files: C:\Users\Public\Downloads\trials-27c9b2b on the target PC,
