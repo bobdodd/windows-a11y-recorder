@@ -217,6 +217,52 @@ asked; then A, B, and D, each measured by trial before the next.
   faults. The trial takes the task's accepted answers for the steps before,
   so the knowledge holds the same statements as in the 27c9b2b trials.
 
+#### The trial of C, 2026-10-19
+
+The trials of 27c9b2b and df8d75a, the same two steps with the same
+samplings, C:\Users\Public\Downloads\trials-27c9b2b and trials-df8d75a
+on the target PC. Each takes the task's accepted answers for the steps
+before it, so the knowledge holds the same statements in both; the layout,
+and the layer template's sentence on it, is the difference.
+
+| Step, sampling | 27c9b2b: prompt tokens, statements, outcome | df8d75a: prompt tokens, statements, outcome |
+| --- | --- | --- |
+| Moment 2, temperature 0 | 5,313; 6; fails, "NVDA's speech was stopped" | 4,817; 6; passes |
+| Moment 2, seed 1 | 5,313; 7; fails, "stop speech" | 4,817; 4; passes |
+| Moment 2, seed 2 | 5,313; 7; fails, "stop speech" | 4,817; 7; fails, "stops speech" |
+| Moment 2, seed 3 | 5,313; 7; fails, "stop speech" | 4,817; 7; fails, "stop speech" |
+| Moment 6, temperature 0 | 11,312; 15; fails, "E20" outside brackets | not given; 99; fails, a loop, stopped by the worker |
+| Moment 6, seed 1 | 11,312; 26; fails, "E95, E96" outside brackets | 9,648; 16; passes |
+| Moment 6, seed 2 | 11,312; 11; fails, a K number in the text | 9,648; 9; fails, a K number in the text |
+| Moment 6, seed 3 | 11,312; 10; fails, a K number in the text | 9,648; 7; passes |
+
+What the trial shows:
+
+- **Fewer prompt tokens:** 496 fewer at moment 2 (9.3%), and 1,664 fewer
+  at moment 6 (14.7%), where the knowledge is larger. The prompt took 47.3
+  to 47.8 s at moment 6, in place of 56.0 to 56.8 s.
+- **More answers pass:** 4 of 8, in place of none. With four samples of
+  each step, this may be partly chance: every failure that remains is of a
+  kind seen at 27c9b2b, the NVDA "stop speech" wording and a K number in
+  the text, which proposal A, and for the first proposal 1 of the
+  2026-10-18 review, are about.
+- **What a task would now do with these two steps:** at moment 2, accept
+  the answer at temperature 0. At moment 6, stop the answer at temperature
+  0 as a loop, then take seed 1, the first valid, and disclose the
+  recovery in Appendix G. Both steps failed their tasks before. A full run
+  sends every step again, so its knowledge will not be the same as these
+  trials'.
+- **The loop at moment 6, temperature 0:** the answer did not repeat at
+  once. It went through the knowledge one statement at a time, an
+  elaboration about each ("The frame does not show the toggleButton
+  described in K96."), and at statement 94 began to repeat "The frame
+  shows the page layout after scrolling, which involved changes in
+  elements." until the worker stopped it at 99, after 326.8 s. The other
+  three samples of the step gave 16, 9, and 7 statements. Whether the new
+  layout makes this more likely cannot be told from one answer; a limit on
+  the statements of a layer, proposal 5 of the 2026-10-18 review, would
+  bound it.
+
 ### D. Notes, not prose, for the answers only a model reads
 
 - **What changes,** for the moment, the tiles, and layers 2 and 3:
@@ -278,7 +324,8 @@ asked; then A, B, and D, each measured by trial before the next.
    and dropped as listed.
 2. Proposal B: the recorder writes layer 1, and whether the text summary
    task stays as a report of its own.
-3. Proposal C: decided and built, 2026-10-19; its trial is to come.
+3. Proposal C: decided and built, 2026-10-19, and tried: see "The trial of
+   C".
 4. Proposal D: whether the moment and tile descriptions become notes too,
    or only the layers.
 
