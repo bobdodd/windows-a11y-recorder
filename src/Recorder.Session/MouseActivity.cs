@@ -235,15 +235,15 @@ public sealed class MouseActivity
         {
             true => "tracking on",
             false => "tracking off",
-            null => "tracking not known"
+            null => "not knowing whether tracking is on"
         };
         var injected = ignore switch
         {
             true => "ignores mouse input from other applications",
             false => "does not ignore mouse input from other applications",
-            null => "whether it ignores mouse input from other applications is not known"
+            null => "not knowing whether it ignores mouse input from other applications"
         };
-        return $"{tracked} ({trackingText}), {injected} ({ignoreText}), as read at NVDA's start";
+        return $"read at NVDA's start: {tracked} ({trackingText}), {injected} ({ignoreText})";
     }
 
     private List<long> NvdaChangeTimes() =>
@@ -318,7 +318,7 @@ public sealed class MouseActivity
         var (tracking, trackingText) = Setting(settings, "enableMouseTracking", NvdaSettings.DefaultEnableMouseTracking);
         var (ignore, ignoreText) = Setting(settings, "ignoreInjectedMouseInput", NvdaSettings.DefaultIgnoreInjectedMouseInput);
         details.Add(string.Create(CultureInfo.InvariantCulture,
-            $"NVDA (process {nvda.ProcessId}): mouse tracking {trackingText}, ignore mouse input from other applications {ignoreText}, as read at its start"));
+            $"NVDA (process {nvda.ProcessId}), read at its start: mouse tracking {trackingText}, ignore mouse input from other applications {ignoreText}"));
         if (item.Injected)
         {
             details.Add("NVDA also ignores injected mouse events while it makes its own mouse clicks; that is not recorded.");

@@ -36,7 +36,11 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
     // The next version adds the statement of kind none, that no evidence
     // of something was found, citing nothing (owner, 2026-10-19: "refer to
     // evidence or state no evidence, both are acceptable").
-    public const int TemplateVersion = 6;
+    // The next version opens what is inferred, derived, found, or not known
+    // in the recorder's facts, labels, and examples with it, rather than
+    // after a comma or in brackets (owner, 2026-10-19: "Be consistent in your
+    // use of English, for the model and the user").
+    public const int TemplateVersion = 7;
 
     public static readonly IReadOnlyList<string> VisitSections = ["page", "purpose", "activity"];
 
@@ -76,7 +80,7 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
         "Describe only what the facts support. Name sites, programs, windows, and pages only as the facts name them. " +
         "Where the facts do not settle something, say that it is unknown; do not guess. " +
         "What NVDA had to announce is the recorder's inference from the page, not a recording of speech: say that NVDA had to announce something, " +
-        "never that NVDA said it or that the participant heard it. " +
+        "opening with the inference, such as \"inferring that NVDA had to announce the main landmark\", never that NVDA said it or that the participant heard it. " +
         "Use the participant's capabilities only as the facts give them: a reported description is the auditor's statement, " +
         "and assistive technology observed running shows what was running, not what the participant is able to do. " +
         "If the participant's capabilities are unknown, do not say what the participant saw or heard; say what was on the page and what was announced. " +
@@ -95,7 +99,7 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
     public const string RecordingInstructions =
         "You describe a whole accessibility test recording, for an accessibility auditor. " +
         "You are given each page visit's URL, title, and headings from the recorder, each with an evidence reference such as [E3], " +
-        "and a model's descriptions of each visit, which are inferences and not facts. " +
+        "and a model's inferred descriptions of each visit, not facts. " +
         "Describe only what these support, name sites and programs only as they are named, and say that something is unknown where they do not settle it. " +
         "Use the participant's capabilities only as given: a reported description is the auditor's statement, and observed assistive technology shows what was running, " +
         "not what the participant is able to do. If the capabilities are unknown, do not say what the participant saw or heard. " +
@@ -195,7 +199,7 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
     {
         var input = new StringBuilder()
             .Append(string.Join('\n', collation.CapabilityLines)).Append("\n\n")
-            .Append(CultureInfo.InvariantCulture, $"Page visit {visit.Visit.Number}, derived by the recorder:\n")
+            .Append(CultureInfo.InvariantCulture, $"The recorder derived page visit {visit.Visit.Number}:\n")
             .Append(visit.Text);
         return input.ToString();
     }
@@ -215,7 +219,7 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
 
         var input = new StringBuilder()
             .Append(string.Join('\n', collation.CapabilityLines)).Append("\n\n")
-            .Append("The page visits, derived by the recorder:\n").Append(overview)
+            .Append("The recorder derived these page visits:\n").Append(overview)
             .Append('\n').Append(describedAs).Append('\n');
         foreach (var (visit, step) in visits)
         {

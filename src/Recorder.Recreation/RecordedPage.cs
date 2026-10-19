@@ -179,7 +179,7 @@ public static class RecordedPage
             notes.Add($"The page is laid out at the recorded layout zoom factor at the frame, {viewport.ShownLayoutZoomFactor.ToString("0.####", CultureInfo.InvariantCulture)}, {source}, which the instrumented renderer applies from the layoutZoom entry of the root element's {RecordedPreferences.AttributeName} attribute, so that its layout units are the recorded ones. The layout zoom is the screen's scale factor, with Windows' text size, times the browser zoom, so the page is {viewport.ShownWidth.ToString("0.##", CultureInfo.InvariantCulture)} by {viewport.ShownHeight.ToString("0.##", CultureInfo.InvariantCulture)} CSS pixels at a device pixel ratio of {viewport.ShownDevicePixelRatio.ToString("0.####", CultureInfo.InvariantCulture)}. The evidence panel's Viewport as shown section compares the page's own with these.");
             if (Math.Abs(viewport.ShownLayoutZoomFactor - recorded.LayoutZoomFactor) > 1e-6)
             {
-                notes.Add($"The layout zoom at the frame differs from that checkpoint's, {recorded.LayoutZoomFactor.ToString("0.####", CultureInfo.InvariantCulture)}, so the page's CSS size is inferred from the window's recorded size in screen pixels, not recorded.");
+                notes.Add($"The layout zoom at the frame differs from that checkpoint's, {recorded.LayoutZoomFactor.ToString("0.####", CultureInfo.InvariantCulture)}; the page's CSS size at the frame is not recorded, so the recreation infers it from the window's recorded size in screen pixels.");
             }
         }
         else

@@ -63,7 +63,7 @@ public sealed class RecordedDisplayLatencyTests
         var note = new RecordedDisplayLatency(24_999_000, 16_666).Note;
         Assert.StartsWith("The compositor values, compositor scroll positions, and animated image frames are those of the compositor frame presented 2 display refreshes before the frame's composition, of 16.666 ms each", note, StringComparison.Ordinal);
         Assert.Contains("the last presented at least 25.0 ms, one and a half refreshes, before it", note, StringComparison.Ordinal);
-        Assert.Contains("inferred from measurements of one machine's recordings, not recorded", note, StringComparison.Ordinal);
+        Assert.Contains("Inferring from measurements of one machine's recordings that the screen shows a compositor frame 2 refreshes after it is presented: that lag is not recorded", note, StringComparison.Ordinal);
     }
 
     // The latency moves the choice by its length: a frame presented exactly

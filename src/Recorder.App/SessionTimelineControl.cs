@@ -228,7 +228,7 @@ public sealed class SessionTimelineControl : FrameworkElement
 
     /// <summary>
     /// The spans of the inferred reading position, drawn as a strip under the
-    /// window strip. The properties panel's Reading position (inferred) row
+    /// window strip. The properties panel's Inferred reading position row
     /// gives the object and its basis in text.
     /// </summary>
     public void SetReadingPositionSpans(IReadOnlyList<Recorder.Session.ReadingPositionSpan> spans)

@@ -126,7 +126,7 @@ public sealed class NvdaAnnouncementTests
         // The containers it is still in are not said again; a link to
         // another page is not "same page".
         Assert.Equal("Away  visited  link", announced[1].Text);
-        Assert.Equal("NVDA had to announce (inferred, uncertain): Away  visited  link", announced[1].Line);
+        Assert.Equal("inferring, with uncertainty, that NVDA had to announce: Away  visited  link", announced[1].Line);
     }
 
     [Fact]
@@ -299,7 +299,7 @@ public sealed class NvdaAnnouncementTests
         ]);
 
         Assert.Equal(NvdaAnnouncementKind.NotModelled, announced[1].Kind);
-        Assert.Equal("NVDA had to announce: not modelled yet; next character is not modelled yet", announced[1].Line);
+        Assert.Equal("not modelling yet what NVDA had to announce; next character is not modelled yet", announced[1].Line);
         Assert.Equal(NvdaAnnouncementKind.Uncertain, announced[2].Kind);
         Assert.Contains(announced[2].Basis, note => note.Contains("next character", StringComparison.Ordinal) &&
             note.Contains("not known", StringComparison.Ordinal));

@@ -76,7 +76,7 @@ public sealed class KeyDispositionTests
         var running = new KeyDispositions([down], NvdaFrom(5 * Second));
         var outcome = running.Of(down.EventId)!;
         Assert.Equal(KeyOutcomeKind.Kept, outcome.Kind);
-        Assert.Equal("kept, screen reader running: NVDA; command: next heading in browse mode (h), inferred", outcome.Text);
+        Assert.Equal("kept, screen reader running: NVDA; inferring the command: next heading in browse mode (h)", outcome.Text);
         Assert.Contains(outcome.Details, line => line.StartsWith("inferred:", StringComparison.Ordinal));
 
         Assert.Equal("kept, no screen reader running", new KeyDispositions([down], NvdaFrom(20 * Second)).Of(down.EventId)!.Text);

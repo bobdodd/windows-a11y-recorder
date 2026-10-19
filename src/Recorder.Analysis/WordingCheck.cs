@@ -59,7 +59,7 @@ public static partial class WordingCheck
 
             if (SpeechAsFact(claim.Text) is { } said)
             {
-                faults.Add($"{place} says \"{said}\", as if NVDA's speech were recorded, where what NVDA had to announce is inferred: \"{Short(claim.Text)}\"");
+                faults.Add($"{place} says \"{said}\", as if NVDA's speech were recorded, where the recorder infers what NVDA had to announce: \"{Short(claim.Text)}\"");
             }
         }
 

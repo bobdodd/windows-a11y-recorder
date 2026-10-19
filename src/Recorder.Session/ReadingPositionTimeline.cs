@@ -86,7 +86,7 @@ public sealed class ReadingPositionTimeline
 
     public const string Key = "screen-reader.reading-position";
 
-    public const string Setting = "Reading position (inferred)";
+    public const string Setting = "Inferred reading position";
 
     private const long ChangedWindowNanoseconds = 1_000_000_000;
 
@@ -269,7 +269,7 @@ public sealed class ReadingPositionTimeline
     /// </summary>
     public string? Of(string eventId) =>
         _byEvent.TryGetValue(eventId, out var step)
-            ? $"Reading position after it (inferred, rule {step.Rule.ToString(CultureInfo.InvariantCulture)} of step 4, {Rule}): " +
+            ? $"Inferred reading position after it (rule {step.Rule.ToString(CultureInfo.InvariantCulture)} of step 4, {Rule}): " +
               $"{step.Value}.{Environment.NewLine}Basis: {step.Basis}."
             : null;
 
@@ -323,7 +323,7 @@ public sealed class ReadingPositionTimeline
             ReadingPositionKind.Uncertain,
             4,
             item,
-            $"{requests.DescribeObject(item, command.Time)}, uncertain since {said} sent nothing",
+            $"uncertain, as {said} sent nothing: {requests.DescribeObject(item, command.Time)}",
             requests.LabelOf(item, command.Time),
             $"NVDA kept {said} and sent nothing to the page in the " +
             $"{(AccessibilityRequests.KeyWindowNanoseconds / 1_000_000).ToString(CultureInfo.InvariantCulture)} ms after it; " +

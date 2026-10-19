@@ -654,14 +654,14 @@ public sealed class KeyDispositions
         var details = new List<string>();
         if (custom.FirstOrDefault(item => item.Script != "None") is { } bound && (kept || shown.Count > 0))
         {
-            text = $"custom command: {bound.Script} ({gesture}){pressed}, inferred";
-            details.Add($"command (inferred from the keys held): {gesture} is bound to {bound.Script} in {bound.Section}, in gestures.ini");
+            text = $"inferring the custom command: {bound.Script} ({gesture}){pressed}";
+            details.Add($"inferring from the keys held that {gesture} is bound to {bound.Script} in {bound.Section}, in gestures.ini");
         }
         else if (shown.Count > 0)
         {
             var names = string.Join(" or ", shown.Select(command =>
                 command.Name + (command.Context == "any" ? string.Empty : $" in {command.Context}")));
-            text = $"command: {names} ({gesture}){pressed}, inferred";
+            text = $"inferring the command: {names} ({gesture}){pressed}";
             if (kept)
             {
                 _keptCommands.Add(new KeptCommand(key.Time, gesture, [.. shown.Select(command => command.Name)]));
@@ -669,7 +669,7 @@ public sealed class KeyDispositions
 
             foreach (var command in shown)
             {
-                details.Add($"command (inferred from the keys held): {gesture} is {command.Name}" +
+                details.Add($"inferring from the keys held that {gesture} is {command.Name}" +
                     (command.Context == "any" ? string.Empty : $", in {command.Context}") +
                     (command.Passes ? ", which NVDA acts on and passes on" : string.Empty) +
                     $"; source: {settings.Data!.SourceOf(command)}");

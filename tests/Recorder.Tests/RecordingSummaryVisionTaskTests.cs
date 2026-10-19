@@ -510,7 +510,7 @@ public sealed partial class RecordingSummaryTaskTests
         // Chapter 1's pages are given the knowledge without numbers, and
         // the story its visit's facts, knowledge, moments, and section.
         var page = Input(bodies[11]);
-        Assert.Contains("Page 1 of the report's chapter on the pages, derived by the recorder:", page, StringComparison.Ordinal);
+        Assert.Contains("The recorder derived page 1 of the report's chapter on the pages:", page, StringComparison.Ordinal);
         Assert.DoesNotContain("[K", page, StringComparison.Ordinal);
         Assert.Contains("    (layer 2, moment 1) An elaboration from layer 2.", page, StringComparison.Ordinal);
         // The page chapter and the story are given the page's changes; the
@@ -520,7 +520,7 @@ public sealed partial class RecordingSummaryTaskTests
         var story = Input(bodies[13]);
         Assert.Contains("\nThe page's changes during the visit", story, StringComparison.Ordinal);
         Assert.Contains("The visit's page is described in the report's chapter on the pages, section 3.1.", story, StringComparison.Ordinal);
-        Assert.Contains("The changes during the visit to the accessibility settings, the assistive technology, and the Magnifier's view, found by the recorder:\nNone were recorded.\n", story, StringComparison.Ordinal);
+        Assert.Contains("The recorder found these changes during the visit to the accessibility settings, the assistive technology, and the Magnifier's view:\nNone were recorded.\n", story, StringComparison.Ordinal);
         Assert.Matches(@"Moment 1, at 00:00:02\.500: the captured frame \[E\d+\]; the page as the recorder rebuilt it, in tiles: tile 1 \[E\d+\], CSS pixels 0 to 925; .*tile 3 \[E\d+\], CSS pixels 1850 to 2775, on the screen;", story);
         Assert.Contains("The story so far: this is the first part.", story, StringComparison.Ordinal);
         Assert.Contains("\"form\"", bodies[13], StringComparison.Ordinal);
@@ -540,7 +540,7 @@ public sealed partial class RecordingSummaryTaskTests
         // chapter on the user experience; the stand-in recording has no
         // settings records, so each part says so.
         var executive = Input(bodies[16]);
-        Assert.Contains("The Windows settings at the start, found by the recorder (Appendix A):\nThe recording holds no record of the Windows settings, so they are unknown.\n", executive, StringComparison.Ordinal);
+        Assert.Contains("The recorder found the Windows settings at the start (Appendix A):\nThe recording holds no record of the Windows settings, so they are unknown.\n", executive, StringComparison.Ordinal);
         Assert.Contains("Its opening:\n  (sentence) The site and the session.", executive, StringComparison.Ordinal);
         Assert.Contains("The part for visit 2:\nWhat the participant did, written by the recorder in the report's subsection of that name", executive, StringComparison.Ordinal);
         Assert.Matches(@"The part for visit 2:\n(.+\n)*?The recording ended at [^\n]+\n\n  Arriving:\n  \(sentence\) How the participant arrived\.", executive);
@@ -560,7 +560,7 @@ public sealed partial class RecordingSummaryTaskTests
             @"### 1\.2 The participant and their set-up\n\nThe recorder found no setting at the start that was not at its default\. Settings whose default is unknown are in Appendices A to C\.\n\nA statement of the participant\. \[E\d+\]\n\n- A setting in use, and why it matters\. \[E\d+\]\n- Another setting in use, and why it matters\. \[E\d+\]\n\n" +
             @"### 1\.3 The journey\n\n1\. A first step\. \[E\d+\]\n2\. A second step\. \[E\d+\]\n\nWhere it got in the way\. \[E\d+\]\n\n" +
             @"### 1\.4 What the evidence shows and does not show\n\nWhat the evidence does not show\. \[E\d+\]\n\n## 2\. The participant\n\n", text);
-        Assert.Matches(@"## 3\. The pages\n\n### 3\.1 [^\n]+\n\nThe visit to the page, derived by the recorder:\n\n- Visit 1, 00:00:0\d to 00:00:\d\d: a visit to a ", text);
+        Assert.Matches(@"## 3\. The pages\n\n### 3\.1 [^\n]+\n\nThe recorder derived the visit to the page:\n\n- Visit 1, 00:00:0\d to 00:00:\d\d: a visit to a ", text);
         Assert.Matches(
             @"\n\n#### 3\.1\.1 What the page is for\n\nA statement about purpose\. \[E\d+\]\n\n#### 3\.1\.2 Layout from top to bottom\n\nA statement about layout\. \[E\d+\]\n\n" +
             @"#### 3\.1\.3 Content\n\nA statement about content\. \[E\d+\]\n\n#### 3\.1\.4 Controls, forms, dialogs, menus, and messages\n\nA statement about controls\. \[E\d+\]\n\n" +
@@ -818,7 +818,7 @@ public sealed partial class RecordingSummaryTaskTests
     [Fact]
     public void Every_template_shows_a_statement_with_its_text_before_its_kind()
     {
-        Assert.Equal((6, 6, 6, 7, 7, 8, 6), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+        Assert.Equal((7, 7, 7, 8, 8, 9, 7), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
             RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.LayerTemplateVersion, RecordingSummaryVisionKind.PageChapterTemplateVersion,
             RecordingSummaryVisionKind.StoryTemplateVersion, RecordingSummaryVisionKind.ExecutiveTemplateVersion));
         foreach (var instructions in new[]

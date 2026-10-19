@@ -139,7 +139,11 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // The next version adds the statement of kind none, that no evidence
     // of something was found, citing nothing (owner, 2026-10-19: "refer to
     // evidence or state no evidence, both are acceptable").
-    public const int PageTemplateVersion = 6;
+    // The next version opens what is inferred, derived, found, or not known
+    // in the recorder's facts, labels, and examples with it, rather than
+    // after a comma or in brackets (owner, 2026-10-19: "Be consistent in your
+    // use of English, for the model and the user").
+    public const int PageTemplateVersion = 7;
 
     /// <summary>Which item a statement is about, said in the page template from version 4.</summary>
     public const string ItemNamed =
@@ -245,7 +249,11 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // The next version adds the statement of kind none, that no evidence
     // of something was found, citing nothing (owner, 2026-10-19: "refer to
     // evidence or state no evidence, both are acceptable").
-    public const int MomentTemplateVersion = 6;
+    // The next version opens what is inferred, derived, found, or not known
+    // in the recorder's facts, labels, and examples with it, rather than
+    // after a comma or in brackets (owner, 2026-10-19: "Be consistent in your
+    // use of English, for the model and the user").
+    public const int MomentTemplateVersion = 7;
 
     public static readonly IReadOnlyList<string> MomentSections = ["screen", "change"];
 
@@ -307,7 +315,11 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // The next version adds the statement of kind none, that no evidence
     // of something was found, citing nothing (owner, 2026-10-19: "refer to
     // evidence or state no evidence, both are acceptable").
-    public const int LayerTemplateVersion = 7;
+    // The next version opens what is inferred, derived, found, or not known
+    // in the recorder's facts, labels, and examples with it, rather than
+    // after a comma or in brackets (owner, 2026-10-19: "Be consistent in your
+    // use of English, for the model and the user").
+    public const int LayerTemplateVersion = 8;
 
     // Version 2 of the chapters' templates: the executive summary becomes
     // chapter 1, so the pages are chapter 2 and the story chapter 3, named
@@ -339,7 +351,11 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // The next version adds the statement of kind none, that no evidence
     // of something was found, citing nothing (owner, 2026-10-19: "refer to
     // evidence or state no evidence, both are acceptable").
-    public const int PageChapterTemplateVersion = 7;
+    // The next version opens what is inferred, derived, found, or not known
+    // in the recorder's facts, labels, and examples with it, rather than
+    // after a comma or in brackets (owner, 2026-10-19: "Be consistent in your
+    // use of English, for the model and the user").
+    public const int PageChapterTemplateVersion = 8;
 
     // Version 7 of the story, and so its opening, and version 5 of the
     // executive summary: the recorder writes each visit's steps, counted,
@@ -350,12 +366,20 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // The next version adds the statement of kind none, that no evidence
     // of something was found, citing nothing (owner, 2026-10-19: "refer to
     // evidence or state no evidence, both are acceptable").
-    public const int StoryTemplateVersion = 8;
+    // The next version opens what is inferred, derived, found, or not known
+    // in the recorder's facts, labels, and examples with it, rather than
+    // after a comma or in brackets (owner, 2026-10-19: "Be consistent in your
+    // use of English, for the model and the user").
+    public const int StoryTemplateVersion = 9;
 
     // The next version adds the statement of kind none, that no evidence
     // of something was found, citing nothing (owner, 2026-10-19: "refer to
     // evidence or state no evidence, both are acceptable").
-    public const int ExecutiveTemplateVersion = 6;
+    // The next version opens what is inferred, derived, found, or not known
+    // in the recorder's facts, labels, and examples with it, rather than
+    // after a comma or in brackets (owner, 2026-10-19: "Be consistent in your
+    // use of English, for the model and the user").
+    public const int ExecutiveTemplateVersion = 7;
 
     /// <summary>The executive summary's subsection the recorder heads with the settings not at their defaults.</summary>
     public const string ParticipantPart = "participant";
@@ -438,7 +462,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "A captured frame shows what was on the screen, not what the participant saw: say that the participant saw something only if the participant's capabilities, " +
         "as given, say that they work by sight; otherwise do not say what the participant saw. " +
         "What NVDA had to announce is the recorder's inference from the page, not a recording of speech: never say that NVDA announced, said, read, or spoke anything, that its speech stopped, or that the participant heard it. " +
-        "Say what NVDA had to announce, inferred, or what NVDA would do, inferred, such as \"NVDA had to announce the main landmark (inferred)\" or \"which NVDA treats as a command to stop speech (inferred)\". " +
+        "Say what NVDA had to announce, or what NVDA would do, opening with the inference, such as \"inferring that NVDA had to announce the main landmark\" or \"inferring that any NVDA speech was stopped\". " +
         "Assistive technology observed running shows what was running, not what the participant is able to do. ";
 
     /// <summary>How a layer's answer is given, said in both layers' templates.</summary>
@@ -488,7 +512,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     public const string PageChapterInstructions =
         "You write the description of one web page for the chapter on the pages of a professional report for accessibility and usability engineers on an accessibility test recording. " +
         "The chapter describes each page from everything known of it from every visit to it, independent of the participant's journey, which the chapter on the user experience tells. " +
-        "You are given the page's address and title, the visits to it with what the recorder derived of them, the page's changes during each visit as the recorder found them, " +
+        "You are given the page's address and title, the visits to it with what the recorder derived of them, the changes the recorder found to the page during each visit, " +
         "each beginning with an evidence reference such as [E3]: its live regions, its popups opening and closing, NVDA's windows, and its scrolls; and each visit's knowledge in layers: " +
         "layer 1 from the recorded data, layer 2 from captured frames of the screen, and layer 3 from the web page as the recorder rebuilt it, each statement with the evidence references it rests on, such as [E3]. " +
         "The knowledge is inference, not fact. " +
@@ -535,10 +559,10 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "You write one part of the chapter on the user experience of a professional report for accessibility and usability engineers on an accessibility test recording: the story of the user experience. " +
         "This part is one page visit. You are given the participant's capabilities; the recorder's facts about the visit, each beginning with an evidence reference such as [E3], " +
         "with the page's changes during it in time order: its live regions, its popups opening and closing, NVDA's windows, and its scrolls; " +
-        "what the participant did, as the recorder writes it in the report: the inputs counted, then numbered steps, each an input and what the recorder found after it and before the next; " +
+        "what the participant did, in the recorder's words in the report: the inputs counted, then numbered steps, each an input and what the recorder found after it and before the next; " +
         "the visit's knowledge in layers: layer 1 from the recorded data, layer 2 from captured frames of the screen, and layer 3 from the web page as the recorder rebuilt it, each statement with the references it rests on; " +
         "the moments of the visit, each with its captured frame's reference and its tiles' references; which section of the chapter on the pages describes the visit's page; " +
-        "the changes during the visit to the accessibility settings, the assistive technology, and the Magnifier's view, found by the recorder, each with its references; " +
+        "the changes the recorder found during the visit to the accessibility settings, the assistive technology, and the Magnifier's view, each with its references; " +
         "and the story so far, the parts written for the visits before. The knowledge is inference, not fact. " +
         "Tell how the participant arrived and what the experience was, in two subsections that the recorder heads, so that each holds only its own topic; " +
         "between them the recorder writes the third, what the participant did, from its steps. " +
@@ -554,8 +578,8 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     public const string OpeningInstructions =
         "You write the opening of the chapter on the user experience of a professional report for accessibility and usability engineers on an accessibility test recording: the story of the user experience. " +
-        "You are given the participant's capabilities; the page visits, as the recorder derived them; the pages, as the chapter on the pages names them; " +
-        "the changes to the accessibility settings, the assistive technology, and the Magnifier's view before the first visit, found by the recorder, each with its references; " +
+        "You are given the participant's capabilities; the page visits the recorder derived; the pages by the names the chapter on the pages gives them; " +
+        "the changes the recorder found before the first visit to the accessibility settings, the assistive technology, and the Magnifier's view, each with its references; " +
         "and the chapter's parts, one for each visit, which follow the opening. " +
         "Each part's statements cite the evidence references they rest on, such as [E3]; the parts are inferences, not facts. " +
         "Introduce the story in one or two paragraphs: the site tested and who it appears to be for, the changes before the first visit, and the course of the session in brief, " +
@@ -567,8 +591,8 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     public const string ExecutiveInstructions =
         "You write the executive summary, the first chapter, of a professional report for accessibility and usability engineers on an accessibility test recording. " +
-        "You are given the participant's capabilities; the assistive technology at the start and the accessibility settings at the start that are not at their defaults or whose default is unknown, found by the recorder; " +
-        "the changes to them during the recording; the page visits and the pages; each visit's steps, as the recorder writes them, counted; and the chapter on the user experience, which tells the journey. " +
+        "You are given the participant's capabilities; what the recorder found of the assistive technology at the start and of the accessibility settings at the start that are not at their defaults or whose default is unknown; " +
+        "the changes to them during the recording; the page visits and the pages; each visit's steps in the recorder's words, counted; and the chapter on the user experience, which tells the journey. " +
         "Each is given with the evidence references it rests on, such as [E3]; the chapter's statements are inferences, not facts. " +
         "Write as the executive summary of a professional report is written: interpret and explain. State a judgement first and then explain it, with its reasons from the evidence and the caveats that temper it. " +
         "Say what the facts mean and why they matter, for this participant and for the engineers who will act on the report, not the facts alone; the chapters and appendices give the facts. " +
@@ -1211,7 +1235,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         references.UnionWith(RecordingSummaryKind.CapabilityReferences(collation));
         var input = new StringBuilder()
             .Append(string.Join('\n', collation.CapabilityLines)).Append("\n\n")
-            .Append(CultureInfo.InvariantCulture, $"Page visit {visit.Visit.Number}, derived by the recorder: {visit.Visit.Start.Url}")
+            .Append(CultureInfo.InvariantCulture, $"The recorder derived page visit {visit.Visit.Number}: {visit.Visit.Start.Url}")
             .Append(visit.Title is { Length: > 0 } title ? $", titled \"{title.Replace("\"", "'", StringComparison.Ordinal)}\"" : ", with no title recorded")
             .Append(".\n\n");
         return input;
@@ -1333,13 +1357,13 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         var references = new HashSet<string>(StringComparer.Ordinal);
         var titles = visits.Select(seen => seen.Visit.Title).Where(title => title is { Length: > 0 }).Distinct(StringComparer.Ordinal).ToList();
         var input = new StringBuilder()
-            .Append(CultureInfo.InvariantCulture, $"Page {number} of the report's chapter on the pages, derived by the recorder: {visits[0].Visit.Visit.Start.Url}")
+            .Append(CultureInfo.InvariantCulture, $"The recorder derived page {number} of the report's chapter on the pages: {visits[0].Visit.Visit.Start.Url}")
             .Append(titles.Count == 0 ? ", with no title recorded" : ", titled " + string.Join(", then ", titles.Select(title => $"\"{title!.Replace("\"", "'", StringComparison.Ordinal)}\"")))
             .Append(CultureInfo.InvariantCulture, $". It was visited {visits.Count} {(visits.Count == 1 ? "time" : "times")}.\n");
         foreach (var (visit, knowledge) in visits)
         {
             input.Append(CultureInfo.InvariantCulture,
-                $"\nVisit {visit.Visit.Number}, derived by the recorder: from {SummaryCollator.Time(visit.Visit.Start.Time)} to {SummaryCollator.Time(visit.Visit.End)}.\n");
+                $"\nThe recorder derived visit {visit.Visit.Number}: from {SummaryCollator.Time(visit.Visit.Start.Time)} to {SummaryCollator.Time(visit.Visit.End)}.\n");
             input.Append(visit.ChangesText).Append('\n');
             foreach (var line in visit.Changes)
             {
@@ -1446,7 +1470,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         var references = new HashSet<string>(RecordingSummaryKind.CapabilityReferences(collation), StringComparer.Ordinal);
         var input = new StringBuilder()
             .Append(string.Join('\n', collation.CapabilityLines)).Append("\n\n")
-            .Append("The page visits, derived by the recorder:\n");
+            .Append("The recorder derived these page visits:\n");
         foreach (var (visit, _) in parts)
         {
             input.Append(CultureInfo.InvariantCulture,
@@ -1455,14 +1479,14 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                 .Append(".\n");
         }
 
-        input.Append("\nThe pages, as the chapter on the pages names them:\n");
+        input.Append("\nThe pages by the names the chapter on the pages gives them:\n");
         foreach (var page in pages)
         {
             input.Append(CultureInfo.InvariantCulture, $"Section 3.{page.Number}: {LayeredReport.PageTitle(page)}, visits {string.Join(", ", page.Visits)}.\n");
         }
 
         AppendChanges(input, "before the first visit", changes ?? [], settingReferences, references);
-        input.Append("\nThe chapter's parts, which follow the opening, each with its inputs as the recorder counts them. The parts are inferences, not facts:\n");
+        input.Append("\nThe chapter's parts, which follow the opening, each with the recorder's count of its inputs. The parts are inferences, not facts:\n");
         foreach (var (visit, step) in parts)
         {
             var steps = StepsOf(collation, visit);
@@ -1527,11 +1551,11 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             input.Append('\n');
         }
 
-        Rows("The assistive technology at the start, found by the recorder (the report's Appendix C)", settings.Assistive, settings.AssistiveNote);
-        Rows("The Windows settings at the start, found by the recorder (Appendix A)", settings.Windows, settings.WindowsNote);
-        Rows("The browser's settings at the start, and the values it sent to the first page visited, found by the recorder (Appendix B)", settings.Browser, settings.BrowserNote);
+        Rows("The recorder found the assistive technology at the start (the report's Appendix C)", settings.Assistive, settings.AssistiveNote);
+        Rows("The recorder found the Windows settings at the start (Appendix A)", settings.Windows, settings.WindowsNote);
+        Rows("The recorder found the browser's settings at the start, and the values it sent to the first page visited (Appendix B)", settings.Browser, settings.BrowserNote);
         AppendChanges(input, "during the recording", settings.Changes, settingReferences, references);
-        input.Append("\nThe page visits, derived by the recorder:\n");
+        input.Append("\nThe recorder derived these page visits:\n");
         foreach (var (visit, _) in parts)
         {
             input.Append(CultureInfo.InvariantCulture,
@@ -1540,13 +1564,13 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                 .Append(".\n");
         }
 
-        input.Append("\nThe pages, as the chapter on the pages names them:\n");
+        input.Append("\nThe pages by the names the chapter on the pages gives them:\n");
         foreach (var page in pages)
         {
             input.Append(CultureInfo.InvariantCulture, $"Section 3.{page.Number}: {LayeredReport.PageTitle(page)}, visits {string.Join(", ", page.Visits)}.\n");
         }
 
-        input.Append("\nThe chapter on the user experience: each visit's steps, as the recorder writes them, and the parts, which are inferences, not facts.\nIts opening:\n");
+        input.Append("\nThe chapter on the user experience: each visit's steps in the recorder's words, and the inferred parts, not facts.\nIts opening:\n");
         AppendStory(input, opening, references);
         foreach (var (visit, step) in parts)
         {
@@ -1607,7 +1631,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         StringBuilder input, string when, IReadOnlyList<SettingChange> changes, IReadOnlyDictionary<string, string>? settingReferences, ISet<string> references)
     {
         input.Append(CultureInfo.InvariantCulture,
-            $"\nThe changes {when} to the accessibility settings, the assistive technology, and the Magnifier's view, found by the recorder:\n");
+            $"\nThe recorder found these changes {when} to the accessibility settings, the assistive technology, and the Magnifier's view:\n");
         if (changes.Count == 0)
         {
             input.Append("None were recorded.\n");
@@ -1759,7 +1783,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         var references = new HashSet<string>(RecordingSummaryKind.CapabilityReferences(collation), StringComparer.Ordinal);
         var input = new StringBuilder()
             .Append(string.Join('\n', collation.CapabilityLines)).Append("\n\n")
-            .Append(CultureInfo.InvariantCulture, $"Page visit {visit.Visit.Number}, derived by the recorder: {visit.Visit.Start.Url}")
+            .Append(CultureInfo.InvariantCulture, $"The recorder derived page visit {visit.Visit.Number}: {visit.Visit.Start.Url}")
             .Append(visit.Title is { Length: > 0 } title ? $", titled \"{title.Replace("\"", "'", StringComparison.Ordinal)}\"" : ", with no title recorded")
             .Append(".\n\n")
             .Append(CultureInfo.InvariantCulture, $"Moment {moment.Number} of the visit, at {SummaryCollator.Time(moment.Frame.Time)}. Why the recorder chose it:\n");
@@ -1802,7 +1826,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         var references = new HashSet<string>(RecordingSummaryKind.CapabilityReferences(collation), StringComparer.Ordinal) { frameReference };
         var input = new StringBuilder()
             .Append(string.Join('\n', collation.CapabilityLines)).Append("\n\n")
-            .Append(CultureInfo.InvariantCulture, $"Page visit {visit.Visit.Number}, derived by the recorder: {visit.Visit.Start.Url}")
+            .Append(CultureInfo.InvariantCulture, $"The recorder derived page visit {visit.Visit.Number}: {visit.Visit.Start.Url}")
             .Append(visit.Title is { Length: > 0 } title ? $", titled \"{title.Replace("\"", "'", StringComparison.Ordinal)}\"" : ", with no title recorded")
             .Append(".\n\n")
             .Append(CultureInfo.InvariantCulture, $"Moment {moment.Number} of the visit, at {SummaryCollator.Time(moment.Frame.Time)}. Why the recorder chose it:\n");

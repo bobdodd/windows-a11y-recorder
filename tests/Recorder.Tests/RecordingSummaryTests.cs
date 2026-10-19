@@ -572,7 +572,7 @@ public sealed class RecordingSummaryTests
         evidence.FocusList.Add(new FocusFact(2 * Second + Second / 10, "focus-1", "doc-1", skip));
         evidence.KeyList.Add(new TimedFact(3 * Second, "key-2", "h, kept by NVDA"));
         evidence.CommandList.Add(new TimedFact(3 * Second, null, "NVDA kept h as its command: next heading."));
-        evidence.AnnouncementList.Add(new TimedFact(3 * Second + Second / 10, "say-1", "NVDA had to announce (inferred, uncertain): heading, level 2"));
+        evidence.AnnouncementList.Add(new TimedFact(3 * Second + Second / 10, "say-1", "inferring, with uncertainty, that NVDA had to announce: heading, level 2"));
         foreach (var (at, letter) in new[] { (4L, "a"), (5L, "b"), (6L, "c") })
         {
             evidence.KeyList.Add(new TimedFact(at * Second, $"key-{letter}", $"{letter}, passed to the page"));
@@ -598,7 +598,7 @@ public sealed class RecordingSummaryTests
                 "  then: 00:00:02.100 The page's focus moved to link \"Skip to main content\".",
                 "Step 2: 00:00:03.000 Key pressed: h, kept by NVDA.",
                 "  then: 00:00:03.000 NVDA kept h as its command: next heading.",
-                "  then: 00:00:03.100 NVDA had to announce (inferred, uncertain): heading, level 2",
+                "  then: 00:00:03.100 inferring, with uncertainty, that NVDA had to announce: heading, level 2",
                 "Step 3: 00:00:04.000 Characters typed, 3 keys, from \"a\" to \"c\", passed to the page.",
                 "Step 4: 00:00:07.000 Mouse left button pressed at screen point (5, 5)",
                 "Step 5: 00:00:07.500 to 00:00:08.000, 2 times: Key pressed: Tab, passed to the page.",
@@ -619,7 +619,7 @@ public sealed class RecordingSummaryTests
             "   - 00:00:02.100 The page's focus moved to link \"Skip to main content\". [R]\n" +
             "2. 00:00:03.000 Key pressed: h, kept by NVDA. [R]\n" +
             "   - 00:00:03.000 NVDA kept h as its command: next heading. [R]\n" +
-            "   - 00:00:03.100 NVDA had to announce (inferred, uncertain): heading, level 2 [R]\n" +
+            "   - 00:00:03.100 inferring, with uncertainty, that NVDA had to announce: heading, level 2 [R]\n" +
             "3. 00:00:04.000 Characters typed, 3 keys, from \"a\" to \"c\", passed to the page. [R]\n" +
             "   - The recorder found nothing after it before the next input.\n" +
             "4. 00:00:07.000 Mouse left button pressed at screen point (5, 5) [R]\n" +
@@ -650,7 +650,7 @@ public sealed class RecordingSummaryTests
         LayeredReport.AppendSettingsNotAtDefault(builder, settings, key => $" [{key}]");
 
         Assert.Equal(
-            "The settings not at their defaults at the start, found by the recorder; Appendices A to C give every setting, and Appendix D every change:\n\n" +
+            "The recorder found these settings not at their defaults at the start; Appendices A to C give every setting, and Appendix D every change:\n\n" +
             "- NVDA, Speech rate: 60 (not the default) [rate]\n" +
             "- Display, Text size: 150% (not the default, which is 100%) [text]\n\n",
             builder.ToString());

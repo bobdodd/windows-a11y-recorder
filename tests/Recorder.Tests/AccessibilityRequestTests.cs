@@ -388,7 +388,7 @@ public sealed class AccessibilityRequestTests
             [new KeptCommand(Second, "h", ["next heading"]), new KeptCommand(3 * Second, "h", ["next heading"])]);
 
         var scroll = requests.Of("s1")!;
-        Assert.Contains("After the key H, 25 ms earlier, which NVDA kept as next heading (h), inferred.", scroll.Details);
+        Assert.Contains("After the key H, 25 ms earlier, inferring that NVDA kept it as next heading (h).", scroll.Details);
         Assert.Contains(
             "Sent with it, as one step: clear Chromium's accessibility focus from link \"Donate\" (node 700); " +
             "move Chromium's accessibility focus, its note of the assistive technology's position, to heading \"Contact us\" (node 652).",

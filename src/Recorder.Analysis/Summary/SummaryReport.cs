@@ -189,7 +189,7 @@ public static class SummaryReport
 
         if (visit.Visit.Steps.Count > 0)
         {
-            builder.Append("\nIn-page jumps within the visit, derived by the recorder:\n\n");
+            builder.Append("\nThe recorder derived these in-page jumps within the visit:\n\n");
             foreach (var step in visit.Visit.Steps)
             {
                 var link = step.LinkName is { Length: > 0 } name ? $" \"{OneLine(name)}\"" : "";
@@ -219,7 +219,7 @@ public static class SummaryReport
 
         builder.Append(Own).Append(scopeNote is null ? "" : " " + scopeNote).Append("\n\n");
 
-        builder.Append("Other programs' windows the recorder found in front, derived from the front window records:\n\n");
+        builder.Append("The recorder derived, from the front window records, these other programs' windows it found in front:\n\n");
         foreach (var window in collation.OtherWindows)
         {
             builder.Append(CultureInfo.InvariantCulture,

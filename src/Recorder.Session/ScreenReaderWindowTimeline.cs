@@ -155,7 +155,7 @@ public sealed class ScreenReaderWindowTimeline
                 endBasis,
                 opener is null
                     ? null
-                    : $"opened by {opener.Gesture} ({string.Join(" or ", opener.Names)}) at {WindowsPreferenceTimeline.Clock(opener.Time)}, inferred",
+                    : $"inferring that it was opened by {opener.Gesture} ({string.Join(" or ", opener.Names)}) at {WindowsPreferenceTimeline.Clock(opener.Time)}",
                 window.ProcessId!.Value)
             {
                 Focus = FocusIn(window.ProcessId!.Value, start, end),

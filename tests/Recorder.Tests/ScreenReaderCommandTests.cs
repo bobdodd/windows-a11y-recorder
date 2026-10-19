@@ -150,7 +150,7 @@ public sealed class ScreenReaderCommandTests
         // Recording 20261010-211432 at 92.8 s: Insert held, F7 kept.
         var (keys, down) = Press(Nvda(TargetSettings), 0x76, (0x2D, true));
         var outcome = keys.Of(down.EventId)!;
-        Assert.Equal("kept, screen reader running: NVDA; command: elements list in browse mode (NVDA+f7), inferred", outcome.Text);
+        Assert.Equal("kept, screen reader running: NVDA; inferring the command: elements list in browse mode (NVDA+f7)", outcome.Text);
         Assert.Contains(outcome.Details, line => line.EndsWith("keyCommands.html#browse-mode", StringComparison.Ordinal));
         Assert.Contains("keyboard layout: desktop (NVDA's default)", outcome.Details);
         Assert.Contains("NVDA keys: Caps Lock, Numpad Insert, Insert (NVDAModifierKeys 7 in nvda.ini)", outcome.Details);
@@ -160,7 +160,7 @@ public sealed class ScreenReaderCommandTests
     public void CapsLockIsAnNvdaKeyOnlyWhereTheSettingsSaySo()
     {
         var (withCapsLock, down) = Press(Nvda(TargetSettings), 0x54, (0x14, false));
-        Assert.EndsWith("command: report title (NVDA+t), inferred", withCapsLock.Of(down.EventId)!.Text, StringComparison.Ordinal);
+        Assert.EndsWith("inferring the command: report title (NVDA+t)", withCapsLock.Of(down.EventId)!.Text, StringComparison.Ordinal);
 
         // Without settings, NVDA's default: Insert and Numpad Insert only.
         var (byDefault, plain) = Press(Nvda(), 0x54, (0x14, false));
@@ -173,7 +173,7 @@ public sealed class ScreenReaderCommandTests
     {
         var laptop = TargetSettings.Replace("'keyboardLayout':null", "'keyboardLayout':'laptop'", StringComparison.Ordinal);
         var (keys, down) = Press(Nvda(laptop), 0x5A, (0x2D, true), (0xA0, false));
-        Assert.EndsWith("command: toggle application sleep mode (NVDA+shift+z), inferred", keys.Of(down.EventId)!.Text, StringComparison.Ordinal);
+        Assert.EndsWith("inferring the command: toggle application sleep mode (NVDA+shift+z)", keys.Of(down.EventId)!.Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -184,7 +184,7 @@ public sealed class ScreenReaderCommandTests
             "'customGestures':[{'section':'globalCommands.GlobalCommands','script':'reportCurrentFocus','gesture':'kb:NVDA+f7'}]",
             StringComparison.Ordinal);
         var (keys, down) = Press(Nvda(custom), 0x76, (0x2D, true));
-        Assert.EndsWith("custom command: reportCurrentFocus (NVDA+f7), inferred", keys.Of(down.EventId)!.Text, StringComparison.Ordinal);
+        Assert.EndsWith("inferring the custom command: reportCurrentFocus (NVDA+f7)", keys.Of(down.EventId)!.Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -200,8 +200,8 @@ public sealed class ScreenReaderCommandTests
             Hook(10 * Second + 400 * Millisecond, 0x2D, up: true, extended: true)
         };
         var keys = new KeyDispositions(records, Nvda(TargetSettings));
-        Assert.EndsWith("report title (NVDA+t), inferred", keys.Of(records[1].EventId)!.Text, StringComparison.Ordinal);
-        Assert.EndsWith("report title (NVDA+t), pressed twice, inferred", keys.Of(records[3].EventId)!.Text, StringComparison.Ordinal);
+        Assert.EndsWith("inferring the command: report title (NVDA+t)", keys.Of(records[1].EventId)!.Text, StringComparison.Ordinal);
+        Assert.EndsWith("inferring the command: report title (NVDA+t), pressed twice", keys.Of(records[3].EventId)!.Text, StringComparison.Ordinal);
         Assert.EndsWith("; NVDA key", keys.Of(records[0].EventId)!.Text, StringComparison.Ordinal);
     }
 
@@ -213,7 +213,7 @@ public sealed class ScreenReaderCommandTests
         var up = Hook(10 * Second + 90 * Millisecond, 0xA2, up: true);
         var rawUp = Raw(10 * Second + 91 * Millisecond, 0xA2, up: true);
         var keys = new KeyDispositions([down, rawDown, up, rawUp], Nvda(TargetSettings));
-        Assert.Equal("passed; command: stop speech (control), inferred", keys.Of(down.EventId)!.Text);
+        Assert.Equal("passed; inferring the command: stop speech (control)", keys.Of(down.EventId)!.Text);
         Assert.Equal(keys.Of(down.EventId)!.Text, keys.Of(rawDown.EventId)!.Text);
         Assert.Contains(keys.Of(down.EventId)!.Details, line => line.Contains("which NVDA acts on and passes on", StringComparison.Ordinal));
     }

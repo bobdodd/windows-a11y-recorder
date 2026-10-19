@@ -747,6 +747,72 @@ used, and says which pictures are recreations.
   both reports appear in the Analysis tab, open in the reading view, and
   move the playhead from a reference.
 
+## Decisions (2026-10-19): the qualifier opens the clause
+
+The full run of 9caf25c on the target machine failed at the story of visit
+1: in all four answers the model was given clicks ending "NVDA stops
+speech, inferred" and wrote that the click "caused NVDA to stop speech",
+which the report's wording check refused. The model-load review of
+2026-10-18 had found the same at layer 2, moment 2. The owner: "I assume
+the model is considering the sub-clause (inferred) to be redundant or
+un-needed information and that is not good news. Until we can be sure why
+this happens we need to change our use of English to avoid the issue", and
+then: "Be consistent in your use of English, for the model and the user.
+Use that as your measure."
+
+**The rule:** what is inferred, derived, found, read, or not known opens
+the clause it qualifies; it is not an aside after a comma, a semicolon, or
+in brackets. The same wording is used in the player, the report, the
+models' inputs, and the examples in their instructions.
+
+- **Inferred:** "inferring that ...", as "inferring that any NVDA speech
+  was stopped", "inferring the command: next heading (h)", "inferring
+  that NVDA had to announce: ...", "inferring, with uncertainty, that NVDA
+  had to announce: ...". A label becomes "Inferred reading position".
+- **Not known:** "not knowing whether ..." or "not knowing what ...".
+- **The recorder's own work:** "The recorder derived ...", "The recorder
+  found ...", "The recorder read ...", as "The recorder derived page
+  visit 1: ..." for "Page visit 1, derived by the recorder: ...".
+- **Left as they are:** sentences whose verb is the qualifier, such as
+  "what NVDA last read is not known" or "These values are inferred, not
+  recorded"; labels already opening with it, such as "Derived by the
+  recorder: ..." or "(page, inferred) ..."; and phrases that say which
+  text is meant rather than how sure it is, such as "listed here in full,
+  as recorded" or "the page as the recorder rebuilt it".
+- **The wording check** takes "inferring" and "infers", as it took
+  "inferred", as saying that what follows is inferred. Its own message now
+  says "where the recorder infers what NVDA had to announce".
+- **Every template's version was raised by one** for the changed inputs
+  and examples: the text summary 7, the moment 7, the tiles 7, the layers
+  8, the page chapter 8, the story and its opening 9, and the executive
+  summary 7.
+
+| Where | Before | From 2026-10-19 |
+| --- | --- | --- |
+| A click (player, facts) | NVDA stops speech, inferred | inferring that any NVDA speech was stopped |
+| A key NVDA kept (player, facts) | command: next heading (h), inferred | inferring the command: next heading (h) |
+| A key bound in gestures.ini | custom command: S (g), inferred | inferring the custom command: S (g) |
+| A key's details (player) | command (inferred from the keys held): g is ... | inferring from the keys held that g is ... |
+| An announcement (player, facts) | NVDA had to announce (inferred): ... | inferring that NVDA had to announce: ... |
+| An uncertain announcement | NVDA had to announce (inferred, uncertain): ... | inferring, with uncertainty, that NVDA had to announce: ... |
+| An announcement not modelled, or unknown | NVDA had to announce: not modelled yet; ... / unknown; ... | not modelling yet what NVDA had to announce; ... / not knowing what NVDA had to announce; ... |
+| The announcements' note (player) | What NVDA had to announce, inferred from its rules, ...; not what it said. | Inferring what NVDA had to announce, not what it said, from its rules, ... |
+| An announcement's basis | NVDA was in browse mode (inferred) | inferring that NVDA was in browse mode |
+| NVDA's mode (player) | browse mode, inferred from ... / changed between ..., inferred; last ... | inferring browse mode from ... / inferring that it changed between ...; last ... |
+| An NVDA window's opener (player) | opened by g (name) at t, inferred | inferring that it was opened by g (name) at t |
+| An accessibility request (player) | ..., which NVDA kept as name (g), inferred. | ..., inferring that NVDA kept it as name (g). |
+| The reading position (player) | Reading position (inferred); ..., uncertain since g sent nothing | Inferred reading position; uncertain, as g sent nothing: ... |
+| NVDA's mouse settings (player) | ..., as read at NVDA's start; tracking not known | read at NVDA's start: ...; not knowing whether tracking is on |
+| The display latency (player) | That the screen shows ... is inferred from measurements of one machine's recordings, not recorded, ... | Inferring from measurements of one machine's recordings that the screen shows ...: that lag is not recorded, ... |
+| The recreation's notes | so the page's CSS size is inferred from ..., not recorded. | ; the page's CSS size at the frame is not recorded, so the recreation infers it from ... |
+| Visits (inputs, report) | Page visit 1, derived by the recorder: ... / The visit to the page, derived by the recorder: | The recorder derived page visit 1: ... / The recorder derived the visit to the page: |
+| Settings (inputs, report) | The settings not at their defaults at the start, found by the recorder; ... | The recorder found these settings not at their defaults at the start; ... |
+| Appendix C | ..., as the recorder read it: / NVDA's settings, as first read ... / The Magnifier, as read with the first captured frame. | The recorder read ...: / The recorder first read NVDA's settings ... / The recorder read the Magnifier with the first captured frame. |
+| The instructions' example | "NVDA had to announce the main landmark (inferred)" | "inferring that NVDA had to announce the main landmark" |
+
+The mouse outcomes are listed in full in `screen-reader-activity.md`, "The
+outcomes' wording".
+
 ## Decisions (2026-10-15)
 
 ### The page understood moment by moment

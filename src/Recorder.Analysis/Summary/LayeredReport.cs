@@ -466,7 +466,7 @@ public static partial class LayeredReport
     // visit it returns to; then each visit's in-page jumps, a list each.
     private static void AppendVisits(StringBuilder builder, PageChapter page, RecordingCollation collation, ReportCitations citations)
     {
-        builder.Append(page.Visits.Count == 1 ? "The visit to the page, derived by the recorder:\n\n" : "The visits to the page, derived by the recorder:\n\n");
+        builder.Append(page.Visits.Count == 1 ? "The recorder derived the visit to the page:\n\n" : "The recorder derived the visits to the page:\n\n");
         var visits = page.Visits.Select(number => collation.Visits.First(item => item.Visit.Number == number)).ToList();
         foreach (var visit in visits)
         {
@@ -490,7 +490,7 @@ public static partial class LayeredReport
         builder.Append('\n');
         foreach (var visit in visits.Where(item => item.Visit.Steps.Count > 0))
         {
-            builder.Append(CultureInfo.InvariantCulture, $"In-page jumps within visit {visit.Visit.Number}, derived by the recorder:\n\n");
+            builder.Append(CultureInfo.InvariantCulture, $"The recorder derived these in-page jumps within visit {visit.Visit.Number}:\n\n");
             foreach (var step in visit.Visit.Steps)
             {
                 var link = step.LinkName is { Length: > 0 } name ? $" \"{SummaryReport.OneLine(name)}\"" : "";
@@ -566,7 +566,7 @@ public static partial class LayeredReport
             return;
         }
 
-        builder.Append("The settings not at their defaults at the start, found by the recorder; Appendices A to C give every setting, and Appendix D every change:\n\n");
+        builder.Append("The recorder found these settings not at their defaults at the start; Appendices A to C give every setting, and Appendix D every change:\n\n");
         foreach (var row in rows)
         {
             builder.Append("- ").Append(SummaryReport.OneLine(row.Group)).Append(", ").Append(SummaryReport.OneLine(row.Setting)).Append(": ")
@@ -611,16 +611,16 @@ public static partial class LayeredReport
         }
 
         Table("## Appendix A. Windows settings at the start",
-            "The Windows accessibility and display settings as the recorder read them at the start of the recording. Microsoft documents the default of the caret width alone, so the other defaults are unknown.",
+            "The recorder read these Windows accessibility and display settings at the start of the recording. Microsoft documents the default of the caret width alone, so the other defaults are unknown.",
             settings.Windows, settings.WindowsNote);
         Table("## Appendix B. Browser settings at the start",
             "The browser's settings as read when its profile was loaded, each with Chromium's own answer to whether it is the default, and the values the browser sent to the first page visited, which follow from the settings and are not settings themselves.",
             settings.Browser, settings.BrowserNote);
         Table("## Appendix C. Assistive technology at the start",
-            "The assistive technology at the start of the recording, as the recorder read it:\n\n" +
+            "The recorder read the assistive technology at the start of the recording:\n\n" +
             "- The products the recorder watched for, whether each was running, and whether its module was in the browser at the first page visit, as the browser starts after the recording does.\n" +
-            "- NVDA's settings, as first read from its configuration folder. A setting not written in nvda.ini is at NVDA's default.\n" +
-            "- The Magnifier, as read with the first captured frame.",
+            "- The recorder first read NVDA's settings from its configuration folder. A setting not written in nvda.ini is at NVDA's default.\n" +
+            "- The recorder read the Magnifier with the first captured frame.",
             settings.Assistive, settings.AssistiveNote);
 
         builder.Append("## Appendix D. Changes during the recording\n\n");

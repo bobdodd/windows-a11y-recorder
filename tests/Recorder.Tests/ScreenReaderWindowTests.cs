@@ -102,7 +102,7 @@ public sealed class ScreenReaderWindowTests
     {
         var windows = Windows();
         Assert.Equal(
-            "Elements List, in front from 00:01:32.768, opened by NVDA+f7 (elements list) at 00:01:32.766, inferred; " +
+            "Elements List, in front from 00:01:32.768, inferring that it was opened by NVDA+f7 (elements list) at 00:01:32.766; " +
             "focus: tree item \"Contact Us\" at 00:01:33.009",
             windows.ValueAt(95 * Second));
         Assert.EndsWith("focus: tree item \"Phone us by number: 1-800-563-2642\" at 00:01:39.960", windows.ValueAt(104_900 * Millisecond), StringComparison.Ordinal);

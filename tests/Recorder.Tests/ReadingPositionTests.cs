@@ -92,7 +92,7 @@ public sealed class ReadingPositionTests
         Assert.Equal(("h (next heading)", "Known", "00:00:01.025"), (step.Cause, step.State, step.When));
         Assert.Equal((-1, 0, 0), (timeline.IndexAt(Second), timeline.IndexAt(Second + 25 * Millisecond), timeline.IndexAt(9 * Second)));
         Assert.Equal(
-            "Reading position after it (inferred, rule 1 of step 4, rule 1): heading \"Contact us\" (node 652)." + Environment.NewLine +
+            "Inferred reading position after it (rule 1 of step 4, rule 1): heading \"Contact us\" (node 652)." + Environment.NewLine +
             "Basis: A request to scroll it into view, 25 ms after NVDA kept next heading (h).",
             timeline.Of("s1"));
         Assert.Equal(timeline.Of("s1"), timeline.Of("k1"));
@@ -159,7 +159,7 @@ public sealed class ReadingPositionTests
         Assert.Equal((4, ReadingPositionKind.Uncertain, "k2"), (step.Rule, step.Kind, step.EventId));
         Assert.Equal(("h (next heading)", "Uncertain"), (step.Cause, step.State));
         Assert.Equal(
-            "heading \"Contact us\" (node 652), uncertain since next heading (h) at 00:00:02.000 sent nothing",
+            "uncertain, as next heading (h) at 00:00:02.000 sent nothing: heading \"Contact us\" (node 652)",
             ValueAt(timeline, 4 * Second));
         Assert.Equal(
             [ReadingPositionKind.Known, ReadingPositionKind.Uncertain],

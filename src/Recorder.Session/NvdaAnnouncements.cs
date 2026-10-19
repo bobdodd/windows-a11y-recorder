@@ -49,10 +49,10 @@ public sealed record NvdaAnnouncement(
     /// <summary>The line under the step in the list of steps, and the row of the tab.</summary>
     public string Line => Kind switch
     {
-        NvdaAnnouncementKind.Inferred => $"NVDA had to announce (inferred): {Text}",
-        NvdaAnnouncementKind.Uncertain => $"NVDA had to announce (inferred, uncertain): {Text}",
-        NvdaAnnouncementKind.NotModelled => $"NVDA had to announce: not modelled yet; {Text}",
-        _ => $"NVDA had to announce: unknown; {Text}"
+        NvdaAnnouncementKind.Inferred => $"inferring that NVDA had to announce: {Text}",
+        NvdaAnnouncementKind.Uncertain => $"inferring, with uncertainty, that NVDA had to announce: {Text}",
+        NvdaAnnouncementKind.NotModelled => $"not modelling yet what NVDA had to announce; {Text}",
+        _ => $"not knowing what NVDA had to announce; {Text}"
     };
 }
 
@@ -76,7 +76,7 @@ public sealed partial class NvdaAnnouncementTimeline
     public const string Separator = "  ";
 
     public const string Note =
-        "What NVDA had to announce, inferred from its rules, the recorded tree, and its recorded settings; not what it said.";
+        "Inferring what NVDA had to announce, not what it said, from its rules, the recorded tree, and its recorded settings.";
 
     private readonly List<NvdaAnnouncement> _announcements = [];
     private readonly Dictionary<ReadingPositionStep, NvdaAnnouncement> _byStep = new(ReferenceEqualityComparer.Instance);
@@ -293,7 +293,7 @@ public sealed partial class NvdaAnnouncementTimeline
                 {
                     return Forget(step, NvdaAnnouncementKind.NotModelled,
                         "in focus mode NVDA reports the focused object, which is not modelled yet",
-                        "NVDA was in focus mode (inferred); it reports the focused object rather than the browse mode text",
+                        "inferring that NVDA was in focus mode, where it reports the focused object rather than the browse mode text",
                         "NVDA was in focus mode");
                 }
 
@@ -303,7 +303,7 @@ public sealed partial class NvdaAnnouncementTimeline
                 }
                 else
                 {
-                    basis.Add("NVDA was in browse mode (inferred)");
+                    basis.Add("inferring that NVDA was in browse mode");
                 }
             }
 
@@ -1024,7 +1024,7 @@ public sealed partial class NvdaAnnouncementTimeline
             string? why = null;
             if (!running)
             {
-                why = "NVDA was not running at the step, as recorded";
+                why = "the recording shows that NVDA was not running at the step";
             }
             else if (record is not { ValueKind: JsonValueKind.Object } payload)
             {

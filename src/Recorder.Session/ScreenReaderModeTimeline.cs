@@ -189,12 +189,12 @@ public sealed class ScreenReaderModeTimeline
             {
                 var from = _spans.LastOrDefault(item => item.Kind != ScreenReaderModeKind.Changed && item.End <= span.Start);
                 var to = _spans.FirstOrDefault(item => item.Kind != ScreenReaderModeKind.Changed && item.Start >= span.End);
-                return $"changed between {WindowsPreferenceTimeline.Clock(span.Start)} and {WindowsPreferenceTimeline.Clock(span.End)}" +
+                return $"inferring that it changed between {WindowsPreferenceTimeline.Clock(span.Start)} and {WindowsPreferenceTimeline.Clock(span.End)}" +
                     (from is not null && to is not null ? $", from {Name(from.Kind)} to {Name(to.Kind)}" : string.Empty) +
-                    $", inferred; last {span.StartBasis}, then {span.EndBasis}";
+                    $"; last {span.StartBasis}, then {span.EndBasis}";
             }
 
-            return $"{Name(span.Kind)}, inferred from {span.StartBasis}" +
+            return $"inferring {Name(span.Kind)} from {span.StartBasis}" +
                 (span.End > span.Start ? $" to {span.EndBasis}" : string.Empty);
         }
 

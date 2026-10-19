@@ -866,7 +866,7 @@ public sealed class AccessibilityRequests
                 ? $"After {click}, the button released {Milliseconds(item.Time - key.Time)} earlier."
                 : $"After the key {KeyboardHookRecords.KeyName(key.VirtualKey)}, {Milliseconds(item.Time - key.Time)} earlier" +
                   (kept.GetValueOrDefault(key.Time) is { } command
-                      ? $", which NVDA kept as {string.Join(" or ", command.Names)} ({command.Gesture}), inferred."
+                      ? $", inferring that NVDA kept it as {string.Join(" or ", command.Names)} ({command.Gesture})."
                       : "."));
         details.Add(AnyProgram);
         return new AccessibilityRequestOutcome($"Asked the page to {ActionText(action, target)}", details);

@@ -5,7 +5,7 @@ using Recorder.Session;
 namespace Recorder.Tests;
 
 /// <summary>
-/// NVDA's browse or focus mode, inferred from the keys it kept or passed,
+/// NVDA's browse or inferring focus mode from the keys it kept or passed,
 /// and unknown where the recording does not show it. See
 /// docs/architecture/screen-reader-activity.md, "2c-2, browse or focus mode".
 /// </summary>
@@ -74,9 +74,9 @@ public sealed class ScreenReaderModeTests
         Assert.Equal(
             [ScreenReaderModeKind.Browse, ScreenReaderModeKind.Changed, ScreenReaderModeKind.Focus],
             mode.Spans.Select(span => span.Kind));
-        Assert.Equal("browse mode, inferred from H kept (next heading) at 00:00:51.000 to D kept (next landmark) at 00:00:54.000", mode.ValueAt(52 * Second));
-        Assert.StartsWith("changed between 00:00:54.000 and 00:03:01.000, from browse mode to focus mode, inferred", mode.ValueAt(100 * Second), StringComparison.Ordinal);
-        Assert.Equal("focus mode, inferred from H passed, received by the page at 00:03:01.000 to I passed, received by the page at 00:03:02.000", mode.ValueAt(181_500 * Millisecond));
+        Assert.Equal("inferring browse mode from H kept (next heading) at 00:00:51.000 to D kept (next landmark) at 00:00:54.000", mode.ValueAt(52 * Second));
+        Assert.StartsWith("inferring that it changed between 00:00:54.000 and 00:03:01.000, from browse mode to focus mode;", mode.ValueAt(100 * Second), StringComparison.Ordinal);
+        Assert.Equal("inferring focus mode from H passed, received by the page at 00:03:01.000 to I passed, received by the page at 00:03:02.000", mode.ValueAt(181_500 * Millisecond));
         Assert.Equal("unknown", mode.ValueAt(10 * Second));
         Assert.Equal("unknown; last seen focus mode, I passed, received by the page at 00:03:02.000", mode.ValueAt(200 * Second));
     }
@@ -101,8 +101,8 @@ public sealed class ScreenReaderModeTests
         Assert.Equal(
             [ScreenReaderModeKind.Browse, ScreenReaderModeKind.Focus, ScreenReaderModeKind.Browse],
             mode.Spans.Select(span => span.Kind));
-        Assert.StartsWith("focus mode, inferred from NVDA+Space kept at 00:00:20.030", mode.ValueAt(30 * Second), StringComparison.Ordinal);
-        Assert.StartsWith("browse mode, inferred from Escape kept at 00:00:40.000", mode.ValueAt(45 * Second), StringComparison.Ordinal);
+        Assert.StartsWith("inferring focus mode from NVDA+Space kept at 00:00:20.030", mode.ValueAt(30 * Second), StringComparison.Ordinal);
+        Assert.StartsWith("inferring browse mode from Escape kept at 00:00:40.000", mode.ValueAt(45 * Second), StringComparison.Ordinal);
         Assert.DoesNotContain(mode.Spans, span => span.Kind == ScreenReaderModeKind.Changed);
     }
 
@@ -211,6 +211,6 @@ public sealed class ScreenReaderModeTests
 
         var span = Assert.Single(archive.ScreenReaderMode.Spans);
         Assert.Equal((ScreenReaderModeKind.Browse, 10 * Second, 12 * Second), (span.Kind, span.Start, span.End));
-        Assert.StartsWith("browse mode, inferred from H kept", archive.ScreenReaderMode.ValueAt(11 * Second), StringComparison.Ordinal);
+        Assert.StartsWith("inferring browse mode from H kept", archive.ScreenReaderMode.ValueAt(11 * Second), StringComparison.Ordinal);
     }
 }
