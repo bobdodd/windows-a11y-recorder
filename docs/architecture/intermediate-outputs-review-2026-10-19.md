@@ -175,6 +175,48 @@ asked; then A, B, and D, each measured by trial before the next.
   accepted at temperature 0; then a full run, checking that chapters 1, 3,
   and 4 pass their own wording checks.
 
+#### The trial of A, 2026-10-19
+
+The trials of c8384b7, with C, against those of df8d75a, with C alone, the
+same two steps with the same samplings (C:\Users\Public\Downloads\trials-c8384b7
+on the target PC). The last column is what the wording check, no longer
+applied to the layers, would have found.
+
+| Step, sampling | df8d75a: prompt tokens, statements, outcome | c8384b7: prompt tokens, statements, outcome | c8384b7: the wording check would have found |
+| --- | --- | --- | --- |
+| Moment 2, temperature 0 | 4,817; 6; passes | 4,669; 8; passes | "stopping speech" |
+| Moment 2, seed 1 | 4,817; 4; passes | 4,669; 10; passes | nothing |
+| Moment 2, seed 2 | 4,817; 7; fails, "stops speech" | 4,669; 8; passes | "stopped NVDA speech" |
+| Moment 2, seed 3 | 4,817; 7; fails, "stop speech" | 4,669; 5; passes | K34 in the text |
+| Moment 6, temperature 0 | not given; 99; fails, a loop | 9,500; 8; passes | E21 outside brackets |
+| Moment 6, seed 1 | 9,648; 16; passes | 9,500; 9; passes | K127 in the text |
+| Moment 6, seed 2 | 9,648; 9; fails, K19 in the text | 9,500; 15; passes | K19 in the text, and more |
+| Moment 6, seed 3 | 9,648; 7; passes | 9,500; 8; passes | K19 in the text |
+
+What the trial shows:
+
+- **Every answer passes:** 8 of 8, against 4 of 8 with C alone and none at
+  27c9b2b. Each still passes the evidence check: every statement cites only
+  references given to it.
+- **No loop:** moment 6 at temperature 0 gave 8 statements in 28.1 s of
+  output, where with C alone it went through the knowledge one statement at
+  a time and was stopped at 99 after 326.8 s. One answer cannot show that
+  A is the cause.
+- **Fewer prompt tokens:** 148 fewer at both moments, from the rules
+  dropped, on top of C's saving.
+- **What later steps would be given:** 7 of the 8 answers hold wording the
+  check would have refused: the NVDA "stop speech" wording in 2, a K number
+  in the text in 4, and an E reference outside brackets in 1. With the
+  rule on K numbers dropped, K numbers in the text are more common: 4 of 8
+  answers, against 1 of 8 at df8d75a, where the rule was in the
+  instructions and the first fault stopped the check.
+- **The risk this leaves:** the page chapter and the story are given the
+  knowledge without its numbers, so a K number in a statement's text, such
+  as "confirming the final scroll position mentioned in K19", points to
+  nothing they hold, and may be copied. Their own wording check refuses
+  such an answer and samples it again. Whether that makes chapters 1, 3,
+  and 4 fail more is what a full run will show.
+
 ### B. The recorder writes layer 1
 
 - **What changes:** the visit's knowledge starts with the recorder's
@@ -338,8 +380,8 @@ What the trial shows:
 
 ## Decisions needed
 
-1. Proposal A: built for its trial, 2026-10-19; whether to keep it follows
-   the trial.
+1. Proposal A: built and tried, 2026-10-19 (see "The trial of A");
+   whether to keep it follows a full run.
 2. Proposal B: the recorder writes layer 1, and whether the text summary
    task stays as a report of its own.
 3. Proposal C: decided and built, 2026-10-19, and tried: see "The trial of
