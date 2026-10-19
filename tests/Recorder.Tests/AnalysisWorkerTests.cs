@@ -616,6 +616,47 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Assert.Contains("writes in its text E7, which it does not cite", failure, StringComparison.Ordinal);
     }
 
+    // A claim that cites nothing is refused, and sampled again as a wording
+    // fault is; a statement that no evidence was found is of kind none
+    // (target machine and owner, 2026-10-19).
+    private const string Uncited = "{ \"description\": [ [ { \"text\": \"No facts were given since the moment before.\", \"kind\": \"claim\", \"evidence\": [] } ] ] }";
+
+    [Fact]
+    public async Task An_answer_with_a_claim_that_cites_nothing_is_asked_for_at_seed_1_above_temperature_0()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var endpoint = Answers(Uncited, "{ \"description\": [ [ { \"text\": \"No facts were given since the moment before.\", \"kind\": \"none\", \"evidence\": [] } ] ] }");
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
+        var bodies = endpoint.Bodies.ToArray();
+        Assert.Equal(2, bodies.Length);
+        Assert.Equal((0.7, 1L), (Settings(bodies[1]).GetProperty("temperature").GetDouble(), Settings(bodies[1]).GetProperty("seed").GetInt64()));
+        var attempts = await AttemptsAsync(task);
+        Assert.Equal("Statement 1 of paragraph 1 of \"description\"" + ClaimCheck.UncitedFailure, attempts[0]["failure"]);
+        Assert.Equal(AttemptOutcomes.Accepted, attempts[1]["outcome"]);
+        var kinds = await RowsAsync(
+            "SELECT c.claim_kind FROM analysis_claims c JOIN analysis_attempts a ON a.attempt_id = c.attempt_id WHERE a.task_id = $1 AND a.attempt_number = 2", task);
+        Assert.Equal("none", kinds.Single()["claim_kind"]);
+    }
+
+    [Fact]
+    public async Task An_answer_with_a_claim_that_cites_nothing_fails_the_step_where_no_answer_sampled_after_it_passes()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var endpoint = Answers(Uncited);
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
+        Assert.Equal(4, endpoint.Bodies.Count);
+        var failure = (string?)(await RowsAsync("SELECT failure FROM analysis_tasks WHERE task_id = $1", task))[0]["failure"];
+        Assert.StartsWith("Step visit-1 failed: its answer gave a claim that cites no evidence, and none of the answers sampled after it passed (at seed 1, ", failure, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task An_answer_saying_NVDA_spoke_is_accepted_for_a_step_whose_wording_is_not_checked()
     {

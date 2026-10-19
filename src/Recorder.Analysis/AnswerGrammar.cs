@@ -41,7 +41,7 @@ public static class AnswerGrammar
             "paragraph ::= \"[\" (statement (\",\" sp statement)*)? \"]\"",
             "statement ::= \"{\\\"text\\\":\" sp text \",\" sp \"\\\"kind\\\":\" sp kind \",\" sp \"\\\"evidence\\\":\" sp evidence \"}\"",
             "text ::= \"\\\"\" char+ \"\\\"\"",
-            $"kind ::= \"\\\"{Claim.ClaimKind}\\\"\" | \"\\\"{Claim.UnknownKind}\\\"\"",
+            $"kind ::= \"\\\"{Claim.ClaimKind}\\\"\" | \"\\\"{Claim.UnknownKind}\\\"\" | \"\\\"{Claim.NoneKind}\\\"\"",
             "evidence ::= \"[\" (string (\",\" sp string)*)? \"]\"",
             "string ::= \"\\\"\" char* \"\\\"\"",
             "char ::= [^\"\\\\\\x7F\\x00-\\x1F] | [\\\\] ([\"\\\\/bfnrt] | \"u\" [0-9a-fA-F]{4})") + "\n";

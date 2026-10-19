@@ -33,7 +33,10 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
     // (recording-summary.md, "Answers on one line"), so it only lengthened
     // the instructions (owner, 2026-10-18: "If it is not needed then it
     // should go").
-    public const int TemplateVersion = 5;
+    // The next version adds the statement of kind none, that no evidence
+    // of something was found, citing nothing (owner, 2026-10-19: "refer to
+    // evidence or state no evidence, both are acceptable").
+    public const int TemplateVersion = 6;
 
     public static readonly IReadOnlyList<string> VisitSections = ["page", "purpose", "activity"];
 
@@ -85,7 +88,8 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
         "In \"activity\", summarise what the participant did, such as moving through the headings or reading down the page, " +
         "and group repeated actions into one statement citing each of their references, rather than one statement for each fact. " +
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} for something the facts support, citing every reference it rests on, " +
-        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []} for something the facts leave open. " +
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []} for something the facts leave open, " +
+        "or {\"text\": ..., \"kind\": \"none\", \"evidence\": []} for something of which the facts hold no evidence. " +
         "Cite only references that appear in the facts. Write plain sentences without Markdown.";
 
     public const string RecordingInstructions =
@@ -101,7 +105,8 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
         "Each section holds only its own paragraphs: what the site or application is goes only in \"site\", who it is for only in \"audience\", " +
         "and what the participant did, visit by visit, only in \"session\". Do not repeat a visit's description; say what it adds to the whole. " +
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
-        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. Cite only references that appear in the input. Write plain sentences without Markdown.";
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []} for something the input leaves open, " +
+        "or {\"text\": ..., \"kind\": \"none\", \"evidence\": []} for something of which the input holds no evidence. Cite only references that appear in the input. Write plain sentences without Markdown.";
 
     public async Task RunAsync(AnalysisTaskContext context, CancellationToken cancellationToken)
     {

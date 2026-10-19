@@ -285,6 +285,20 @@ public sealed class AnalysisRulesTests
         Assert.Equal("unknown", claims[1].Kind);
     }
 
+    // A statement that no evidence of something was found cites nothing,
+    // as one of what is unknown may (owner, 2026-10-19).
+    [Fact]
+    public void A_statement_that_no_evidence_was_found_need_cite_nothing()
+    {
+        var (claims, _, failure) = ClaimCheck.Check(
+            "{ \"description\": [ [ { \"text\": \"No facts were given since the moment before.\", \"kind\": \"none\", \"evidence\": [] } ] ] }",
+            ["description"], References);
+
+        Assert.Null(failure);
+        Assert.Equal((Claim.NoneKind, 0), (claims.Single().Kind, claims.Single().Evidence.Count));
+        Assert.Contains(Claim.NoneKind, ClaimCheck.Schema(["description"]).ToJsonString(), StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("", "empty")]
     [InlineData("not json", "not valid JSON")]
@@ -292,7 +306,7 @@ public sealed class AnalysisRulesTests
     [InlineData("{ \"other\": [] }", "no \"description\" section")]
     [InlineData("{ \"description\": [ { } ] }", "not a list of statements")]
     [InlineData("{ \"description\": [ [ { \"kind\": \"claim\", \"text\": \"x\" } ] ] }", "does not have a kind, a text, and a list of evidence")]
-    [InlineData("{ \"description\": [ [ { \"kind\": \"guess\", \"text\": \"x\", \"evidence\": [\"E1\"] } ] ] }", "neither claim nor unknown")]
+    [InlineData("{ \"description\": [ [ { \"kind\": \"guess\", \"text\": \"x\", \"evidence\": [\"E1\"] } ] ] }", "which is not claim, unknown, or none")]
     [InlineData("{ \"description\": [ [ { \"kind\": \"claim\", \"text\": \" \", \"evidence\": [\"E1\"] } ] ] }", "has no text")]
     [InlineData("{ \"description\": [ [ { \"kind\": \"claim\", \"text\": \"x\", \"evidence\": [] } ] ] }", "cites no evidence")]
     [InlineData("{ \"description\": [ [ { \"kind\": \"claim\", \"text\": \"x\", \"evidence\": [\"E9\"] } ] ] }", "E9, which was not in the input")]

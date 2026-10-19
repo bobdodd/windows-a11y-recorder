@@ -217,7 +217,9 @@ announced at this moment is not provided in the facts...", at moment 1
 with build 8addabd, after a sentence in the prompt said such a statement
 is of kind unknown. With the text first, the model writes the statement
 before saying what kind it is. The check is unchanged, so a claim citing
-nothing still fails. Holding every claim to cite one of the input's
+nothing still fails (from 2026-10-19 it is sampled again, and a statement
+that no evidence was found has a kind of its own, none: see "A statement
+that no evidence was found"). Holding every claim to cite one of the input's
 references was considered and not done: a claim with nothing to cite would
 then have to cite something, and the check would no longer show it. Every
 template's version was raised by one, as each shows the fields' order.
@@ -1076,6 +1078,44 @@ recommendation: the recovery as built, started by the output limit.
   failed answer is found through the tasks run again in turn. Two tests
   that used the output limit as their refused answer now use an answer
   citing a reference not in the input.
+
+### A statement that no evidence was found (built)
+
+Built on 2026-10-19 after the full run of c8384b7 on the target machine
+failed at moment 10 of visit 1. That frame is the last before the visit
+ended, and no recorded facts fell between it and moment 9, so its input
+said "The recorder has no facts of the visit since the moment before."
+The model wrote, in the "change" section, "No new facts about the visit
+are provided since the moment before this one." as a claim citing
+nothing, and the check refused it: "Statement 2 of paragraph 1 of
+\"change\" is a claim that cites no evidence". A claim that cites nothing
+was not among the failures sampled again, so the step failed at once.
+
+Leaving such sentences out of the inputs was proposed and refused by the
+owner: "I prefer for a statement that no evidence is found, that is a
+perfectly reasonable statement and better than leaving the next step
+wondering if content is missing. You should be allowing for this - refer
+to evidence or state no evidence, both are acceptable." The owner agreed
+the change below the same day: "yes, do that".
+
+- **A third kind of statement, none:** a statement that no evidence of
+  something was found, citing nothing. A claim still cites at least one
+  reference; an unknown still says what the evidence leaves open. The kind
+  is in the answer's grammar (`AnswerGrammar`), its schema and check
+  (`ClaimCheck`), and the catalog (migration 0037), and each template
+  shows it beside the unknown, with what it is for. The inputs' sentences
+  that say nothing was recorded are kept.
+- **A claim that cites nothing is sampled again,** as an answer whose
+  wording breaks the report's rules is: at temperature 0.7 at seed 1, then
+  2, then 3, the first that passes being the step's answer. Where none
+  passes, the step fails, saying "its answer gave a claim that cites no
+  evidence" and why each sample failed. Every attempt is in Appendix G.6.
+- **Every template's version was raised by one:** the text summary 6, the
+  moment 6, the tiles 6, the layers 7, the page chapter 7, the story and
+  its opening 8, and the executive summary 6.
+- **Tests:** a none citing nothing passes the check; every template offers
+  it; a claim citing nothing is sampled again at seed 1 and the answer of
+  kind none is kept; where no sample passes the step fails, saying why.
 
 ## Decisions (2026-10-14)
 

@@ -509,6 +509,19 @@ public sealed class AnalysisWorker
                             .ConfigureAwait(false);
                     }
 
+                    // An answer with a claim that cites nothing, the same
+                    // way: a statement that no evidence was found is of kind
+                    // none, and one given as a claim is sampled again
+                    // (target machine, 2026-10-19: moment 10 said as a claim
+                    // that no facts were given since the moment before;
+                    // owner, the same day, "yes, do that").
+                    if (WasUncited(failure))
+                    {
+                        return await RecoverFromLoopAsync(
+                            task, stepKey, request, profile, response.Content ?? "", inputSha, parameters, modelSha, basis, build, Caught.Uncited, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+
                     throw new StepFailedException(
                         $"Step {stepKey} failed: {failure} At temperature 0 the same request gives the same output, " +
                         "so it was not asked for again.",
@@ -566,6 +579,7 @@ public sealed class AnalysisWorker
             Caught.Limit => "an answer that reached the output limit",
             Caught.Empty => "an answer with no statement",
             Caught.Wording => "an answer whose wording broke the report's rules",
+            Caught.Uncited => "an answer with a claim that cites no evidence",
             _ => "a loop"
         };
         var caught = kind switch
@@ -573,6 +587,7 @@ public sealed class AnalysisWorker
             Caught.Limit => "its answer reached the output limit",
             Caught.Empty => "its answer gave no statement",
             Caught.Wording => "its answer's wording broke the report's rules",
+            Caught.Uncited => "its answer gave a claim that cites no evidence",
             _ => "its answer was caught in a loop"
         };
         var failures = new List<string>();
@@ -616,8 +631,8 @@ public sealed class AnalysisWorker
             failures.Add($"at seed {seedName}, {attempt.Failure}");
         }
 
-        // An answer that reached the output limit, gave no statement, or
-        // broke the wording rules has no loop to cut it at, so where no
+        // An answer that reached the output limit, gave no statement, broke
+        // the wording rules, or gave a claim that cites nothing has no loop to cut it at, so where no
         // sample passed, the step fails.
         if (kind != Caught.Loop)
         {
@@ -681,14 +696,19 @@ public sealed class AnalysisWorker
     private static bool WasMisworded(string? failure) =>
         failure is not null && failure.StartsWith(WordingCheck.Failure, StringComparison.Ordinal);
 
+    private static bool WasUncited(string? failure) =>
+        failure is not null && failure.EndsWith(ClaimCheck.UncitedFailure, StringComparison.Ordinal);
+
     // What an answer that failed was caught at, where it is recovered from
-    // by sampling: a loop, the output limit, no statement, or its wording.
+    // by sampling: a loop, the output limit, no statement, its wording, or
+    // a claim that cites nothing.
     private enum Caught
     {
         Loop,
         Limit,
         Empty,
-        Wording
+        Wording,
+        Uncited
     }
 
     private static Caught? Recoverable(string? rawOutput, string? failure) =>
@@ -696,6 +716,7 @@ public sealed class AnalysisWorker
         : ReachedLimit(failure) ? Caught.Limit
         : WasEmpty(failure) ? Caught.Empty
         : WasMisworded(failure) ? Caught.Wording
+        : WasUncited(failure) ? Caught.Uncited
         : null;
 
     // The checks of an answer: ClaimCheck's, then, for a step that needs a

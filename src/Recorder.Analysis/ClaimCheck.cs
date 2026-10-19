@@ -5,13 +5,17 @@ namespace Recorder.Analysis;
 
 /// <summary>
 /// One statement in a model's output. A claim rests on the evidence it
-/// cites; an unknown says what the evidence does not say, and need not cite
-/// anything.
+/// cites; an unknown says what the evidence leaves open; a none says that
+/// no evidence of something was found. An unknown and a none need not cite
+/// anything. The none was added on 2026-10-19 (owner: "refer to evidence or
+/// state no evidence, both are acceptable"), after a moment with no facts
+/// since the moment before was refused for saying so as a claim.
 /// </summary>
 public sealed record Claim(string Section, int Paragraph, int Ordinal, string Kind, string Text, IReadOnlyList<string> Evidence)
 {
     public const string ClaimKind = "claim";
     public const string UnknownKind = "unknown";
+    public const string NoneKind = "none";
 }
 
 /// <summary>
@@ -26,6 +30,9 @@ public sealed record Claim(string Section, int Paragraph, int Ordinal, string Ki
 /// </summary>
 public static class ClaimCheck
 {
+    /// <summary>How a claim that cites nothing is refused, after the statement's place.</summary>
+    public const string UncitedFailure = " is a claim that cites no evidence.";
+
     /// <summary>The JSON schema the server is asked to hold output to.</summary>
     /// <param name="forms">
     /// Where given, each statement may also have a "form", one of these,
@@ -52,7 +59,7 @@ public static class ClaimCheck
             ["properties"] = new JsonObject
             {
                 ["text"] = new JsonObject { ["type"] = "string", ["minLength"] = 1 },
-                ["kind"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(Claim.ClaimKind, Claim.UnknownKind) },
+                ["kind"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(Claim.ClaimKind, Claim.UnknownKind, Claim.NoneKind) },
                 ["evidence"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } }
             },
             ["required"] = new JsonArray("text", "kind", "evidence")
@@ -193,9 +200,9 @@ public static class ClaimCheck
 
                         var kind = kindElement.GetString()!;
                         var text = textElement.GetString()!;
-                        if (kind is not (Claim.ClaimKind or Claim.UnknownKind))
+                        if (kind is not (Claim.ClaimKind or Claim.UnknownKind or Claim.NoneKind))
                         {
-                            return ([], default, $"{place} has the kind \"{kind}\", which is neither claim nor unknown.");
+                            return ([], default, $"{place} has the kind \"{kind}\", which is not claim, unknown, or none.");
                         }
 
                         if (string.IsNullOrWhiteSpace(text))
@@ -238,7 +245,7 @@ public static class ClaimCheck
 
                         if (kind == Claim.ClaimKind && evidence.Count == 0)
                         {
-                            return ([], default, $"{place} is a claim that cites no evidence.");
+                            return ([], default, $"{place}{UncitedFailure}");
                         }
 
                         claims.Add(new Claim(section, paragraphIndex, ordinal, kind, text, evidence));

@@ -19,7 +19,7 @@ public sealed class AnswerGrammarTests
             "paragraph ::= \"[\" (statement (\",\" sp statement)*)? \"]\"\n" +
             "statement ::= \"{\\\"text\\\":\" sp text \",\" sp \"\\\"kind\\\":\" sp kind \",\" sp \"\\\"evidence\\\":\" sp evidence \"}\"\n" +
             "text ::= \"\\\"\" char+ \"\\\"\"\n" +
-            "kind ::= \"\\\"claim\\\"\" | \"\\\"unknown\\\"\"\n" +
+            "kind ::= \"\\\"claim\\\"\" | \"\\\"unknown\\\"\" | \"\\\"none\\\"\"\n" +
             "evidence ::= \"[\" (string (\",\" sp string)*)? \"]\"\n" +
             "string ::= \"\\\"\" char* \"\\\"\"\n" +
             "char ::= [^\"\\\\\\x7F\\x00-\\x1F] | [\\\\] ([\"\\\\/bfnrt] | \"u\" [0-9a-fA-F]{4})\n",

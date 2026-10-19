@@ -136,7 +136,10 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // (recording-summary.md, "Answers on one line"), so it only lengthened
     // the instructions (owner, 2026-10-18: "If it is not needed then it
     // should go").
-    public const int PageTemplateVersion = 5;
+    // The next version adds the statement of kind none, that no evidence
+    // of something was found, citing nothing (owner, 2026-10-19: "refer to
+    // evidence or state no evidence, both are acceptable").
+    public const int PageTemplateVersion = 6;
 
     /// <summary>Which item a statement is about, said in the page template from version 4.</summary>
     public const string ItemNamed =
@@ -145,7 +148,8 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
     /// <summary>What kind a statement of what is unknown is, said in the combined template from version 3.</summary>
     public const string UnknownIsUnknown =
-        "A statement that says something is unknown, or that cites no reference, is of kind unknown; every claim cites at least one reference. ";
+        "A statement that says something is unknown is of kind unknown, one that says no evidence of something was found is of kind none, " +
+        "and neither cites a reference; every claim cites at least one reference. ";
 
     /// <summary>How a reference is cited, said in the templates of version 2.</summary>
     public const string CiteWithoutBrackets = "Cite each reference as it is written without its brackets, such as \"E3\". ";
@@ -238,7 +242,10 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // (recording-summary.md, "Answers on one line"), so it only lengthened
     // the instructions (owner, 2026-10-18: "If it is not needed then it
     // should go").
-    public const int MomentTemplateVersion = 5;
+    // The next version adds the statement of kind none, that no evidence
+    // of something was found, citing nothing (owner, 2026-10-19: "refer to
+    // evidence or state no evidence, both are acceptable").
+    public const int MomentTemplateVersion = 6;
 
     public static readonly IReadOnlyList<string> MomentSections = ["screen", "change"];
 
@@ -297,7 +304,10 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // references in the evidence only, the statement's number never in the
     // text with its example, and no Markdown (the design review of
     // 2026-10-19, proposal A). The rules on what is true are kept.
-    public const int LayerTemplateVersion = 6;
+    // The next version adds the statement of kind none, that no evidence
+    // of something was found, citing nothing (owner, 2026-10-19: "refer to
+    // evidence or state no evidence, both are acceptable").
+    public const int LayerTemplateVersion = 7;
 
     // Version 2 of the chapters' templates: the executive summary becomes
     // chapter 1, so the pages are chapter 2 and the story chapter 3, named
@@ -326,7 +336,10 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // the story given the visit in time order to take its steps from, and
     // what is seen set beside what the page is built as
     // (report-fixes-2026-10-18.md).
-    public const int PageChapterTemplateVersion = 6;
+    // The next version adds the statement of kind none, that no evidence
+    // of something was found, citing nothing (owner, 2026-10-19: "refer to
+    // evidence or state no evidence, both are acceptable").
+    public const int PageChapterTemplateVersion = 7;
 
     // Version 7 of the story, and so its opening, and version 5 of the
     // executive summary: the recorder writes each visit's steps, counted,
@@ -334,9 +347,15 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
     // defaults; the model writes the story's arriving and experience, and
     // is given only the settings not at their defaults or whose default is
     // unknown (owner, 2026-10-18, the design review's proposal 4).
-    public const int StoryTemplateVersion = 7;
+    // The next version adds the statement of kind none, that no evidence
+    // of something was found, citing nothing (owner, 2026-10-19: "refer to
+    // evidence or state no evidence, both are acceptable").
+    public const int StoryTemplateVersion = 8;
 
-    public const int ExecutiveTemplateVersion = 5;
+    // The next version adds the statement of kind none, that no evidence
+    // of something was found, citing nothing (owner, 2026-10-19: "refer to
+    // evidence or state no evidence, both are acceptable").
+    public const int ExecutiveTemplateVersion = 6;
 
     /// <summary>The executive summary's subsection the recorder heads with the settings not at their defaults.</summary>
     public const string ParticipantPart = "participant";
@@ -437,7 +456,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "This is about the user experience, not a list of the page's elements: do not list each control, link, or line of text. " +
         "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
         "A statement of \"new\" is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
-        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}; one of \"elaborations\" or \"corrections\" begins with its \"about\", such as {\"about\": \"K3\", \"text\": ..., \"kind\": \"claim\", \"evidence\": [...]}. " +
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}, or {\"text\": ..., \"kind\": \"none\", \"evidence\": []}; one of \"elaborations\" or \"corrections\" begins with its \"about\", such as {\"about\": \"K3\", \"text\": ..., \"kind\": \"claim\", \"evidence\": [...]}. " +
         UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets +
         VisualAndSemantics;
 
@@ -488,7 +507,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "What the rebuilt page lacks, such as an image that was not recorded, is not part of the page: do not describe it as the page's content. " +
         "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " + ParagraphRule +
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
-        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + ReferencesOutOfText + "Write plain sentences without Markdown.";
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []}, or {\"text\": ..., \"kind\": \"none\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + ReferencesOutOfText + "Write plain sentences without Markdown.";
 
     /// <summary>How chapter 4's answers are given, said in its templates.</summary>
     public const string StoryAnswer =
@@ -500,7 +519,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "\"sentence\", a sentence of prose; " + ListForms +
         "or \"picture\", a picture the recorder puts in, its text the picture's caption, citing the one captured frame or tile it shows and what the caption rests on. " +
         "A statement is {\"form\": ..., \"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
-        "or {\"form\": ..., \"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + ReferencesOutOfText +
+        "or {\"form\": ..., \"text\": ..., \"kind\": \"unknown\", \"evidence\": []}, or {\"form\": ..., \"text\": ..., \"kind\": \"none\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + ReferencesOutOfText +
         "Write plain sentences without Markdown.";
 
     /// <summary>
@@ -571,7 +590,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Write prose by default. Each statement has a form: \"sentence\", a sentence of prose; \"bullet\", a point of a list whose order does not matter, its text the point and why it matters, in two or three sentences, never a bare fact; " +
         "or \"numbered\", a step of a sequence whose order matters, which the recorder numbers. Use a list only where its points are distinct and each needs explaining; otherwise write sentences. " +
         "A statement is {\"form\": ..., \"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
-        "or {\"form\": ..., \"text\": ..., \"kind\": \"unknown\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + ReferencesOutOfText +
+        "or {\"form\": ..., \"text\": ..., \"kind\": \"unknown\", \"evidence\": []}, or {\"form\": ..., \"text\": ..., \"kind\": \"none\", \"evidence\": []}. " + UnknownIsUnknown + "Cite only references that appear in the input. " + CiteWithoutBrackets + ReferencesOutOfText +
         "Write clean, readable prose for a professional report, without Markdown.";
     private readonly Func<string, string, CancellationToken, Task<(Recorder.Session.SessionPlaybackArchive Archive, RecordingFileDocuments Documents)>> _open;
 
@@ -641,7 +660,8 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "Each section is a list of paragraphs, and each paragraph a list of statements. Each section holds only its own paragraphs. " +
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
         "with every statement about the picture citing the picture's reference, " +
-        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []} for something the picture and facts leave open. " +
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []} for something the picture and facts leave open, " +
+        "or {\"text\": ..., \"kind\": \"none\", \"evidence\": []} for something of which the picture and facts hold no evidence. " +
         "Cite only references that appear in the input. Write plain sentences without Markdown.";
 
     public const string PageInstructions =
@@ -665,7 +685,8 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         "The section is a list of paragraphs, and each paragraph a list of statements. " +
         "A statement is {\"text\": ..., \"kind\": \"claim\", \"evidence\": [...]} citing every reference it rests on, " +
         "with every statement about a tile citing that tile's reference, " +
-        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []} for something the tiles and facts leave open. " +
+        "or {\"text\": ..., \"kind\": \"unknown\", \"evidence\": []} for something the tiles and facts leave open, " +
+        "or {\"text\": ..., \"kind\": \"none\", \"evidence\": []} for something of which the tiles and facts hold no evidence. " +
         "Cite only references that appear in the input. Write plain sentences without Markdown.";
 
 

@@ -706,13 +706,33 @@ public sealed partial class RecordingSummaryTaskTests
                  })
         {
             Assert.Contains("Cite each reference as it is written without its brackets, such as \"E3\".", instructions, StringComparison.Ordinal);
-            Assert.Contains("A statement that says something is unknown, or that cites no reference, is of kind unknown; every claim cites at least one reference.", instructions, StringComparison.Ordinal);
+            Assert.Contains(RecordingSummaryVisionKind.UnknownIsUnknown.TrimEnd(), instructions, StringComparison.Ordinal);
         }
 
         Assert.DoesNotContain("without its brackets", RecordingSummaryKind.RecordingInstructions, StringComparison.Ordinal);
         foreach (var instructions in new[] { RecordingSummaryVisionKind.MomentInstructions, RecordingSummaryVisionKind.PageInstructions })
         {
             Assert.DoesNotContain("is of kind unknown", instructions, StringComparison.Ordinal);
+        }
+    }
+
+    // Every step may say that no evidence of something was found, as a
+    // statement of kind none citing nothing (owner, 2026-10-19: "refer to
+    // evidence or state no evidence, both are acceptable").
+    [Fact]
+    public void Every_template_offers_the_statement_that_no_evidence_was_found()
+    {
+        foreach (var instructions in new[]
+                 {
+                     RecordingSummaryKind.VisitInstructions, RecordingSummaryKind.RecordingInstructions,
+                     RecordingSummaryVisionKind.MomentInstructions, RecordingSummaryVisionKind.PageInstructions,
+                     RecordingSummaryVisionKind.Layer2Instructions, RecordingSummaryVisionKind.Layer3Instructions,
+                     RecordingSummaryVisionKind.PageChapterInstructions, RecordingSummaryVisionKind.StoryInstructions,
+                     RecordingSummaryVisionKind.OpeningInstructions, RecordingSummaryVisionKind.ExecutiveInstructions
+                 })
+        {
+            Assert.Contains("\"kind\": \"none\", \"evidence\": []}", instructions, StringComparison.Ordinal);
+            Assert.DoesNotContain("or that cites no reference, is of kind unknown", instructions, StringComparison.Ordinal);
         }
     }
 
@@ -798,7 +818,7 @@ public sealed partial class RecordingSummaryTaskTests
     [Fact]
     public void Every_template_shows_a_statement_with_its_text_before_its_kind()
     {
-        Assert.Equal((5, 5, 5, 6, 6, 7, 5), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
+        Assert.Equal((6, 6, 6, 7, 7, 8, 6), (RecordingSummaryKind.TemplateVersion, RecordingSummaryVisionKind.MomentTemplateVersion,
             RecordingSummaryVisionKind.PageTemplateVersion, RecordingSummaryVisionKind.LayerTemplateVersion, RecordingSummaryVisionKind.PageChapterTemplateVersion,
             RecordingSummaryVisionKind.StoryTemplateVersion, RecordingSummaryVisionKind.ExecutiveTemplateVersion));
         foreach (var instructions in new[]
