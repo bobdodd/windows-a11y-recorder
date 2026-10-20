@@ -9,8 +9,8 @@ to four models or modes, at temperature 0 and at 0.7 with seeds 1 to 3:
 Qwen3.6-35B-A3B UD-Q4_K_M, the task's own profile, with thinking off as the
 run was, and on; and Gemma 4 26B A4B UD-Q4_K_M with thinking off, and on.
 Each trial at temperature 0 with the task's own settings sent the same
-request as the task's first attempt (the same SHA-256), and failed as it
-did.
+request as the task's first attempt (the same SHA-256), and failed, as that
+attempt had.
 
 ## Passes
 
