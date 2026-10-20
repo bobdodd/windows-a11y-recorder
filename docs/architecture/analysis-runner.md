@@ -598,7 +598,7 @@ Built on 2026-10-14, after decision 4 below.
 Built on 2026-10-14, so that one step can be tried with other sampling
 options without running its task again. The worker program, run as
 
-`Recorder.AnalysisWorker.exe --trial TASK STEP FILE [OPTION=VALUE ...] [--one-line]`
+`Recorder.AnalysisWorker.exe --trial TASK STEP FILE [OPTION=VALUE ...] [profile=NAME] [thinking=on|off] [--one-line]`
 
 runs the task's code again, giving back the task's accepted steps before
 STEP, sends STEP's request with the options given on top of its profile's,
@@ -649,6 +649,35 @@ catalog. It does not run while the worker is running.
   `StepTrial` and `AnalysisWorker.TrialStepAsync`; the trial test checks
   the instructions, the input, the form, and that no picture is listed
   for a step sent none.
+- **It may give the step to another model, thinking or not:** with
+  `profile=NAME` the step's request goes to that profile of the analysis
+  settings, which must take the step's capability, in place of the
+  profile chosen when the task was queued; with `thinking=on` or
+  `thinking=off` the profile's thinking is turned on or off; and
+  `max_tokens=N` sets the output limit, which with thinking holds the
+  thinking as well as the answer. The file names the profile used, and
+  gives the model's thinking, which the server streams apart from the
+  answer as `reasoning_content`, after the answer, with its length; the
+  thinking is neither part of the answer nor checked. Every request now
+  says `enable_thinking` true or false, as models differ in which they do
+  when not told: Qwen3.6 thinks, Gemma 4 does not (Unsloth's
+  [Gemma 4 guide](https://unsloth.ai/docs/models/gemma-4)). A request of a
+  profile with thinking off is as before. Added on 2026-10-19, after the
+  executive summary of the run of f06412e failed on its wording in all
+  four answers, so that the report's steps can be tried on another model
+  and with thinking on (owner, the same day: "Maybe we need to experiment
+  with a different model for the report", and "yes please" to the trial's
+  profile choice and thinking). Artificial Analysis scores Qwen3.6-35B-A3B
+  at 64.4% on IFBench with reasoning and 36.2% without
+  ([Frontier tracker](https://loggel.github.io/frontier/models/qwen3-6-35b-a3b/)),
+  and the recorder's profiles run it without. Thinking is a trial option
+  rather than a second profile, so that one profile, with its server's
+  settings and its loaded model, is tried with thinking on and off; a
+  second local profile of the same file would need a model name of its
+  own, and so a load of its own. llama.cpp b11607, the target
+  machine's, builds the grammar of an answer held to a schema with the
+  thinking before it (`common/chat-auto-parser-generator.cpp`), so thinking
+  and the schema go together.
 
 - **Tests:** the sampling options read, sent, recorded, and refused; the
   repeat watch, letting through a conclusion restated later, two repeats
@@ -659,7 +688,10 @@ catalog. It does not run while the worker is running.
   again; a trial
   of one step that writes nothing to the catalog; and the answer's
   grammar, and a trial held to one line sending it in place of the
-  schema.
+  schema; a trial given another profile with thinking on, sending that
+  profile's model with `enable_thinking` true and the output limit given,
+  and keeping the thinking; and a streamed answer whose thinking is kept
+  apart from the answer and not watched.
 
 ### Reusing steps when run again
 

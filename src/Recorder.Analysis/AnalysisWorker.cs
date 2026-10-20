@@ -104,7 +104,7 @@ internal sealed class ModelSwitchNeededException(string profile) : Exception($"T
 
 internal sealed class StoppedForRecordingException() : Exception("A recording started.");
 
-internal sealed record TrialPlan(string StepKey, IReadOnlyDictionary<string, double> Sampling, string PicturesFolder, bool OneLine = false);
+internal sealed record TrialPlan(string StepKey, IReadOnlyDictionary<string, double> Sampling, string PicturesFolder, bool OneLine = false, string? Profile = null, bool? Thinking = null);
 
 internal sealed class TrialFinishedException(StepTrial trial) : Exception("The trial step has run.")
 {
@@ -859,6 +859,14 @@ public sealed class AnalysisWorker
             throw new StepFailedException($"No model profile was chosen for {capability} when the task was queued.");
         }
 
+        return ChosenProfile(profileName, request);
+    }
+
+    // A profile of the analysis settings for a step, by name, without the
+    // sampling options the step leaves out.
+    private ModelProfile ChosenProfile(string profileName, ModelRequest request)
+    {
+        var capability = request.Capability;
         var profile = _settings.Profile(profileName) ??
             throw new StepFailedException($"The model profile \"{profileName}\" is not in the analysis settings.");
         if (!profile.Supports(capability))
@@ -883,12 +891,20 @@ public sealed class AnalysisWorker
     /// only returned. See docs/architecture/analysis-runner.md, "Trying a
     /// step with other sampling options".
     /// </summary>
+    /// <remarks>
+    /// The trial may name another profile of the analysis settings for the
+    /// step, and turn its thinking on or off, so that models can be compared
+    /// on the same request (owner, 2026-10-19); the task's own steps keep
+    /// the profiles chosen when it was queued.
+    /// </remarks>
     public async Task<StepTrial> TrialAsync(
         Guid taskId,
         string stepKey,
         IReadOnlyDictionary<string, double> sampling,
         CancellationToken cancellationToken,
-        bool oneLine = false)
+        bool oneLine = false,
+        string? profile = null,
+        bool? thinking = null)
     {
         ArgumentNullException.ThrowIfNull(stepKey);
         ArgumentNullException.ThrowIfNull(sampling);
@@ -900,7 +916,7 @@ public sealed class AnalysisWorker
         }
 
         var pictures = $"analysis/trials/{task.TaskId:D}-{DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture)}/pages";
-        _trial = new TrialPlan(stepKey, sampling, pictures, oneLine);
+        _trial = new TrialPlan(stepKey, sampling, pictures, oneLine, profile, thinking);
         try
         {
             await kind.RunAsync(new AnalysisTaskContext(this, task, pictures), cancellationToken).ConfigureAwait(false);
@@ -941,8 +957,9 @@ public sealed class AnalysisWorker
         }
 
         var given = StepProfile(task, request);
-        var options = given.Generation.Sampling.ToBuilder();
-        var generation = given.Generation;
+        var chosen = trial.Profile is { } name ? ChosenProfile(name, request) : given;
+        var options = chosen.Generation.Sampling.ToBuilder();
+        var generation = trial.Thinking is { } thinking ? chosen.Generation with { Thinking = thinking } : chosen.Generation;
         foreach (var (option, value) in trial.Sampling)
         {
             // A trial may set the temperature and the seed, so that answers
@@ -956,6 +973,17 @@ public sealed class AnalysisWorker
                 }
 
                 generation = generation with { Temperature = value };
+                continue;
+            }
+
+            if (option == "max_tokens")
+            {
+                if (value != Math.Floor(value) || value < 1)
+                {
+                    throw new StepFailedException("The output limit must be a whole number of tokens, at least 1.");
+                }
+
+                generation = generation with { MaxTokens = (int)value };
                 continue;
             }
 
@@ -978,7 +1006,7 @@ public sealed class AnalysisWorker
             options[option] = value;
         }
 
-        var profile = given with { Generation = generation with { Sampling = options.ToImmutable() } };
+        var profile = chosen with { Generation = generation with { Sampling = options.ToImmutable() } };
         var body = ChatRequest.Build(profile, request, trial.OneLine);
 
         // The request as the task itself would send it, without the trial's
@@ -986,7 +1014,7 @@ public sealed class AnalysisWorker
         // says whether it sends what the task sent (owner, 2026-10-14).
         var asTask = ChatRequest.Sha256(ChatRequest.Build(given, request));
         var attempts = await Catalog.StepRequestsAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false);
-        await EnsureLoadedAsync(given, cancellationToken).ConfigureAwait(false);
+        await EnsureLoadedAsync(chosen, cancellationToken).ConfigureAwait(false);
         var build = await _endpoint.ServerBuildAsync(profile, cancellationToken).ConfigureAwait(false);
         var parameters = ChatRequest.Parameters(profile, request);
         parameters["server_defaults"] = await _endpoint.ServerSamplingAsync(profile, cancellationToken).ConfigureAwait(false);

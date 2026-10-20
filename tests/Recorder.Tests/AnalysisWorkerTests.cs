@@ -976,7 +976,8 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         {
             ("seed", 1.5, "The seed must be a whole number."),
             ("temperature", -1.0, "The temperature must be at least 0."),
-            ("max_tokens", 10.0, "The sampling option \"max_tokens\" is one the worker sets itself.")
+            ("max_tokens", 0.5, "The output limit must be a whole number of tokens, at least 1."),
+            ("stream", 0.0, "The sampling option \"stream\" is one the worker sets itself.")
         })
         {
             var refused = await Assert.ThrowsAsync<StepFailedException>(() =>
@@ -984,6 +985,40 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
                     .TrialAsync(task, "visit-1", new Dictionary<string, double> { [option] = value }, Token));
             Assert.Equal(message, refused.Message);
         }
+    }
+
+    [Fact]
+    public async Task A_trial_may_give_the_step_to_another_profile_with_thinking_on_and_keeps_the_thinking()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var endpoint = new StandInEndpoint
+        {
+            Answer = (profile, _, _) => Task.FromResult(StandInEndpoint.Valid("E1") with { Reasoning = "The input says E1, so cite it." })
+        };
+        var settings = SettingsWith(3, Profile("This PC", "qwen"), Profile("Gemma 4", "gemma"));
+
+        var trial = await new AnalysisWorker(catalog, settings, [new StandInKind("visit-1")], endpoint, options: Fast)
+            .TrialAsync(task, "visit-1", new Dictionary<string, double> { ["max_tokens"] = 16384 }, Token, profile: "Gemma 4", thinking: true);
+
+        Assert.Null(trial.Failure);
+        Assert.Equal("Gemma 4", trial.Profile);
+        using (var document = JsonDocument.Parse(Assert.Single(endpoint.Bodies)))
+        {
+            Assert.Equal("gemma", document.RootElement.GetProperty("model").GetString());
+            Assert.True(document.RootElement.GetProperty("chat_template_kwargs").GetProperty("enable_thinking").GetBoolean());
+            Assert.Equal(16384, document.RootElement.GetProperty("max_tokens").GetInt32());
+        }
+
+        Assert.NotEqual(trial.RequestSha256, trial.SentSha256);
+        var described = trial.Describe();
+        Assert.Contains("with profile Gemma 4.", described, StringComparison.Ordinal);
+        Assert.Contains("The model's thinking before the answer, 30 characters, exactly as it arrived; it is not part of the answer and is not checked:\nThe input says E1, so cite it.\n", described, StringComparison.Ordinal);
+
+        var missing = await Assert.ThrowsAsync<StepFailedException>(() =>
+            new AnalysisWorker(catalog, settings, [new StandInKind("visit-1")], endpoint, options: Fast)
+                .TrialAsync(task, "visit-1", new Dictionary<string, double>(), Token, profile: "Elsewhere"));
+        Assert.Equal("The model profile \"Elsewhere\" is not in the analysis settings.", missing.Message);
     }
 
     [Fact]
@@ -1548,6 +1583,28 @@ public sealed class HttpModelEndpointTests
         text.Append("\"timings\": { \"prompt_ms\": 9000.5, \"predicted_ms\": 120.25 }}\n\n");
         text.Append("data: [DONE]\n\n");
         return text.ToString();
+    }
+
+    [Fact]
+    public async Task A_streamed_answer_keeps_the_thinking_apart_from_the_answer_and_watches_only_the_answer()
+    {
+        var port = FreePort();
+        using var listener = new HttpListener();
+        listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+        listener.Start();
+        using var client = new HttpClient();
+        var endpoint = new HttpModelEndpoint(client, null);
+        var seen = new List<string>();
+        var thinking = "data: {\"choices\": [ { \"index\": 0, \"delta\": { \"reasoning_content\": \"Cite E1. \" } } ]}\n\n" +
+            "data: {\"choices\": [ { \"index\": 0, \"delta\": { \"reasoning_content\": \"Then answer.\" } } ]}\n\n";
+
+        var serving = ServeOnceAsync(listener, 200, thinking + Stream("{\"description\": ", "[]}"), "text/event-stream");
+        var response = await endpoint.CompleteAsync(Server(port), "{}", content => { seen.Add(content); return null; }, Token);
+        await serving;
+
+        Assert.Equal("{\"description\": []}", response.Content);
+        Assert.Equal("Cite E1. Then answer.", response.Reasoning);
+        Assert.Equal(["{\"description\": ", "{\"description\": []}"], seen);
     }
 
     [Fact]

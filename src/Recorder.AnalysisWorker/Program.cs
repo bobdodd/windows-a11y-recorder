@@ -15,17 +15,19 @@ using Recorder.Database;
 // answer to JSON on one line by the recorder's own grammar. See
 // docs/architecture/analysis-runner.md, "Trying a step with other sampling
 // options".
-(Guid Task, string Step, string File, Dictionary<string, double> Sampling, bool OneLine)? trial = null;
+(Guid Task, string Step, string File, Dictionary<string, double> Sampling, bool OneLine, string? Profile, bool? Thinking)? trial = null;
 if (args.Length > 0 && args[0] == "--trial")
 {
     var sampling = new Dictionary<string, double>(StringComparer.Ordinal);
     if (args.Length < 4 || !Guid.TryParse(args[1], out var trialTask))
     {
-        Console.Error.WriteLine("Give: --trial TASK STEP FILE [OPTION=VALUE ...] [--one-line], for example --trial 01a13a7e-... visit-0001-moment-10 C:\\Users\\Public\\Downloads\\trial.txt presence_penalty=1.5");
+        Console.Error.WriteLine("Give: --trial TASK STEP FILE [OPTION=VALUE ...] [profile=NAME] [thinking=on|off] [--one-line], for example --trial 01a13a7e-... visit-0001-moment-10 C:\\Users\\Public\\Downloads\\trial.txt presence_penalty=1.5");
         return 2;
     }
 
     var oneLine = false;
+    string? trialProfile = null;
+    bool? thinking = null;
     foreach (var pair in args.Skip(4))
     {
         if (pair == "--one-line")
@@ -35,6 +37,27 @@ if (args.Length > 0 && args[0] == "--trial")
         }
 
         var parts = pair.Split('=', 2);
+
+        // Another profile of the analysis settings for the step, and its
+        // thinking on or off, to compare models on the same request.
+        if (parts.Length == 2 && parts[0] == "profile" && parts[1].Length > 0)
+        {
+            trialProfile = parts[1];
+            continue;
+        }
+
+        if (parts.Length == 2 && parts[0] == "thinking")
+        {
+            if (parts[1] is not ("on" or "off"))
+            {
+                Console.Error.WriteLine($"thinking is on or off, not {parts[1]}");
+                return 2;
+            }
+
+            thinking = parts[1] == "on";
+            continue;
+        }
+
         if (parts.Length != 2 || !double.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value))
         {
             Console.Error.WriteLine($"Not an option and a number: {pair}");
@@ -44,7 +67,7 @@ if (args.Length > 0 && args[0] == "--trial")
         sampling[parts[0]] = value;
     }
 
-    trial = (trialTask, args[2], args[3], sampling, oneLine);
+    trial = (trialTask, args[2], args[3], sampling, oneLine, trialProfile, thinking);
 }
 
 // With --recreation-check RECORDING TIME FOLDER [CHROMIUM], the worker
@@ -147,7 +170,7 @@ try
     if (trial is { } plan)
     {
         Console.WriteLine($"Trying step {plan.Step}. This can take some minutes.");
-        var result = await worker.TrialAsync(plan.Task, plan.Step, plan.Sampling, shutdown.Token, plan.OneLine).ConfigureAwait(false);
+        var result = await worker.TrialAsync(plan.Task, plan.Step, plan.Sampling, shutdown.Token, plan.OneLine, plan.Profile, plan.Thinking).ConfigureAwait(false);
         await File.WriteAllTextAsync(plan.File, result.Describe(), new System.Text.UTF8Encoding(false), shutdown.Token).ConfigureAwait(false);
         Console.WriteLine($"Written: {plan.File}");
         Status("Stopped: the trial has run.");

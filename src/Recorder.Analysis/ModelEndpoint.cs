@@ -88,7 +88,16 @@ public sealed record ModelResponse(
     int? CompletionTokens,
     double? PromptMilliseconds,
     double? CompletionMilliseconds,
-    string? StoppedBecause = null);
+    string? StoppedBecause = null)
+{
+    /// <summary>
+    /// What the model thought before its answer, where thinking was on and
+    /// the server gave it apart from the answer (llama.cpp's
+    /// <c>reasoning_content</c>); null where it gave none. It is not part of
+    /// the answer and is not checked.
+    /// </summary>
+    public string? Reasoning { get; init; }
+}
 
 /// <summary>A failure reported by, or in reaching, a model server.</summary>
 public sealed class ModelEndpointException(string message, Exception? inner = null, bool refused = false) : Exception(message, inner)
@@ -219,10 +228,10 @@ public static class ChatRequest
             body["grammar"] = AnswerGrammar.For(request.Sections);
         }
 
-        if (!profile.Generation.Thinking)
-        {
-            body["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false };
-        }
+        // Thinking is asked for or turned off in so many words, as models
+        // differ in which they do when not told: Qwen3.6 thinks, Gemma 4
+        // does not (Unsloth's Gemma 4 guide, "Thinking mode").
+        body["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = profile.Generation.Thinking };
 
         foreach (var (option, value) in profile.Generation.Sampling)
         {
@@ -313,6 +322,9 @@ public sealed class HttpModelEndpoint(
             var content = message.TryGetProperty("content", out var contentElement) && contentElement.ValueKind == JsonValueKind.String
                 ? contentElement.GetString()
                 : null;
+            var reasoning = message.TryGetProperty("reasoning_content", out var reasoningElement) && reasoningElement.ValueKind == JsonValueKind.String
+                ? reasoningElement.GetString()
+                : null;
             var finish = choice.TryGetProperty("finish_reason", out var finishElement) && finishElement.ValueKind == JsonValueKind.String
                 ? finishElement.GetString()
                 : null;
@@ -330,7 +342,10 @@ public sealed class HttpModelEndpoint(
                 completionMs = Double(timings, "predicted_ms");
             }
 
-            return new ModelResponse(content, finish, promptTokens, completionTokens, promptMs, completionMs);
+            return new ModelResponse(content, finish, promptTokens, completionTokens, promptMs, completionMs)
+            {
+                Reasoning = string.IsNullOrEmpty(reasoning) ? null : reasoning
+            };
         }
         catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException or IndexOutOfRangeException)
         {
@@ -348,6 +363,7 @@ public sealed class HttpModelEndpoint(
         CancellationToken cancellationToken)
     {
         var content = new StringBuilder();
+        var reasoning = new StringBuilder();
         string? finish = null;
         int? promptTokens = null, completionTokens = null;
         double? promptMs = null, completionMs = null;
@@ -387,6 +403,14 @@ public sealed class HttpModelEndpoint(
                             added = true;
                         }
 
+                        // The thinking, which llama.cpp streams apart from
+                        // the answer; kept, not watched for repeats.
+                        if (choice.TryGetProperty("delta", out var thought) &&
+                            thought.TryGetProperty("reasoning_content", out var thinking) && thinking.ValueKind == JsonValueKind.String)
+                        {
+                            reasoning.Append(thinking.GetString());
+                        }
+
                         if (choice.TryGetProperty("finish_reason", out var reason) && reason.ValueKind == JsonValueKind.String)
                         {
                             finish = reason.GetString();
@@ -409,7 +433,10 @@ public sealed class HttpModelEndpoint(
                 if (added && watch?.Invoke(content.ToString()) is { } stop)
                 {
                     // Closing the response stops the server generating.
-                    return new ModelResponse(content.ToString(), null, null, null, null, null, stop);
+                    return new ModelResponse(content.ToString(), null, null, null, null, null, stop)
+                    {
+                        Reasoning = reasoning.Length == 0 ? null : reasoning.ToString()
+                    };
                 }
             }
             catch (JsonException exception)
@@ -418,7 +445,10 @@ public sealed class HttpModelEndpoint(
             }
         }
 
-        return new ModelResponse(content.ToString(), finish, promptTokens, completionTokens, promptMs, completionMs);
+        return new ModelResponse(content.ToString(), finish, promptTokens, completionTokens, promptMs, completionMs)
+        {
+            Reasoning = reasoning.Length == 0 ? null : reasoning.ToString()
+        };
     }
 
     public async Task<JsonObject?> ServerSamplingAsync(ModelProfile profile, CancellationToken cancellationToken)

@@ -123,6 +123,15 @@ public sealed record StepTrial(
         text.Append(Parameters.ToJsonString(indented)).Append("\n\n");
         text.Append("The answer, exactly as it arrived:\n");
         text.Append(Response?.Content ?? "").Append("\n");
+        if (Response?.Reasoning is { } reasoning)
+        {
+            text.Append(CultureInfo.InvariantCulture, $"\nThe model's thinking before the answer, {reasoning.Length} characters, exactly as it arrived; it is not part of the answer and is not checked:\n");
+            text.Append(reasoning).Append('\n');
+        }
+        else
+        {
+            text.Append("\nThe model gave no thinking before the answer.\n");
+        }
         if (Instructions is not null)
         {
             text.Append("\nThe step's instructions, as sent:\n").Append(Instructions).Append('\n');
