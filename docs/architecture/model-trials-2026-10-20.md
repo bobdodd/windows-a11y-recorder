@@ -3,7 +3,7 @@
 The executive summary of the run of f06412e failed on its wording in all
 four answers. The owner: "I fear the real problem is the model", and then
 "Maybe we need to experiment with a different model for the report". The
-trials of ad487b2 (`Run-ModelTrials-ad487b2.ps1`) gave the story of visit 1
+trials of ad487b2 (`scripts/Run-ModelTrials-ad487b2.ps1`, after `scripts/Add-Gemma4Profile.ps1`) gave the story of visit 1
 and the executive summary of that task (01a1566e-3cd9-7651-84e9-936e9059764f)
 to four models or modes, at temperature 0 and at 0.7 with seeds 1 to 3:
 Qwen3.6-35B-A3B UD-Q4_K_M, the task's own profile, with thinking off as the
