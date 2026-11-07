@@ -103,6 +103,9 @@ Filename: "{app}\{#AppExe}"; Parameters: "--setup-models"; WorkingDir: "{app}"; 
 [Code]
 const
   VcRuntimeKey = 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64';
+  // Read and run, inherited, for ALL APPLICATION PACKAGES and ALL
+  // RESTRICTED APPLICATION PACKAGES; see GrantBrowserSandboxAccess.
+  BrowserGrants = '/grant "*S-1-15-2-1:(OI)(CI)(RX)" /grant "*S-1-15-2-2:(OI)(CI)(RX)"';
 
 function VcRuntimeInstalled: Boolean;
 var
@@ -168,10 +171,43 @@ begin
       'running an analysis.', mbInformation, MB_OK, IDOK);
 end;
 
+// Chromium starts some of its processes, the network service among them, in
+// an AppContainer, and before it does so it checks that the container can
+// read and run chrome.exe; when it cannot, the browser stops at startup
+// ("Sandbox cannot access executable", sandbox\policy\win\sandbox_win.cc).
+// Chromium's build grants this on its output folder
+// (testing\scripts\common.py, set_lpac_acls), but a folder under
+// %LOCALAPPDATA%\Programs does not have it, so it is granted here: read and
+// run for ALL APPLICATION PACKAGES (S-1-15-2-1) and ALL RESTRICTED
+// APPLICATION PACKAGES (S-1-15-2-2), inherited by everything in the folder.
+// Found on the target machine, 2026-11-07.
+procedure GrantBrowserSandboxAccess;
+var
+  ResultCode: Integer;
+  Browser: String;
+begin
+  Browser := ExpandConstant('{app}\browser');
+  WizardForm.StatusLabel.Caption := 'Letting the browser''s sandbox read its programs...';
+  if not Exec(ExpandConstant('{sys}\icacls.exe'), '"' + Browser + '" ' + BrowserGrants + ' /q',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    ResultCode := -1;
+  if ResultCode <> 0 then
+    SuppressibleMsgBox(
+      'The browser''s sandbox could not be given access to its folder (result ' +
+      IntToStr(ResultCode) + '). Without it the browser stops as it starts, so ' +
+      'recording a browser and inspecting a page do not work.' + #13#10#13#10 +
+      'Run this in PowerShell to give it, then start the recorder again:' + #13#10#13#10 +
+      'icacls "' + Browser + '" ' + BrowserGrants,
+      mbError, MB_OK, IDOK);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
+  begin
+    GrantBrowserSandboxAccess;
     InstallVcRuntime;
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

@@ -30,6 +30,10 @@ Changes on `main` since 1.1.0, not yet released.
   the player and the analysis worker with the .NET run time, PostgreSQL, the instrumented
   Chromium, and llama.cpp b11607 with the CUDA 12.4 run time, and runs
   Microsoft's Visual C++ run-time installer when it is missing.
+- The installer lets the browser's sandbox read and run the installed
+  browser's files. Without it, the installed browser stopped as it
+  started, so "Inspect page at this frame" said the instrumented Chromium
+  closed before it opened its DevTools port (development PC, 2026-11-07).
 - At start, the app points the model server setting at the installed
   llama.cpp server when none is set or the one set is not there.
 - Model setup: shows the PC's graphics card and memory, offers a list of

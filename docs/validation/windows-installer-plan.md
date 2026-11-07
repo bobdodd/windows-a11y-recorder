@@ -16,7 +16,8 @@ What was checked before this plan, in the Linux build environment:
   installers built from placeholder files installed and uninstalled under
   Wine.
 
-None of that shows the installer works on Windows. Tests 1 to 8 do.
+None of that shows the installer works on Windows. Tests 1 to 8, with
+6b, do.
 
 ## Before the tests
 
@@ -152,6 +153,22 @@ installed `llama-server.exe` and `"port"` is 8091.
 **On screen:** the instrumented browser opens at the W3C page, the
 recording stops without an error, and the player shows the desktop video
 with browser events in the timeline.
+
+## Test 6b: inspect the page at a frame
+
+Added 2026-11-07, after the installed browser stopped as it started on the
+development PC: its sandbox could not read `chrome.exe` in the installed
+folder, which the installer now allows.
+
+1. With the recording from test 6 open, move the playhead to a moment
+   after the first link was followed.
+2. Choose "Inspect page at this frame".
+3. In the "Inspect page at this frame" window, choose the page, then
+   Open.
+
+**On screen:** a browser window opens showing the recorded page, with
+DevTools open beside it, and no message that the page could not be
+recreated.
 
 ## Test 7: summarise with the downloaded model
 

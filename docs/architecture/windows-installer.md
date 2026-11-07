@@ -107,6 +107,21 @@ point of the Alienware trial is to choose them there.
   for every user. If it is still missing afterwards, the installer says so
   and where to get it; if it asks for a restart (result 3010), the installer
   says to restart before running an analysis.
+- **The browser's sandbox can read its folder.** Chromium starts some of
+  its processes, the network service among them, in an AppContainer, and
+  first checks that the container can read and run `chrome.exe`; when it
+  cannot, the browser stops as it starts, logging "Sandbox cannot access
+  executable"
+  ([Chromium, sandbox_win.cc](https://raw.githubusercontent.com/chromium/chromium/main/sandbox/policy/win/sandbox_win.cc)).
+  Chromium's build grants this on its output folder
+  ([Chromium, set_lpac_acls](https://raw.githubusercontent.com/chromium/chromium/main/testing/scripts/common.py)),
+  but a folder under `%LOCALAPPDATA%\Programs` does not have it. After the
+  files are copied, the installer runs `icacls` on `browser\`, granting
+  read and run, inherited by everything in it, to ALL APPLICATION PACKAGES
+  (`S-1-15-2-1`) and ALL RESTRICTED APPLICATION PACKAGES (`S-1-15-2-2`). If
+  that fails, it says so and gives the command to run. Found on the
+  development PC on 2026-11-07, when "Inspect page at this frame" failed
+  with the installed browser.
 - **NVIDIA check.** When `nvidia-smi.exe` is not in the Windows system
   folder, the Ready page warns that the models will be very slow or fail
   without an NVIDIA graphics card. The install continues.
@@ -151,7 +166,9 @@ failure:
    are beside them.
 4. Copies the Chromium run-time files and runs
    `scripts\Test-BrowserProtocolQuery.ps1` on the copy, which checks the
-   copied browser reports the protocol version the recorder speaks.
+   copied browser reports the protocol version the recorder speaks. The
+   query starts no sandboxed process, so it does not show the sandbox can
+   read the installed folder; validation test 6b does.
 5. Downloads the llama.cpp b11607 CUDA 12.4 archive and the CUDA run-time
    archive, checks their sizes and SHA-256 against the values in the
    script, unpacks them to `llama\`, and runs `llama-server.exe --version`.
