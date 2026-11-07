@@ -184,28 +184,83 @@ function Find-DotNet {
         ".NET 10 SDK, then run this script again.")
 }
 
+# Every ISCC.exe that could be Inno Setup's: one given with
+# -InnoSetupCompiler, one in PATH, the install folder Windows records for
+# each Inno Setup installation (machine-wide or for this user, which is
+# where winget's per-user installs go), and the default folders.
+function Get-InnoSetupCandidates {
+    $paths = New-Object System.Collections.Generic.List[string]
+    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($command) {
+        $paths.Add($command.Source)
+    }
+    $uninstallKeys = @(
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*")
+    foreach ($key in $uninstallKeys) {
+        foreach ($entry in Get-ItemProperty -Path $key -ErrorAction SilentlyContinue) {
+            $name = $entry.PSObject.Properties["DisplayName"]
+            $location = $entry.PSObject.Properties["InstallLocation"]
+            if ($name -and $location -and $name.Value -like "Inno Setup*" -and $location.Value) {
+                $paths.Add((Join-Path $location.Value "ISCC.exe"))
+            }
+        }
+    }
+    foreach ($folder in @(
+            (Join-Path $env:LOCALAPPDATA "Programs"),
+            ${env:ProgramFiles},
+            ${env:ProgramFiles(x86)})) {
+        if ($folder -and (Test-Path -LiteralPath $folder)) {
+            foreach ($found in Get-ChildItem -LiteralPath $folder -Directory -Filter "Inno Setup*" -ErrorAction SilentlyContinue) {
+                $paths.Add((Join-Path $found.FullName "ISCC.exe"))
+            }
+        }
+    }
+    return $paths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -Unique
+}
+
+function Get-FileMajorVersion {
+    param([string] $Path)
+    $version = (Get-Item -LiteralPath $Path).VersionInfo
+    if ($version.FileMajorPart) {
+        return $version.FileMajorPart
+    }
+    return 0
+}
+
+# The setup script uses SetupArchitecture, which Inno Setup 7 added, so an
+# older Inno Setup cannot compile it.
 function Find-InnoSetup {
     if ($InnoSetupCompiler) {
         if (-not (Test-Path -LiteralPath $InnoSetupCompiler)) {
             throw "Inno Setup's compiler was not found at $InnoSetupCompiler."
         }
-        return $InnoSetupCompiler
+        $candidates = @($InnoSetupCompiler)
     }
-    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-    if ($command) {
-        return $command.Source
+    else {
+        $candidates = @(Get-InnoSetupCandidates)
     }
-    $candidates = @(
-        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 7\ISCC.exe"),
-        (Join-Path ${env:ProgramFiles} "Inno Setup 7\ISCC.exe"),
-        (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 7\ISCC.exe"))
+
+    $older = New-Object System.Collections.Generic.List[string]
     foreach ($candidate in $candidates) {
-        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+        $major = Get-FileMajorVersion -Path $candidate
+        if ($major -ge 7) {
             return $candidate
         }
+        $older.Add("$candidate (version $major)")
     }
-    throw ("Inno Setup 7 was not found. Install it with: " +
-        "winget install --id JRSoftware.InnoSetup -e   then run this script again.")
+
+    $install = "winget install --id JRSoftware.InnoSetup -e --accept-package-agreements --accept-source-agreements"
+    if ($older.Count -gt 0) {
+        throw ("Inno Setup 7 or later is needed, and only an older version was found: " +
+            ($older -join ", ") + ". Install Inno Setup 7 from https://jrsoftware.org/isdl.php, " +
+            "or with: $install   then run this script again.")
+    }
+    throw ("Inno Setup was not found in PATH, in Windows' list of installed programs, " +
+        "or in Program Files. Install it with: $install   then run this script again. " +
+        "If it is installed in another folder, run this script with " +
+        "-InnoSetupCompiler followed by the full path of its ISCC.exe.")
 }
 
 function Get-Revision {
