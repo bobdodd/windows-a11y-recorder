@@ -39,7 +39,7 @@ configuration after the install (see "Model setup").
 
 | Part | Where the app looks for it | How the installer provides it |
 |---|---|---|
-| The player, the capture host and the analysis worker (.NET 10, WPF) | One folder; the player starts `Recorder.AnalysisWorker.exe` from its own folder (`AnalysisPlayer.WorkerFileName`) | Published self-contained for `win-x64`, so the PC needs no .NET run time |
+| The player and the analysis worker (.NET 10, WPF) | One folder; the player starts `Recorder.AnalysisWorker.exe` from its own folder (`AnalysisPlayer.WorkerFileName`) | Published self-contained for `win-x64`, so the PC needs no .NET run time |
 | PostgreSQL server | `pgsql\` beside the programs (`Recorder.App.csproj`, `RecorderDatabaseLocation`) | The binaries `scripts\Get-PostgresBinaries.ps1` fetches, copied by the publish |
 | The catalog's data | `%LOCALAPPDATA%\Windows A11y Recorder` | Created on first start |
 | Recordings | `Documents\Windows A11y Recorder` by default | Created on first recording |
@@ -56,7 +56,15 @@ configuration after the install (see "Model setup").
 
 Into `%LOCALAPPDATA%\Programs\Windows A11y Recorder`:
 
-- The three .NET programs and the .NET run time, in one folder.
+- The player and the analysis worker, with the .NET run time, in one
+  folder. The command-line capture host (`Recorder.CaptureHost.exe`) is not
+  installed: the player records by itself, and the capture host is used only
+  by the development validation scripts. Published separately, it ships
+  different copies of four DLLs from the player's
+  (`Microsoft.Extensions.Logging.Abstractions.dll`,
+  `Microsoft.Extensions.DependencyInjection.Abstractions.dll`,
+  `Microsoft.VisualBasic.dll`, `System.Drawing.dll`), so it could not share
+  the player's folder.
 - `model-catalog.json`, the list of models model setup offers.
 - `pgsql\`: the PostgreSQL server programs, libraries and licences.
 - `browser\`: the instrumented Chromium's run-time files, not the whole
@@ -138,9 +146,9 @@ failure:
    6.3 or later (in PATH, where Windows records it was installed, or an
    "Inno Setup" folder in Program Files or `%LOCALAPPDATA%\Programs`).
 2. Fetches or reuses the pinned PostgreSQL binaries.
-3. Publishes the player, which brings the analysis worker beside it, and
-   the capture host, self-contained for `win-x64`, each into its own folder,
-   then merges them, refusing any file the two ship in different versions.
+3. Publishes the player, which brings the analysis worker beside it,
+   self-contained for `win-x64`, and checks PostgreSQL and the model list
+   are beside them.
 4. Copies the Chromium run-time files and runs
    `scripts\Test-BrowserProtocolQuery.ps1` on the copy, which checks the
    copied browser reports the protocol version the recorder speaks.

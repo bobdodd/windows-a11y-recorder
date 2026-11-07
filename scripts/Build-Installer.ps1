@@ -7,8 +7,10 @@
     Runs on the development PC, the only PC with the instrumented Chromium
     build. Every step stops the build at the first failure:
 
-      1. Publishes the player (with the analysis worker beside it) and the
-         capture host, self-contained for win-x64, into one folder.
+      1. Publishes the player, which brings the analysis worker beside it,
+         self-contained for win-x64. The command-line capture host is not
+         installed: the player records, and the capture host is used only
+         by the development validation scripts.
       2. Fetches or reuses the pinned PostgreSQL binaries
          (scripts\Get-PostgresBinaries.ps1); the publish copies them to pgsql.
       3. Copies the run-time files of the instrumented Chromium build to
@@ -40,6 +42,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+# Windows PowerShell 5.1 may not offer TLS 1.2 by default, which GitHub and
+# Hugging Face require.
+[Net.ServicePointManager]::SecurityProtocol =
+    [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 if (-not $WorkFolder) {
@@ -184,16 +191,19 @@ function Find-DotNet {
         ".NET 10 SDK, then run this script again.")
 }
 
-# Every ISCC.exe that could be Inno Setup's: one given with
-# -InnoSetupCompiler, one in PATH, the install folder Windows records for
-# each Inno Setup installation (machine-wide or for this user, which is
-# where winget's per-user installs go), and the default folders.
+# Every ISCC.exe that could be Inno Setup's, with its version: one given
+# with -InnoSetupCompiler, one in PATH, the install folder Windows records
+# for each Inno Setup installation (machine-wide or for this user, which is
+# where winget's per-user installs go), and any Inno Setup folder in the
+# default places.
+#
+# Inno Setup's programs carry no file version (it is 0.0.0.0), so the
+# version is the DisplayVersion Windows records for the installation, or
+# else the major version ISCC prints in its banner, "Inno Setup 6
+# Command-Line Compiler".
 function Get-InnoSetupCandidates {
-    $paths = New-Object System.Collections.Generic.List[string]
-    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-    if ($command) {
-        $paths.Add($command.Source)
-    }
+    $found = [ordered]@{}
+
     $uninstallKeys = @(
         "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
         "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
@@ -202,56 +212,95 @@ function Get-InnoSetupCandidates {
         foreach ($entry in Get-ItemProperty -Path $key -ErrorAction SilentlyContinue) {
             $name = $entry.PSObject.Properties["DisplayName"]
             $location = $entry.PSObject.Properties["InstallLocation"]
-            if ($name -and $location -and $name.Value -like "Inno Setup*" -and $location.Value) {
-                $paths.Add((Join-Path $location.Value "ISCC.exe"))
+            if (-not ($name -and $location -and $name.Value -like "Inno Setup*" -and $location.Value)) {
+                continue
             }
+            $path = Join-Path $location.Value "ISCC.exe"
+            $displayVersion = $entry.PSObject.Properties["DisplayVersion"]
+            $version = $null
+            if ($displayVersion -and $displayVersion.Value) {
+                $parsed = $null
+                if ([System.Version]::TryParse(($displayVersion.Value -replace "[^0-9.].*$", ""), [ref]$parsed)) {
+                    $version = $parsed
+                }
+            }
+            $found[$path.ToLowerInvariant()] = [pscustomobject]@{ Path = $path; Version = $version; FromBanner = $false }
         }
+    }
+
+    $paths = New-Object System.Collections.Generic.List[string]
+    if ($InnoSetupCompiler) {
+        $paths.Add($InnoSetupCompiler)
+    }
+    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($command) {
+        $paths.Add($command.Source)
     }
     foreach ($folder in @(
             (Join-Path $env:LOCALAPPDATA "Programs"),
             ${env:ProgramFiles},
             ${env:ProgramFiles(x86)})) {
         if ($folder -and (Test-Path -LiteralPath $folder)) {
-            foreach ($found in Get-ChildItem -LiteralPath $folder -Directory -Filter "Inno Setup*" -ErrorAction SilentlyContinue) {
-                $paths.Add((Join-Path $found.FullName "ISCC.exe"))
+            foreach ($directory in Get-ChildItem -LiteralPath $folder -Directory -Filter "Inno Setup*" -ErrorAction SilentlyContinue) {
+                $paths.Add((Join-Path $directory.FullName "ISCC.exe"))
             }
         }
     }
-    return $paths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -Unique
-}
+    foreach ($path in $paths) {
+        if (-not $found.Contains($path.ToLowerInvariant())) {
+            $found[$path.ToLowerInvariant()] = [pscustomobject]@{ Path = $path; Version = $null; FromBanner = $false }
+        }
+    }
 
-function Get-FileVersion {
-    param([string] $Path)
-    $info = (Get-Item -LiteralPath $Path).VersionInfo
-    return New-Object System.Version ([int]$info.FileMajorPart), ([int]$info.FileMinorPart)
+    $candidates = New-Object System.Collections.Generic.List[object]
+    foreach ($candidate in $found.Values) {
+        if (-not (Test-Path -LiteralPath $candidate.Path -PathType Leaf)) {
+            continue
+        }
+        if (-not $candidate.Version) {
+            $banner = (Invoke-Program -FilePath $candidate.Path).Output
+            if ($banner -match "Inno Setup (\d+)(\.(\d+))?") {
+                $minor = if ($Matches[3]) { [int]$Matches[3] } else { 0 }
+                $candidate.Version = New-Object System.Version ([int]$Matches[1]), $minor
+                $candidate.FromBanner = -not $Matches[3]
+            }
+        }
+        $candidates.Add($candidate)
+    }
+    return $candidates
 }
 
 # The setup script needs Inno Setup 6.3 or later, for the x64os
-# architecture. winget's JRSoftware.InnoSetup is 6.7.3 (2026-11-06).
+# architecture. winget's JRSoftware.InnoSetup is 6.7.3 (2026-11-06). When
+# only the banner's major version is known, 6 is accepted, and an Inno Setup
+# 6 older than 6.3 is reported by the compiler, which names x64os.
 function Find-InnoSetup {
-    if ($InnoSetupCompiler) {
-        if (-not (Test-Path -LiteralPath $InnoSetupCompiler)) {
-            throw "Inno Setup's compiler was not found at $InnoSetupCompiler."
-        }
-        $candidates = @($InnoSetupCompiler)
-    }
-    else {
-        $candidates = @(Get-InnoSetupCandidates)
+    if ($InnoSetupCompiler -and -not (Test-Path -LiteralPath $InnoSetupCompiler -PathType Leaf)) {
+        throw "Inno Setup's compiler was not found at $InnoSetupCompiler."
     }
 
-    $older = New-Object System.Collections.Generic.List[string]
-    foreach ($candidate in $candidates) {
-        $version = Get-FileVersion -Path $candidate
-        if ($version -ge (New-Object System.Version 6, 3)) {
-            return $candidate
-        }
-        $older.Add("$candidate (version $version)")
+    $candidates = @(Get-InnoSetupCandidates)
+    if ($InnoSetupCompiler) {
+        $candidates = @($candidates | Where-Object { $_.Path -eq $InnoSetupCompiler })
+    }
+    $minimum = New-Object System.Version 6, 3
+    $usable = @($candidates | Where-Object {
+            $_.Version -and ($_.Version -ge $minimum -or ($_.FromBanner -and $_.Version.Major -ge 6))
+        } | Sort-Object { $_.Version } -Descending)
+    if ($usable.Count -gt 0) {
+        $shown = if ($usable[0].FromBanner) { "$($usable[0].Version.Major)" } else { "$($usable[0].Version)" }
+        Write-Host "Inno Setup version $shown"
+        return $usable[0].Path
     }
 
     $install = "winget install --id JRSoftware.InnoSetup -e --accept-package-agreements --accept-source-agreements"
-    if ($older.Count -gt 0) {
-        throw ("Inno Setup 6.3 or later is needed, and only an older version was found: " +
-            ($older -join ", ") + ". Update it with: $install   then run this script again.")
+    if ($candidates.Count -gt 0) {
+        $described = $candidates | ForEach-Object {
+            $shown = if (-not $_.Version) { "version unknown" } elseif ($_.FromBanner) { "version $($_.Version.Major)" } else { "version $($_.Version)" }
+            "$($_.Path) ($shown)"
+        }
+        throw ("Inno Setup 6.3 or later is needed, and only this was found: " +
+            ($described -join ", ") + ". Update it with: $install   then run this script again.")
     }
     throw ("Inno Setup was not found in PATH, in Windows' list of installed programs, " +
         "or in Program Files. Install it with: $install   then run this script again. " +
@@ -294,8 +343,9 @@ function Get-ProductVersion {
 }
 
 # Publishes a project into its own folder and merges it into the app folder.
-# A file both programs ship must be identical, or one program would run with
-# the other's copy.
+# A file two publishes both ship must be identical, or one program would run
+# with the other's copy. (The capture host was dropped from the installer
+# because it ships different copies of four DLLs from the player's.)
 function Publish-Into {
     param(
         [Parameter(Mandatory = $true)] [string] $DotNet,
@@ -523,6 +573,8 @@ function Write-Notices {
     $text.Add("")
     $text.Add("llama.cpp $llamaBuild (folder llama)")
     $text.Add("  MIT licence: llama\LICENSE-llama.cpp.txt. https://github.com/ggml-org/llama.cpp")
+    $text.Add("  It includes the LLVM OpenMP run time (llama\libomp.dll), under the Apache")
+    $text.Add("  License 2.0 with LLVM Exceptions: llama\LICENSE-LLVM-OpenMP.")
     $text.Add("")
     $text.Add("NVIDIA CUDA run time 12.4 (folder llama: cudart64_12.dll, cublas64_12.dll,")
     $text.Add("  cublasLt64_12.dll), as distributed by llama.cpp beside its CUDA build.")
@@ -571,8 +623,7 @@ Write-Step "PostgreSQL"
 
 Write-Step "Publishing the programs"
 Publish-Into -DotNet $dotnet -Project "src\Recorder.App\Recorder.App.csproj" -Name "Recorder.App"
-Publish-Into -DotNet $dotnet -Project "src\Recorder.CaptureHost\Recorder.CaptureHost.csproj" -Name "Recorder.CaptureHost"
-foreach ($required in @("Recorder.App.exe", "Recorder.AnalysisWorker.exe", "Recorder.CaptureHost.exe",
+foreach ($required in @("Recorder.App.exe", "Recorder.AnalysisWorker.exe",
         "model-catalog.json", "pgsql\bin\postgres.exe")) {
     if (-not (Test-Path -LiteralPath (Join-Path $app $required))) {
         throw "The published folder has no $required."

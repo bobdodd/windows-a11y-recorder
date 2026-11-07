@@ -27,7 +27,7 @@ Changes on `main` since 1.1.0, not yet released.
 
 - A Windows installer built with Inno Setup (6.3 or later) by
   `scripts\Build-Installer.ps1` on the development PC. It installs per user
-  the programs with the .NET run time, PostgreSQL, the instrumented
+  the player and the analysis worker with the .NET run time, PostgreSQL, the instrumented
   Chromium, and llama.cpp b11607 with the CUDA 12.4 run time, and runs
   Microsoft's Visual C++ run-time installer when it is missing.
 - At start, the app points the model server setting at the installed
