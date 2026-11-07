@@ -660,6 +660,38 @@ Remaining:
 2. Add evidence correlation and screen-reader behavior analysis.
 3. Investigate touch and gesture coverage on representative hardware.
 
+## Install on another Windows PC
+
+The installer, `WindowsA11yRecorder-Setup-<revision>.exe`, installs the
+recorder for the current user, with no administrator rights, into
+`%LOCALAPPDATA%\Programs\Windows A11y Recorder`. It includes everything the
+recorder needs except the model files: the .NET run time, PostgreSQL, the
+instrumented Chromium and the llama.cpp server with the NVIDIA CUDA 12.4 run
+time. It runs Microsoft's Visual C++ run-time installer if the PC does not
+have it. It needs 64-bit Windows 10 version 2004 or later, and an NVIDIA
+graphics card for the analysis models.
+
+On its last page it starts the recorder with model setup open, which shows
+the PC's graphics card and memory, offers Qwen3.6 and Gemma 4 models in
+several sizes, says how each compares with the card's memory, and downloads
+the chosen ones with their checksums checked. A model not in the list can be
+added from its Hugging Face address or from a file already on the PC. Model
+setup is on the Analysis menu afterwards, as "Set up models...", and the
+model profiles window edits each profile's server arguments and generation
+settings. Uninstalling keeps the recordings, the catalog and the models.
+
+The installer is built on the development PC, which has the instrumented
+Chromium build, with Inno Setup 7 installed:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+.\scripts\Build-Installer.ps1
+```
+
+It is written to `artifacts\installer\output`. See
+[the installer decisions](docs/architecture/windows-installer.md) and
+[its validation plan](docs/validation/windows-installer-plan.md).
+
 ## Build and test
 
 The managed solution requires the .NET 10 SDK and targets Windows 10 version
@@ -713,6 +745,8 @@ The setup script checks out Chromium, applies the recorder bridge, generates
 - [Prototype architecture](docs/architecture/prototype-architecture.md)
 - [Collector contracts](docs/architecture/collector-contracts.md)
 - [Reference Windows test platform](docs/architecture/reference-platform.md)
+- [Windows installer and configurable local models](docs/architecture/windows-installer.md)
+- [Windows installer validation plan](docs/validation/windows-installer-plan.md)
 - [Threat model](docs/security/threat-model.md)
 - [Privacy and data-handling policy](docs/security/privacy-and-data-handling-policy.md)
 - [Chromium connection validation record](docs/validation/chromium-connection-2026-09-18.md)

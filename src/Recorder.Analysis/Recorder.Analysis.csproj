@@ -4,6 +4,14 @@
     <!-- The page recreated at a moment, for the summary with vision. -->
     <ProjectReference Include="../Recorder.Recreation/Recorder.Recreation.csproj" />
   </ItemGroup>
+  <!-- The models the setup window offers, beside the programs, so the list
+       can be read and changed without a new build. -->
+  <ItemGroup>
+    <None Include="Setup/model-catalog.json"
+          Link="model-catalog.json"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Recorder.Tests" />
   </ItemGroup>

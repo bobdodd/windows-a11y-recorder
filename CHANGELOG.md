@@ -4,6 +4,46 @@ This project uses semantic version numbers for product releases. Protocol and
 archive schema versions are compatibility contracts and advance independently
 from the product version.
 
+## Unreleased
+
+Changes on `main` since 1.1.0, not yet released.
+
+### Analysis
+
+- The analysis runner: tasks queued from the player's Analysis menu run in
+  a separate worker against a local llama.cpp server, paused while a
+  recording is in progress, with each accepted step stored and reused when
+  its request is unchanged; see
+  [the analysis runner](docs/architecture/analysis-runner.md).
+- The recording summary, with and without vision, written as a numbered
+  Markdown report citing the recorded evidence; see
+  [the recording summary](docs/architecture/recording-summary.md).
+- The model trials on the development PC with Qwen3.6 and Gemma 4; see
+  [the trials of 2026-10-20](docs/architecture/model-trials-2026-10-20.md).
+- Database migrations 0034 to 0037 add the analysis tasks, their steps and
+  their claims to the catalog.
+
+### Installer and model setup
+
+- A Windows installer built with Inno Setup 7 by
+  `scripts\Build-Installer.ps1` on the development PC. It installs per user
+  the programs with the .NET run time, PostgreSQL, the instrumented
+  Chromium, and llama.cpp b11607 with the CUDA 12.4 run time, and runs
+  Microsoft's Visual C++ run-time installer when it is missing.
+- At start, the app points the model server setting at the installed
+  llama.cpp server when none is set or the one set is not there.
+- Model setup: shows the PC's graphics card and memory, offers a list of
+  Qwen3.6 and Gemma 4 files pinned to Hugging Face commits, compares each
+  with the PC's memory, and downloads the chosen ones, resuming after a
+  stop and checking each file's SHA-256. Models can also be added from a
+  Hugging Face address or a file on the PC. Each becomes a text profile
+  and, with its image add-on, an image profile.
+- The model profiles window edits each profile's server arguments, output
+  limit, temperature, seed and thinking, and the default profiles.
+- See [the installer decisions](docs/architecture/windows-installer.md) and
+  [its validation plan](docs/validation/windows-installer-plan.md). Not yet
+  run on Windows.
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now

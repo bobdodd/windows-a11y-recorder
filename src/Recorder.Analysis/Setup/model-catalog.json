@@ -1,0 +1,344 @@
+{
+  "version": 1,
+  "llamaServer": "b11607",
+  "checked": "2026-11-06",
+  "models": [
+    {
+      "id": "qwen3.6-35b-a3b-ud-q4_k_m",
+      "name": "Qwen3.6 35B A3B, UD-Q4_K_M",
+      "family": "Qwen3.6 35B A3B",
+      "description": "Mixture of experts: 35 billion parameters, 3 billion used for each token. Fast for its size, since most of it can stay in the PC's memory.",
+      "quantization": "UD-Q4_K_M",
+      "source": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF",
+      "baseModel": "https://huggingface.co/Qwen/Qwen3.6-35B-A3B",
+      "licence": "apache-2.0",
+      "model": {
+        "name": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+        "url": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/a483e9e6cbd595906af30beda3187c2663a1118c/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+        "size": 22134528992,
+        "sha256": "ac0e2c1189e055faa36eff361580e79c5bd6f8e76bffb4ce547f167d53e31a61"
+      },
+      "imageAddOn": {
+        "name": "mmproj-F16.gguf",
+        "url": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/a483e9e6cbd595906af30beda3187c2663a1118c/mmproj-F16.gguf",
+        "size": 899283680,
+        "sha256": "8971ee4f331ff0a4c609374f32984b3d4e6dc086c0aa35f1d637fad1829e887f"
+      },
+      "arguments": "-fa on -c 32768",
+      "generation": {
+        "maxTokens": 8192,
+        "temperature": 0,
+        "seed": 1,
+        "thinking": false
+      },
+      "note": "The model and file used on the development PC since 2026-10-13."
+    },
+    {
+      "id": "qwen3.6-35b-a3b-ud-q5_k_s",
+      "name": "Qwen3.6 35B A3B, UD-Q5_K_S",
+      "family": "Qwen3.6 35B A3B",
+      "description": "Mixture of experts: 35 billion parameters, 3 billion used for each token. Fast for its size, since most of it can stay in the PC's memory.",
+      "quantization": "UD-Q5_K_S",
+      "source": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF",
+      "baseModel": "https://huggingface.co/Qwen/Qwen3.6-35B-A3B",
+      "licence": "apache-2.0",
+      "model": {
+        "name": "Qwen3.6-35B-A3B-UD-Q5_K_S.gguf",
+        "url": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/a483e9e6cbd595906af30beda3187c2663a1118c/Qwen3.6-35B-A3B-UD-Q5_K_S.gguf",
+        "size": 24942050272,
+        "sha256": "31d886cbd8c3db2e66f4366cbfed93389cb982bdced1caa37262befdb34f5715"
+      },
+      "imageAddOn": {
+        "name": "mmproj-F16.gguf",
+        "url": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/a483e9e6cbd595906af30beda3187c2663a1118c/mmproj-F16.gguf",
+        "size": 899283680,
+        "sha256": "8971ee4f331ff0a4c609374f32984b3d4e6dc086c0aa35f1d637fad1829e887f"
+      },
+      "arguments": "-fa on -c 32768",
+      "generation": {
+        "maxTokens": 8192,
+        "temperature": 0,
+        "seed": 1,
+        "thinking": false
+      }
+    },
+    {
+      "id": "qwen3.6-35b-a3b-ud-q6_k",
+      "name": "Qwen3.6 35B A3B, UD-Q6_K",
+      "family": "Qwen3.6 35B A3B",
+      "description": "Mixture of experts: 35 billion parameters, 3 billion used for each token. Fast for its size, since most of it can stay in the PC's memory.",
+      "quantization": "UD-Q6_K",
+      "source": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF",
+      "baseModel": "https://huggingface.co/Qwen/Qwen3.6-35B-A3B",
+      "licence": "apache-2.0",
+      "model": {
+        "name": "Qwen3.6-35B-A3B-UD-Q6_K.gguf",
+        "url": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/a483e9e6cbd595906af30beda3187c2663a1118c/Qwen3.6-35B-A3B-UD-Q6_K.gguf",
+        "size": 29308320736,
+        "sha256": "4fe53b148b46f9b88830e2a3055c5b15c3a4d1e3ddc9a1384a108d8b9d59f043"
+      },
+      "imageAddOn": {
+        "name": "mmproj-F16.gguf",
+        "url": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/a483e9e6cbd595906af30beda3187c2663a1118c/mmproj-F16.gguf",
+        "size": 899283680,
+        "sha256": "8971ee4f331ff0a4c609374f32984b3d4e6dc086c0aa35f1d637fad1829e887f"
+      },
+      "arguments": "-fa on -c 32768",
+      "generation": {
+        "maxTokens": 8192,
+        "temperature": 0,
+        "seed": 1,
+        "thinking": false
+      }
+    },
+    {
+      "id": "qwen3.6-35b-a3b-q8_0",
+      "name": "Qwen3.6 35B A3B, Q8_0",
+      "family": "Qwen3.6 35B A3B",
+      "description": "Mixture of experts: 35 billion parameters, 3 billion used for each token. Fast for its size, since most of it can stay in the PC's memory.",
+      "quantization": "Q8_0",
+      "source": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF",
+      "baseModel": "https://huggingface.co/Qwen/Qwen3.6-35B-A3B",
+      "licence": "apache-2.0",
+      "model": {
+        "name": "Qwen3.6-35B-A3B-Q8_0.gguf",
+        "url": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/a483e9e6cbd595906af30beda3187c2663a1118c/Qwen3.6-35B-A3B-Q8_0.gguf",
+        "size": 36903140320,
+        "sha256": "d1a395809f65a43a13ad119eb4e7acdef1ac6d68120f39902c8ab96e72794a59"
+      },
+      "imageAddOn": {
+        "name": "mmproj-F16.gguf",
+        "url": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/a483e9e6cbd595906af30beda3187c2663a1118c/mmproj-F16.gguf",
+        "size": 899283680,
+        "sha256": "8971ee4f331ff0a4c609374f32984b3d4e6dc086c0aa35f1d637fad1829e887f"
+      },
+      "arguments": "-fa on -c 32768",
+      "generation": {
+        "maxTokens": 8192,
+        "temperature": 0,
+        "seed": 1,
+        "thinking": false
+      }
+    },
+    {
+      "id": "qwen3.6-27b-q4_k_m",
+      "name": "Qwen3.6 27B, Q4_K_M",
+      "family": "Qwen3.6 27B",
+      "description": "Dense: all 27 billion parameters used for each token. Slower than the 35B A3B unless the whole file fits on the graphics card.",
+      "quantization": "Q4_K_M",
+      "source": "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF",
+      "baseModel": "https://huggingface.co/Qwen/Qwen3.6-27B",
+      "licence": "apache-2.0",
+      "model": {
+        "name": "Qwen3.6-27B-Q4_K_M.gguf",
+        "url": "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/82d411acf4a06cfb8d9b073a5211bf410bfc29bf/Qwen3.6-27B-Q4_K_M.gguf",
+        "size": 16817244384,
+        "sha256": "5ed60d0af4650a854b1755bd392f9aef4872643dc25a254bc68043fa638392a0"
+      },
+      "imageAddOn": {
+        "name": "mmproj-F16.gguf",
+        "url": "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/82d411acf4a06cfb8d9b073a5211bf410bfc29bf/mmproj-F16.gguf",
+        "size": 927607360,
+        "sha256": "eacf610d1ee4bd5ed0197a0777dd8f4fceb8eefa27009067c7d496cb68fbde45"
+      },
+      "arguments": "-fa on -c 32768",
+      "generation": {
+        "maxTokens": 8192,
+        "temperature": 0,
+        "seed": 1,
+        "thinking": false
+      }
+    },
+    {
+      "id": "qwen3.6-27b-q5_k_m",
+      "name": "Qwen3.6 27B, Q5_K_M",
+      "family": "Qwen3.6 27B",
+      "description": "Dense: all 27 billion parameters used for each token. Slower than the 35B A3B unless the whole file fits on the graphics card.",
+      "quantization": "Q5_K_M",
+      "source": "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF",
+      "baseModel": "https://huggingface.co/Qwen/Qwen3.6-27B",
+      "licence": "apache-2.0",
+      "model": {
+        "name": "Qwen3.6-27B-Q5_K_M.gguf",
+        "url": "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/82d411acf4a06cfb8d9b073a5211bf410bfc29bf/Qwen3.6-27B-Q5_K_M.gguf",
+        "size": 19509790944,
+        "sha256": "cfecab168156269f25d5ffe9e13cf2a401ca2f43a9693fa00bcd1625316ccbde"
+      },
+      "imageAddOn": {
+        "name": "mmproj-F16.gguf",
+        "url": "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/82d411acf4a06cfb8d9b073a5211bf410bfc29bf/mmproj-F16.gguf",
+        "size": 927607360,
+        "sha256": "eacf610d1ee4bd5ed0197a0777dd8f4fceb8eefa27009067c7d496cb68fbde45"
+      },
+      "arguments": "-fa on -c 32768",
+      "generation": {
+        "maxTokens": 8192,
+        "temperature": 0,
+        "seed": 1,
+        "thinking": false
+      }
+    },
+    {
+      "id": "qwen3.6-27b-q6_k",
+      "name": "Qwen3.6 27B, Q6_K",
+      "family": "Qwen3.6 27B",
+      "description": "Dense: all 27 billion parameters used for each token. Slower than the 35B A3B unless the whole file fits on the graphics card.",
+      "quantization": "Q6_K",
+      "source": "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF",
+      "baseModel": "https://huggingface.co/Qwen/Qwen3.6-27B",
+      "licence": "apache-2.0",
+      "model": {
+        "name": "Qwen3.6-27B-Q6_K.gguf",
+        "url": "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/82d411acf4a06cfb8d9b073a5211bf410bfc29bf/Qwen3.6-27B-Q6_K.gguf",
+        "size": 22523238624,
+        "sha256": "ec1805fe87e6519c461c1ed2d179865464a875ed241032ead65a354f979cfe14"
+      },
+      "imageAddOn": {
+        "name": "mmproj-F16.gguf",
+        "url": "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/82d411acf4a06cfb8d9b073a5211bf410bfc29bf/mmproj-F16.gguf",
+        "size": 927607360,
+        "sha256": "eacf610d1ee4bd5ed0197a0777dd8f4fceb8eefa27009067c7d496cb68fbde45"
+      },
+      "arguments": "-fa on -c 32768",
+      "generation": {
+        "maxTokens": 8192,
+        "temperature": 0,
+        "seed": 1,
+        "thinking": false
+      }
+    },
+    {
+      "id": "gemma-4-26b-a4b-ud-q4_k_m",
+      "name": "Gemma 4 26B A4B, UD-Q4_K_M",
+      "family": "Gemma 4 26B A4B",
+      "description": "Mixture of experts: 26 billion parameters, 4 billion used for each token.",
+      "quantization": "UD-Q4_K_M",
+      "source": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF",
+      "baseModel": "https://huggingface.co/google/gemma-4-26B-A4B-it",
+      "licence": "apache-2.0",
+      "model": {
+        "name": "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
+        "url": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/c099eb48e663fd284577b04978a94ffccb261841/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
+        "size": 16947541728,
+        "sha256": "f2c28b3dc4776931ac6f879e11f203dec637ea0f14267a86ec8f6165f63f293f"
+      },
+      "imageAddOn": {
+        "name": "mmproj-F16.gguf",
+        "url": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/c099eb48e663fd284577b04978a94ffccb261841/mmproj-F16.gguf",
+        "size": 1193058784,
+        "sha256": "418a6d8723067cd712235facbbc5cba6c8fbbd413fc1292d2aace5a027d5a42f"
+      },
+      "arguments": "-fa on -c 32768",
+      "generation": {
+        "maxTokens": 8192,
+        "temperature": 0,
+        "seed": 1,
+        "thinking": false,
+        "sampling": {
+          "top_p": 0.95,
+          "top_k": 64
+        }
+      },
+      "note": "The file of the model trials of 2026-10-20."
+    },
+    {
+      "id": "gemma-4-26b-a4b-ud-q6_k",
+      "name": "Gemma 4 26B A4B, UD-Q6_K",
+      "family": "Gemma 4 26B A4B",
+      "description": "Mixture of experts: 26 billion parameters, 4 billion used for each token.",
+      "quantization": "UD-Q6_K",
+      "source": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF",
+      "baseModel": "https://huggingface.co/google/gemma-4-26B-A4B-it",
+      "licence": "apache-2.0",
+      "model": {
+        "name": "gemma-4-26B-A4B-it-UD-Q6_K.gguf",
+        "url": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/c099eb48e663fd284577b04978a94ffccb261841/gemma-4-26B-A4B-it-UD-Q6_K.gguf",
+        "size": 23172478688,
+        "sha256": "76bf3eee49cca5b076b34a4b575ecd505dabc470512b46f1207b4f9da08385f0"
+      },
+      "imageAddOn": {
+        "name": "mmproj-F16.gguf",
+        "url": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/c099eb48e663fd284577b04978a94ffccb261841/mmproj-F16.gguf",
+        "size": 1193058784,
+        "sha256": "418a6d8723067cd712235facbbc5cba6c8fbbd413fc1292d2aace5a027d5a42f"
+      },
+      "arguments": "-fa on -c 32768",
+      "generation": {
+        "maxTokens": 8192,
+        "temperature": 0,
+        "seed": 1,
+        "thinking": false,
+        "sampling": {
+          "top_p": 0.95,
+          "top_k": 64
+        }
+      }
+    },
+    {
+      "id": "gemma-4-31b-q4_k_m",
+      "name": "Gemma 4 31B, Q4_K_M",
+      "family": "Gemma 4 31B",
+      "description": "Dense: all 31 billion parameters used for each token.",
+      "quantization": "Q4_K_M",
+      "source": "https://huggingface.co/unsloth/gemma-4-31B-it-GGUF",
+      "baseModel": "https://huggingface.co/google/gemma-4-31B-it",
+      "licence": "apache-2.0",
+      "model": {
+        "name": "gemma-4-31B-it-Q4_K_M.gguf",
+        "url": "https://huggingface.co/unsloth/gemma-4-31B-it-GGUF/resolve/c1ac76e99d5513b141e8adde7288b85c3f9c32ec/gemma-4-31B-it-Q4_K_M.gguf",
+        "size": 18323733440,
+        "sha256": "38bd64c852c4b460434cc7162fa9bdcf242faf86502581a754cb72956bb17f84"
+      },
+      "imageAddOn": {
+        "name": "mmproj-F16.gguf",
+        "url": "https://huggingface.co/unsloth/gemma-4-31B-it-GGUF/resolve/c1ac76e99d5513b141e8adde7288b85c3f9c32ec/mmproj-F16.gguf",
+        "size": 1198957024,
+        "sha256": "6edcca228213c28d3567a35d22f849eea52d8360875093851959adf5d2f270eb"
+      },
+      "arguments": "-fa on -c 32768",
+      "generation": {
+        "maxTokens": 8192,
+        "temperature": 0,
+        "seed": 1,
+        "thinking": false,
+        "sampling": {
+          "top_p": 0.95,
+          "top_k": 64
+        }
+      }
+    },
+    {
+      "id": "gemma-4-31b-q5_k_m",
+      "name": "Gemma 4 31B, Q5_K_M",
+      "family": "Gemma 4 31B",
+      "description": "Dense: all 31 billion parameters used for each token.",
+      "quantization": "Q5_K_M",
+      "source": "https://huggingface.co/unsloth/gemma-4-31B-it-GGUF",
+      "baseModel": "https://huggingface.co/google/gemma-4-31B-it",
+      "licence": "apache-2.0",
+      "model": {
+        "name": "gemma-4-31B-it-Q5_K_M.gguf",
+        "url": "https://huggingface.co/unsloth/gemma-4-31B-it-GGUF/resolve/c1ac76e99d5513b141e8adde7288b85c3f9c32ec/gemma-4-31B-it-Q5_K_M.gguf",
+        "size": 21658401728,
+        "sha256": "95192e41190ef5eb72db92b669cea0ed733049c2265a03a64ac5a080d8605958"
+      },
+      "imageAddOn": {
+        "name": "mmproj-F16.gguf",
+        "url": "https://huggingface.co/unsloth/gemma-4-31B-it-GGUF/resolve/c1ac76e99d5513b141e8adde7288b85c3f9c32ec/mmproj-F16.gguf",
+        "size": 1198957024,
+        "sha256": "6edcca228213c28d3567a35d22f849eea52d8360875093851959adf5d2f270eb"
+      },
+      "arguments": "-fa on -c 32768",
+      "generation": {
+        "maxTokens": 8192,
+        "temperature": 0,
+        "seed": 1,
+        "thinking": false,
+        "sampling": {
+          "top_p": 0.95,
+          "top_k": 64
+        }
+      }
+    }
+  ]
+}

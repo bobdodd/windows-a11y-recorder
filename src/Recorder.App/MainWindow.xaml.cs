@@ -170,6 +170,7 @@ public partial class MainWindow : Window
         }
 
         await StartAnalysisAsync();
+        OfferModelSetup();
     }
 
     private string DatabaseUnavailableText =>

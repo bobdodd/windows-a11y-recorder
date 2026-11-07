@@ -158,6 +158,10 @@
                 Style="{StaticResource AnalysisMenuItem}"
                 Header="_Model profiles..."
                 Click="ModelProfilesMenuItem_Click" />
+      <MenuItem x:Name="ModelSetupMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="Set _up models..."
+                Click="ModelSetupMenuItem_Click" />
       <!-- On by default; saved in the analysis settings file as
            "reportBrowserOnly" (report-fixes-2026-10-18.md, part 4). -->
       <MenuItem x:Name="BrowserOnlyMenuItem"

@@ -39,6 +39,7 @@ public partial class MainWindow
     // run, such as before a restart, get a worker.
     private async Task StartAnalysisAsync()
     {
+        UseInstalledModelServer();
         ReadAnalysisSettings();
         BindAnalysis();
         if (AnalysisCatalogOrNull is not { } catalog)
@@ -539,7 +540,7 @@ public partial class MainWindow
 
     private void ModelProfilesMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        new ModelProfilesWindow(this, AnalysisSettingsFile.DefaultPath).ShowDialog();
+        new ModelProfilesWindow(this, AnalysisSettingsFile.DefaultPath, AppContext.BaseDirectory).ShowDialog();
         ReadAnalysisSettings();
         UpdateAnalysisControls();
     }
