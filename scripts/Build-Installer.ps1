@@ -220,17 +220,14 @@ function Get-InnoSetupCandidates {
     return $paths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -Unique
 }
 
-function Get-FileMajorVersion {
+function Get-FileVersion {
     param([string] $Path)
-    $version = (Get-Item -LiteralPath $Path).VersionInfo
-    if ($version.FileMajorPart) {
-        return $version.FileMajorPart
-    }
-    return 0
+    $info = (Get-Item -LiteralPath $Path).VersionInfo
+    return New-Object System.Version ([int]$info.FileMajorPart), ([int]$info.FileMinorPart)
 }
 
-# The setup script uses SetupArchitecture, which Inno Setup 7 added, so an
-# older Inno Setup cannot compile it.
+# The setup script needs Inno Setup 6.3 or later, for the x64os
+# architecture. winget's JRSoftware.InnoSetup is 6.7.3 (2026-11-06).
 function Find-InnoSetup {
     if ($InnoSetupCompiler) {
         if (-not (Test-Path -LiteralPath $InnoSetupCompiler)) {
@@ -244,18 +241,17 @@ function Find-InnoSetup {
 
     $older = New-Object System.Collections.Generic.List[string]
     foreach ($candidate in $candidates) {
-        $major = Get-FileMajorVersion -Path $candidate
-        if ($major -ge 7) {
+        $version = Get-FileVersion -Path $candidate
+        if ($version -ge (New-Object System.Version 6, 3)) {
             return $candidate
         }
-        $older.Add("$candidate (version $major)")
+        $older.Add("$candidate (version $version)")
     }
 
     $install = "winget install --id JRSoftware.InnoSetup -e --accept-package-agreements --accept-source-agreements"
     if ($older.Count -gt 0) {
-        throw ("Inno Setup 7 or later is needed, and only an older version was found: " +
-            ($older -join ", ") + ". Install Inno Setup 7 from https://jrsoftware.org/isdl.php, " +
-            "or with: $install   then run this script again.")
+        throw ("Inno Setup 6.3 or later is needed, and only an older version was found: " +
+            ($older -join ", ") + ". Update it with: $install   then run this script again.")
     }
     throw ("Inno Setup was not found in PATH, in Windows' list of installed programs, " +
         "or in Program Files. Install it with: $install   then run this script again. " +

@@ -25,7 +25,7 @@ Changes on `main` since 1.1.0, not yet released.
 
 ### Installer and model setup
 
-- A Windows installer built with Inno Setup 7 by
+- A Windows installer built with Inno Setup (6.3 or later) by
   `scripts\Build-Installer.ps1` on the development PC. It installs per user
   the programs with the .NET run time, PostgreSQL, the instrumented
   Chromium, and llama.cpp b11607 with the CUDA 12.4 run time, and runs

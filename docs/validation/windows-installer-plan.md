@@ -12,8 +12,9 @@ What was checked before this plan, in the Linux build environment:
   retries and hash check, Hugging Face addresses, and the profile writer).
 - The player publishes for `win-x64` with the analysis worker and
   `model-catalog.json` beside it.
-- The setup script compiles with Inno Setup 7.1.1, and an installer built
-  from placeholder files installed and uninstalled under Wine.
+- The setup script compiles with Inno Setup 6.7.3 and 7.1.1, and
+  installers built from placeholder files installed and uninstalled under
+  Wine.
 
 None of that shows the installer works on Windows. Tests 1 to 8 do.
 
@@ -38,8 +39,8 @@ that window only.
    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
    ```
 
-2. Install Inno Setup 7, if it is not installed (Windows may ask for
-   permission):
+2. Install Inno Setup, if it is not installed (6.3 or later; winget
+   installs 6.7.3, and Windows may ask for permission):
 
    ```powershell
    winget install --id JRSoftware.InnoSetup -e --accept-package-agreements --accept-source-agreements

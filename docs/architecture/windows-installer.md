@@ -80,8 +80,8 @@ point of the Alienware trial is to choose them there.
   recorder's data is already per user, and the keyboard and mouse hooks do
   not need elevation. Start menu entries for the recorder and for the
   third-party notices; a desktop shortcut is optional.
-- **64-bit only, Windows 10 version 2004 or later**: a 64-bit Setup
-  (`SetupArchitecture=x64`), allowed only on x64 Windows (`x64os`), with
+- **64-bit only, Windows 10 version 2004 or later**: allowed only on x64
+  Windows, installing in 64-bit mode (`x64os`), with
   `MinVersion=10.0.19041`, the Windows version the programs target.
 - **Upgrades in place.** A newer installer closes the running recorder,
   removes the old `browser`, `llama` and `pgsql` folders and the programs'
@@ -134,8 +134,9 @@ only place the instrumented Chromium build exists.
 `scripts\Build-Installer.ps1` does every step and stops at the first
 failure:
 
-1. Finds the .NET SDK (in PATH or `%USERPROFILE%\.dotnet`) and Inno Setup 7
-   (in PATH or its install folders).
+1. Finds the .NET SDK (in PATH or `%USERPROFILE%\.dotnet`) and Inno Setup
+   6.3 or later (in PATH, where Windows records it was installed, or an
+   "Inno Setup" folder in Program Files or `%LOCALAPPDATA%\Programs`).
 2. Fetches or reuses the pinned PostgreSQL binaries.
 3. Publishes the player, which brings the analysis worker beside it, and
    the capture host, self-contained for `win-x64`, each into its own folder,
@@ -162,17 +163,22 @@ checkout has uncommitted changes. Downloads are kept in
 
 ### Installer tool
 
-Inno Setup 7 builds one `Setup.exe`, supports a per-user install without
+Inno Setup builds one `Setup.exe`, supports a per-user install without
 administrator rights, copies folder trees recursively without listing every
 file, and its licence allows use "for any purpose, including commercial
 applications" ([Inno Setup licence](https://jrsoftware.org/files/is/license.txt)).
-`SetupArchitecture=x64` makes Setup itself a 64-bit program, which runs on
-x64 Windows ([Inno Setup help, SetupArchitecture](https://jrsoftware.org/ishelp/topic_setup_setuparchitecture.htm)).
 
-The setup script was compiled with Inno Setup 7.1.1, and a build from
-placeholder files was installed and removed under Wine; that shows the
-script compiles and its code runs, not that it behaves correctly on
-Windows.
+The script works with Inno Setup 6.3 and later, including 7. On
+2026-11-06 winget's `JRSoftware.InnoSetup` installed 6.7.3 on the
+development PC, not 7. The script therefore does not use Inno Setup 7's
+64-bit Setup program (`SetupArchitecture=x64`,
+[Inno Setup help](https://jrsoftware.org/ishelp/topic_setup_setuparchitecture.htm)):
+Setup itself is 32-bit, and it installs the 64-bit programs in 64-bit mode.
+
+The setup script was compiled with Inno Setup 6.7.3 and 7.1.1, and builds
+from placeholder files were installed and removed under Wine, each in
+64-bit install mode; that shows the script compiles and its code runs, not
+that it behaves correctly on Windows.
 
 ### llama.cpp build
 

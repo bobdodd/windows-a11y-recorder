@@ -1,4 +1,5 @@
-; Inno Setup 7 script for the Windows A11y Recorder installer.
+; Inno Setup script for the Windows A11y Recorder installer, for Inno Setup
+; 6.3 or later (x64os needs 6.3).
 ;
 ; Built by scripts\Build-Installer.ps1, which prepares the staging folder and
 ; passes these values with /D:
@@ -48,7 +49,9 @@ DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 UsePreviousAppDir=yes
-SetupArchitecture=x64
+; Setup itself is 32-bit, so the script compiles with Inno Setup 6.3 and
+; later (winget's JRSoftware.InnoSetup is 6.7.3) as well as 7; it installs
+; the 64-bit programs in 64-bit mode, on x64 Windows only.
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
 ; Windows 10 version 2004, the oldest the programs target

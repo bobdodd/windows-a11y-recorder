@@ -681,7 +681,7 @@ model profiles window edits each profile's server arguments and generation
 settings. Uninstalling keeps the recordings, the catalog and the models.
 
 The installer is built on the development PC, which has the instrumented
-Chromium build, with Inno Setup 7 installed:
+Chromium build, with Inno Setup 6.3 or later installed:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
