@@ -1,6 +1,8 @@
 # Recording an Android device
 
-Proposed 2026-11-07. Not agreed or built.
+Proposed 2026-11-07. Questions 2 to 5 agreed on 2026-11-07 (see
+[Decisions](#decisions-of-2026-11-07)); question 1 waits for check 1. Not
+built.
 
 ## Purpose
 
@@ -265,8 +267,10 @@ events, video and sound fall on one timeline on the Pixel.
 ## Checks before building
 
 These use the standard scrcpy 5.0.1 and adb on the PC, with no new code,
-and answer what the design depends on. Each would be written as a test of
-at most five steps with on-screen checks.
+and answer what the design depends on. They are written as tests of at
+most five steps with on-screen checks in
+[the feasibility checks](../validation/android-feasibility-plan.md), run
+by `scripts/Test-AndroidFeasibility.ps1`.
 
 1. Does `output` capture TalkBack's speech, and does `playback` with
    `--audio-dup`? The check shows the captured sound's levels as a
@@ -302,3 +306,22 @@ at most five steps with on-screen checks.
    (recommended), or the phone and the PC's desktop in one recording?
 5. **Checks first.** Run the four checks above before any building
    (recommended)?
+
+## Decisions of 2026-11-07
+
+The owner answered questions 2 to 5:
+
+- **Companion app (question 2, option a).** The app declares
+  `isAccessibilityTool`. It is an accessibility app, is never offered on
+  Google Play, and is installed by the recorder over adb on a phone in
+  developer mode.
+- **Connection (question 3).** USB first. Wireless debugging comes later.
+- **First version (question 4).** The phone with the PC's microphone. The
+  phone and the PC's desktop in one recording is not in the first
+  version.
+- **Checks first (question 5).** The four checks are run before any
+  building, as
+  [the feasibility checks](../validation/android-feasibility-plan.md).
+
+Question 1, the device sound source, is decided from tests 2 and 3 of
+those checks.

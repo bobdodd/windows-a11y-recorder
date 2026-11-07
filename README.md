@@ -750,6 +750,7 @@ The setup script checks out Chromium, applies the recorder bridge, generates
 - [MP4 export of a recording](docs/architecture/mp4-export.md)
 - [MP4 export validation plan](docs/validation/mp4-export-plan.md)
 - [Recording an Android device (proposal)](docs/architecture/android-recording.md)
+- [Android feasibility checks](docs/validation/android-feasibility-plan.md)
 - [Threat model](docs/security/threat-model.md)
 - [Privacy and data-handling policy](docs/security/privacy-and-data-handling-policy.md)
 - [Chromium connection validation record](docs/validation/chromium-connection-2026-09-18.md)
