@@ -17,6 +17,7 @@
     <Project Path="src/Recorder.CaptureHost/Recorder.CaptureHost.csproj" />
     <Project Path="src/Recorder.Analysis/Recorder.Analysis.csproj" />
     <Project Path="src/Recorder.AnalysisWorker/Recorder.AnalysisWorker.csproj" />
+    <Project Path="src/Recorder.Export/Recorder.Export.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Recorder.Tests/Recorder.Tests.csproj" />

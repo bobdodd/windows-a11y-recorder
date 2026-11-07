@@ -85,7 +85,8 @@ public static class RecordingFilePlayback
                         index.PresentedCheckpoints,
                         index.FrameCompositions.Where(frame => shown.Contains(frame.FrameNanoseconds))),
                 Timeline = timeline,
-                RecordSource = timeline
+                RecordSource = timeline,
+                AudioBuffers = timeline
             };
             return new RecordingFilePlaybackResult(archive, reader.Incomplete, derived)
             {

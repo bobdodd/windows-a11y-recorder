@@ -406,6 +406,19 @@ internal static class EvidenceSamples
         ("audio.microphone", "audio-stream-error", @"{""stream"":""microphone"",""errorType"":null,""message"":null}"),
         ("audio.system", "collector-omission", @"{""reason"":""audio-buffer-dropped"",""count"":3,""stream"":""system""}"),
         ("audio.microphone", "collector-omission", @"{""reason"":""audio-device-missing""}"),
+        ("audio.screen-reader", "audio-stream-started",
+            @"{""stream"":""screen-reader"",""path"":""audio/screen-reader.wav"",""device"":""NVDA (process 4321) and the programs it started"",""format"":" + Format + "," +
+            @"""dataBytes"":0,""buffersObserved"":0,""buffersDropped"":0}"),
+        ("audio.screen-reader", "audio-stream-stopped",
+            @"{""stream"":""screen-reader"",""path"":""audio/screen-reader.wav"",""device"":""NVDA (process 4321) and the programs it started"",""format"":" + Format + "," +
+            @"""dataBytes"":9600,""buffersObserved"":5,""buffersDropped"":0}"),
+        ("audio.screen-reader", "audio-buffer",
+            @"{""stream"":""screen-reader"",""path"":""audio/screen-reader.wav"",""bufferSequence"":4,""dataByteOffset"":7680," +
+            @"""byteLength"":1920,""sampleFrames"":480,""durationNanoseconds"":10000000," +
+            @"""estimatedFirstSampleMonotonicNanoseconds"":41000000,""callbackMonotonicNanoseconds"":51000000}"),
+        ("audio.screen-reader", "audio-stream-error",
+            @"{""stream"":""screen-reader"",""errorType"":""COMException"",""message"":""The process ended.""}"),
+        ("audio.screen-reader", "collector-omission", @"{""reason"":""audio-buffer-dropped"",""count"":1,""stream"":""screen-reader""}"),
         ("browser.lifecycle", "browser-connected",
             @"{""protocolVersion"":""1"",""browserInstanceId"":""browser-1"",""processId"":4000,""processType"":""browser""," +
             @"""chromiumVersion"":""142.0.7400.1"",""parentProcessId"":null,""childProcessId"":null}"),

@@ -896,7 +896,8 @@ public sealed class SessionTimelineControl : FrameworkElement
         "window.foreground" => 3,
         "graphics.desktop.frames" => 4,
         "audio.microphone" => 5,
-        "audio.system" => 6,
+        // The screen reader's sound shares the system sound's lane.
+        "audio.system" or "audio.screen-reader" => 6,
         "system.preferences" => 7,
         "graphics.magnifier" => 8,
         "browser.preferences" => 9,

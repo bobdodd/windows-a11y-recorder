@@ -13,7 +13,7 @@ namespace Recorder.Database.RecordingFiles;
 /// recently read chunks and message indexes are kept. Safe for use from
 /// more than one thread at a time.
 /// </summary>
-public sealed class RecordingFileTimeline : ISessionTimeline, ISessionEventRecordSource, IDisposable
+public sealed class RecordingFileTimeline : ISessionTimeline, ISessionEventRecordSource, ISessionAudioBufferSource, IDisposable
 {
     private const int CachedChunks = 8;
     private const int CachedIndexes = 512;
@@ -155,6 +155,41 @@ public sealed class RecordingFileTimeline : ISessionTimeline, ISessionEventRecor
         }
 
         return record.GetRawText();
+    }
+
+    public IReadOnlyList<SessionAudioBuffer> ReadAudioBuffers(string stream, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        var ids = IdsOf(new HashSet<string>(StringComparer.Ordinal) { $"audio.{stream}" });
+        var buffers = new List<SessionAudioBuffer>();
+        if (ids.Length == 0)
+        {
+            return buffers;
+        }
+
+        // Every chunk holding the channel is read once, in file order, and
+        // not kept, so the chunks cached for the player stay.
+        foreach (var chunk in _chunks.Where(chunk => chunk.Holds(ids)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var records = _reader.ReadChunkRecords(chunk.Chunk);
+            foreach (var entry in EntriesOf(chunk, ids))
+            {
+                var message = _reader.ReadMessageAt(records, entry.Offset);
+                using var document = JsonDocument.Parse(message.Data);
+                var record = document.RootElement.GetProperty("event");
+                if (record.TryGetProperty("eventType", out var type) &&
+                    type.ValueEquals("audio-buffer") &&
+                    record.TryGetProperty("payload", out var payload) &&
+                    SessionAudioBuffer.FromPayload(payload) is { } buffer)
+                {
+                    buffers.Add(buffer);
+                }
+            }
+        }
+
+        buffers.Sort(static (left, right) => left.BufferSequence.CompareTo(right.BufferSequence));
+        return buffers;
     }
 
     public void Dispose() => _reader.Dispose();

@@ -1761,7 +1761,7 @@ internal static class EvidenceCatalog
             map[("accessibility.uia.events", type)] = UiaEvents;
         }
 
-        foreach (var channel in new[] { "audio.microphone", "audio.system" })
+        foreach (var channel in new[] { "audio.microphone", "audio.system", "audio.screen-reader" })
         {
             map[(channel, "audio-stream-started")] = AudioStreams;
             map[(channel, "audio-stream-stopped")] = AudioStreams;
@@ -1772,7 +1772,8 @@ internal static class EvidenceCatalog
         foreach (var channel in new[]
                  {
                      "accessibility.uia.events", "window.foreground", "graphics.desktop.frames",
-                     "audio.microphone", "audio.system", "browser.lifecycle", "browser.accessibility",
+                     "audio.microphone", "audio.system", "audio.screen-reader", "browser.lifecycle",
+                     "browser.accessibility",
                      "browser.listener", "browser.dispatch", "browser.timer", "browser.scheduler",
                      "browser.navigation", "browser.dom", "browser.cookie", "browser.interaction",
                      "browser.layout", "browser.presentation", "browser.network",

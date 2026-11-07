@@ -1,6 +1,7 @@
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using Recorder.Contracts;
+using System.Runtime.InteropServices;
 using System.Threading.Channels;
 
 namespace Recorder.Collectors.Audio;
@@ -34,7 +35,10 @@ public sealed class AudioCollector : ICaptureCollector
 
         if (options.CaptureSystemAudio)
         {
+            // The screen reader's sound is recorded on its own when it can
+            // be separated from the rest of the system sound.
             channels.Add("audio.system");
+            channels.Add("audio.screen-reader");
         }
 
         Descriptor = CollectorDescriptor.Create(
@@ -96,21 +100,7 @@ public sealed class AudioCollector : ICaptureCollector
 
             if (_options.CaptureSystemAudio)
             {
-                TryPrepareStream(
-                    AudioStreamKind.System,
-                    static () =>
-                    {
-                        using var enumerator = new MMDeviceEnumerator();
-                        var device = enumerator.GetDefaultAudioEndpoint(
-                            DataFlow.Render,
-                            Role.Console);
-                        return (
-                            (IWaveIn)new WasapiLoopbackCapture(device),
-                            device.FriendlyName,
-                            (string?)null,
-                            ReadEndpointVolume(device));
-                    },
-                    limitations);
+                PrepareSystemStreams(limitations);
             }
 
             if (_streams.Count == 0)
@@ -290,20 +280,112 @@ public sealed class AudioCollector : ICaptureCollector
                 limitations.Add(prepared.Limitation);
             }
 
-            _streams.Add(new AudioStreamCapture(
+            _streams.Add(CreateStream(
                 kind,
                 prepared.Capture,
                 prepared.DeviceName,
-                prepared.EndpointVolumeScalar,
-                _context!,
-                OnAudioBuffer,
-                OnAudioFailure));
+                prepared.EndpointVolumeScalar));
         }
         catch (Exception exception)
         {
             limitations.Add(
-                $"{kind.ToString().ToLowerInvariant()}-unavailable:" +
+                $"{AudioStreamCapture.NameOf(kind)}-unavailable:" +
                 $"{exception.GetType().Name}:0x{exception.HResult:X8}");
+        }
+    }
+
+    // With NVDA running and Windows able to capture one program's sound,
+    // NVDA's sound is recorded on its own and the system sound is every
+    // other program's; otherwise the system sound is everything the
+    // speakers play, NVDA included. See docs/architecture/mp4-export.md.
+    private void PrepareSystemStreams(ICollection<string> limitations)
+    {
+        var screenReader = ScreenReaderProcess.FindNvda();
+        if (screenReader is not null)
+        {
+            if (!ProcessLoopbackCapture.IsSupported)
+            {
+                limitations.Add(
+                    $"screen-reader-unavailable:requires-windows-build-{ProcessLoopbackCapture.MinimumBuild}");
+            }
+            else
+            {
+                ProcessLoopbackCapture? included = null;
+                ProcessLoopbackCapture? excluded = null;
+                try
+                {
+                    included = ProcessLoopbackCapture.Open(
+                        screenReader.ProcessId,
+                        ProcessLoopbackMode.IncludeTargetProcessTree);
+                    excluded = ProcessLoopbackCapture.Open(
+                        screenReader.ProcessId,
+                        ProcessLoopbackMode.ExcludeTargetProcessTree);
+                    var volume = ReadDefaultRenderVolume();
+                    _streams.Add(CreateStream(
+                        AudioStreamKind.System,
+                        excluded,
+                        $"Every program's sound except {screenReader.Name} (process {screenReader.ProcessId})",
+                        volume));
+                    _streams.Add(CreateStream(
+                        AudioStreamKind.ScreenReader,
+                        included,
+                        $"{screenReader.Name} (process {screenReader.ProcessId}) and the programs it started",
+                        volume));
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    included?.Dispose();
+                    excluded?.Dispose();
+                    limitations.Add(
+                        "screen-reader-unavailable:" +
+                        $"{exception.GetType().Name}:0x{exception.HResult:X8}");
+                }
+            }
+        }
+
+        TryPrepareStream(
+            AudioStreamKind.System,
+            static () =>
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                var device = enumerator.GetDefaultAudioEndpoint(
+                    DataFlow.Render,
+                    Role.Console);
+                return (
+                    (IWaveIn)new WasapiLoopbackCapture(device),
+                    device.FriendlyName,
+                    (string?)null,
+                    ReadEndpointVolume(device));
+            },
+            limitations);
+    }
+
+    private AudioStreamCapture CreateStream(
+        AudioStreamKind kind,
+        IWaveIn capture,
+        string deviceName,
+        float? endpointVolumeScalar) =>
+        new(
+            kind,
+            capture,
+            deviceName,
+            endpointVolumeScalar,
+            _context!,
+            OnAudioBuffer,
+            OnAudioFailure);
+
+    private static float? ReadDefaultRenderVolume()
+    {
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            using var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Console);
+            return ReadEndpointVolume(device);
+        }
+        catch (Exception exception) when (exception is COMException or InvalidOperationException)
+        {
+            return null;
         }
     }
 
@@ -473,7 +555,8 @@ public sealed class AudioCollector : ICaptureCollector
 internal enum AudioStreamKind
 {
     Microphone,
-    System
+    System,
+    ScreenReader
 }
 
 internal sealed class AudioStreamCapture : IDisposable
@@ -525,10 +608,8 @@ internal sealed class AudioStreamCapture : IDisposable
             },
             _ => Interlocked.Increment(ref _droppedBuffers));
 
-        KindName = kind.ToString().ToLowerInvariant();
-        Channel = kind == AudioStreamKind.Microphone
-            ? "audio.microphone"
-            : "audio.system";
+        KindName = NameOf(kind);
+        Channel = $"audio.{KindName}";
         RelativePath = Path.Combine("audio", $"{KindName}.wav")
             .Replace('\\', '/');
         AbsolutePath = Path.Combine(
@@ -540,6 +621,15 @@ internal sealed class AudioStreamCapture : IDisposable
     }
 
     public AudioStreamKind Kind { get; }
+
+    /// <summary>The stream's name in its channel, events, and file name.</summary>
+    public static string NameOf(AudioStreamKind kind) => kind switch
+    {
+        AudioStreamKind.Microphone => "microphone",
+        AudioStreamKind.System => "system",
+        AudioStreamKind.ScreenReader => "screen-reader",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind))
+    };
     public string KindName { get; }
     public string Channel { get; }
     public string RelativePath { get; }

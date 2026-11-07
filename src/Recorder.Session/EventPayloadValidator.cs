@@ -19,6 +19,7 @@ internal static class EventPayloadValidator
         "graphics.magnifier",
         "audio.microphone",
         "audio.system",
+        "audio.screen-reader",
         "browser.lifecycle",
         "browser.listener",
         "browser.dispatch",
@@ -167,14 +168,18 @@ internal static class EventPayloadValidator
             case ("audio.microphone", "audio-stream-stopped"):
             case ("audio.system", "audio-stream-started"):
             case ("audio.system", "audio-stream-stopped"):
+            case ("audio.screen-reader", "audio-stream-started"):
+            case ("audio.screen-reader", "audio-stream-stopped"):
                 ValidateAudioStream(payload, issues);
                 break;
             case ("audio.microphone", "audio-buffer"):
             case ("audio.system", "audio-buffer"):
+            case ("audio.screen-reader", "audio-buffer"):
                 ValidateAudioBuffer(payload, issues);
                 break;
             case ("audio.microphone", "audio-stream-error"):
             case ("audio.system", "audio-stream-error"):
+            case ("audio.screen-reader", "audio-stream-error"):
                 ValidateAudioError(payload, issues);
                 break;
             case ("browser.lifecycle", "browser-connected"):
@@ -583,6 +588,7 @@ internal static class EventPayloadValidator
             case ("graphics.desktop.frames", "collector-omission"):
             case ("audio.microphone", "collector-omission"):
             case ("audio.system", "collector-omission"):
+            case ("audio.screen-reader", "collector-omission"):
                 ValidateOmission(payload, issues);
                 break;
             case ("browser.lifecycle", "collector-omission"):
@@ -2350,7 +2356,7 @@ internal static class EventPayloadValidator
         ValidateShape(
             payload,
             [
-                RequiredEnum("stream", "microphone", "system"),
+                RequiredEnum("stream", "microphone", "system", "screen-reader"),
                 RequiredSafePath("path"),
                 RequiredString("device"),
                 OptionalNullableNumber("endpointVolumeScalar", nonnegative: true),
@@ -2389,7 +2395,7 @@ internal static class EventPayloadValidator
         ValidateShape(
             payload,
             [
-                RequiredEnum("stream", "microphone", "system"),
+                RequiredEnum("stream", "microphone", "system", "screen-reader"),
                 RequiredSafePath("path"),
                 RequiredInteger("bufferSequence", nonnegative: true),
                 RequiredInteger("dataByteOffset", nonnegative: true),
@@ -2407,7 +2413,7 @@ internal static class EventPayloadValidator
         ValidateShape(
             payload,
             [
-                RequiredEnum("stream", "microphone", "system"),
+                RequiredEnum("stream", "microphone", "system", "screen-reader"),
                 NullableString("errorType"),
                 NullableString("message")
             ],
@@ -8690,7 +8696,7 @@ internal static class EventPayloadValidator
             [
                 RequiredString("reason"),
                 OptionalInteger("count", nonnegative: true),
-                OptionalEnum("stream", "microphone", "system")
+                OptionalEnum("stream", "microphone", "system", "screen-reader")
             ],
             issues);
 

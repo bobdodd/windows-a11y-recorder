@@ -55,6 +55,7 @@ public partial class MainWindow : Window
         "system.assistive-technology",
         "audio.microphone",
         "audio.system",
+        "audio.screen-reader",
         "session.annotations",
         .. BrowserChannels
     ];
@@ -1300,15 +1301,20 @@ public partial class MainWindow : Window
     {
         var microphoneGain = MicrophoneVolumeSlider.Value;
         var systemGain = SystemAudioVolumeSlider.Value;
-        _audioPlayer?.SetGains(microphoneGain, systemGain);
+        var screenReaderGain = ScreenReaderVolumeSlider.Value;
+        _audioPlayer?.SetGains(microphoneGain, systemGain, screenReaderGain);
         MicrophoneVolumeTextBlock.Text = FormatGain(microphoneGain);
         SystemAudioVolumeTextBlock.Text = FormatGain(systemGain);
+        ScreenReaderVolumeTextBlock.Text = FormatGain(screenReaderGain);
         AutomationProperties.SetHelpText(
             MicrophoneVolumeSlider,
             $"Microphone playback gain {FormatGain(microphoneGain)}");
         AutomationProperties.SetHelpText(
             SystemAudioVolumeSlider,
             $"System audio playback gain {FormatGain(systemGain)}");
+        AutomationProperties.SetHelpText(
+            ScreenReaderVolumeSlider,
+            $"Screen reader playback gain {FormatGain(screenReaderGain)}");
     }
 
     private void SynchronizeAudio(long positionNanoseconds, bool play)
@@ -1334,6 +1340,7 @@ public partial class MainWindow : Window
         NextFrameButton.IsEnabled = enabled;
         PlaybackSlider.IsEnabled = enabled;
         InspectPageButton.IsEnabled = enabled && _recordedDocuments is not null;
+        SaveMp4Button.IsEnabled = enabled;
         var timelineEnabled = _playbackArchive is not null &&
             _playbackArchive.DurationNanoseconds > 0;
         TimelineZoomSlider.IsEnabled = timelineEnabled;
@@ -1372,6 +1379,7 @@ public partial class MainWindow : Window
             visibleChannels);
         AddVisibleChannel(FilterMicrophoneCheckBox, "audio.microphone", visibleChannels);
         AddVisibleChannel(FilterSystemAudioCheckBox, "audio.system", visibleChannels);
+        AddVisibleChannel(FilterScreenReaderAudioCheckBox, "audio.screen-reader", visibleChannels);
         AddVisibleChannel(
             FilterMarkersCheckBox,
             "session.annotations",

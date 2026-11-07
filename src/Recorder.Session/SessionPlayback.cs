@@ -16,6 +16,12 @@ public sealed record SessionPlaybackArchive(
     public ISessionEventRecordSource? RecordSource { get; init; }
 
     /// <summary>
+    /// Where the audio streams' buffer records are read from, for an MP4
+    /// export. Null for an archive built without a store.
+    /// </summary>
+    public ISessionAudioBufferSource? AudioBuffers { get; init; }
+
+    /// <summary>
     /// The Windows settings of the recording, for the properties panel;
     /// empty for a recording made before they were recorded.
     /// </summary>

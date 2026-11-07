@@ -13,7 +13,7 @@
       "pattern": "^(?![A-Za-z]:)(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$))[^\\\\]+$"
     },
     "streamName": {
-      "enum": ["microphone", "system"]
+      "enum": ["microphone", "system", "screen-reader"]
     },
     "format": {
       "type": "object",

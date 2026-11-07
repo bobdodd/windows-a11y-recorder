@@ -13,15 +13,16 @@ internal sealed class SessionAudioPlayer : IDisposable
         _tracks = tracks.Select(track => new TrackPlayer(track)).ToList();
     }
 
-    public void SetGains(double microphoneGainDb, double systemGainDb)
+    public void SetGains(double microphoneGainDb, double systemGainDb, double screenReaderGainDb)
     {
         foreach (var track in _tracks)
         {
-            track.GainDecibels = track.Track.Stream.Equals(
-                "microphone",
-                StringComparison.OrdinalIgnoreCase)
-                ? microphoneGainDb
-                : systemGainDb;
+            track.GainDecibels = track.Track.Stream switch
+            {
+                "microphone" => microphoneGainDb,
+                "screen-reader" => screenReaderGainDb,
+                _ => systemGainDb
+            };
         }
     }
 

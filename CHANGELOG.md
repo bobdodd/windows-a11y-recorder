@@ -44,6 +44,27 @@ Changes on `main` since 1.1.0, not yet released.
   [its validation plan](docs/validation/windows-installer-plan.md). Not yet
   run on Windows.
 
+### MP4 export
+
+- "Save as MP4..." in the player saves the whole open recording as an MP4
+  file, with Windows' own H.264 and AAC encoders. The picture follows the
+  Whole screen setting. The chosen sounds (microphone, system sound and
+  screen reader) are mixed at the player's levels into the first sound
+  track, and each also has a track of its own; the own tracks are marked
+  as alternatives of the first. Sound is placed where its buffer records
+  put it, with silence where nothing was recorded. The video has a
+  constant frame rate, 20 a second for recordings at 5.
+- With NVDA running on Windows build 20348 or later, a recording with
+  system sound records NVDA's sound on its own as
+  `audio/screen-reader.wav` (channel `audio.screen-reader`), and the system
+  sound leaves it out. On earlier builds the system sound includes NVDA as
+  before, and the audio collector reports the limitation.
+- The player has a third volume slider, "Screen reader", and a channel
+  filter for the screen reader's sound.
+- See [the MP4 export design](docs/architecture/mp4-export.md) and
+  [its validation plan](docs/validation/mp4-export-plan.md). Not yet run
+  in the app on Windows.
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now

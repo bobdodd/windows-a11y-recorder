@@ -1804,6 +1804,12 @@ the target machine, build 19045, cannot. On such builds speech stays in
 the system sound; where the build allows, the screen reader's sound is
 recorded as its own channel.
 
+From 2026-11-07, where the build allows and NVDA is running when a
+recording starts, NVDA's sound is recorded as its own stream,
+`audio.screen-reader`, and the system sound leaves it out; see
+[the MP4 export design](mp4-export.md), "Recording the screen reader on
+its own".
+
 ## The player
 
 A "Screen reader" lane on the timeline shows:

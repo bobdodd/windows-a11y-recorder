@@ -183,11 +183,11 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         // One window with a process and one without, one monitor, two UI
         // Automation elements, ten browser contexts (the ninth that of the
         // browser preference samples, protocol 0.56, and the tenth that of
-        // an accessibility action sent, protocol 0.60), two audio paths and
+        // an accessibility action sent, protocol 0.60), three audio paths and
         // two navigation URLs, three foreground windows, eight event
         // targets, two script locations, one world and two scopes.
         await WriteAsync(sessionKey, recordingId, SampleEvents(sessionKey));
-        long[] once = [2, 1, 2, 10, 4, 3, 8, 2, 1, 2];
+        long[] once = [2, 1, 2, 10, 5, 3, 8, 2, 1, 2];
         Assert.Equal(once, await IdentityCountsAsync(recordingId));
 
         // A resumed recording has a new writer, which does not look up the

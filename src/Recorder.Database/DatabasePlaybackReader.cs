@@ -196,6 +196,7 @@ public sealed class DatabasePlaybackReader(NpgsqlDataSource dataSource)
             cancellationToken).ConfigureAwait(false);
         return archive with
         {
+            AudioBuffers = new DatabaseAudioBufferSource(dataSource, recordingId),
             BrowserNavigations = archive.BrowserNavigations.Count == 0
                 ? archive.BrowserNavigations
                 : BrowserNavigationFrames.Apply(
@@ -332,6 +333,42 @@ public sealed class DatabasePlaybackReader(NpgsqlDataSource dataSource)
         }
 
         return names;
+    }
+}
+
+/// <summary>
+/// Reads an audio stream's buffer records from the audio_buffers evidence
+/// table of a recording kept in the database.
+/// </summary>
+public sealed class DatabaseAudioBufferSource(
+    NpgsqlDataSource dataSource,
+    Guid recordingId) : ISessionAudioBufferSource
+{
+    public IReadOnlyList<SessionAudioBuffer> ReadAudioBuffers(string stream, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        var table = EvidenceCatalog.ByEventType[("audio.microphone", "audio-buffer")];
+        using var command = dataSource.CreateCommand(
+            $"SELECT {EvidenceSql.PayloadExpression(table)}::text FROM {table.Name} t " +
+            "JOIN events e ON e.recording_id = t.recording_id AND e.event_key = t.event_key " +
+            "JOIN channels c ON c.channel_id = e.channel_id " +
+            "WHERE t.recording_id = $1 AND c.name = $2");
+        command.Parameters.AddWithValue(recordingId);
+        command.Parameters.AddWithValue($"audio.{stream}");
+        var buffers = new List<SessionAudioBuffer>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var payload = JsonDocument.Parse(reader.GetString(0));
+            if (SessionAudioBuffer.FromPayload(payload.RootElement) is { } buffer)
+            {
+                buffers.Add(buffer);
+            }
+        }
+
+        buffers.Sort(static (left, right) => left.BufferSequence.CompareTo(right.BufferSequence));
+        return buffers;
     }
 }
 

@@ -357,6 +357,11 @@
                             Content="System _audio"
                             Checked="TimelineFilter_Changed"
                             Unchecked="TimelineFilter_Changed" />
+                  <CheckBox x:Name="FilterScreenReaderAudioCheckBox"
+                            IsChecked="True"
+                            Content="Screen reader sound"
+                            Checked="TimelineFilter_Changed"
+                            Unchecked="TimelineFilter_Changed" />
                   <CheckBox x:Name="FilterMarkersCheckBox"
                             IsChecked="True"
                             Content="Mar_kers"
@@ -772,6 +777,12 @@
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="160" />
             <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="28" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="160" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
           <Label Grid.Column="0"
                  Padding="0,0,8,0"
@@ -813,6 +824,35 @@
                      MinWidth="52"
                      VerticalAlignment="Center"
                      Text="0 dB" />
+          <!-- Recorded on its own only when NVDA was running and Windows
+               could separate its sound; see docs/architecture/mp4-export.md. -->
+          <Label Grid.Column="8"
+                 Padding="0,0,8,0"
+                 VerticalContentAlignment="Center"
+                 Target="{Binding ElementName=ScreenReaderVolumeSlider}"
+                 Content="Screen reader:" />
+          <Slider x:Name="ScreenReaderVolumeSlider"
+                  Grid.Column="9"
+                  Minimum="-36"
+                  Maximum="0"
+                  Value="0"
+                  TickFrequency="3"
+                  IsSnapToTickEnabled="True"
+                  ValueChanged="AudioVolumeSlider_ValueChanged"
+                  AutomationProperties.Name="Screen reader playback gain" />
+          <local:SelectableText x:Name="ScreenReaderVolumeTextBlock"
+                     Grid.Column="10"
+                     Margin="8,0,0,0"
+                     MinWidth="52"
+                     VerticalAlignment="Center"
+                     Text="0 dB" />
+          <Button x:Name="SaveMp4Button"
+                  Grid.Column="12"
+                  Margin="12,0,0,0"
+                  Content="Save as MP_4..."
+                  IsEnabled="False"
+                  Click="SaveMp4Button_Click"
+                  AutomationProperties.HelpText="Saves the whole recording as an MP4 video with the sounds you choose." />
         </Grid>
       </Grid>
 

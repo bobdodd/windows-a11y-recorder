@@ -49,7 +49,13 @@ public partial class MainWindow
     }
 
     // The image shown for a frame, and the words its help text gains.
-    private ImageSource FrameImage(SessionVideoFrame frame, BitmapSource bitmap, out string view)
+    private ImageSource FrameImage(SessionVideoFrame frame, BitmapSource bitmap, out string view) =>
+        FrameImage(frame, bitmap, _showWholeScreen, out view);
+
+    // The image of a frame in the participant's view or the whole screen,
+    // which an MP4 export also draws, so the video shows what the player
+    // shows.
+    internal static ImageSource FrameImage(SessionVideoFrame frame, BitmapSource bitmap, bool showWholeScreen, out string view)
     {
         var colors = ColorEffect.IsIdentity(frame.ColorEffect)
             ? string.Empty
@@ -64,7 +70,7 @@ public partial class MainWindow
 
             // Not magnified, but colors changed: the whole frame is the part
             // seen.
-            if (_showWholeScreen)
+            if (showWholeScreen)
             {
                 view = $", whole screen as captured; the participant saw it{colors}";
                 return bitmap;
@@ -86,7 +92,7 @@ public partial class MainWindow
         var whole = new Rect(0, 0, width, height);
         var group = new DrawingGroup();
         RenderOptions.SetBitmapScalingMode(group, BitmapScalingMode.HighQuality);
-        if (_showWholeScreen)
+        if (showWholeScreen)
         {
             group.Children.Add(new ImageDrawing(bitmap, whole));
             // A yellow line over a black one, so the outline shows on light
