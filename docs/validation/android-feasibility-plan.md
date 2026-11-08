@@ -62,9 +62,12 @@ run it again. Send the whole output.
 
 1. Turn on TalkBack (Settings, Accessibility, TalkBack).
 2. Run `& $check -Check Sound -Source output`
-3. Follow the prompts: keep still until about 7 seconds, then swipe right
-   3 times, slowly, until about 15 seconds.
-4. Read the chart.
+3. Before 7 seconds, press the phone's volume-up key, open the volume
+   panel's settings and set "Accessibility volume" to about 80%. The
+   level that counts is the one set while the check runs.
+4. From the 7-second prompt, swipe right 3 times, slowly, until about 15
+   seconds.
+5. Read the chart.
 
 **On screen:** "Sound from 'output': " with about 20 seconds, 48000 Hz
 and 2 channels", then a line per half second with a level and a bar of `#`.
@@ -142,3 +145,16 @@ Tests 2 and 3 answer question 1 of the proposal, which sound source the
 recorder uses. Tests 4 to 6 show which of TalkBack's text, its log and
 the touches the recorder can rely on. The design is updated with the
 results before any building starts.
+
+## Results
+
+- 2026-11-07, Pixel 10 Pro XL, Android 17 (API level 37, build
+  CP3A.260905.009), TalkBack 17.1.0.1003738110, scrcpy 5.0.1.
+- Test 1 passed once the phone made a data connection to the PC; Windows'
+  own WinUSB driver served the ADB interface, and the Google USB Driver
+  was not needed.
+- Test 2: `output` recorded sound after the swipes. With the volume set
+  before the run the loudest moment was 2.9%; with Accessibility volume
+  set to about 80% during the run it was 32.0%.
+- Test 3: `playback` with `--audio-dup` recorded only silence.
+- Tests 4 to 6: not yet run.

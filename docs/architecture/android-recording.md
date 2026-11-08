@@ -1,8 +1,7 @@
 # Recording an Android device
 
-Proposed 2026-11-07. Questions 2 to 5 agreed on 2026-11-07 (see
-[Decisions](#decisions-of-2026-11-07)); question 1 waits for check 1. Not
-built.
+Proposed 2026-11-07. All five questions decided on 2026-11-07 (see
+[Decisions](#decisions-of-2026-11-07)). Not built.
 
 ## Purpose
 
@@ -96,10 +95,38 @@ The scrcpy server offers two ways to capture the phone's sound
   as well (`--audio-dup`), but "Android apps can opt-out, so the whole
   output is not necessarily captured".
 
-Neither page says whether TalkBack's speech is included. Since app capture
-excludes screen reader speech (see "Shape"), `playback` may well leave it
-out. That is inference, and check 1 decides it. The choice between the two
-is question 1.
+Neither page says whether TalkBack's speech is included. Check 1 answered
+it on the owner's Pixel 10 Pro XL (Android 17, TalkBack 17.1) on
+2026-11-07; see "Results of check 1" below. `output` captured sound after
+each TalkBack swipe and exact silence otherwise. `playback` with
+`--audio-dup` captured nothing: every sample of a 20-second file was 0.
+That matches Android's rule that playback capture takes only players whose
+usage is `USAGE_MEDIA`, `USAGE_GAME` or `USAGE_UNKNOWN`
+([Android Developers](https://developer.android.com/media/platform/av-capture)).
+That TalkBack's speech has an accessibility usage is inference.
+
+#### Results of check 1
+
+| Run | Phone volume | Loudest half second | Sound present |
+|---|---|---|---|
+| `output` | as found | 2.9% of full scale | after the swipes, and once at 4.5 s |
+| `output` | raised to maximum before the run | 2.9% | after the swipes |
+| `playback`, `--audio-dup` | as found | 0.0% | none |
+| `output` | Accessibility volume about 80%, set during the run | 32.0% | after the swipes |
+
+The level of `output` follows the phone's volume as set while the capture
+runs, not the volume set before it: raising both sliders to the maximum
+beforehand changed nothing, while setting Accessibility volume to about
+80% during the run raised the loudest moment about elevenfold. This
+matches scrcpy issue 3790, where the capture volume follows the device
+volume and pressing the volume keys during capture resets it to the
+device volume
+([scrcpy issue 3790](https://github.com/Genymobile/scrcpy/issues/3790#issuecomment-1472079314)).
+The owner found about 80% Accessibility volume needed for a usable
+recording. The recorder therefore needs to show the phone's sound level
+while recording and tell the tester to raise the phone's volume during
+the session when it is too low; whether it can read or set that volume
+over adb is not yet checked.
 
 Sound packets also carry device times: the server takes them from
 Android's audio timestamp (`AudioRecordReader`, `timestamp.nanoTime`).
@@ -309,7 +336,13 @@ by `scripts/Test-AndroidFeasibility.ps1`.
 
 ## Decisions of 2026-11-07
 
-The owner answered questions 2 to 5:
+The owner answered questions 2 to 5, and question 1 followed from check 1:
+
+- **Device sound (question 1, option a).** `output`. It records
+  TalkBack and everything else the phone plays; `playback` recorded
+  nothing of TalkBack. The phone is silent during a recording, and the
+  participant hears it from the PC. The phone's volume is set during the
+  session, with Accessibility volume at about 80%.
 
 - **Companion app (question 2, option a).** The app declares
   `isAccessibilityTool`. It is an accessibility app, is never offered on
@@ -322,6 +355,3 @@ The owner answered questions 2 to 5:
 - **Checks first (question 5).** The four checks are run before any
   building, as
   [the feasibility checks](../validation/android-feasibility-plan.md).
-
-Question 1, the device sound source, is decided from tests 2 and 3 of
-those checks.
