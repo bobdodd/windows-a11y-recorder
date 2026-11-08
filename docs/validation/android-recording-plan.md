@@ -280,4 +280,9 @@ is on the PC.
   and test 6 checks both. The "adb server" line found the server started
   by scrcpy's adb for the feasibility checks, of the same version, and
   used it, which is what test 9 sets up; test 9 is not needed again.
+- 2026-11-08, part 1: test 7 passed. Unplugged, the panel changed to
+  "Phone: not found." with the steps; plugged in again, the phone's
+  lines came back. TalkBack, turned on while the phone was unplugged,
+  showed as on once it was back. Test 6's new steps 4 and 5 and test 8
+  wait for the next installer build.
 
