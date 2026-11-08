@@ -48,7 +48,10 @@ public sealed class AndroidDeviceChecksTests
 
         var report = await Checks(adb).CheckAsync(CancellationToken.None);
 
-        Assert.Contains("TalkBack: off. Turn it on in Settings, Accessibility, TalkBack.", report.Text);
+        Assert.Contains("TalkBack: off.", report.Text);
+        Assert.DoesNotContain("Turn it on", report.Text);
+        Assert.DoesNotContain("Display speech output", report.Text);
+        Assert.True(report.Checks.Single(check => check.Name == "TalkBack").Ok);
     }
 
     [Fact]

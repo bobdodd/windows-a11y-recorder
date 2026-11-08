@@ -244,6 +244,10 @@ slice's full test goes into a validation plan,
     storage, which adb cannot read on a phone that is not rooted. Not
     checked: whether `adb shell settings list secure` on the Pixel shows
     it.
+  - TalkBack is reported as on or off, and off is not treated as a
+    problem: the owner tests magnification, visual layout and colour
+    without it (owner, 2026-11-08). The "Display speech output" reminder
+    shows only while TalkBack is on.
   - The companion app line waits for slice 2.
   - Access keys: "Desktop frames" is now Alt+T, so Alt+D opens the
     Android menu (validation plan, part 0 results). Alt+T is also "Stop
@@ -462,8 +466,11 @@ slice's full test goes into a validation plan,
 - **Settings.** At the start, `adb shell settings list secure`, `system`
   and `global`, keeping the accessibility-related keys named in a list in
   the source and documented with it, such as the enabled services,
-  TalkBack, explore by touch, color inversion, font scale, display size,
-  and the text-to-speech rate. After that, the companion app's content
+  TalkBack, explore by touch, magnification, color inversion, color
+  correction, font scale, display size, and the text-to-speech rate.
+  TalkBack is often off in a recording, as the owner tests magnification,
+  visual layout and colour without it (2026-11-08), so these settings
+  are as much the recording's subject as TalkBack is. After that, the companion app's content
   observers on the same keys
   ([Android, Settings.Secure](https://developer.android.com/reference/android/provider/Settings.Secure)).
   TalkBack's own preferences, such as verbosity, are kept inside TalkBack

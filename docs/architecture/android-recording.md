@@ -264,8 +264,10 @@ scrcpy source (`mic`), and could be added later.
 At the start and on each change, the recording holds the phone's
 accessibility-related settings, in the same form as the Windows ones
 ([accessibility preferences](accessibility-preferences.md)). Examples are
-the enabled accessibility services, TalkBack, explore by touch, color
-inversion, font size and display size. The companion app watches each
+the enabled accessibility services, TalkBack, explore by touch,
+magnification, color inversion, color correction, font size and display
+size. TalkBack is off in many recordings: the owner also tests
+magnification, visual layout and colour, without it (2026-11-08). The companion app watches each
 setting through a content observer
 ([Android, Settings.Secure](https://developer.android.com/reference/android/provider/Settings.Secure)),
 and the recorder reads the full list over adb at the start.

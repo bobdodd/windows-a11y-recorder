@@ -190,9 +190,11 @@ choices, "This PC's desktop" (chosen) and "Android device".
 
 ### Test 6: the phone's checks
 
-1. Connect the Pixel by USB, unlocked, with TalkBack on.
+1. Connect the Pixel by USB, unlocked, with TalkBack off.
 2. In "Recording target", choose "Android device".
 3. Wait 5 seconds, then read the side panel.
+4. On the Pixel, turn on TalkBack (Settings, Accessibility, TalkBack).
+5. Wait 5 seconds, then read the side panel again.
 
 **On screen:** "Capture channels" and "Instrumented Chromium" are gone,
 and "Android device checks" shows:
@@ -204,9 +206,11 @@ and "Android device checks" shows:
 - "System: Android 17, build CP3A.260905.009, security patch
   2026-09-05." (later values if the phone has updated)
 - "Screen: 1080 by 2404 pixels."
-- "TalkBack: on."
-- "Display speech output: the recorder cannot read this setting." with
-  where to turn it on.
+- "TalkBack: off.", with nothing after it on that line and no "Display
+  speech output" line, as TalkBack off is not a problem.
+
+After step 5, "TalkBack: on." and under it "Display speech output: the
+recorder cannot read this setting." with where to turn it on.
 
 Under them, "Recording the phone is not built yet; for now this panel
 checks it." If "adb server" says another program's server is running,
@@ -266,4 +270,14 @@ leaves it running.", and the phone's lines as in test 6. The case of a
 server of another version, which the recorder leaves alone, is covered
 only by the tests in the build environment, as no adb of another version
 is on the PC.
+- 2026-11-08, part 1: test 5 passed; the recorder showed "Recording
+  target" with both choices. In test 6 every line was as expected except
+  "TalkBack: off. Turn it on in Settings, Accessibility, TalkBack.",
+  which was right, as TalkBack was off. The owner does not always use
+  TalkBack: magnification, visual layout and colour are tested without
+  it. So TalkBack off is now reported without asking for it to be turned
+  on, the "Display speech output" reminder shows only with TalkBack on,
+  and test 6 checks both. The "adb server" line found the server started
+  by scrcpy's adb for the feasibility checks, of the same version, and
+  used it, which is what test 9 sets up; test 9 is not needed again.
 

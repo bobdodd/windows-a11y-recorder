@@ -246,13 +246,19 @@ public sealed partial class AndroidDeviceChecks(IAdb adb, IAdbServerProbe server
             $"Android {Or(details.AndroidVersion, "version not reported")}, build {Or(details.Build, "not reported")}, security patch {Or(details.SecurityPatch, "not reported")}.",
             true));
         checks.Add(new AndroidCheck("Screen", ScreenText(details), details.ScreenWidth is not null));
-        checks.Add(details.TalkBackOn
-            ? new AndroidCheck("TalkBack", "on.", true)
-            : new AndroidCheck("TalkBack", "off. Turn it on in Settings, Accessibility, TalkBack.", false));
-        checks.Add(new AndroidCheck(
-            "Display speech output",
-            "the recorder cannot read this setting. Check that it is on: TalkBack's settings, Advanced settings, Developer settings, \"Display speech output\".",
-            false));
+        // TalkBack is one of the things tested, not needed for every
+        // recording: magnification, layout and colour are tested without it
+        // (owner, 2026-11-08). So off is reported, not asked to be changed,
+        // and the reminder for TalkBack's own setting shows only with it on.
+        checks.Add(new AndroidCheck("TalkBack", details.TalkBackOn ? "on." : "off.", true));
+        if (details.TalkBackOn)
+        {
+            checks.Add(new AndroidCheck(
+                "Display speech output",
+                "the recorder cannot read this setting. Check that it is on: TalkBack's settings, Advanced settings, Developer settings, \"Display speech output\".",
+                false));
+        }
+
         return new AndroidCheckReport(PhoneState.Connected, checks);
     }
 

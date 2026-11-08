@@ -92,8 +92,9 @@ Changes on `main` since 1.1.0, not yet released.
   desktop and an Android device. The Android device shows "Android
   device checks" in place of the capture channels: adb and its version,
   the adb server, the phone's model, Android version, build, security
-  patch and screen size, whether TalkBack is on, and a reminder to turn
-  on TalkBack's "Display speech output". They are read again every 2
+  patch and screen size, whether TalkBack is on, and, while it is, a
+  reminder to turn on its "Display speech output". TalkBack off is not
+  treated as a problem. They are read again every 2
   seconds, and a phone that is not found comes with the steps to connect
   it.
 - An adb server already run by another program is used only if its
