@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Part 0 of the implementation plan only proves the app builds and installs.
+  The service receives no events yet; later parts widen this configuration
+  as each kind of evidence is added. isAccessibilityTool declares that the
+  app exists to support accessibility work.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/service_description"
+    android:accessibilityEventTypes="typeAnnouncement"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:notificationTimeout="0"
+    android:canRetrieveWindowContent="false"
+    android:isAccessibilityTool="true" />

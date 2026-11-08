@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Windows A11y Recorder companion app. It is installed over USB by the
+  recorder and never published in an app store. See
+  docs/architecture/android-implementation-plan.md.
+
+  It asks for no permissions: it has no internet access and talks to the
+  recorder only through adb.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.bobdodd.a11yrecorder.companion">
+
+    <application
+        android:label="@string/app_name"
+        android:allowBackup="false"
+        android:hasCode="true">
+
+        <service
+            android:name=".RecorderAccessibilityService"
+            android:label="@string/service_label"
+            android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service" />
+        </service>
+    </application>
+</manifest>

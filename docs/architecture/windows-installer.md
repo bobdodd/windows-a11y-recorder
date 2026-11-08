@@ -76,6 +76,8 @@ Into `%LOCALAPPDATA%\Programs\Windows A11y Recorder`:
 - `llama\`: llama.cpp b11607 for Windows x64 with CUDA 12.4, and the CUDA
   12.4 run-time files llama.cpp publishes beside it
   ([llama.cpp release b11607](https://github.com/ggml-org/llama.cpp/releases/tag/b11607)).
+- `android\`: the scrcpy server and the Android companion app, for
+  recording an Android phone (see "Android files").
 - `THIRD-PARTY-NOTICES.txt`, naming each included component and where its
   licence is, and the licences themselves beside the components.
 
@@ -172,19 +174,74 @@ failure:
 5. Downloads the llama.cpp b11607 CUDA 12.4 archive and the CUDA run-time
    archive, checks their sizes and SHA-256 against the values in the
    script, unpacks them to `llama\`, and runs `llama-server.exe --version`.
-6. Downloads `vc_redist.x64.exe` from Microsoft
+6. Downloads the scrcpy 5.0.1 server and its licence, checks their sizes
+   and SHA-256, and copies them to `android\`; then builds the Android
+   companion app with `scripts\Build-CompanionApp.ps1` and copies it, with
+   its description `companion-app.txt`, to `android\`. The first build
+   asks the owner to accept the Android SDK licence, which the app's build
+   tools are used under; `-AcceptAndroidSdkLicense` accepts it without
+   asking. See "Android files" below.
+7. Downloads `vc_redist.x64.exe` from Microsoft
    (`https://aka.ms/vs/17/release/vc_redist.x64.exe`) and checks it has a
    valid Microsoft signature. The address always gives the latest version,
    so it is checked by signature rather than a fixed hash.
-7. Writes `THIRD-PARTY-NOTICES.txt`, including each NuGet package with the
+8. Writes `THIRD-PARTY-NOTICES.txt`, including each NuGet package with the
    licence its `.nuspec` declares.
-8. Compiles `installer\WindowsA11yRecorder.iss` into
+9. Compiles `installer\WindowsA11yRecorder.iss` into
    `artifacts\installer\output\WindowsA11yRecorder-Setup-<revision>.exe`,
    and writes its SHA-256 beside it.
 
 The revision is the commit's short hash, with `-modified` added if the
 checkout has uncommitted changes. Downloads are kept in
 `artifacts\installer\downloads`, so a second build does not repeat them.
+
+### Android files
+
+Part 0 of the
+[Android implementation plan](android-implementation-plan.md) adds an
+`android\` folder to the installation:
+
+- `scrcpy-server-v5.0.1`, which records the phone's screen and sound
+  (Apache License 2.0), with `LICENSE-scrcpy.txt`.
+- `a11yrecorder-companion.apk`, the companion app, and
+  `companion-app.txt`, which gives its package, versions, SHA-256 and
+  signing certificate. The recorder checks the app against that SHA-256.
+
+adb is not in the installation. The Android SDK licence does not allow it
+to be redistributed
+([Android, SDK terms 3.4](https://developer.android.com/studio/terms)), so
+the recorder downloads it from Google in its Android setup window (Android
+menu, "Set up Android recording..."), after the person accepts the licence,
+into `%LOCALAPPDATA%\Windows A11y Recorder\android\platform-tools`.
+
+The companion app is built straight from Google's SDK tools, without
+Gradle: `aapt2` compiles and links the resources, `javac` compiles the
+Java source against the platform's `android.jar`, `d8` converts it to
+Android byte code, and `zipalign` and `apksigner` finish it. Gradle and the
+Android Gradle plugin fetch many further files from Maven repositories on
+each new machine; without them the build downloads exactly three files,
+each pinned and checked by SHA-256:
+
+| File | From | Size (bytes) |
+| --- | --- | --- |
+| Eclipse Temurin JDK 21.0.13+9 | [Adoptium](https://adoptium.net/) | 205,421,281 (Windows), 207,858,352 (Linux) |
+| Android SDK Build-Tools 37.0.0 | [Google's repository list](https://dl.google.com/android/repository/repository2-3.xml) | 61,077,164 (Windows), 66,135,704 (Linux) |
+| Android SDK platform 37.0, revision 2 | the same list | 67,281,901 |
+
+The SHA-1 values in Google's list matched the downloads on 2026-11-08,
+when the SHA-256 values in the script were computed. The JDK's SHA-256
+values are the ones the Adoptium API gives.
+
+The app is signed with a key made on the first build in
+`%LOCALAPPDATA%\Windows A11y Recorder Build\companion-signing`, outside the
+repository, with a random password kept beside it. Android only lets an
+app be replaced by one signed with the same key, so that folder should be
+kept. Its version code is the number of commits on the branch, which only
+grows, because Android refuses to replace an app with one of a lower code.
+
+The same script runs in the Linux build environment under PowerShell 7,
+with the Linux JDK and Build-Tools, so changes to the app are built and
+checked there before they reach the development PC.
 
 ### Installer tool
 

@@ -125,8 +125,9 @@
   </Window.Resources>
 
   <DockPanel>
-  <!-- The menu bar, with one menu: Analysis (analysis-runner.md, "The
-       player"). Each item opens with a single click; none has a submenu. -->
+  <!-- The menu bar, with two menus: Analysis (analysis-runner.md, "The
+       player") and Android (android-implementation-plan.md). Each item
+       opens with a single click; none has a submenu. -->
   <Menu x:Name="MainMenu"
         DockPanel.Dock="Top"
         Background="{StaticResource PanelBackground}"
@@ -170,6 +171,17 @@
                 IsCheckable="True"
                 IsChecked="True"
                 Click="BrowserOnlyMenuItem_Click" />
+    </MenuItem>
+    <MenuItem x:Name="AndroidMenu"
+              Header="An_droid"
+              MinHeight="44"
+              Padding="12,0"
+              VerticalContentAlignment="Center"
+              Foreground="#CDCCCA">
+      <MenuItem x:Name="AndroidSetupMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="Set _up Android recording..."
+                Click="AndroidSetupMenuItem_Click" />
     </MenuItem>
   </Menu>
   <Grid>

@@ -2,9 +2,9 @@
 
 Written 2026-11-07 for the first version agreed in
 [Recording an Android device](android-recording.md): the phone connected
-to the PC by USB, recorded with the PC's microphone. Not built. The
-owner answered its three questions on 2026-11-08; see
-[Decisions of 2026-11-08](#decisions-of-2026-11-08).
+to the PC by USB, recorded with the PC's microphone. Slice 0 is built;
+the others are not. The owner answered its three questions on 2026-11-08;
+see [Decisions of 2026-11-08](#decisions-of-2026-11-08).
 
 Each part below is marked as one of:
 
@@ -69,7 +69,8 @@ on 2026-11-07 (commit `1f42a04`):
   and checks, the scrcpy client, the `getevent` and `logcat` readers, the
   companion app's connection, the phone clock mapper, and the collectors.
   An `AndroidCollectorFactory` sits beside `WindowsCollectorFactory`.
-- **`android/companion`**: the companion app, a Kotlin Gradle project.
+- **`android/companion`**: the companion app, in Java, built from the SDK
+  tools by `scripts/Build-CompanionApp.ps1` (slice 0).
   Package `io.github.bobdodd.a11yrecorder.companion`, named after the
   repository's GitHub owner as Android package names usually are.
 - **Recorder, player, export and installer** changes, listed in each
@@ -161,9 +162,15 @@ slice's full test goes into a validation plan,
   so it goes into `android\` in the install folder with its licence, and
   into `THIRD-PARTY-NOTICES.txt`.
 - **Companion app build.** By `Build-Installer.ps1` on the development
-  PC (decided 2026-11-08). The script fetches a pinned Java development
-  kit and the Android SDK command-line tools on first use, and the owner
-  accepts the Android SDK licence there once. The Linux build environment
+  PC (decided 2026-11-08), which runs `scripts\Build-CompanionApp.ps1`.
+  The script fetches a pinned Java development kit, the SDK Build-Tools
+  37.0.0 and the Android 17 SDK platform on first use, and the owner
+  accepts the Android SDK licence there once. It builds the app straight
+  from those tools (`aapt2`, `javac`, `d8`, `zipalign`, `apksigner`), not
+  with Gradle, and the app is written in Java, not Kotlin, so the build
+  downloads only those three pinned files and nothing from Maven
+  repositories (decided while building part 0; see
+  [Windows installer, "Android files"](windows-installer.md#android-files)). The Linux build environment
   builds the app too, to test changes before they reach the PC. The app
   is signed with a key kept on the build machine outside the repository,
   so a new version installs over the old one. If the key ever changes, the
@@ -171,6 +178,14 @@ slice's full test goes into a validation plan,
   service on again (slice 2).
 - **Target test.** Open Android setup, accept the licence, download; the
   window shows "Platform-Tools 37.0.1 installed" and the folder.
+- **Built (2026-11-08).** `Recorder.Collectors.Android` holds the pinned
+  values (`AndroidTools`), the checked unpacking of Platform-Tools
+  (`PlatformToolsInstaller`) and the status of each program
+  (`AndroidToolsStatus`). The Android menu's "Set up Android recording..."
+  opens `AndroidSetupWindow`. `android/companion` is the app's skeleton:
+  the accessibility service is declared, with `isAccessibilityTool`, and
+  receives nothing yet. The validation steps are in
+  [the Android recording validation plan](../validation/android-recording-plan.md).
 
 ### Slice 1: the phone, found and checked
 

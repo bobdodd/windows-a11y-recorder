@@ -11,6 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Recorder.Analysis/Recorder.Analysis.csproj" />
+    <ProjectReference Include="../Recorder.Collectors.Android/Recorder.Collectors.Android.csproj" />
     <!-- The worker program is built beside the player, which starts it. -->
     <ProjectReference Include="../Recorder.AnalysisWorker/Recorder.AnalysisWorker.csproj" />
     <ProjectReference Include="../Recorder.Coordinator/Recorder.Coordinator.csproj" />

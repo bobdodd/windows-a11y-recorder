@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Recording an Android phone over USB. See
+       docs/architecture/android-implementation-plan.md. -->
+  <ItemGroup>
+    <ProjectReference Include="../Recorder.Contracts/Recorder.Contracts.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Recorder.Tests" />
+  </ItemGroup>
+</Project>

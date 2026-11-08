@@ -3,6 +3,7 @@
   <Folder Name="/src/">
     <Project Path="src/Recorder.Collectors.AssistiveTechnology/Recorder.Collectors.AssistiveTechnology.csproj" />
     <Project Path="src/Recorder.Collectors.Browser/Recorder.Collectors.Browser.csproj" />
+    <Project Path="src/Recorder.Collectors.Android/Recorder.Collectors.Android.csproj" />
     <Project Path="src/Recorder.App/Recorder.App.csproj" />
     <Project Path="src/Recorder.Coordinator/Recorder.Coordinator.csproj" />
     <Project Path="src/Recorder.WindowsCapture/Recorder.WindowsCapture.csproj" />

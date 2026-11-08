@@ -19,10 +19,15 @@
          (scripts\Test-BrowserProtocolQuery.ps1).
       4. Downloads the pinned llama.cpp server and its CUDA run time, checks
          their SHA-256, unpacks them to llama, and runs llama-server --version.
-      5. Downloads Microsoft's Visual C++ x64 redistributable and checks it is
+      5. Downloads the pinned scrcpy server and its licence into android, and
+         builds the Android companion app there
+         (scripts\Build-CompanionApp.ps1). The first build asks you to accept
+         the Android SDK licence, which the companion app's build tools are
+         used under.
+      6. Downloads Microsoft's Visual C++ x64 redistributable and checks it is
          signed by Microsoft.
-      6. Writes THIRD-PARTY-NOTICES.txt.
-      7. Compiles installer\WindowsA11yRecorder.iss with Inno Setup and writes
+      7. Writes THIRD-PARTY-NOTICES.txt.
+      8. Compiles installer\WindowsA11yRecorder.iss with Inno Setup and writes
          the installer's SHA-256 beside it.
 
     Downloads are kept in artifacts\installer\downloads, so a second build
@@ -37,7 +42,8 @@ param(
     [string] $ChromiumSource = (Join-Path $env:USERPROFILE "chromium-dev\chromium\src"),
     [string] $ChromiumBuildFolder = "out\A11yRecorder",
     [string] $InnoSetupCompiler = "",
-    [string] $WorkFolder = ""
+    [string] $WorkFolder = "",
+    [switch] $AcceptAndroidSdkLicense
 )
 
 $ErrorActionPreference = "Stop"
@@ -76,6 +82,24 @@ $llamaDownloads = @(
     }
 )
 $llamaLicenseUrl = "https://raw.githubusercontent.com/ggml-org/llama.cpp/$llamaBuild/LICENSE"
+
+# The scrcpy server, which records the phone's screen and sound, from its
+# GitHub release, and its licence at the same tag. The server's size and
+# SHA-256 are the release's; the licence's SHA-256 was computed from the file
+# on 2026-11-08. See docs\architecture\android-implementation-plan.md.
+$scrcpyVersion = "5.0.1"
+$scrcpyServer = @{
+    Name   = "scrcpy-server-v5.0.1"
+    Url    = "https://github.com/Genymobile/scrcpy/releases/download/v5.0.1/scrcpy-server-v5.0.1"
+    Size   = 733930
+    Sha256 = "764eb6f79811d5211fe9df341120882ba9994c7a61b897d7bf3fb662e53bc536"
+}
+$scrcpyLicense = @{
+    Name   = "scrcpy-v5.0.1-LICENSE.txt"
+    Url    = "https://raw.githubusercontent.com/Genymobile/scrcpy/v5.0.1/LICENSE"
+    Size   = 11387
+    Sha256 = "01c12035bf35af37241298dc7ad538eb2a07e5c940437bc6876feeaa9d1951d0"
+}
 
 # Microsoft's permanent address for the latest Visual C++ 2015-2022 x64
 # redistributable. It changes as Microsoft updates the run time, so it is
@@ -485,6 +509,28 @@ function Add-Llama {
         ($llamaDownloads | ForEach-Object { "$($_.Name) sha256 $($_.Sha256)" }))
 }
 
+function Add-Android {
+    $android = Join-Path $app "android"
+    New-Item -ItemType Directory -Force -Path $android | Out-Null
+    foreach ($item in @($scrcpyServer, $scrcpyLicense)) {
+        Get-Download -Url $item.Url -Name $item.Name -Size $item.Size -Sha256 $item.Sha256 | Out-Null
+    }
+    Copy-Item -LiteralPath (Join-Path $downloads $scrcpyServer.Name) -Destination (Join-Path $android $scrcpyServer.Name) -Force
+    Copy-Item -LiteralPath (Join-Path $downloads $scrcpyLicense.Name) -Destination (Join-Path $android "LICENSE-scrcpy.txt") -Force
+    Write-Host "Bundled scrcpy server $scrcpyVersion."
+
+    $companionWork = Join-Path $WorkFolder "companion"
+    & (Join-Path $PSScriptRoot "Build-CompanionApp.ps1") -WorkFolder $companionWork -DownloadFolder $downloads `
+        -AcceptAndroidSdkLicense:$AcceptAndroidSdkLicense
+    foreach ($name in @("a11yrecorder-companion.apk", "companion-app.txt")) {
+        $built = Join-Path (Join-Path $companionWork "output") $name
+        if (-not (Test-Path -LiteralPath $built)) {
+            throw "The companion app build did not write $built."
+        }
+        Copy-Item -LiteralPath $built -Destination (Join-Path $android $name) -Force
+    }
+}
+
 function Get-VcRedist {
     $path = Get-Download -Url $vcRedistUrl -Name "vc_redist.x64.exe"
     $signature = Get-AuthenticodeSignature -LiteralPath $path
@@ -581,6 +627,10 @@ function Write-Notices {
     $text.Add("  Redistributed under the NVIDIA CUDA Toolkit End User License Agreement,")
     $text.Add("  https://docs.nvidia.com/cuda/eula/index.html")
     $text.Add("")
+    $text.Add("scrcpy server $scrcpyVersion (folder android: $($scrcpyServer.Name))")
+    $text.Add("  Apache License 2.0: android\LICENSE-scrcpy.txt. https://github.com/Genymobile/scrcpy")
+    $text.Add("  It runs on the Android phone while it is recorded.")
+    $text.Add("")
     $text.Add("Microsoft .NET run time (the main folder)")
     $text.Add("  MIT licence. https://github.com/dotnet/runtime/blob/main/LICENSE.TXT")
     if ($runtimeNotices) {
@@ -643,6 +693,9 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Step "llama.cpp server"
 Add-Llama
+
+Write-Step "Android files"
+Add-Android
 
 Write-Step "Visual C++ run time"
 Get-VcRedist

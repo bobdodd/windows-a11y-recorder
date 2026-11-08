@@ -69,6 +69,22 @@ Changes on `main` since 1.1.0, not yet released.
   [its validation plan](docs/validation/mp4-export-plan.md). Not yet run
   in the app on Windows.
 
+### Android recording, part 0: the tools
+
+- The player's new Android menu opens "Set up Android recording...",
+  which downloads Google's Android SDK Platform-Tools 37.0.1 (adb) after
+  the Android SDK licence is accepted, checks its size and SHA-256, and
+  unpacks it into `%LOCALAPPDATA%\Windows A11y Recorder\android`. The
+  window also shows whether the scrcpy server and the companion app are in
+  place.
+- The installer includes the scrcpy 5.0.1 server and the companion app in
+  `android\`. The companion app, so far a skeleton with its accessibility
+  service declared, is built from Google's SDK tools by
+  `scripts\Build-CompanionApp.ps1`, which `Build-Installer.ps1` runs.
+- See [the Android implementation plan](docs/architecture/android-implementation-plan.md)
+  and [its validation plan](docs/validation/android-recording-plan.md).
+  Not yet run on Windows.
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now
