@@ -3,7 +3,8 @@
 Proposed 2026-11-07. All five questions decided and all four checks run
 on 2026-11-07 (see [Decisions](#decisions-of-2026-11-07) and
 [the feasibility checks](../validation/android-feasibility-plan.md)).
-Not built.
+Not built. The first version's build is planned in
+[the implementation plan](android-implementation-plan.md).
 
 ## Purpose
 
@@ -316,9 +317,13 @@ events, video and sound fall on one timeline on the Pixel.
   in their own lanes. MP4 export treats the phone's sound as the system
   sound.
 - **Installer.** It bundles the pinned scrcpy server and the companion
-  app. Whether Google's adb and USB driver may be bundled needs checking
-  against their terms. Until then, the installer downloads them from
-  Google during installation, as it does for models.
+  app. Google's adb is not bundled: the Android SDK licence does not allow
+  redistributing the SDK or any part of it
+  ([Android, SDK terms 3.4](https://developer.android.com/studio/terms)).
+  The recorder downloads it from Google in an Android setup window, as
+  model setup downloads models. The USB driver was not needed on the
+  owner's PC. See [the implementation plan](android-implementation-plan.md),
+  slice 0.
 
 ## Limits
 
@@ -384,7 +389,6 @@ The owner answered questions 2 to 5, and question 1 followed from check 1:
   nothing of TalkBack. The phone is silent during a recording, and the
   participant hears it from the PC. The phone's volume is set during the
   session, with Accessibility volume at about 80%.
-
 - **Companion app (question 2, option a).** The app declares
   `isAccessibilityTool`. It is an accessibility app, is never offered on
   Google Play, and is installed by the recorder over adb on a phone in
