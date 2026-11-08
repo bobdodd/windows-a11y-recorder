@@ -160,6 +160,10 @@ public interface ICaptureCollector : IAsyncDisposable
     // the collector can say. Null when healthy or when no reason is known.
     string? HealthReason => null;
 
+    // A sentence on what the collector has recorded so far, for the
+    // recording's status, when it has one to give. Null otherwise.
+    string? Summary => null;
+
     ValueTask<CapabilityResult> InitializeAsync(
         CollectorInitializationContext context,
         CancellationToken cancellationToken);

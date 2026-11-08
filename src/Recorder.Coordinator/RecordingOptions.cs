@@ -74,4 +74,5 @@ public sealed record CollectorStatus(
     CollectorHealthState Health,
     CapabilityStatus? Capability,
     IReadOnlyList<string> Limitations,
-    string? HealthReason = null);
+    string? HealthReason = null,
+    string? Summary = null);

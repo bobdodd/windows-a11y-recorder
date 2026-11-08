@@ -1,0 +1,140 @@
+using System.Globalization;
+using System.Text.Json;
+
+namespace Recorder.Collectors.Android;
+
+/// <summary>
+/// The messages between the recorder and the companion app, one JSON object
+/// per line, over the abstract local socket
+/// <see cref="SocketName"/>, which the recorder reaches with adb forward
+/// (android-implementation-plan.md, slice 2). The app's side is
+/// android/companion/src/.../RecorderLink.java; the two change together, and
+/// <see cref="Version"/> goes up when either side's messages change.
+/// </summary>
+public static class CompanionProtocol
+{
+    public const int Version = 1;
+
+    /// <summary>The companion app's socket, in Linux's abstract namespace.</summary>
+    public const string SocketName = "a11yrecorder_companion";
+
+    public const string ServiceClass = AndroidTools.CompanionPackage + ".RecorderAccessibilityService";
+
+    /// <summary>The service as Android names it in enabled_accessibility_services.</summary>
+    public const string ServiceComponent = AndroidTools.CompanionPackage + "/" + ServiceClass;
+
+    /// <summary>A clock request; the app answers with the same id.</summary>
+    public static string ClockRequest(long id) =>
+        "{\"type\":\"clock\",\"id\":" + id.ToString(CultureInfo.InvariantCulture) + "}\n";
+
+    /// <summary>
+    /// Reads one line from the app. A line that is not a JSON object with a
+    /// type, or a known type without its fields, is a
+    /// <see cref="FormatException"/>.
+    /// </summary>
+    public static CompanionMessage Parse(string line)
+    {
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(line);
+        }
+        catch (JsonException ex)
+        {
+            throw new FormatException($"The companion app sent a line that is not JSON: {ex.Message}", ex);
+        }
+
+        using (document)
+        {
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                throw new FormatException("The companion app sent a line that is not a JSON object.");
+            }
+
+            var type = String(root, "type");
+            return type switch
+            {
+                "hello" => new CompanionHello(
+                    Int(root, "protocol"),
+                    String(root, "versionName"),
+                    Long(root, "versionCode"),
+                    String(root, "androidRelease"),
+                    Int(root, "sdk"),
+                    Long(root, "time")),
+                "clock" => new CompanionClockReply(
+                    Long(root, "id"),
+                    Long(root, "received"),
+                    Long(root, "sent")),
+                "display" => new CompanionDisplay(
+                    String(root, "reason"),
+                    Int(root, "rotation"),
+                    Int(root, "modeWidth"),
+                    Int(root, "modeHeight"),
+                    Long(root, "time")),
+                "error" => new CompanionError(String(root, "message")),
+                _ => new CompanionUnknown(type)
+            };
+        }
+    }
+
+    private static JsonElement Member(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value)
+            ? value
+            : throw new FormatException($"The companion app's message has no \"{name}\".");
+
+    private static string String(JsonElement root, string name)
+    {
+        var value = Member(root, name);
+        return value.ValueKind == JsonValueKind.String
+            ? value.GetString()!
+            : throw new FormatException($"The companion app's \"{name}\" is not text.");
+    }
+
+    private static long Long(JsonElement root, string name)
+    {
+        var value = Member(root, name);
+        return value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number)
+            ? number
+            : throw new FormatException($"The companion app's \"{name}\" is not a whole number.");
+    }
+
+    private static int Int(JsonElement root, string name)
+    {
+        var value = Member(root, name);
+        return value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number)
+            ? number
+            : throw new FormatException($"The companion app's \"{name}\" is not a whole number.");
+    }
+}
+
+public abstract record CompanionMessage;
+
+/// <summary>Sent first on every connection.</summary>
+/// <param name="Time">The phone's CLOCK_MONOTONIC when it was sent, in nanoseconds.</param>
+public sealed record CompanionHello(
+    int Protocol,
+    string VersionName,
+    long VersionCode,
+    string AndroidRelease,
+    int Sdk,
+    long Time) : CompanionMessage;
+
+/// <summary>The phone's CLOCK_MONOTONIC when the request was read and when the reply was written.</summary>
+public sealed record CompanionClockReply(long Id, long Received, long Sent) : CompanionMessage;
+
+/// <summary>
+/// The phone display's rotation in degrees and its display mode's size in
+/// pixels, sent after the greeting and whenever either changes.
+/// </summary>
+public sealed record CompanionDisplay(
+    string Reason,
+    int Rotation,
+    int ModeWidth,
+    int ModeHeight,
+    long Time) : CompanionMessage;
+
+public sealed record CompanionError(string Message) : CompanionMessage;
+
+/// <summary>A message of a type this recorder does not know, from a newer companion app.</summary>
+public sealed record CompanionUnknown(string Type) : CompanionMessage;

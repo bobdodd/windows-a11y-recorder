@@ -3,7 +3,8 @@
 Written 2026-11-08 for slice 0 of
 [the Android implementation plan](../architecture/android-implementation-plan.md),
 the tools, with tests 5 to 9 added the same day for slice 1, the phone
-found and checked. Later slices add their tests here. Each test checks one
+found and checked, and tests 10 to 14 for slice 2, the companion app and
+the phone clock. Later slices add their tests here. Each test checks one
 behaviour in at most five steps, with what to see on the screen.
 
 What was checked before this plan, in the Linux build environment:
@@ -213,7 +214,8 @@ After step 5, "TalkBack: on." and under it "Display speech output: the
 recorder cannot read this setting." with where to turn it on.
 
 Under them, "Recording the phone is not built yet; for now this panel
-checks it." If "adb server" says another program's server is running,
+checks it." (From part 2 the panel also has a "Companion app" line and
+another note under the checks; test 10 checks them.) If "adb server" says another program's server is running,
 note which program and send the line.
 
 ### Test 7: the phone unplugged and plugged in again
@@ -290,3 +292,122 @@ is on the PC.
   it. Test 8 passed: Alt+D opened the Android menu, and Alt+T checked and
   unchecked "Desktop frames". All of part 1's tests have passed.
 
+## Part 2: the companion app and the phone clock
+
+What was checked before these tests, in the Linux build environment: the
+solution builds with no warnings; `scripts/Build-CompanionApp.ps1` built
+the companion app, version 1.1.0, with Java's warnings treated as errors;
+and 26 new tests pass. They cover the clock fit (an offset with drift,
+the phone sleeping, a slow answer that is not a discontinuity, the
+uncertainty between samples), the messages of protocol 1, a connection
+to a fake companion app over a local socket (the greeting, the first
+display and a clock answer; nothing listening; a greeting of another
+protocol), the `adb forward` and its removal, installing and turning on with TalkBack kept, an app signed with
+another key, the panel's companion line in each state, and a recording
+with the app answering, with the app not reachable, and with the
+connection lost part way. None of that shows the app on Android 17, the
+real socket and `adb forward`, the phone's clock, or the panel on
+Windows. Tests 10 to 14 do.
+
+The Pixel already has the companion app from test 4, made by an older
+build and left off, so the recorder offers to update it.
+
+### Test 10: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Connect the Pixel by USB, unlocked, with TalkBack on.
+4. Start the recorder from the Start menu, and in "Recording target"
+   choose "Android device".
+5. Wait 5 seconds, then read "Android device checks".
+
+**On screen:** the build ends with `INSTALLER BUILT` and, before that,
+`COMPANION APP BUILT` with `1.1.0, version code` and a number. In the
+panel, the lines of test 6 with "TalkBack: on.", and a line "Companion
+app: version code" with a number, "is installed, older than the
+recorder's" with a larger number, and "Choose "Install companion app" to
+update it." Under the checks, a button "Install companion app", and the
+note "A recording of the phone records the companion app's connection,
+the phone's clock and its display's rotation and size. The phone's
+screen, sound, touches and accessibility evidence come in later parts."
+
+### Test 11: install and turn on the companion app
+
+With the panel from test 10 showing and TalkBack still on:
+
+1. Choose "Install companion app".
+2. Wait until the text under the button changes from "Installing the
+   companion app on the phone." to a result, about 10 seconds.
+3. Wait 5 seconds more, then read "Android device checks".
+4. On the Pixel, open Settings, then Accessibility.
+
+**On screen:** under the button, "The companion app is installed and
+on." The button is gone, and the panel shows "Companion app: installed,
+on, and answering (version 1.1.0, version code" with the larger number
+from test 10 ", protocol 1)." "TalkBack: on." is still there. On the
+Pixel, "A11y Recorder companion" shows as on, and TalkBack as on. If the
+result is anything else, or the phone shows a message about the
+companion app, send its words; this is where the plan's risk about
+Android's restricted settings is settled.
+
+### Test 12: a recording of 30 seconds
+
+With the panel from test 11 showing:
+
+1. Choose "Start recording".
+2. Wait 30 seconds.
+3. Read the list under "Current session".
+4. Choose "Stop recording".
+
+**On screen:** in step 3 the list has one line, starting
+"android.companion: Running, Healthy." and going on "Companion app
+1.1.0:" with a number of clock samples, about 120 (four a second),
+"largest error bound" with a number of milliseconds, and "screen rotated
+0 degrees, 1080 by 2404." No desktop or browser lines. Send the line, as
+its error bound is the first measure of how closely the phone's clock is
+placed on the recording's.
+
+### Test 13: the phone rotated during a recording
+
+1. On the Pixel, turn on Auto-rotate (swipe down twice from the top of
+   the screen), and open Chrome.
+2. In the recorder, choose "Start recording".
+3. Turn the phone on its side, wait 5 seconds, and read the
+   "android.companion" line under "Current session".
+4. Turn the phone upright, wait 5 seconds, and read the line again.
+5. Choose "Stop recording".
+
+**On screen:** in step 3 the line ends "screen rotated 90 degrees, 1080
+by 2404." or "screen rotated 270 degrees, 1080 by 2404.", depending on
+which way the phone was turned. In step 4 it ends "screen rotated 0
+degrees, 1080 by 2404." If the size in step 3 reads "2404 by 1080", send
+the line: the plan expects the size not to change with rotation, but has
+not checked it.
+
+### Test 14: the cable unplugged during a recording
+
+1. In the recorder, choose "Start recording", and wait 10 seconds.
+2. Unplug the USB cable from the phone.
+3. Within 5 seconds, read the "android.companion" line under "Current
+   session".
+4. Choose "Stop recording".
+5. Plug the cable in again and unlock the phone.
+
+**On screen:** in step 3 the line starts "android.companion: Running,
+Degraded. The connection to the phone's companion app ended during the
+recording:" followed by the reason, then "The recording goes on without
+the phone's clock." and "Companion app 1.1.0:" with the clock samples
+taken before the cable was unplugged; that number no longer goes up.
+"Stop recording" ends the recording as usual. After step 5, within 10
+seconds, the panel shows "Companion app: installed, on, and answering"
+again.

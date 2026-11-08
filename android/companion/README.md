@@ -10,4 +10,7 @@ pinned and checked by its SHA-256.
 - `res/`: the service configuration and the text the phone shows.
 - `src/`: the Java source.
 
-See `docs/architecture/android-implementation-plan.md`, part 0.
+What the app does, and the protocol it speaks with the recorder, are in
+`docs/architecture/android-implementation-plan.md`, slices 0 and 2.
+`src/Recorder.Collectors.Android/CompanionProtocol.cs` is the recorder's
+side of the protocol and must agree with `RecorderLink.java`.

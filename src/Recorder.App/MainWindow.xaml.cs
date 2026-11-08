@@ -9,6 +9,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using Npgsql;
+using Recorder.Collectors.Android;
 using Recorder.Coordinator;
 using Recorder.Database;
 using Recorder.Database.RecordingFiles;
@@ -185,18 +186,27 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (AndroidTargetRadioButton.IsChecked == true)
+        // An Android recording (android-implementation-plan.md, slice 2)
+        // records the companion app, the phone clock and the display; the
+        // PC's own collectors are not used.
+        var android = AndroidTargetRadioButton.IsChecked == true;
+        string? androidSerial = null;
+        if (android)
         {
-            MessageBox.Show(
-                this,
-                "Recording an Android device is not built yet. For now the Android device checks panel checks the phone.",
-                "Android recording not built yet",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-            return;
-        }
+            if (_androidReport is not { Phone: PhoneState.Connected, Serial: { } serial })
+            {
+                MessageBox.Show(
+                    this,
+                    "The phone is not connected and allowed. The Android device checks panel says what to do.",
+                    "No phone to record",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
 
-        if (!AnyChannelSelected())
+            androidSerial = serial;
+        }
+        else if (!AnyChannelSelected())
         {
             MessageBox.Show(
                 this,
@@ -207,11 +217,15 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!TryValidateBrowserCapture(
-                out var chromiumPath,
-                out var browserStartUrl,
-                out var browserProfileDirectory,
-                out var fullWalkInterval))
+        string? chromiumPath = null;
+        string? browserStartUrl = null;
+        string? browserProfileDirectory = null;
+        var fullWalkInterval = 0;
+        if (!android && !TryValidateBrowserCapture(
+                out chromiumPath,
+                out browserStartUrl,
+                out browserProfileDirectory,
+                out fullWalkInterval))
         {
             return;
         }
@@ -226,17 +240,21 @@ public partial class MainWindow : Window
 
         try
         {
-            _coordinator = new SessionCoordinator(WindowsCollectorFactory.Create, _database);
+            _coordinator = android
+                ? new SessionCoordinator(
+                    _ => [new AndroidCompanionCollector(new AdbProcess(AndroidTools.Adb(AndroidTools.DataFolder)), androidSerial!)],
+                    _database)
+                : new SessionCoordinator(WindowsCollectorFactory.Create, _database);
             var status = await _coordinator.StartAsync(new RecordingOptions
             {
                 OutputRoot = OutputRootTextBox.Text,
-                CaptureKeyboardAndMouse = InputCheckBox.IsChecked == true,
-                CaptureUiAutomation = AutomationCheckBox.IsChecked == true,
-                CaptureForegroundWindow = WindowCheckBox.IsChecked == true,
-                CaptureDesktopFrames = FramesCheckBox.IsChecked == true,
-                CaptureMicrophone = MicrophoneCheckBox.IsChecked == true,
-                CaptureSystemAudio = SystemAudioCheckBox.IsChecked == true,
-                CaptureBrowserEvidence = BrowserEvidenceCheckBox.IsChecked == true,
+                CaptureKeyboardAndMouse = !android && InputCheckBox.IsChecked == true,
+                CaptureUiAutomation = !android && AutomationCheckBox.IsChecked == true,
+                CaptureForegroundWindow = !android && WindowCheckBox.IsChecked == true,
+                CaptureDesktopFrames = !android && FramesCheckBox.IsChecked == true,
+                CaptureMicrophone = !android && MicrophoneCheckBox.IsChecked == true,
+                CaptureSystemAudio = !android && SystemAudioCheckBox.IsChecked == true,
+                CaptureBrowserEvidence = !android && BrowserEvidenceCheckBox.IsChecked == true,
                 ChromiumExecutablePath = chromiumPath,
                 BrowserStartUrl = browserStartUrl,
                 BrowserProfileDirectory = browserProfileDirectory,
@@ -1557,10 +1575,12 @@ public partial class MainWindow : Window
             $"{status.DroppedEvents:N0} dropped" +
             DatabaseEvidenceText(status.Database);
         CollectorStatusListBox.ItemsSource = status.Collectors.Select(collector =>
-            collector.HealthReason is null
-                ? $"{collector.CollectorType}: {collector.Lifecycle}, {collector.Health}"
+            (collector.HealthReason is null
+                ? $"{collector.CollectorType}: {collector.Lifecycle}, {collector.Health}" +
+                    (collector.Summary is null ? "" : ".")
                 : $"{collector.CollectorType}: {collector.Lifecycle}, " +
-                    $"{collector.Health}. {collector.HealthReason}")
+                    $"{collector.Health}. {collector.HealthReason}") +
+            (collector.Summary is { } summary && summary != collector.HealthReason ? $" {summary}" : ""))
             .ToArray();
 
         // A collector that stops supplying evidence while recording is spoken
@@ -1627,6 +1647,9 @@ public partial class MainWindow : Window
         BrowserCaptureGroupBox.IsEnabled = enabled;
         DesktopTargetRadioButton.IsEnabled = enabled;
         AndroidTargetRadioButton.IsEnabled = enabled;
+        // Installing the companion app during a recording would end its
+        // connection, so the button waits for the recording to end.
+        CompanionButton.IsEnabled = enabled && !_companionSetupRunning;
         OutputRootTextBox.IsEnabled = enabled;
         BrowseButton.IsEnabled = enabled;
     }

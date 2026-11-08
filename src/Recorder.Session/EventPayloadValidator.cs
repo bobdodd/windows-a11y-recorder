@@ -37,7 +37,10 @@ internal static class EventPayloadValidator
         "browser.compositor",
         "browser.animation",
         "browser.script",
-        "browser.preferences"
+        "browser.preferences",
+        Recorder.Contracts.AndroidCompanionRecords.CompanionChannel,
+        Recorder.Contracts.AndroidCompanionRecords.ClockChannel,
+        Recorder.Contracts.AndroidCompanionRecords.DisplayChannel
     ];
 
     /// <summary>Whether the recorder defines the channel.</summary>
@@ -138,6 +141,18 @@ internal static class EventPayloadValidator
                 break;
             case ("input.mouse-hook", "hook-mouse-installed"):
                 ValidateHookMouseInstalled(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidCompanionRecords.CompanionChannel, Recorder.Contracts.AndroidCompanionRecords.ConnectedEventType):
+                ValidateAndroidCompanionConnected(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidCompanionRecords.CompanionChannel, Recorder.Contracts.AndroidCompanionRecords.UnavailableEventType):
+                ValidateAndroidCompanionUnavailable(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidCompanionRecords.ClockChannel, Recorder.Contracts.AndroidCompanionRecords.ClockSampleEventType):
+                ValidateAndroidClockSample(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidCompanionRecords.DisplayChannel, Recorder.Contracts.AndroidCompanionRecords.DisplayEventType):
+                ValidateAndroidDisplayState(payload, issues);
                 break;
             case ("system.assistive-technology", "assistive-technology-watch"):
                 ValidateAssistiveTechnologyWatch(payload, issues);
@@ -1789,6 +1804,101 @@ internal static class EventPayloadValidator
                 "hook-mouse-flag-inconsistent",
                 "#/payload/penOrTouch",
                 "penOrTouch must be what extraInformation's signature says.");
+        }
+    }
+
+    // The Android companion collector's records (android-implementation-plan.md,
+    // slice 2): the companion app's connection, the phone clock's samples,
+    // and the phone display.
+    private static void ValidateAndroidCompanionConnected(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues) =>
+        ValidateShape(
+            payload,
+            [
+                RequiredString("serial"),
+                RequiredInteger("protocol", positive: true),
+                RequiredText("versionName"),
+                RequiredInteger("versionCode", nonnegative: true),
+                RequiredText("androidRelease"),
+                RequiredInteger("sdk", positive: true)
+            ],
+            issues);
+
+    private static void ValidateAndroidCompanionUnavailable(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues) =>
+        ValidateShape(
+            payload,
+            [
+                RequiredString("serial"),
+                RequiredString("reason"),
+                RequiredBoolean("connectionLost")
+            ],
+            issues);
+
+    private static void ValidateAndroidClockSample(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredInteger("segment", positive: true),
+                RequiredBoolean("discontinuity"),
+                RequiredInteger("recorderSendNanoseconds"),
+                RequiredInteger("phoneReceiveNanoseconds", nonnegative: true),
+                RequiredInteger("phoneSendNanoseconds", nonnegative: true),
+                RequiredInteger("recorderReceiveNanoseconds"),
+                RequiredInteger("errorBoundNanoseconds", nonnegative: true)
+            ],
+            issues);
+        long? Read(string name) =>
+            payload.TryGetProperty(name, out var value) && IsInteger(value) ? value.GetInt64() : null;
+        if (Read("recorderSendNanoseconds") is { } send && Read("recorderReceiveNanoseconds") is { } receive &&
+            Read("phoneReceiveNanoseconds") is { } phoneReceive && Read("phoneSendNanoseconds") is { } phoneSend &&
+            Read("errorBoundNanoseconds") is { } bound)
+        {
+            if (receive < send || phoneSend < phoneReceive)
+            {
+                AddError(
+                    issues,
+                    "android-clock-sample-order",
+                    "#/payload",
+                    "A clock sample's receive times cannot be before its send times.");
+            }
+            else if (bound != Math.Max(0, (receive - send) - (phoneSend - phoneReceive)) / 2)
+            {
+                AddError(
+                    issues,
+                    "android-clock-sample-bound",
+                    "#/payload/errorBoundNanoseconds",
+                    "errorBoundNanoseconds must be half the round trip less the phone's own time.");
+            }
+        }
+    }
+
+    private static void ValidateAndroidDisplayState(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredEnum("reason", [.. Recorder.Contracts.AndroidCompanionRecords.DisplayReasons]),
+                RequiredInteger("rotation", nonnegative: true),
+                RequiredInteger("modeWidth", positive: true),
+                RequiredInteger("modeHeight", positive: true)
+            ],
+            issues);
+        if (payload.TryGetProperty("rotation", out var rotation) && IsInteger(rotation) &&
+            !Recorder.Contracts.AndroidCompanionRecords.Rotations.Contains((int)rotation.GetInt64()))
+        {
+            AddError(
+                issues,
+                "android-display-rotation",
+                "#/payload/rotation",
+                "rotation must be 0, 90, 180 or 270.");
         }
     }
 

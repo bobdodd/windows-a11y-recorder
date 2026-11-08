@@ -1,14 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Part 0 of the implementation plan only proves the app builds and installs.
-  The service receives no events yet; later parts widen this configuration
-  as each kind of evidence is added. isAccessibilityTool declares that the
-  app exists to support accessibility work.
+  The companion's service configuration, slice 2 of
+  docs/architecture/android-implementation-plan.md:
+
+  - every event type, and the window content, with interactive windows,
+    view IDs and the views not important for accessibility, so the tree
+    recorded from slice 7 holds what TalkBack is given and what it is not;
+  - isAccessibilityTool, as the app exists to support accessibility work
+    (decided 2026-11-07);
+  - no request for explore by touch, so turning the service on does not
+    change how the phone responds to touch.
+
+  The service performs no actions.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/service_description"
-    android:accessibilityEventTypes="typeAnnouncement"
+    android:accessibilityEventTypes="typeAllMask"
     android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds|flagIncludeNotImportantViews"
     android:notificationTimeout="0"
-    android:canRetrieveWindowContent="false"
+    android:canRetrieveWindowContent="true"
     android:isAccessibilityTool="true" />

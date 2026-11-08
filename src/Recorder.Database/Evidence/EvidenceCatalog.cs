@@ -280,6 +280,43 @@ internal static class EvidenceCatalog
         BigInt("unmatchedRawButtonAt", N),
         Int("unmatchedButton", N));
 
+    // Added by 0038_android_companion.sql. The Android companion collector's
+    // records: the companion app's connection (android.companion), the phone
+    // clock's samples (clock.android) and the phone display
+    // (android.display). See docs/architecture/android-implementation-plan.md,
+    // slice 2.
+    public static readonly EvidenceTable AndroidCompanionConnections = Evidence(
+        "android_companion_connections",
+        Text("serial"),
+        Int("protocol"),
+        Text("versionName"),
+        BigInt("versionCode"),
+        Text("androidRelease"),
+        Int("sdk"));
+
+    public static readonly EvidenceTable AndroidCompanionUnavailabilities = Evidence(
+        "android_companion_unavailabilities",
+        Text("serial"),
+        Text("reason"),
+        Bool("connectionLost"));
+
+    public static readonly EvidenceTable AndroidClockSamples = Evidence(
+        "android_clock_samples",
+        Int("segment"),
+        Bool("discontinuity"),
+        BigInt("recorderSendNanoseconds"),
+        BigInt("phoneReceiveNanoseconds"),
+        BigInt("phoneSendNanoseconds"),
+        BigInt("recorderReceiveNanoseconds"),
+        BigInt("errorBoundNanoseconds"));
+
+    public static readonly EvidenceTable AndroidDisplayStates = Evidence(
+        "android_display_states",
+        Text("reason"),
+        Int("rotation"),
+        Int("modeWidth"),
+        Int("modeHeight"));
+
     // Added by 0026_assistive_technology.sql. The assistive technology
     // collector's records (system.assistive-technology): what it watches,
     // each watched process's start and exit, each of its modules seen in or
@@ -1628,6 +1665,10 @@ internal static class EvidenceCatalog
         [
             AccessibilityHitTests, AccessibilityHitTestResults, AccessibilityActionsSent,
             AccessibilityActionsReceived, AccessibilityHitTestsComputed
+        ]),
+        (38, "android_companion",
+        [
+            AndroidCompanionConnections, AndroidCompanionUnavailabilities, AndroidClockSamples, AndroidDisplayStates
         ])
     ];
 
@@ -1661,6 +1702,10 @@ internal static class EvidenceCatalog
             [("input.keyboard-hook", "hook-installed")] = KeyboardHookInstallations,
             [("input.mouse-hook", "hook-mouse")] = MouseHookEvents,
             [("input.mouse-hook", "hook-mouse-installed")] = MouseHookInstallations,
+            [(Recorder.Contracts.AndroidCompanionRecords.CompanionChannel, Recorder.Contracts.AndroidCompanionRecords.ConnectedEventType)] = AndroidCompanionConnections,
+            [(Recorder.Contracts.AndroidCompanionRecords.CompanionChannel, Recorder.Contracts.AndroidCompanionRecords.UnavailableEventType)] = AndroidCompanionUnavailabilities,
+            [(Recorder.Contracts.AndroidCompanionRecords.ClockChannel, Recorder.Contracts.AndroidCompanionRecords.ClockSampleEventType)] = AndroidClockSamples,
+            [(Recorder.Contracts.AndroidCompanionRecords.DisplayChannel, Recorder.Contracts.AndroidCompanionRecords.DisplayEventType)] = AndroidDisplayStates,
             [("system.assistive-technology", "assistive-technology-watch")] = AssistiveTechnologyWatches,
             [("system.assistive-technology", "assistive-technology-process-started")] = AssistiveTechnologyProcessStarts,
             [("system.assistive-technology", "assistive-technology-process-exited")] = AssistiveTechnologyProcessExits,

@@ -345,10 +345,26 @@
                 <local:SelectableText x:Name="AndroidChecksText"
                            TextWrapping="Wrap"
                            Text="Checking the phone." />
+                <!-- Shown while the phone is connected and its companion
+                     app is not ready (slice 2): installs the recorder's
+                     copy, or turns the installed one on. -->
+                <Button x:Name="CompanionButton"
+                        Margin="0,12,0,0"
+                        MinHeight="44"
+                        MinWidth="44"
+                        HorizontalAlignment="Left"
+                        Visibility="Collapsed"
+                        Content="Install companion app"
+                        AutomationProperties.HelpText="Installs the recorder's companion app on the phone over USB, or turns it on, and leaves the phone's other accessibility services, such as TalkBack, as they are."
+                        Click="CompanionButton_Click" />
+                <local:SelectableText x:Name="CompanionResultText"
+                           Margin="0,8,0,0"
+                           TextWrapping="Wrap"
+                           Visibility="Collapsed" />
                 <local:SelectableText Margin="0,8,0,0"
                            Foreground="{StaticResource MutedText}"
                            TextWrapping="Wrap"
-                           Text="Recording the phone is not built yet; for now this panel checks it." />
+                           Text="A recording of the phone records the companion app's connection, the phone's clock and its display's rotation and size. The phone's screen, sound, touches and accessibility evidence come in later parts." />
               </StackPanel>
             </GroupBox>
 

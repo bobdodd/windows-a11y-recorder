@@ -3,7 +3,8 @@
 Written 2026-11-07 for the first version agreed in
 [Recording an Android device](android-recording.md): the phone connected
 to the PC by USB, recorded with the PC's microphone. Slices 0 and 1 are
-built; the others are not. The owner answered its three questions on 2026-11-08;
+built and tested; slice 2 is built and waits for its tests on the Pixel;
+the others are not built. The owner answered its three questions on 2026-11-08;
 see [Decisions of 2026-11-08](#decisions-of-2026-11-08).
 
 Each part below is marked as one of:
@@ -295,6 +296,97 @@ slice's full test goes into a validation plan,
   Accessibility shows the service and TalkBack both on. Start and stop a
   recording of 30 seconds; the recording's details show clock samples
   with a largest error bound in milliseconds.
+- **Built (2026-11-08), not yet tested on the Pixel.** Tests 10 to 14
+  of [the validation plan](../validation/android-recording-plan.md)
+  check it there.
+  - **App.** `RecorderAccessibilityService` starts `RecorderLink` when
+    Android connects the service and stops it when the service is turned
+    off. The service configuration is as above, with
+    `notificationTimeout` 0. The service receives events but does nothing
+    with them yet; slice 7 records them.
+  - **Socket.** `RecorderLink` listens on `a11yrecorder_companion` and
+    keeps a connection only if `getPeerCredentials()` gives adb's shell
+    user, or root on a phone where adb runs as root; any other is closed
+    at once.
+  - **Protocol 1.** Lines of JSON, each with a `type`. On connecting, the
+    app writes `hello` (protocol, app version name and code, Android
+    release and SDK level) and then `display` together, so nothing comes
+    between them. It answers each `clock` request with the request's `id`
+    and its `System.nanoTime()` when it read the request (`received`) and
+    when it wrote the reply (`sent`). It writes `display` again (rotation
+    in degrees, display mode width and height) when the rotation or size
+    changes. `CompanionProtocol.cs` in the recorder and `RecorderLink.java`
+    must agree; a hello of another protocol is refused with a message to
+    install the recorder's own app.
+  - **The checks panel.** The companion line reads the installed version
+    code with `pm list packages --show-versioncode` in the same shell
+    command as the other checks, and whether the service is in
+    `enabled_accessibility_services`. If the app is missing or older than
+    the recorder's copy, the panel offers "Install companion app"; if it
+    is installed but off, "Turn on companion app". When it is on, the
+    recorder connects through `adb forward` and reads the greeting,
+    showing "installed, on, and answering" with its version and protocol.
+    That answer is kept while the version stays the same; a failure is
+    tried again after 6 seconds.
+  - **Install and turn on.** `adb install -r` with the APK in the install
+    folder. If Android refuses it because the installed app is signed
+    with another key, the recorder removes the installed app and installs
+    its own. It then reads `enabled_accessibility_services`, adds the
+    companion's service to the services already listed, writes the list
+    back with `settings put secure enabled_accessibility_services` and
+    `accessibility_enabled 1`, and reads it again to check the phone kept
+    it. A list holding characters other than those of component names is
+    left alone, and the panel asks the tester to turn the app on in
+    Settings.
+  - **Recording.** "Start recording" with the Android device chosen
+    needs the phone connected, and records with one collector,
+    `android.companion`; the desktop's capture and the instrumented
+    Chromium are not started. The collector opens the forward and the
+    connection, records `companion-connected` on `android.companion`, and
+    asks for the phone's clock every 250 milliseconds, waiting at most 1
+    second for each answer. Each answer is recorded as `clock-sample` on
+    `clock.android`, with the four times, its error bound, its segment
+    and whether it began a new one. Display messages are recorded as
+    `display-state` on `android.display`, with the phone time as
+    `NativeTimestamp` and the session time from the fit.
+  - **Not reaching the phone does not stop the recording.** If the
+    companion cannot be reached at the start, or the connection ends
+    during the recording, the collector records `companion-unavailable`
+    with the reason, reports itself Degraded with that reason, and the
+    recording goes on. This slice does not connect again after a lost
+    connection.
+  - **The fit.** `PhoneClockMapper` fits session midpoint on phone
+    midpoint by least squares within each segment, each sample weighted
+    by the inverse square of its error bound plus 100 microseconds, so a
+    slow answer moves the line less than a quick one. A sample begins a
+    new segment when the time since the segment's last sample differs
+    between the two clocks by more than 20 milliseconds plus both
+    samples' error bounds. That is judged from the last sample, not from
+    the line: two running clocks differ in rate by parts per million,
+    microseconds over a quarter second, while a line fitted to a few
+    close samples can be steeper or shallower than that. A phone time
+    takes the larger error bound of the samples either side of it as its
+    uncertainty, or the last sample's bound beyond the last sample. A
+    display message that arrives before the first sample is stamped with
+    the time the recorder read it, with the `receipt-time-stamp` flag.
+  - **Status.** The "Current session" list shows, for the collector,
+    the companion's version, the number of clock samples, the largest
+    error bound, the latest rotation and size, and any discontinuities or
+    unanswered requests.
+  - **Storage.** Migration 0038 adds `android_companion_connections`,
+    `android_companion_unavailabilities`, `android_clock_samples` and
+    `android_display_states`, and the payload validator checks that each
+    sample's error bound agrees with its four times and that rotation is
+    0, 90, 180 or 270.
+  - **Not checked.** Whether Android 17 on the Pixel accepts the
+    `settings put` for an app installed with `adb install`, and keeps
+    TalkBack on, is what test 11 shows. That the display mode's width
+    and height stay in the phone's natural orientation when it rotates,
+    so that rotation changes and size does not, is inference: the
+    reference describes the mode's physical width and height without
+    saying whether they follow rotation
+    ([Android, Display.Mode](https://developer.android.com/reference/android/view/Display.Mode)).
+    Test 13 shows it.
 
 ### Slice 3: the screen
 
@@ -505,7 +597,7 @@ slice's full test goes into a validation plan,
 | Media Foundation decodes the phone's 1080 by 2404 H.264 | Checked on the development PC with one frame; the Alienware not checked | slice 3 |
 | Video packet times are CLOCK_MONOTONIC | Inference | slice 8, one-timeline check |
 | Accessibility event times match CLOCK_MONOTONIC | Inference from source | slice 8 |
-| `adb install` avoids the restricted settings block | Reported by developers | slice 2 |
+| `adb install` avoids the restricted settings block | Reported by developers; the recorder turns the app on with `settings put`, not through Settings | slice 2, test 11 |
 | Accessibility volume can be read or set over adb | Not checked | slice 4 |
 | "Display speech output" can be read over adb | Not checked | slice 1 |
 | PNG for every changed frame keeps up on the PC | Not measured | slice 3 |

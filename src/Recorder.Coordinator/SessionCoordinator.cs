@@ -60,7 +60,8 @@ public sealed class SessionCoordinator : IAsyncDisposable
                 runtime.Collector.HealthState,
                 runtime.Capability?.Status,
                 runtime.Capability?.Limitations ?? [],
-                runtime.Collector.HealthReason)).ToArray(),
+                runtime.Collector.HealthReason,
+                runtime.Collector.Summary)).ToArray(),
             _message,
             DatabaseStatus());
     }

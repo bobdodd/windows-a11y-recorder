@@ -241,6 +241,24 @@ internal static class EvidenceSamples
         // touch screen; the first installation, a refresh, one after a loss
         // of the mouse hook, and one after a loss of the keyboard hook whose
         // mouse hook could not be installed.
+        // Added with 0038_android_companion.sql: the companion app's greeting,
+        // its absence at the start and its loss during a recording, two clock
+        // samples (the second after the phone slept), and the display at the
+        // start and after turning the phone.
+        ("android.companion", "companion-connected",
+            J("{'serial':'58191FDCQ00ABZ','protocol':1,'versionName':'1.1.0','versionCode':685,'androidRelease':'17','sdk':37}")),
+        ("android.companion", "companion-unavailable",
+            J("{'serial':'58191FDCQ00ABZ','reason':'Nothing on the phone answered.','connectionLost':false}")),
+        ("android.companion", "companion-unavailable",
+            J("{'serial':'58191FDCQ00ABZ','reason':'The companion app closed the connection.','connectionLost':true}")),
+        ("clock.android", "clock-sample",
+            J("{'segment':1,'discontinuity':false,'recorderSendNanoseconds':1000000,'phoneReceiveNanoseconds':5000400000,'phoneSendNanoseconds':5000450000,'recorderReceiveNanoseconds':1900000,'errorBoundNanoseconds':425000}")),
+        ("clock.android", "clock-sample",
+            J("{'segment':2,'discontinuity':true,'recorderSendNanoseconds':91000000000,'phoneReceiveNanoseconds':6000400000,'phoneSendNanoseconds':6000400000,'recorderReceiveNanoseconds':91000000001,'errorBoundNanoseconds':0}")),
+        ("android.display", "display-state",
+            J("{'reason':'initial','rotation':0,'modeWidth':1344,'modeHeight':2992}")),
+        ("android.display", "display-state",
+            J("{'reason':'changed','rotation':90,'modeWidth':1344,'modeHeight':2992}")),
         ("input.mouse-hook", "hook-mouse",
             J("{'installation':1,'message':512,'kind':'move','button':null,'x':640,'y':-12,'mouseData':0,'wheelDelta':null,'flags':0,'injected':false,'lowerIntegrityInjected':false,'penOrTouch':null,'extraInformation':0,'eventTimeMilliseconds':123456789}")),
         ("input.mouse-hook", "hook-mouse",

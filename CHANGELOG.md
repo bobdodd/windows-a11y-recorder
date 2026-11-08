@@ -104,6 +104,29 @@ Changes on `main` since 1.1.0, not yet released.
 - Recording the phone is not built yet. Tests 5 to 9 passed on the
   development PC and the Pixel 10 Pro XL on 2026-11-08.
 
+### Android recording, part 2: the companion app and the phone clock
+
+- The companion app's accessibility service opens a local socket on the
+  phone, `a11yrecorder_companion`, reached through `adb forward`, and
+  keeps only connections from adb's shell user. It greets the recorder
+  with its version and protocol, answers clock requests with the phone's
+  CLOCK_MONOTONIC, and reports the display's rotation and size when they
+  change. It performs no actions and has no internet permission.
+- The checks panel shows whether the companion app is installed, on and
+  answering, and offers "Install companion app" or "Turn on companion
+  app". Installing keeps every accessibility service already on, such
+  as TalkBack.
+- "Start recording" with the Android device chosen records the
+  companion's connection, a clock sample every 250 milliseconds and the
+  display's changes, placed on the session clock by a weighted line fit
+  per segment, with a new segment when the phone's clock stops, as it
+  does while the phone sleeps. A companion that cannot be reached, or a
+  connection lost part way, is recorded and marks the collector
+  Degraded; the recording goes on.
+- Database migration 0038 adds the tables of the companion's records.
+- Tests 10 to 14 of the validation plan check it on the Pixel; not yet
+  run.
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now

@@ -35,10 +35,50 @@ public sealed record AndroidCheck(string Name, string Text, bool Ok);
 /// The checks panel's content (android-implementation-plan.md, slice 1),
 /// in the order shown.
 /// </summary>
-public sealed record AndroidCheckReport(PhoneState Phone, IReadOnlyList<AndroidCheck> Checks)
+/// <param name="Serial">The connected phone's serial, when one is connected.</param>
+/// <param name="Companion">What the panel offers to do for the companion app.</param>
+public sealed record AndroidCheckReport(
+    PhoneState Phone,
+    IReadOnlyList<AndroidCheck> Checks,
+    string? Serial = null,
+    CompanionAction Companion = CompanionAction.None)
 {
+    /// <summary>The phone is connected and its companion app answered.</summary>
+    public bool CompanionReady => Phone == PhoneState.Connected && Checks.Any(check => check.Name == AndroidDeviceChecks.CompanionCheckName && check.Ok);
+
     /// <summary>Each check as "Name: text", one to a line.</summary>
     public string Text => string.Join(Environment.NewLine, Checks.Select(check => $"{check.Name}: {check.Text}"));
+}
+
+/// <summary>What the checks panel offers for the companion app.</summary>
+public enum CompanionAction
+{
+    /// <summary>Nothing: it is ready, or the recorder cannot help.</summary>
+    None,
+
+    /// <summary>Install the recorder's copy, and turn it on.</summary>
+    Install,
+
+    /// <summary>Turn on the installed copy.</summary>
+    TurnOn
+}
+
+/// <summary>Asks the companion app on a phone for its greeting.</summary>
+public interface ICompanionProbe
+{
+    /// <summary>The greeting, or a <see cref="CompanionUnavailableException"/> saying why there was none.</summary>
+    Task<CompanionHello> HelloAsync(string serial, CancellationToken cancellation);
+}
+
+/// <summary>Connects through adb forward, reads the greeting, and closes the connection.</summary>
+public sealed class AdbCompanionProbe(IAdb adb) : ICompanionProbe
+{
+    public async Task<CompanionHello> HelloAsync(string serial, CancellationToken cancellation)
+    {
+        await using var connection = await CompanionLink.OpenAsync(
+            adb, serial, CompanionLink.StopwatchNanoseconds, cancellation).ConfigureAwait(false);
+        return connection.Hello;
+    }
 }
 
 /// <summary>A line of adb devices -l: the serial, the state, and the details after them.</summary>
@@ -54,8 +94,12 @@ public sealed record PhoneDetails(
     int? ScreenHeight,
     int? OverrideWidth,
     int? OverrideHeight,
-    string EnabledServices)
+    string EnabledServices,
+    long? CompanionVersionCode = null)
 {
+    /// <summary>The companion app's service is among the enabled accessibility services.</summary>
+    public bool CompanionOn => CompanionApp.IsOn(EnabledServices);
+
     /// <summary>TalkBack is on when its service is among the enabled accessibility services.</summary>
     public bool TalkBackOn =>
         EnabledServices.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -66,9 +110,23 @@ public sealed record PhoneDetails(
 /// Checks adb, the adb server and the phone for the checks panel, as the
 /// feasibility checks did in PowerShell (scripts/Test-AndroidFeasibility.ps1).
 /// Nothing here changes a setting on the phone.
+///
+/// With the recorder's copy of the companion app and a probe, the checks
+/// also report the companion app (slice 2): installed or not, its version
+/// code against the recorder's copy, on or off, and whether it answers.
 /// </summary>
-public sealed partial class AndroidDeviceChecks(IAdb adb, IAdbServerProbe server, Func<string, bool> fileExists)
+public sealed partial class AndroidDeviceChecks(
+    IAdb adb,
+    IAdbServerProbe server,
+    Func<string, bool> fileExists,
+    BundledCompanion? bundled = null,
+    ICompanionProbe? probe = null)
 {
+    public const string CompanionCheckName = "Companion app";
+
+    /// <summary>How long a failed greeting is reported before it is tried again.</summary>
+    private const long ProbeRetryMilliseconds = 6_000;
+
     /// <summary>TalkBack's package, as installed on the Pixel 10 Pro XL.</summary>
     public const string TalkBackPackage = "com.google.android.marvin.talkback";
 
@@ -95,9 +153,19 @@ public sealed partial class AndroidDeviceChecks(IAdb adb, IAdbServerProbe server
         "echo @patch; getprop ro.build.version.security_patch; " +
         "echo @size; wm size; " +
         "echo @services; settings get secure enabled_accessibility_services; " +
+        "echo @companion; pm list packages --show-versioncode " + AndroidTools.CompanionPackage + "; " +
         "echo @end";
 
     private AdbClientVersion? _client;
+
+    // The last greeting asked for, so that a working app is not connected
+    // to every two seconds: kept while the phone, the installed version and
+    // the service's state stay the same, and a failure is tried again after
+    // ProbeRetryMilliseconds.
+    private (string Serial, long VersionCode, bool On)? _probed;
+    private CompanionHello? _hello;
+    private string? _probeFailure;
+    private long _probedAt;
 
     /// <summary>Runs every check once.</summary>
     public async Task<AndroidCheckReport> CheckAsync(CancellationToken cancellation)
@@ -259,7 +327,78 @@ public sealed partial class AndroidDeviceChecks(IAdb adb, IAdbServerProbe server
                 false));
         }
 
-        return new AndroidCheckReport(PhoneState.Connected, checks);
+        var action = CompanionAction.None;
+        if (bundled is not null && probe is not null)
+        {
+            var (companion, offer) = await CheckCompanionAsync(device.Serial, details, cancellation).ConfigureAwait(false);
+            checks.Add(companion);
+            action = offer;
+        }
+
+        return new AndroidCheckReport(PhoneState.Connected, checks, device.Serial, action);
+    }
+
+    private async Task<(AndroidCheck Check, CompanionAction Action)> CheckCompanionAsync(
+        string serial,
+        PhoneDetails details,
+        CancellationToken cancellation)
+    {
+        var installed = details.CompanionVersionCode;
+        var copy = bundled!;
+        if (installed is null)
+        {
+            return copy.Problem is null
+                ? (new AndroidCheck(CompanionCheckName, "not installed. Choose \"Install companion app\".", false), CompanionAction.Install)
+                : (new AndroidCheck(CompanionCheckName, "not installed, and the recorder's own copy cannot be used. " + copy.Problem, false), CompanionAction.None);
+        }
+
+        if (copy.Problem is null && copy.VersionCode is { } recorders && installed < recorders)
+        {
+            return (new AndroidCheck(
+                CompanionCheckName,
+                $"version code {installed} is installed, older than the recorder's {recorders}. Choose \"Install companion app\" to update it.",
+                false), CompanionAction.Install);
+        }
+
+        if (!details.CompanionOn)
+        {
+            return (new AndroidCheck(
+                CompanionCheckName,
+                $"installed (version code {installed}), but off. Choose \"Turn on companion app\".",
+                false), CompanionAction.TurnOn);
+        }
+
+        var key = (serial, installed.Value, true);
+        var now = Environment.TickCount64;
+        if (_probed != key || (_hello is null && now - _probedAt >= ProbeRetryMilliseconds))
+        {
+            _probed = key;
+            _probedAt = now;
+            try
+            {
+                _hello = await probe!.HelloAsync(serial, cancellation).ConfigureAwait(false);
+                _probeFailure = null;
+            }
+            catch (CompanionUnavailableException exception)
+            {
+                _hello = null;
+                _probeFailure = exception.Message;
+            }
+        }
+
+        if (_hello is { } hello)
+        {
+            return (new AndroidCheck(
+                CompanionCheckName,
+                $"installed, on, and answering (version {hello.VersionName}, version code {hello.VersionCode}, protocol {hello.Protocol}).",
+                true), CompanionAction.None);
+        }
+
+        return (new AndroidCheck(
+            CompanionCheckName,
+            $"installed (version code {installed}) and on, but not answering: {_probeFailure}" +
+            (copy.Problem is null ? " Choose \"Install companion app\" to install it again." : ""),
+            false), copy.Problem is null ? CompanionAction.Install : CompanionAction.None);
     }
 
     /// <summary>The devices in adb devices -l output; the heading and daemon messages are skipped.</summary>
@@ -345,6 +484,10 @@ public sealed partial class AndroidDeviceChecks(IAdb adb, IAdbServerProbe server
             services = "";
         }
 
+        long? companion = parts.TryGetValue("companion", out var listed)
+            ? CompanionApp.ParseInstalledVersionCode(string.Join("\n", listed))
+            : null;
+
         return new PhoneDetails(
             Part("model"),
             Part("release"),
@@ -354,7 +497,8 @@ public sealed partial class AndroidDeviceChecks(IAdb adb, IAdbServerProbe server
             height,
             overrideWidth,
             overrideHeight,
-            services);
+            services,
+            companion);
     }
 
     /// <summary>

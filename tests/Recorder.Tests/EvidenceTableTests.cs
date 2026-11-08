@@ -890,7 +890,11 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         // 0028 added the tables of the input recordability records.
         !Recorder.Contracts.InputRecordabilityRecords.EventTypes.Contains(record.EventType) &&
         // 0031 added the tables of the accessibility request records.
-        !Recorder.Session.AccessibilityRequests.IsRequestEvidence(record.Channel, record.EventType);
+        !Recorder.Session.AccessibilityRequests.IsRequestEvidence(record.Channel, record.EventType) &&
+        // 0038 added the tables of the Android companion records.
+        record.Channel is not (Recorder.Contracts.AndroidCompanionRecords.CompanionChannel or
+            Recorder.Contracts.AndroidCompanionRecords.ClockChannel or
+            Recorder.Contracts.AndroidCompanionRecords.DisplayChannel);
 
     private static List<string> Sorted(List<string> rows)
     {
