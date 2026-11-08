@@ -176,6 +176,8 @@ function Start-Scrcpy([string[]]$arguments, [string]$name) {
     $errLog = Join-Path $root "$name-$stamp.scrcpy-err.txt"
     $p = Start-Process -FilePath $scrcpy -ArgumentList $arguments -WorkingDirectory $scrcpyDir `
         -NoNewWindow -PassThru -RedirectStandardOutput $outLog -RedirectStandardError $errLog
+    # Reading the handle now keeps the exit code readable after the process ends.
+    [void]$p.Handle
     return [pscustomobject]@{ Process = $p; Out = $outLog; Err = $errLog }
 }
 
@@ -230,7 +232,9 @@ switch ($Check) {
     'Sound' {
         Assert-TalkBackOn
         $wav = Join-Path $root "sound-$Source-$stamp.wav"
-        $arguments = @('--no-window', "--audio-source=$Source", '--audio-codec=raw', '--require-audio',
+        # --no-window stops only the display; --no-video stops the screen
+        # being recorded too, which a WAV file cannot hold.
+        $arguments = @('--no-video', '--no-control', '--no-window', "--audio-source=$Source", '--audio-codec=raw', '--require-audio',
                        "--record=`"$wav`"", '--time-limit=20')
         if ($Source -eq 'playback') { $arguments += '--audio-dup' }
         Say "Recording 20 seconds of the phone's sound from '$Source'. Follow the prompts."
