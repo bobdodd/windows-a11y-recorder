@@ -68,10 +68,11 @@ run it again. Send the whole output.
 
 **On screen:** "Sound from 'output': " with about 20 seconds, 48000 Hz
 and 2 channels", then a line per half second with a level and a bar of `#`.
-Before about 7 seconds, the levels are near 0% with no bar. After it,
-several groups of bars, each a few half seconds long, one group for
-each thing TalkBack said. The last line gives how many half seconds were
-above 2%. While this runs the phone is silent, and its sound plays on
+The bars are scaled to the loudest half second. Before about 7 seconds,
+the levels are 0.0% with no bar. After it, several groups of bars, each
+a few half seconds long, one group for each thing TalkBack said. The
+last line gives the loudest level and how many half seconds were above
+0.1%. While this runs the phone is silent, and its sound plays on
 the PC instead; that is how `output` works. Send the chart.
 
 ## Test 3: the phone's sound with duplication (`playback`)

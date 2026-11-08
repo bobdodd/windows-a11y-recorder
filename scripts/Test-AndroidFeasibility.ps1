@@ -249,15 +249,19 @@ switch ($Check) {
         Say ''
         Say ("Sound from '{0}': {1:N1} seconds, {2} Hz, {3} channels. Peak level per half second:" -f $Source, $levels.Seconds, $levels.Rate, $levels.Channels)
         Say ''
+        # Phone sound can be quiet, and silence from the phone is exactly 0,
+        # so bars are scaled to the loudest half second and any half second
+        # above 0.1% counts as sound.
+        $max = ($levels.Peaks | Measure-Object -Maximum).Maximum
         $loud = 0
         for ($i = 0; $i -lt $levels.Peaks.Length; $i++) {
             $p = $levels.Peaks[$i]
-            $bar = '#' * [int][Math]::Round($p * 50)
-            if ($p -ge 0.02) { $loud++ }
+            $bar = if ($max -gt 0) { '#' * [int][Math]::Round($p / $max * 50) } else { '' }
+            if ($p -ge 0.001) { $loud++ }
             Say ("{0,5:N1} s {1,5:N1}% |{2}" -f ($i * 0.5), ($p * 100), $bar)
         }
         Say ''
-        Say "Half seconds with sound above 2%: $loud of $($levels.Peaks.Length)"
+        Say ("Loudest half second: {0:N1}%. Half seconds with sound above 0.1%: {1} of {2}" -f ($max * 100), $loud, $levels.Peaks.Length)
         Say "The sound file is $wav"
     }
 
