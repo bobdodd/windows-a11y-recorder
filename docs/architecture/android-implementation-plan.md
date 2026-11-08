@@ -213,6 +213,9 @@ slice's full test goes into a validation plan,
   "Android device"; the panel shows "Pixel 10 Pro XL", "Android 17",
   "1080 by 2404" and "TalkBack: on". Unplug the cable; within a few
   seconds the panel shows "Phone: not found" and the steps.
+- **Passed (2026-11-08).** Tests 5 to 9 of
+  [the validation plan](../validation/android-recording-plan.md) on the
+  development PC and the Pixel.
 - **Built (2026-11-08).** The side panel's new "Recording target" group
   offers "This PC's desktop" and "Android device" (Alt+V). Choosing the
   Android device hides the capture channels and the Chromium settings

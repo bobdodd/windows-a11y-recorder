@@ -101,7 +101,8 @@ Changes on `main` since 1.1.0, not yet released.
   version matches the recorder's adb; otherwise the panel says which
   program runs it and leaves it alone.
 - "Desktop frames" moves to Alt+T, so Alt+D opens the Android menu.
-- Recording the phone is not built yet. Not yet run on Windows.
+- Recording the phone is not built yet. Tests 5 to 9 passed on the
+  development PC and the Pixel 10 Pro XL on 2026-11-08.
 
 ## 1.1.0 - 2026-10-13
 

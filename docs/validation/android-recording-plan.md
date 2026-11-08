@@ -283,6 +283,10 @@ is on the PC.
 - 2026-11-08, part 1: test 7 passed. Unplugged, the panel changed to
   "Phone: not found." with the steps; plugged in again, the phone's
   lines came back. TalkBack, turned on while the phone was unplugged,
-  showed as on once it was back. Test 6's new steps 4 and 5 and test 8
-  wait for the next installer build.
+  showed as on once it was back.
+- 2026-11-08, part 1, installer built from `e580566`: test 6 passed. The
+  panel followed TalkBack being turned off and on, and with TalkBack on
+  showed "TalkBack: on." with the "Display speech output" reminder under
+  it. Test 8 passed: Alt+D opened the Android menu, and Alt+T checked and
+  unchecked "Desktop frames". All of part 1's tests have passed.
 
