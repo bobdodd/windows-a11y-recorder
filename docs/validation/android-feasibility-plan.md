@@ -94,7 +94,9 @@ chart.
 ## Test 4: TalkBack's text is in the video
 
 1. In TalkBack's settings, open Advanced settings, then Developer
-   settings, and turn on "Display speech output".
+   settings, and turn on "Display speech output". Swipe right once on
+   the Home screen and check that text appears at the bottom of the
+   phone before going on.
 2. Run `& $check -Check SpeechText`
 3. Follow the prompts: swipe right 3 times, slowly, from about 4
    seconds.
@@ -157,4 +159,13 @@ results before any building starts.
   before the run the loudest moment was 2.9%; with Accessibility volume
   set to about 80% during the run it was 32.0%.
 - Test 3: `playback` with `--audio-dup` recorded only silence.
-- Tests 4 to 6: not yet run.
+- Test 4: the first run showed no text because "Display speech output"
+  was not on; once on, the text showed on the phone and in the MP4. In
+  the frame sent, the green focus box is on Messenger and the text at the
+  bottom reads "Double-tap to activate. Double-tap and hold to long press.
+  Actions available, swipe up or swipe down and double-tap to activate."
+  That is the usage hint, which had replaced the spoken name by the time
+  of the frame, so a single frame does not hold everything TalkBack said.
+  The text also covers the bottom of the screen, here the search bar and
+  navigation buttons.
+- Tests 5 and 6: not yet run.
