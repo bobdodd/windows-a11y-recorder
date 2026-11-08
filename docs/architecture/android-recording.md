@@ -1,7 +1,9 @@
 # Recording an Android device
 
-Proposed 2026-11-07. All five questions decided on 2026-11-07 (see
-[Decisions](#decisions-of-2026-11-07)). Not built.
+Proposed 2026-11-07. All five questions decided and all four checks run
+on 2026-11-07 (see [Decisions](#decisions-of-2026-11-07) and
+[the feasibility checks](../validation/android-feasibility-plan.md)).
+Not built.
 
 ## Purpose
 
@@ -240,6 +242,18 @@ scrcpy source (`mic`), and could be added later.
 - Positions are in the touch panel's units. They are converted to screen
   pixels from each axis's range, which `getevent -lp` reports
   ([Bytescope](https://bytescope.dev/en/web-adb/commands/getevent/)).
+- Check 4 confirmed this on 2026-11-07 without root and with TalkBack on:
+  three taps at the top, middle and bottom were read as x 603, y 171;
+  x 654, y 1188; and x 613, y 2155 on a screen of 1080 by 2404 pixels.
+  The panel reports in finer units than pixels (an x of 7510 in the raw
+  events), so the conversion is needed. `getevent` does not flush its
+  output when read through a pipe, so the recorder reads it through a
+  terminal on the phone (`adb shell -tt`) or must otherwise keep lines
+  from being held back.
+- The touch times (about 146,202 s) and the TalkBack log times from
+  `logcat -v monotonic` (about 145,977 s, four minutes earlier) are on
+  the same scale, which fits both being CLOCK_MONOTONIC. That is
+  inference until the one-timeline check below.
 - The same stream gives the hardware keys, such as volume and power. Text
   typed on the on-screen keyboard is not in it. Text changes come from the
   accessibility events.

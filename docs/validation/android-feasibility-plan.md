@@ -175,4 +175,8 @@ results before any building starts.
   current item" line when a swipe cut speech off, and a "speak word ="
   line for each word reached, 42 in all. See "What TalkBack said" in the
   design.
-- Test 6: not yet run.
+- Test 6: passed with TalkBack on and no root. "Touches: 3", at 0.00 s
+  x 603, y 171; at 4.09 s x 654, y 1188; at 7.19 s x 613, y 2155
+  pixels, on a screen of 1080 by 2404. The raw file has 1,436 lines.
+
+All four checks of the design have now been run.
