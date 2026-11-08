@@ -142,7 +142,9 @@ internet." with its switch off.
   `WindowsA11yRecorder-Setup-2f1f913.exe` built, with the `android` folder
   holding the companion app, its description, the scrcpy server and its
   licence). Tests 2 and 3 passed: the owner found the Android menu and
-  Platform-Tools downloaded and installed.
+  Platform-Tools downloaded and installed. Test 4 passed: the companion
+  app installed on the Pixel and "A11y Recorder companion" appeared in
+  Settings, Accessibility, left off.
 - Found during test 2: the menu bar is easy to miss. The owner looked for
   the Android menu in the side panel's sections before finding the thin
   strip at the top of the window. Making the menu bar much more visible is
