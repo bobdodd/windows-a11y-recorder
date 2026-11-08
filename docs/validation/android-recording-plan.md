@@ -135,3 +135,17 @@ the Pixel, the companion's page shows the description "Records
 accessibility evidence for Windows A11y Recorder while a recording runs
 over USB. It does nothing on the phone and sends nothing over the
 internet." with its switch off.
+
+## Results
+
+- 2026-11-08, development PC: test 1 passed (installer
+  `WindowsA11yRecorder-Setup-2f1f913.exe` built, with the `android` folder
+  holding the companion app, its description, the scrcpy server and its
+  licence). Tests 2 and 3 passed: the owner found the Android menu and
+  Platform-Tools downloaded and installed.
+- Found during test 2: the menu bar is easy to miss. The owner looked for
+  the Android menu in the side panel's sections before finding the thin
+  strip at the top of the window. Making the menu bar much more visible is
+  a later change, not part of the Android work. The menu's access key,
+  Alt+D, is also used by "Desktop frames"; it gets a letter of its own in
+  slice 1.
