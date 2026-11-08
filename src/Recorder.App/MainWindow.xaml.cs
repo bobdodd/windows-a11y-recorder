@@ -185,6 +185,17 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (AndroidTargetRadioButton.IsChecked == true)
+        {
+            MessageBox.Show(
+                this,
+                "Recording an Android device is not built yet. For now the Android device checks panel checks the phone.",
+                "Android recording not built yet",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
         if (!AnyChannelSelected())
         {
             MessageBox.Show(
@@ -1614,6 +1625,8 @@ public partial class MainWindow : Window
         SystemAudioCheckBox.IsEnabled = enabled;
         BrowserEvidenceCheckBox.IsEnabled = enabled;
         BrowserCaptureGroupBox.IsEnabled = enabled;
+        DesktopTargetRadioButton.IsEnabled = enabled;
+        AndroidTargetRadioButton.IsEnabled = enabled;
         OutputRootTextBox.IsEnabled = enabled;
         BrowseButton.IsEnabled = enabled;
     }
@@ -1759,6 +1772,7 @@ public partial class MainWindow : Window
         CloseTornTabs();
         CloseReportWindows();
         _analysisTimer?.Stop();
+        StopAndroidChecks();
         eventArgs.Cancel = true;
         if (_transitioning)
         {

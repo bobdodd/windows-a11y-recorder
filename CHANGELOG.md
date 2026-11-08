@@ -83,7 +83,24 @@ Changes on `main` since 1.1.0, not yet released.
   `scripts\Build-CompanionApp.ps1`, which `Build-Installer.ps1` runs.
 - See [the Android implementation plan](docs/architecture/android-implementation-plan.md)
   and [its validation plan](docs/validation/android-recording-plan.md).
-  Not yet run on Windows.
+  Tests 1 to 4 passed on the development PC and the Pixel 10 Pro XL on
+  2026-11-08.
+
+### Android recording, part 1: the phone, found and checked
+
+- The side panel's "Recording target" group chooses between this PC's
+  desktop and an Android device. The Android device shows "Android
+  device checks" in place of the capture channels: adb and its version,
+  the adb server, the phone's model, Android version, build, security
+  patch and screen size, whether TalkBack is on, and a reminder to turn
+  on TalkBack's "Display speech output". They are read again every 2
+  seconds, and a phone that is not found comes with the steps to connect
+  it.
+- An adb server already run by another program is used only if its
+  version matches the recorder's adb; otherwise the panel says which
+  program runs it and leaves it alone.
+- "Desktop frames" moves to Alt+T, so Alt+D opens the Android menu.
+- Recording the phone is not built yet. Not yet run on Windows.
 
 ## 1.1.0 - 2026-10-13
 

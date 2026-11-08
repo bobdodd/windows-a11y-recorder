@@ -1,8 +1,9 @@
 # Recording an Android device: validation plan
 
 Written 2026-11-08 for slice 0 of
-[the Android implementation plan](../architecture/android-implementation-plan.md):
-the tools. Later slices add their tests here. Each test checks one
+[the Android implementation plan](../architecture/android-implementation-plan.md),
+the tools, with tests 5 to 9 added the same day for slice 1, the phone
+found and checked. Later slices add their tests here. Each test checks one
 behaviour in at most five steps, with what to see on the screen.
 
 What was checked before this plan, in the Linux build environment:
@@ -151,3 +152,118 @@ internet." with its switch off.
   a later change, not part of the Android work. The menu's access key,
   Alt+D, is also used by "Desktop frames"; it gets a letter of its own in
   slice 1.
+
+## Part 1: the phone, found and checked
+
+What was checked before these tests, in the Linux build environment: the
+solution builds with no warnings, and 15 new tests of the checks pass
+against a fake adb that answers with what the Pixel printed in the
+feasibility checks: a connected phone with TalkBack on and off, another
+accessibility service on its own, a changed screen resolution, no phone,
+a phone not yet allowed, an offline phone, two devices, no adb, another
+program's adb server of another version and of the same version, the
+recorder's own server already running, and adb's version reply. None of
+that shows the panel on Windows, a real adb server, or the real phone.
+Tests 5 to 9 do.
+
+### Test 5: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Start the recorder from the Start menu.
+4. Read the top of the side panel.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the licence
+question does not come back, as it was accepted in test 1. In the
+recorder, above "Capture channels", a group "Recording target" with two
+choices, "This PC's desktop" (chosen) and "Android device".
+
+### Test 6: the phone's checks
+
+1. Connect the Pixel by USB, unlocked, with TalkBack on.
+2. In "Recording target", choose "Android device".
+3. Wait 5 seconds, then read the side panel.
+
+**On screen:** "Capture channels" and "Instrumented Chromium" are gone,
+and "Android device checks" shows:
+
+- "adb: ready, version 1.0.41 (Platform-Tools 37.0.1)."
+- "adb server: the recorder's own."
+- "Phone: Pixel 10 Pro XL, connected and allowed (serial
+  58191FDCQ00ABZ)."
+- "System: Android 17, build CP3A.260905.009, security patch
+  2026-09-05." (later values if the phone has updated)
+- "Screen: 1080 by 2404 pixels."
+- "TalkBack: on."
+- "Display speech output: the recorder cannot read this setting." with
+  where to turn it on.
+
+Under them, "Recording the phone is not built yet; for now this panel
+checks it." If "adb server" says another program's server is running,
+note which program and send the line.
+
+### Test 7: the phone unplugged and plugged in again
+
+With the panel from test 6 showing:
+
+1. Unplug the USB cable from the phone.
+2. Within 5 seconds, read the panel.
+3. Plug the cable in again and unlock the phone.
+4. Within 5 seconds, read the panel.
+
+**On screen:** after step 1, "Phone: not found." followed by "Step 1" to
+"Step 4": USB debugging on, the cable carrying data, "File transfer"
+under "Use USB for", and "Allow USB debugging?" accepted. The lines for
+the system, screen and TalkBack are gone. After step 3, the lines of test
+6 are back.
+
+### Test 8: the menu's access key
+
+1. Choose "This PC's desktop" in "Recording target".
+2. Press Alt+D.
+3. Press Escape twice, then press Alt+T.
+
+**On screen:** after step 2 the Android menu is open, showing "Set up
+Android recording...". After step 3 the menu is closed and "Desktop
+frames" in "Capture channels" has changed between checked and unchecked;
+its letter "t" is underlined while Alt is held. Press Alt+T again to put
+it back.
+
+### Test 9: another program's adb server
+
+The adb that came with scrcpy for the feasibility checks is the same
+version as the recorder's, so the recorder uses its server rather than
+stopping it.
+
+1. Choose "This PC's desktop" in "Recording target".
+2. In PowerShell, stop the recorder's adb server and start scrcpy's:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   & (Join-Path $env:LOCALAPPDATA "Windows A11y Recorder\android\platform-tools\adb.exe") kill-server
+   & (Join-Path $repo "artifacts\android-checks\tools\scrcpy-win64-v5.0.1\adb.exe") start-server
+   ```
+
+3. In the recorder, choose "Android device" and wait 5 seconds.
+4. Read the "adb server" line.
+
+**On screen:** in step 2, "* daemon started successfully". In the panel,
+"adb server: another program's adb server is running (from
+C:\Users\User\windows-a11y-recorder\artifacts\android-checks\tools\scrcpy-win64-v5.0.1\adb.exe).
+It is the same version as the recorder's, so the recorder uses it and
+leaves it running.", and the phone's lines as in test 6. The case of a
+server of another version, which the recorder leaves alone, is covered
+only by the tests in the build environment, as no adb of another version
+is on the PC.
+

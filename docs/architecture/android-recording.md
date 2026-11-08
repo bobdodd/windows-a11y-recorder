@@ -310,8 +310,9 @@ events, video and sound fall on one timeline on the Pixel.
 - **Recorder.** A recording can target "Android device". Before start it
   shows, from its checks: the phone found and authorized, its model and
   Android version, the companion app installed and on, TalkBack on or
-  off, and whether "Display speech output" is on. Each source reports its
-  capability as the collector contracts require.
+  off, and a reminder to turn on "Display speech output", which the
+  recorder cannot read (slice 1 of the implementation plan). Each source
+  reports its capability as the collector contracts require.
 - **Player.** The phone's picture takes the desktop's place, with touches
   drawn as the pointer is now, and the TalkBack and accessibility events
   in their own lanes. MP4 export treats the phone's sound as the system

@@ -2,8 +2,8 @@
 
 Written 2026-11-07 for the first version agreed in
 [Recording an Android device](android-recording.md): the phone connected
-to the PC by USB, recorded with the PC's microphone. Slice 0 is built;
-the others are not. The owner answered its three questions on 2026-11-08;
+to the PC by USB, recorded with the PC's microphone. Slices 0 and 1 are
+built; the others are not. The owner answered its three questions on 2026-11-08;
 see [Decisions of 2026-11-08](#decisions-of-2026-11-08).
 
 Each part below is marked as one of:
@@ -212,7 +212,43 @@ slice's full test goes into a validation plan,
 - **Target test.** With the phone connected and TalkBack on, choose
   "Android device"; the panel shows "Pixel 10 Pro XL", "Android 17",
   "1080 by 2404" and "TalkBack: on". Unplug the cable; within a few
-  seconds the panel shows "Phone not found" and the steps.
+  seconds the panel shows "Phone: not found" and the steps.
+- **Built (2026-11-08).** The side panel's new "Recording target" group
+  offers "This PC's desktop" and "Android device" (Alt+V). Choosing the
+  Android device hides the capture channels and the Chromium settings
+  and shows "Android device checks", which `AndroidDeviceChecks` in
+  `Recorder.Collectors.Android` fills in every 2 seconds. A change of the
+  phone's state, such as unplugging it, is also spoken. "Start
+  recording" with the Android device chosen says the recording is not
+  built yet.
+  - Each check is one adb command through `IAdb`: `adb version` once,
+    `adb devices -l`, and for a connected phone one `adb -s <serial>
+    shell` command that prints the model, Android version, build,
+    security patch, `wm size` and the enabled accessibility services,
+    each after a marker. Tests run them against a fake that answers with
+    what the Pixel printed in the feasibility checks.
+  - The adb server: before starting one, the recorder asks port 5037 for
+    a running server's version, with the request adb's own client sends
+    ([adb, overview](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/dev/overview.md)),
+    and lists the adb programs running. adb's client stops a server whose
+    version differs from its own and starts its own
+    ([adb, adb_client.cpp](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/client/adb_client.cpp)).
+    So a server from another program is used if its version matches
+    the recorder's (41 for Platform-Tools 37.0.1); otherwise the panel
+    names its program and version and stops there, leaving it running.
+    The recorder's own server is left running when the recorder closes,
+    as adb's servers are.
+  - "Display speech output": not read, so the panel always reminds the
+    tester where to turn it on. It is set in TalkBack's own settings
+    screens, and the inference is that TalkBack keeps it in its own
+    storage, which adb cannot read on a phone that is not rooted. Not
+    checked: whether `adb shell settings list secure` on the Pixel shows
+    it.
+  - The companion app line waits for slice 2.
+  - Access keys: "Desktop frames" is now Alt+T, so Alt+D opens the
+    Android menu (validation plan, part 0 results). Alt+T is also "Stop
+    recording", which is never available while the channels can be
+    changed.
 
 ### Slice 2: the companion app and the phone clock
 

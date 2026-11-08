@@ -223,7 +223,32 @@
                     Content="_Open recording..."
                     Click="OpenRecordingButton_Click" />
 
-            <GroupBox Header="Capture channels" Padding="10" Margin="0,0,0,12">
+            <!-- What to record (android-implementation-plan.md, slice 1).
+                 Choosing the Android device shows its checks panel in place
+                 of the desktop's channels. Each choice is a 44 pixel high
+                 target. -->
+            <GroupBox Header="Recording target" Padding="10" Margin="0,0,0,12">
+              <StackPanel>
+                <RadioButton x:Name="DesktopTargetRadioButton"
+                             GroupName="RecordingTarget"
+                             IsChecked="True"
+                             MinHeight="44"
+                             VerticalContentAlignment="Center"
+                             Foreground="#CDCCCA"
+                             Content="This PC's desktop"
+                             Checked="RecordingTarget_Checked" />
+                <RadioButton x:Name="AndroidTargetRadioButton"
+                             GroupName="RecordingTarget"
+                             MinHeight="44"
+                             VerticalContentAlignment="Center"
+                             Foreground="#CDCCCA"
+                             Content="Android de_vice"
+                             AutomationProperties.HelpText="Checks the Android phone connected over USB."
+                             Checked="RecordingTarget_Checked" />
+              </StackPanel>
+            </GroupBox>
+
+            <GroupBox x:Name="CaptureChannelsGroupBox" Header="Capture channels" Padding="10" Margin="0,0,0,12">
               <StackPanel>
                 <CheckBox x:Name="InputCheckBox"
                           IsChecked="True"
@@ -236,7 +261,7 @@
                           Content="_Foreground window changes" />
                 <CheckBox x:Name="FramesCheckBox"
                           IsChecked="True"
-                          Content="_Desktop frames" />
+                          Content="Desk_top frames" />
                 <CheckBox x:Name="MicrophoneCheckBox"
                           Content="_Microphone audio"
                           AutomationProperties.HelpText="Records speech and other sound from the default microphone." />
@@ -306,6 +331,24 @@
                         Content="Open recreation with _fixed content"
                         AutomationProperties.HelpText="Opens a fixed test page in the instrumented Chromium with DevTools and the evidence panel. The page is written in code and is not evidence from a recording."
                         Click="OpenFixedRecreationButton_Click" />
+              </StackPanel>
+            </GroupBox>
+
+            <!-- The Android device's checks (android-implementation-plan.md,
+                 slice 1), read again every 2 seconds while it is shown. -->
+            <GroupBox x:Name="AndroidChecksGroupBox"
+                      Header="Android device checks"
+                      Padding="10"
+                      Margin="0,0,0,12"
+                      Visibility="Collapsed">
+              <StackPanel>
+                <local:SelectableText x:Name="AndroidChecksText"
+                           TextWrapping="Wrap"
+                           Text="Checking the phone." />
+                <local:SelectableText Margin="0,8,0,0"
+                           Foreground="{StaticResource MutedText}"
+                           TextWrapping="Wrap"
+                           Text="Recording the phone is not built yet; for now this panel checks it." />
               </StackPanel>
             </GroupBox>
 

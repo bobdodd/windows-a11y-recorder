@@ -23,6 +23,7 @@ internal sealed class BusyIndicator
     private const string BusyActivityId = "Recorder.App.Busy";
     private const string LayoutActivityId = "Recorder.App.Layout";
     private const string AnalysisActivityId = "Recorder.App.Analysis";
+    private const string AndroidActivityId = "Recorder.App.Android";
     private const string CollectorHealthActivityId =
         "Recorder.App.CollectorHealth";
 
@@ -95,6 +96,13 @@ internal sealed class BusyIndicator
     /// </summary>
     public void AnnounceAnalysis(string message) =>
         Announce(message, AutomationNotificationKind.Other, AnalysisActivityId);
+
+    /// <summary>
+    /// Speaks a change the Android device checks found, such as the phone
+    /// being unplugged (android-implementation-plan.md, slice 1).
+    /// </summary>
+    public void AnnounceAndroid(string message) =>
+        Announce(message, AutomationNotificationKind.Other, AndroidActivityId);
 
     private void End()
     {
