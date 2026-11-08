@@ -168,4 +168,11 @@ results before any building starts.
   of the frame, so a single frame does not hold everything TalkBack said.
   The text also covers the bottom of the screen, here the search bar and
   navigation buttons.
-- Tests 5 and 6: not yet run.
+- Test 5: TalkBack wrote 1,196 log lines in about 16 seconds. For the 3
+  swipes (Session, O SCANada, Speedtest) they hold each spoken text in a
+  "Speaking fragment text=" line with an utterance number and the
+  causing event, each usage hint as its own utterance, an "interrupting
+  current item" line when a swipe cut speech off, and a "speak word ="
+  line for each word reached, 42 in all. See "What TalkBack said" in the
+  design.
+- Test 6: not yet run.

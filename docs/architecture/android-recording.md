@@ -142,15 +142,42 @@ scrcpy source (`mic`), and could be added later.
   TalkBack speech output on the screen", and a log level of VERBOSE
   ([Android, testing](https://developer.android.com/guide/topics/ui/accessibility/testing)).
   With the first turned on, TalkBack's words are in the video as text.
-  Check 2 confirms they reach the recorded picture.
+  Check 2 confirmed on 2026-11-07 that they reach the recorded picture.
+  Only the latest text shows, so a later utterance such as a usage hint
+  replaces the name it followed, and the text covers the bottom of the
+  screen.
 - With verbose logging, TalkBack writes to the system log, which the
   recorder can read over adb. Google's own bug template warns that
   "TalkBack logs exposes the contents of your screen to your device's
   logs"
   ([Google Issue Tracker](https://issuetracker.google.com/issues/517413745)).
-  Whether the log holds the spoken text, and with what times, is check 3.
-  If it does, TalkBack's speech is recorded as text, which NVDA does not
-  allow.
+  Check 3 on 2026-11-07 (TalkBack 17.1, log level Verbose) found the
+  spoken text in TalkBack's own log lines, with CLOCK_MONOTONIC times
+  from `logcat -v monotonic`. For three swipes on the Home screen the
+  log held, for each item:
+  - the focus event and the text chosen for it, for example
+    `viewAccessibilityFocused: ... ttsOutput={Speedtest}`;
+  - `SpeechControllerImpl: Speaking fragment text="Speedtest",
+    utteranceId=talkback_17, ... event=type:EVENT_TYPE_ACCESSIBILITY
+    subtype:TYPE_VIEW_ACCESSIBILITY_FOCUSED ... time:145986290`, the
+    full text with an utterance number and the time of the event that
+    caused it;
+  - the usage hint as a separate utterance, `Speaking fragment
+    text="Double-tap to activate. ..."`;
+  - `clearCurrentAndQueuedUtterancesThatDontIgnoreInterrupts:
+    interrupting current item: {utteranceId:"talkback_16", ...}` when the
+    next swipe cut an utterance off;
+  - `FeedbackFragmentsIterator: onFragmentRangeStarted , speak word =
+    Double`, one line per word as the speech engine reached it.
+
+  So TalkBack's speech can be recorded as text, with when each utterance
+  started, which event caused it, which words were reached and when it
+  was interrupted, which NVDA does not allow. These are TalkBack's
+  internal log lines, not a published interface, so their wording can
+  change between TalkBack versions; the recorder keeps the raw lines and
+  parses them as a separate, versioned step. That the word lines match
+  when the words were heard is inference: they come from the speech
+  engine's progress, not from the sound.
 - Like the NVDA design ([screen reader activity](screen-reader-activity.md)),
   what TalkBack had to announce can also be inferred from the
   accessibility events below. That is later work, and is kept apart from
