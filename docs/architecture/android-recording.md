@@ -400,3 +400,9 @@ The owner answered questions 2 to 5, and question 1 followed from check 1:
 - **Checks first (question 5).** The four checks are run before any
   building, as
   [the feasibility checks](../validation/android-feasibility-plan.md).
+
+The owner answered the implementation plan's three questions on
+2026-11-08: the companion app is built by the installer build on the
+development PC, and Chrome's DevTools Protocol and analysis of phone
+recordings come after the first version
+([implementation plan](android-implementation-plan.md#decisions-of-2026-11-08)).

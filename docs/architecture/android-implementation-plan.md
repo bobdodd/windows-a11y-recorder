@@ -2,8 +2,9 @@
 
 Written 2026-11-07 for the first version agreed in
 [Recording an Android device](android-recording.md): the phone connected
-to the PC by USB, recorded with the PC's microphone. Not built. Three
-questions for the owner are at the end.
+to the PC by USB, recorded with the PC's microphone. Not built. The
+owner answered its three questions on 2026-11-08; see
+[Decisions of 2026-11-08](#decisions-of-2026-11-08).
 
 Each part below is marked as one of:
 
@@ -26,10 +27,10 @@ Each part below is marked as one of:
 | Settings | `adb shell settings list` at start, companion app's observers after | receipt time in the app | settings records |
 | Phone clock | companion app answers clock requests over an adb socket | `System.nanoTime()` | mapping samples |
 
-Not in the first version: Chrome's DevTools Protocol (question 2), the
+Not in the first version: Chrome's DevTools Protocol (decided 2026-11-08), the
 PC's desktop in the same recording (decided 2026-11-07), wireless
 debugging (decided 2026-11-07), the phone's microphone, and analysis of
-phone recordings (question 3).
+phone recordings (decided 2026-11-08).
 
 ## How the recorder is built today
 
@@ -159,9 +160,13 @@ slice's full test goes into a validation plan,
   ([scrcpy, LICENSE](https://github.com/Genymobile/scrcpy/blob/master/LICENSE)),
   so it goes into `android\` in the install folder with its licence, and
   into `THIRD-PARTY-NOTICES.txt`.
-- **Companion app build.** Depends on question 1. The app is signed with
-  a key kept on the build machine outside the repository, so a new
-  version installs over the old one. If the key ever changes, the
+- **Companion app build.** By `Build-Installer.ps1` on the development
+  PC (decided 2026-11-08). The script fetches a pinned Java development
+  kit and the Android SDK command-line tools on first use, and the owner
+  accepts the Android SDK licence there once. The Linux build environment
+  builds the app too, to test changes before they reach the PC. The app
+  is signed with a key kept on the build machine outside the repository,
+  so a new version installs over the old one. If the key ever changes, the
   recorder removes the old app and installs the new one, and turns the
   service on again (slice 2).
 - **Target test.** Open Android setup, accept the licence, download; the
@@ -470,3 +475,14 @@ slice's full test goes into a validation plan,
      plays and exports phone recordings, and the analysis is planned
      once real phone recordings exist to design it against.
    - (b) In the first version, as a slice after slice 8.
+
+## Decisions of 2026-11-08
+
+The owner answered the three questions:
+
+- **Companion app build (question 1, option a).** By the installer build,
+  `Build-Installer.ps1`, on the development PC.
+- **Chrome's DevTools Protocol (question 2, option a).** After the first
+  version.
+- **Analysis of phone recordings (question 3, option a).** After the
+  first version, once real phone recordings exist.
