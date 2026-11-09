@@ -565,6 +565,41 @@ public sealed class AndroidFramesTests : IDisposable
             return packet;
         }
     }
+
+    // Step 3c: the playback index a recording file holds keeps the phone's
+    // frames, so the player built from it shows them.
+    [Fact]
+    public void PlaybackIndex_KeepsThePhoneFrames_AndTheArchiveShowsThem()
+    {
+        Directory.CreateDirectory(Path.Combine(_folder, "frames", "android"));
+        File.WriteAllBytes(Path.Combine(_folder, AndroidFrameRecords.FramePath(1)), [1]);
+        File.WriteAllBytes(Path.Combine(_folder, AndroidFrameRecords.FramePath(2)), [1]);
+        var collector = CollectorDescriptor.Create(
+            "android.screen", "AndroidScreenCollector", "1", [AndroidFrameRecords.FramesChannel], "test");
+        var builder = new PlaybackIndexBuilder(10_000_000, TimeSpan.Zero);
+        builder.Add(1, RecorderEventFactory.Create("s", collector, AndroidFrameRecords.FramesChannel, 1, 100_000_000,
+            AndroidFrameRecords.FrameEventType, new { path = AndroidFrameRecords.FramePath(1), width = 1080, height = 2404, session = 1 }));
+        builder.Add(2, RecorderEventFactory.Create("s", collector, AndroidFrameRecords.FramesChannel, 2, 900_000_000,
+            AndroidFrameRecords.FrameEventType, new { path = AndroidFrameRecords.FramePath(2), width = 2404, height = 1080, session = 2 }));
+        var index = builder.Build();
+
+        Assert.Equal(20, index.Version);
+        Assert.Equal(2, index.Events.Count(item => item.Channel == AndroidFrameRecords.FramesChannel));
+
+        var archiveBuilder = new SessionPlaybackArchiveBuilder(_folder, retainEvents: false);
+        archiveBuilder.AddIndex(index);
+        var started = DateTimeOffset.UtcNow;
+        var archive = archiveBuilder.Build(new SessionManifest(
+            "1.1", "s", "completed", started, started.AddSeconds(1), 1_000_000_000, 10_000_000, 1,
+            "Windows", ".NET", "X64",
+            new SessionRecordingConfiguration(true, true, true, false, 5, true, true),
+            [], [], 1, 0, null));
+
+        Assert.Equal(SessionFrameSource.Phone, archive.FrameSource);
+        Assert.Equal(
+            [(100_000_000L, 1080, 2404), (900_000_000L, 2404, 1080)],
+            archive.Frames.Select(frame => (frame.MonotonicNanoseconds, frame.Width, frame.Height)));
+    }
 }
 
 /// <summary>

@@ -194,6 +194,31 @@ public sealed class Mp4ExportTests : IDisposable
     }
 
     [Fact]
+    public void SizesAPhoneExportForBothShapesAtSixtyFramesASecond()
+    {
+        // Upright only: 1080 by 2404 made smaller to 2304 high, its shape
+        // kept, and even.
+        Assert.Equal(
+            new VideoFormat(1034, 2304, 60, 60),
+            VideoSchedule.FormatOf([Frame(0, 1080, 2404), Frame(8, 1080, 2404), Frame(900, 1080, 2404)], SessionFrameSource.Phone));
+        // Turned during the recording: wide enough for the wide pictures and
+        // tall enough for the upright ones, made smaller to fit.
+        Assert.Equal(
+            new VideoFormat(2304, 2304, 60, 60),
+            VideoSchedule.FormatOf([Frame(0, 1080, 2404), Frame(100, 2404, 1080)], SessionFrameSource.Phone));
+        // The desktop's rule is unchanged: the largest frame, at a rate from
+        // the frames' spacing.
+        Assert.Equal(
+            VideoSchedule.FormatOf([Frame(0, 1280, 720), Frame(200), Frame(400)]),
+            VideoSchedule.FormatOf([Frame(0, 1280, 720), Frame(200), Frame(400)], SessionFrameSource.Desktop));
+        // A wide picture in the square export is drawn its full width, centred.
+        Assert.Equal((0d, 634.5d, 2304d, 1035.1d), Round(VideoSchedule.Placement(2404, 1080, 2304, 2304)));
+    }
+
+    private static (double, double, double, double) Round((double X, double Y, double Width, double Height) value) =>
+        (Math.Round(value.X, 1), Math.Round(value.Y, 1), Math.Round(value.Width, 1), Math.Round(value.Height, 1));
+
+    [Fact]
     public void SetsTheBitRateFromTheRecordedFramesNotTheExportsRate()
     {
         Assert.Equal(2_073_600u, Mp4Writer.BitrateOf(new VideoFormat(1920, 1080, 20, 5)));

@@ -63,7 +63,11 @@ public sealed record PlaybackIndex
     // Version 19 keeps the page's focus records (browser.interaction,
     // focus-changed) whole, for the reading position
     // (ReadingPositionTimeline).
-    public const int CurrentVersion = 19;
+    // Version 20 keeps the phone's frames (graphics.android.frames,
+    // device-frame, Android slice 3c), which the player shows in place of
+    // the desktop's; an older index is derived again, so recordings made
+    // with step 3b play their phone frames.
+    public const int CurrentVersion = 20;
 
     public required int Version { get; init; }
 
@@ -75,7 +79,7 @@ public sealed record PlaybackIndex
     public required PlaybackOccupancy Occupancy { get; init; }
 
     /// <summary>
-    /// The desktop frame, audio stream start, browser navigation, and page
+    /// The desktop and phone frame, audio stream start, browser navigation, and page
     /// popup and popup widget events, with the payload properties playback
     /// reads.
     /// </summary>
@@ -250,6 +254,13 @@ public sealed class PlaybackIndexBuilder
         {
             Keep(eventKey, record);
             _compositions.Add(new CapturedFrameComposition(time, CompositionTime(time, payload)));
+            return;
+        }
+
+        if (channel == Recorder.Contracts.AndroidFrameRecords.FramesChannel &&
+            record.EventType == Recorder.Contracts.AndroidFrameRecords.FrameEventType)
+        {
+            Keep(eventKey, record);
             return;
         }
 

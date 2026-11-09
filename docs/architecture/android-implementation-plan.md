@@ -595,6 +595,70 @@ slice's full test goes into a validation plan,
     phone sent got a frame. Evidence for analysis uses only what
     differs, as for the desktop.
 
+- **Built, step 3c (2026-11-09).** The player and the MP4 export show
+  the phone's frames.
+  - **Which frames.** The playback index keeps the `device-frame`
+    events, and its version is now 20, so a recording made with step 3b
+    has its index derived again when it is opened; the player's status
+    line then ends "The recording file's playback index is version 19".
+    A recording with desktop frames shows them, as before. One with no
+    desktop frames and some phone frames shows the phone's
+    (`SessionFrameSource.Phone`). A recording has one or the other
+    today, as a recording's target is the desktop or the phone; if one
+    has both, the desktop's are shown.
+  - **Player.** The phone's frame takes the desktop's place, drawn as
+    large as fits the frame area with its shape kept, so a portrait
+    picture fills the area's height and a landscape one its width. The
+    Frames filter and the timeline's frame lane include the phone's
+    frames. A screen reader hears the picture as "Recorded phone screen
+    frame", with "Phone frame N of M" and its time. A recording with no
+    frames of either kind says "This recording contains no desktop or
+    phone frames."
+  - **MP4 export: size.** The phone's pictures change shape when it is
+    turned, so the export is as wide as the widest picture and as tall
+    as the tallest, made smaller to fit within 4096 by 2304 with its
+    shape kept. Each picture is drawn as large as fits, centred on black.
+    A recording that stays portrait exports at 1034 by 2304; one turned
+    on its side exports at 2304 by 2304, a portrait picture filling the
+    height and a landscape one the width.
+  - **MP4 export: rate.** 60 frames a second, fixed. The desktop's rate
+    comes from its frames' usual spacing ([MP4 export](mp4-export.md),
+    "Timing of the picture"), but the phone sends pictures only when its
+    screen changes, up to 120 a second while it moves and none while it
+    is still, so their spacing has no usual value. Each picture is shown
+    from the video frame nearest its time, within 8.3 ms. Of pictures
+    less than a sixtieth of a second apart, only the last before each
+    video frame is shown; the recording's PNG files and stream keep them
+    all, and the export window says so.
+  - **Checked (2026-11-09).** In the Linux build environment the
+    solution builds with no warnings and the tests pass, 4 of them new:
+    the phone's frames replace the desktop's, the desktop's win when
+    both are present, the export's size for both shapes, and the
+    phone's frames kept by the playback index and shown. On the
+    development PC a check program opened test 23's recording
+    (`20261109-153003-26acc41259cf41d6a09c4f7f78e3990f`, 131 frames,
+    18.7 seconds) with the recorder's own code: frames from the phone,
+    tall from 1.590 seconds, wide from frame 14 at 6.076 seconds, tall
+    again from frame 83 at 15.656 seconds. Of its 131 pictures, an
+    export would show 69 at 30 frames a second, 89 at 60, 110 at 90 and
+    128 at 120. Its pictures are 4.2 ms apart at the least and 8.6 ms
+    at the median.
+  - **Checked at 60 and 120 a second (2026-11-09).** The check program
+    saved the recording at 2304 by 2304 with Windows' encoder, the
+    graphics card's and the software one, at 60 and at 120 frames a
+    second. All four were saved: 16.1 and 16.0 MB in 16 seconds at 60;
+    14.6 and 21.5 MB in 25 to 26 seconds at 120. FFmpeg reads them as
+    H.264 High profile, level 5.2 at 60 a second and level 6.0 at 120,
+    with 1,125 and 2,249 frames, and decodes them without errors.
+    Windows decoded six moments of each through `Windows.Media.Editing`
+    on the development PC. Microsoft documents its decoder only up to
+    level 5.1
+    ([Microsoft, H.264 video decoder](https://learn.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder)),
+    so both levels are past what is documented, and level 6.0 further
+    past it; that other players and phones play level 6.0 is not
+    checked. 60 is kept for now; 120 would show almost every picture
+    and is an owner's decision.
+
 ### Slice 4: the phone's sound
 
 - **Stored.** The audio socket gives raw PCM at 48 kHz, two channels,

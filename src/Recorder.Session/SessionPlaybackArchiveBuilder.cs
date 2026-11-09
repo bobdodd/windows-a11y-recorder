@@ -23,6 +23,7 @@ public sealed class SessionPlaybackArchiveBuilder
         "accessibility.uia.events",
         "session.annotations",
         "graphics.desktop.frames",
+        AndroidFrameRecords.FramesChannel,
         "graphics.magnifier",
         "system.assistive-technology",
         "input.keyboard-hook"
@@ -100,6 +101,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly string _root;
     private readonly List<SessionTimelineEvent> _events = [];
     private readonly List<SessionVideoFrame> _frames = [];
+    private readonly List<SessionVideoFrame> _phoneFrames = [];
     private readonly Dictionary<string, SessionAudioTrack> _audioTracks =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly List<BrowserEventProjection> _browserProjections = [];
@@ -148,6 +150,7 @@ public sealed class SessionPlaybackArchiveBuilder
     /// </summary>
     public static bool BuildsFrom(string channel) =>
         channel == "graphics.desktop.frames" ||
+        channel == AndroidFrameRecords.FramesChannel ||
         channel == WindowsPreferenceSettings.Channel ||
         channel == MagnifierChanges.Channel ||
         channel == AssistiveTechnologyRecords.Channel ||
@@ -274,6 +277,13 @@ public sealed class SessionPlaybackArchiveBuilder
             payload.ValueKind == JsonValueKind.Object)
         {
             AddFrame(_root, timestamp, payload, _frames);
+        }
+
+        if (timelineEvent.Channel == AndroidFrameRecords.FramesChannel &&
+            timelineEvent.EventType == AndroidFrameRecords.FrameEventType &&
+            payload.ValueKind == JsonValueKind.Object)
+        {
+            AddFrame(_root, timestamp, payload, _phoneFrames);
         }
 
         if (timelineEvent.Channel == WindowsPreferenceSettings.Channel &&
@@ -447,7 +457,14 @@ public sealed class SessionPlaybackArchiveBuilder
         ThrowIfBuilt();
         _built = true;
         _events.Sort(InMemorySessionTimeline.Compare);
-        _frames.Sort(static (left, right) =>
+        // The phone's frames take the desktop's place in a recording that
+        // has none of the desktop's (Android slice 3c); an Android recording
+        // does not capture the desktop.
+        var source = _frames.Count == 0 && _phoneFrames.Count > 0
+            ? SessionFrameSource.Phone
+            : SessionFrameSource.Desktop;
+        var frames = source == SessionFrameSource.Phone ? _phoneFrames : _frames;
+        frames.Sort(static (left, right) =>
             left.MonotonicNanoseconds.CompareTo(right.MonotonicNanoseconds));
         var duration = Math.Max(manifest.DurationNanoseconds ?? 0, _maximumTimestamp);
         var browserNavigations = BrowserNavigationCorrelator.Build(
@@ -495,12 +512,13 @@ public sealed class SessionPlaybackArchiveBuilder
             manifest,
             duration,
             _events,
-            _frames,
+            frames,
             _audioTracks.Values
                 .OrderBy(track => track.Stream, StringComparer.OrdinalIgnoreCase)
                 .ToArray(),
             browserNavigations)
         {
+            FrameSource = source,
             WindowsPreferences = _preferences.Count == 0
                 ? WindowsPreferenceTimeline.Empty
                 : new WindowsPreferenceTimeline(_preferences),

@@ -823,3 +823,121 @@ upright as the phone was held. No picture is stretched or cut off.
   turned upright again before its screen stopped being recorded; the
   pictures follow the phone in both turns. None is stretched or cut
   off. All of step 3b's tests have passed.
+
+## Part 3, step 3c: the phone's screen in the player and the MP4 export
+
+Step 3c shows the phone's pictures in the player, in the desktop's
+place, and saves them as the picture of an MP4 export: as large as
+fits, upright as the phone was held, at 60 frames a second.
+
+What was checked before these tests: in the Linux build environment the
+solution builds with no warnings and the tests pass, 4 of them new. On
+the development PC a check program opened test 23's recording with the
+recorder's own code, and found its 131 pictures, tall, then wide from
+6.076 seconds, then tall again from 15.656 seconds. It saved that
+recording as MP4 at 2304 by 2304 at 60 and at 120 frames a second, and
+Windows decoded all of them (see the implementation plan, "Built, step
+3c"). None of that shows the player or the export window in the app, or
+what the MP4 looks like in Media Player. Tests 24 to 28 do.
+
+### Test 24: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Connect the Pixel by USB, unlocked. Start the recorder from the Start
+   menu, and in "Recording target" choose "Android device".
+4. If the panel offers "Install companion app", choose it, and wait until
+   the panel shows "Companion app: installed, on, and answering".
+5. Read the note under "Android device checks".
+
+**On screen:** the build ends with `INSTALLER BUILT`. In step 5 the
+panel shows "Companion app: installed, on, and answering (version
+1.1.0", and the note reads "A recording of the phone records the
+companion app's connection, the phone's clock, its display's rotation
+and size, and the phone's screen as a video stream and as a picture for
+each change, which the player shows and an MP4 export saves. Its sound,
+touches and accessibility evidence come in later parts."
+
+### Test 25: test 23's recording in the player
+
+1. In the recorder, choose "Open recording...".
+2. Open the recording of test 23,
+   `20261109-153003-26acc41259cf41d6a09c4f7f78e3990f`.
+3. Read the status line at the bottom of the window.
+4. Drag the playback slider to 00:00:03.000, and look at the picture.
+5. Drag the playback slider to 00:00:10.000, and look at the picture.
+
+**On screen:** in step 3 the status line includes "131 frames" and
+ends "Read from its recording file. The recording file's playback index
+is version 19", as the recording was made before this version and its
+index is made again on opening. If the line is cut off at the right,
+send a screenshot. In step 4 the picture is tall and shows Chrome
+upright, filling the frame area's height. In step 5 it is wide and
+shows Chrome in landscape, upright as the phone was held, filling the
+frame area's width. Neither is stretched or cut off.
+
+### Test 26: the MP4 export window for the phone
+
+With the recording of test 25 open:
+
+1. Choose "Save as MP4..." (Alt+4).
+2. Read the window.
+
+**On screen:** the window's heading is "Save the recording as MP4",
+then "The whole recording, 0:18, as H.264 video of 2304 by 2304 pixels
+at 60 frames a second.", followed by the sentence about each recorded
+frame being shown until the next, then "The phone sends a picture
+whenever its screen changes, up to 120 a second. Of pictures less than
+a sixtieth of a second apart, only the last before each video frame is
+shown; the recording keeps them all." The next line is "Picture: the
+phone's screen as recorded, each picture as large as fits, upright as
+the phone was held." Under "File": a path ending
+`\Videos\20261109-153003-26acc41259cf41d6a09c4f7f78e3990f.mp4`. All
+the text wraps within the window, with no scroll bar across it.
+
+### Test 27: the MP4 of the phone
+
+In the window from test 26:
+
+1. Choose "Save MP4", and wait for the status line to stop changing.
+2. Read the status line.
+3. Open the MP4 in Media Player, drag to 0:03, and pause.
+4. Drag to 0:10, and pause.
+
+**On screen:** in step 2 the status line begins "Saved
+C:\Users\User\Videos\20261109-153003-26acc41259cf41d6a09c4f7f78e3990f.mp4:
+2304 by 2304 pixels," and includes "Encoded with the Windows encoder".
+Any line beginning "The MP4 could not be saved" is a failure; send it.
+In step 3 the video is square and shows Chrome tall and upright in the
+middle, filling the height, black on both sides. In step 4 it shows
+Chrome wide, in landscape, upright, filling the width, black above and
+below. Neither is stretched.
+
+### Test 28: three apps on the phone
+
+With the Pixel upright on its home screen, and the recorder's target
+still "Android device":
+
+1. Choose "Start recording", and wait 5 seconds.
+2. On the phone, open Settings, wait 5 seconds, and go back to the home
+   screen.
+3. Open Chrome, wait 5 seconds, and go back to the home screen.
+4. Open Clock, wait 5 seconds, then in the recorder choose "Stop
+   recording".
+5. When the recording has opened in the player, choose Play, and watch
+   the picture until the end.
+
+**On screen:** in step 5 the picture shows, in order, the home screen,
+Settings, the home screen, Chrome, the home screen and Clock, each
+upright and filling the frame area's height, changing as the time
+moves on.

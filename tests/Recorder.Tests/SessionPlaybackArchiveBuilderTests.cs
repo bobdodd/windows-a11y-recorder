@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Recorder.Contracts;
 using Recorder.Session;
 
 namespace Recorder.Tests;
@@ -67,6 +68,100 @@ public sealed class SessionPlaybackArchiveBuilderTests
             Assert.Null(frames[1].Magnification);
             Assert.Null(frames[2].Magnification);
             Assert.Equal(0, frames[2].X);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PhoneFramesTakeTheDesktopsPlaceInARecordingWithoutIt()
+    {
+        var directory = CreateDirectory();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(directory, "frames", "android"));
+            foreach (var name in new[] { "0000000001.png", "0000000002.png" })
+            {
+                await File.WriteAllBytesAsync(
+                    Path.Combine(directory, "frames", "android", name),
+                    [1],
+                    TestContext.Current.CancellationToken);
+            }
+
+            await WriteManifestAsync(directory, 1_000_000_000);
+            // Stored out of time order: the archive's frames are in time order.
+            await WriteEventsAsync(
+                directory,
+                [
+                    CreateEvent(AndroidFrameRecords.FramesChannel, AndroidFrameRecords.FrameEventType, 400, new
+                    {
+                        path = "frames/android/0000000002.png",
+                        width = 2404,
+                        height = 1080
+                    }),
+                    CreateEvent(AndroidFrameRecords.FramesChannel, AndroidFrameRecords.FrameEventType, 100, new
+                    {
+                        path = "frames/android/0000000001.png",
+                        width = 1080,
+                        height = 2404
+                    }),
+                    // A frame whose file is missing is left out, as the desktop's.
+                    CreateEvent(AndroidFrameRecords.FramesChannel, AndroidFrameRecords.FrameEventType, 500, new
+                    {
+                        path = "frames/android/0000000003.png",
+                        width = 2404,
+                        height = 1080
+                    })
+                ]);
+
+            var archive = await LoadAsync(directory);
+
+            Assert.Equal(SessionFrameSource.Phone, archive.FrameSource);
+            Assert.Equal(
+                ["frames/android/0000000001.png 1080x2404 100", "frames/android/0000000002.png 2404x1080 400"],
+                archive.Frames.Select(frame => $"{frame.Path} {frame.Width}x{frame.Height} {frame.MonotonicNanoseconds}"));
+            Assert.All(archive.Frames, frame => Assert.Null(frame.Magnification));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DesktopFramesAreShownWhenARecordingHasBoth()
+    {
+        var directory = CreateDirectory();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(directory, "frames", "android"));
+            Directory.CreateDirectory(Path.Combine(directory, "frames", "desktop"));
+            await File.WriteAllBytesAsync(Path.Combine(directory, "frames", "android", "0000000001.png"), [1], TestContext.Current.CancellationToken);
+            await File.WriteAllBytesAsync(Path.Combine(directory, "frames", "desktop", "0000000000.png"), [1], TestContext.Current.CancellationToken);
+            await WriteManifestAsync(directory, 1_000_000_000);
+            await WriteEventsAsync(
+                directory,
+                [
+                    CreateEvent(AndroidFrameRecords.FramesChannel, AndroidFrameRecords.FrameEventType, 100, new
+                    {
+                        path = "frames/android/0000000001.png",
+                        width = 1080,
+                        height = 2404
+                    }),
+                    CreateEvent("graphics.desktop.frames", "desktop-frame", 200, new
+                    {
+                        path = "frames/desktop/0000000000.png",
+                        width = 1920,
+                        height = 1080
+                    })
+                ]);
+
+            var archive = await LoadAsync(directory);
+
+            Assert.Equal(SessionFrameSource.Desktop, archive.FrameSource);
+            Assert.Equal("frames/desktop/0000000000.png", Assert.Single(archive.Frames).Path);
         }
         finally
         {

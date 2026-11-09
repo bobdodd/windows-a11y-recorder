@@ -48,6 +48,17 @@ public static class VideoSchedule
 
     private const int MaximumFramesPerSecond = 120;
 
+    /// <summary>
+    /// The frame rate of an export of the phone's screen. The phone sends a
+    /// picture whenever its screen changes, up to 120 a second while it
+    /// moves and none while it is still, so the pictures' median spacing
+    /// says nothing about a usual rate. 60 a second shows each picture
+    /// within 8.3 ms of its time; of pictures less than a sixtieth of a
+    /// second apart only the last before each video frame is shown, and the
+    /// recording keeps them all (Android slice 3c).
+    /// </summary>
+    public const int PhoneFramesPerSecond = 60;
+
     public static IReadOnlyList<ScheduledFrame> Plan(
         IReadOnlyList<SessionVideoFrame> frames,
         long durationNanoseconds,
@@ -112,9 +123,30 @@ public static class VideoSchedule
     /// the smallest multiple of it of at least 20 a second, so frames at
     /// their usual spacing fall on samples evenly.
     /// </summary>
-    public static VideoFormat FormatOf(IReadOnlyList<SessionVideoFrame> frames)
+    public static VideoFormat FormatOf(IReadOnlyList<SessionVideoFrame> frames) =>
+        FormatOf(frames, SessionFrameSource.Desktop);
+
+    /// <summary>
+    /// The export's size and rate for frames of the desktop, as
+    /// <see cref="FormatOf(IReadOnlyList{SessionVideoFrame})"/>, or of the
+    /// phone's screen. The phone's frames change shape when it is turned,
+    /// so their export is wide enough for the widest and tall enough for
+    /// the tallest, made smaller to fit within 4096 by 2304 in the same
+    /// way, and each picture is drawn as large as fits, centred; its rate
+    /// is <see cref="PhoneFramesPerSecond"/>.
+    /// </summary>
+    public static VideoFormat FormatOf(IReadOnlyList<SessionVideoFrame> frames, SessionFrameSource source)
     {
         ArgumentNullException.ThrowIfNull(frames);
+        if (source == SessionFrameSource.Phone)
+        {
+            var sized = frames.Where(frame => frame.Width > 0 && frame.Height > 0).ToList();
+            var (phoneWidth, phoneHeight) = sized.Count == 0
+                ? (1280, 720)
+                : Fit(sized.Max(frame => frame.Width), sized.Max(frame => frame.Height), MaximumWidth, MaximumHeight);
+            return new VideoFormat(phoneWidth, phoneHeight, PhoneFramesPerSecond, PhoneFramesPerSecond);
+        }
+
         var largest = frames
             .Where(frame => frame.Width > 0 && frame.Height > 0)
             .MaxBy(frame => (long)frame.Width * frame.Height);

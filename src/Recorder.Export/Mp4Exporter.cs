@@ -16,11 +16,13 @@ public interface IExportFrameRenderer
 
 /// <summary>What an export writes: the whole recording, with the chosen sounds.</summary>
 /// <param name="Audio">The sounds, in the order their own tracks follow the mixed track.</param>
+/// <param name="FrameSource">What the frames show, which sets the export's size and rate.</param>
 public sealed record Mp4ExportRequest(
     string OutputPath,
     IReadOnlyList<SessionVideoFrame> Frames,
     long DurationNanoseconds,
-    IReadOnlyList<ExportAudioSource> Audio);
+    IReadOnlyList<ExportAudioSource> Audio,
+    SessionFrameSource FrameSource = SessionFrameSource.Desktop);
 
 /// <summary>How far an export has got, in the recording's time.</summary>
 public readonly record struct Mp4ExportProgress(long DoneNanoseconds, long TotalNanoseconds);
@@ -68,7 +70,7 @@ public static class Mp4Exporter
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(renderer);
-        var format = VideoSchedule.FormatOf(request.Frames);
+        var format = VideoSchedule.FormatOf(request.Frames, request.FrameSource);
         var schedule = VideoSchedule.Plan(request.Frames, request.DurationNanoseconds, format.FramesPerSecond);
         if (schedule.Count == 0)
         {

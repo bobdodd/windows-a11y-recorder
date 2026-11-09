@@ -64,20 +64,27 @@ internal sealed class ExportMp4Window : Window
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ShowInTaskbar = false;
 
-        var format = VideoSchedule.FormatOf(archive.Frames);
+        var format = VideoSchedule.FormatOf(archive.Frames, archive.FrameSource);
+        var phone = archive.FrameSource == SessionFrameSource.Phone;
         var page = new StackPanel { Margin = new Thickness(16) };
         page.Children.Add(Heading("Save the recording as MP4", 1));
         page.Children.Add(Paragraph(
             $"The whole recording, {FormatDuration(archive.DurationNanoseconds)}, as H.264 video of {format.Width} by " +
             $"{format.Height} pixels at {format.FramesPerSecond} frames a second. Each recorded frame is shown from when " +
-            "it was captured until the next, to within half a video frame, so the video keeps the recording's timing."));
+            "it was captured until the next, to within half a video frame, so the video keeps the recording's timing." +
+            (phone
+                ? " The phone sends a picture whenever its screen changes, up to 120 a second. Of pictures less than a " +
+                  "sixtieth of a second apart, only the last before each video frame is shown; the recording keeps them all."
+                : "")));
         page.Children.Add(Paragraph(MagnifiedView.AnyChanged(archive.Frames)
             ? showWholeScreen
                 ? "Picture: the whole screen as captured, with the participant's view outlined, as the player shows it " +
                   "now. To save the participant's view instead, close this window and turn off Whole screen."
                 : "Picture: the participant's view, the part of the screen Magnifier showed in the colors it showed, as " +
                   "the player shows it now. To save the whole screen instead, close this window and turn on Whole screen."
-            : "Picture: the screen as captured."));
+            : phone
+                ? "Picture: the phone's screen as recorded, each picture as large as fits, upright as the phone was held."
+                : "Picture: the screen as captured."));
 
         page.Children.Add(Heading("Sound", 2));
         var tracks = archive.AudioTracks.ToDictionary(track => track.Stream, StringComparer.Ordinal);
@@ -254,7 +261,7 @@ internal sealed class ExportMp4Window : Window
                         gains.TryGetValue(choice.Track.Stream, out var gain) ? gain : 0))
                     .ToList();
                 completion.TrySetResult(Mp4Exporter.Export(
-                    new Mp4ExportRequest(path, archive.Frames, archive.DurationNanoseconds, sources),
+                    new Mp4ExportRequest(path, archive.Frames, archive.DurationNanoseconds, sources, archive.FrameSource),
                     new WpfFrameRenderer(wholeScreen),
                     progress,
                     token));

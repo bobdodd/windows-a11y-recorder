@@ -138,6 +138,19 @@ therefore has a constant frame rate:
 The same test after the change: 70 video frames of 50 ms, 10 of black,
 then each recorded frame on 4, ending at 3.5 s, the recording's length.
 
+A recording of an Android phone is exported at 60 frames a second,
+fixed. The phone sends a picture only when its screen changes, up to
+120 a second while it moves and none while it is still, so the spacing
+of its pictures has no usual value. Each picture is shown from the
+video frame nearest its time, within 8.3 ms. Of pictures less than a
+sixtieth of a second apart, only the last before each video frame is
+shown; the recording keeps them all, and the export window says so. In
+the recording of the Android plan's test 23, 131 pictures in 18.7
+seconds, 89 are shown at 60 a second and 128 would be at 120. Why 120
+is not used is under "Encoding"
+([Android implementation plan](android-implementation-plan.md),
+"Built, step 3c").
+
 ### Placing the sound
 
 Windows' loopback capture gives no data while nothing is playing: "If no
@@ -205,6 +218,20 @@ The records are read in bulk: from the recording file
   The export is the size of the largest frame, made smaller to fit within
   that with its shape kept, and even in both directions. Smaller frames
   are centred on black.
+- A recording of an Android phone changes shape when the phone is
+  turned, so its export is as wide as its widest picture and as tall as
+  its tallest, made smaller to fit within 4096 by 2304 in the same way.
+  Each picture is drawn as large as fits, centred on black: 1034 by 2304
+  for a phone held upright throughout, 2304 by 2304 for one turned on
+  its side.
+- The encoder is given no H.264 level and chooses its own. On
+  2026-11-09, on the development PC, a phone recording at 2304 by 2304
+  was saved at level 5.2 at 60 frames a second and at level 6.0 at 120.
+  Windows decoded both, but Microsoft documents its decoder only up to
+  level 5.1
+  ([Microsoft, H.264 video decoder](https://learn.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder)),
+  and that other players play level 6.0 is not checked, so the phone's
+  rate is 60.
 - Windows N editions lack Media Foundation until the Media Feature Pack is
   installed
   ([Microsoft](https://support.microsoft.com/en-us/windows/experience/platform-variants/media-feature-pack-for-windows-n)).

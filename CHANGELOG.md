@@ -167,6 +167,19 @@ Changes on `main` since 1.1.0, not yet released.
 - Database migration 0040 adds the tables of the frame records.
 - The player does not show the phone's frames yet (part 3c).
 
+### Android recording, part 3c: the phone's screen in the player and MP4 export
+
+- A recording of the phone shows its frames in the player, in the
+  desktop's place, as large as fits with their shape kept. The Frames
+  filter and the timeline's frame lane include them.
+- The MP4 export saves the phone's frames: as wide as the widest picture
+  and as tall as the tallest, within 4096 by 2304, each picture as large
+  as fits, at 60 frames a second. The export window says that of
+  pictures less than a sixtieth of a second apart only the last before
+  each video frame is shown.
+- The playback index is version 20 and keeps the phone's frame records,
+  so recordings made before are indexed again when opened.
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now

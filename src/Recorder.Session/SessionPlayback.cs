@@ -108,6 +108,12 @@ public sealed record SessionPlaybackArchive(
     /// </summary>
     public BrowserPreferenceTimeline BrowserPreferences { get; init; } = BrowserPreferenceTimeline.Empty;
 
+    /// <summary>
+    /// What <see cref="Frames"/> show: the desktop, or, in a recording with
+    /// no desktop frames, the phone's screen (Android slice 3c).
+    /// </summary>
+    public SessionFrameSource FrameSource { get; init; } = SessionFrameSource.Desktop;
+
     private ISessionTimeline? _timeline;
 
     /// <summary>
@@ -166,6 +172,20 @@ public sealed record SessionTimelineEvent(
     string EventType,
     long MonotonicNanoseconds,
     string Summary);
+
+/// <summary>What a recording's frames show.</summary>
+public enum SessionFrameSource
+{
+    /// <summary>The PC's desktop, <c>graphics.desktop.frames</c>.</summary>
+    Desktop,
+
+    /// <summary>
+    /// The phone's screen, <c>graphics.android.frames</c>: one picture for
+    /// each change, at the size of its capture session, so the size changes
+    /// when the phone is turned.
+    /// </summary>
+    Phone
+}
 
 /// <param name="X">The virtual screen's left edge, which the frame's left edge shows.</param>
 /// <param name="Y">The virtual screen's top edge, which the frame's top edge shows.</param>

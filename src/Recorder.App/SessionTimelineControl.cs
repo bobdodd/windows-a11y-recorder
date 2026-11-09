@@ -894,7 +894,9 @@ public sealed class SessionTimelineControl : FrameworkElement
         "input.mouse" or "input.mouse-hook" => 1,
         "accessibility.uia.events" => 2,
         "window.foreground" => 3,
-        "graphics.desktop.frames" => 4,
+        // The phone's frames share the desktop frames' lane: a recording
+        // has one or the other (Android slice 3c).
+        "graphics.desktop.frames" or Recorder.Contracts.AndroidFrameRecords.FramesChannel => 4,
         "audio.microphone" => 5,
         // The screen reader's sound shares the system sound's lane.
         "audio.system" or "audio.screen-reader" => 6,

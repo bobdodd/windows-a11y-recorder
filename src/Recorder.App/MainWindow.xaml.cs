@@ -51,6 +51,7 @@ public partial class MainWindow : Window
         "window.foreground",
         "system.preferences",
         "graphics.desktop.frames",
+        Recorder.Contracts.AndroidFrameRecords.FramesChannel,
         "graphics.magnifier",
         "browser.preferences",
         "system.assistive-technology",
@@ -916,8 +917,13 @@ public partial class MainWindow : Window
                     ? Visibility.Visible
                     : Visibility.Collapsed;
             VideoPlaceholderTextBlock.Text = _playbackArchive.Frames.Count == 0
-                ? "This recording contains no desktop frames."
+                ? "This recording contains no desktop or phone frames."
                 : string.Empty;
+            AutomationProperties.SetName(
+                VideoImage,
+                _playbackArchive.FrameSource == SessionFrameSource.Phone
+                    ? "Recorded phone screen frame"
+                    : "Recorded desktop video frame");
             SeekTo(0, synchronizeAudio: false);
             PlaybackStatusTextBlock.Text =
                 $"{_playbackArchive.Manifest.SessionId} | " +
@@ -1258,7 +1264,8 @@ public partial class MainWindow : Window
         VideoImage.Source = FrameImage(frame, bitmap, out var view);
         AutomationProperties.SetHelpText(
             VideoImage,
-            $"Desktop frame {index + 1} of {_playbackArchive.Frames.Count}, " +
+            $"{(_playbackArchive.FrameSource == SessionFrameSource.Phone ? "Phone" : "Desktop")} frame " +
+            $"{index + 1} of {_playbackArchive.Frames.Count}, " +
             $"{FormatTime(frame.MonotonicNanoseconds)}{view}");
     }
 
@@ -1416,6 +1423,10 @@ public partial class MainWindow : Window
         AddVisibleChannel(
             FilterFramesCheckBox,
             "graphics.desktop.frames",
+            visibleChannels);
+        AddVisibleChannel(
+            FilterFramesCheckBox,
+            Recorder.Contracts.AndroidFrameRecords.FramesChannel,
             visibleChannels);
         AddVisibleChannel(FilterMicrophoneCheckBox, "audio.microphone", visibleChannels);
         AddVisibleChannel(FilterSystemAudioCheckBox, "audio.system", visibleChannels);
