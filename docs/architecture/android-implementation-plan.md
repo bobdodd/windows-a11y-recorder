@@ -585,11 +585,15 @@ slice's full test goes into a validation plan,
   - **Measured on the Pixel, and decided (2026-11-09).** In test 21,
     3,080 frames from about 76 seconds of scrolling took 2,244 MB,
     against 26.5 MB for the stream, and decoding kept up. Decided by the
-    owner: every frame is kept as it is made, with no limit on how many
-    and no harder compression. Disk space is cheap and plentiful, and
-    temporary folders of 100 GB are not a problem. Evidence for analysis
-    uses only the frames that differ from the one before, as for the
-    desktop, and step 3b already writes only those.
+    owner: the frames stay as step 3b makes them, with no limit on how
+    many and no harder compression. Disk space is cheap and plentiful,
+    and temporary folders of 100 GB are not a problem. Not every picture
+    of the stream gets a frame: a picture the same in every byte as the
+    one before gets none, and the phone sends no pictures while its
+    screen is still. On the Pixel, though, no picture has yet been the
+    same as the one before, so in tests 18 and 21 every picture the
+    phone sent got a frame. Evidence for analysis uses only what
+    differs, as for the desktop.
 
 ### Slice 4: the phone's sound
 

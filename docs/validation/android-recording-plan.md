@@ -809,8 +809,9 @@ upright as the phone was held. No picture is stretched or cut off.
   check on the development PC. The stream holds every picture the PNG
   files do, so how many PNG files to make, and when, is a question of
   disk use and speed, not of evidence. The owner decided on
-  2026-11-09 to keep every frame as it is: disk space is cheap, and
-  analysis uses only the frames that differ, as for the desktop.
+  2026-11-09 to keep the frames as step 3b makes them, one for each
+  picture that differs from the one before: disk space is cheap, and
+  analysis uses only what differs, as for the desktop.
 - 2026-11-09, test 23 passed. The owner saw every picture in the right
   orientation, tall then wide, and pictures of the phone's turning
   animation between them. Checked from the recording
