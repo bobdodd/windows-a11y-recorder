@@ -1,6 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Recording an Android phone over USB. See
        docs/architecture/android-implementation-plan.md. -->
+  <PropertyGroup>
+    <!-- Media Foundation's H.264 decoder is called through its function
+         tables, as in Recorder.Export. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Recorder.Contracts/Recorder.Contracts.csproj" />
   </ItemGroup>

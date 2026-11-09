@@ -21,4 +21,7 @@
     <ProjectReference Include="../../src/Recorder.Analysis/Recorder.Analysis.csproj" />
     <ProjectReference Include="../../src/Recorder.Export/Recorder.Export.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="TestData\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

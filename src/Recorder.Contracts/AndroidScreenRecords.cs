@@ -78,3 +78,73 @@ public sealed record AndroidVideoPacket(
 /// <summary>Why the phone's screen is missing from part or all of a recording.</summary>
 /// <param name="ConnectionLost">True when a stream that had started ended during the recording.</param>
 public sealed record AndroidVideoUnavailable(string Serial, string Reason, bool ConnectionLost);
+
+/// <summary>
+/// The records of the phone's frames, step 3b of slice 3 in
+/// docs/architecture/android-implementation-plan.md: pictures decoded from
+/// the stored stream and written as PNG files, one for each picture whose
+/// pixels differ from the picture before it.
+/// </summary>
+public static class AndroidFrameRecords
+{
+    public const string FramesChannel = "graphics.android.frames";
+
+    public const string FrameEventType = "device-frame";
+    public const string UnavailableEventType = "frames-unavailable";
+
+    /// <summary>The frames' folder, relative to the recording's folder.</summary>
+    public const string FramesFolder = "frames/android";
+
+    /// <summary>The picture was compressed by the phone's encoder before the recorder had it.</summary>
+    public const string CompressedOnPhoneFlag = "compressed-on-phone";
+
+    /// <summary>
+    /// The colour matrix or range was not in the stream, so the recorder
+    /// used BT.709 limited range, which the Pixel 10 Pro XL's stream gave.
+    /// </summary>
+    public const string ColourAssumedFlag = "colour-assumed";
+
+    /// <summary>A frame's file name: its sequence on the frames channel, ten digits.</summary>
+    public static string FramePath(ulong sequence) =>
+        FramesFolder + "/" + sequence.ToString("D10", System.Globalization.CultureInfo.InvariantCulture) + ".png";
+}
+
+/// <summary>A picture of the phone's screen, written as a PNG file.</summary>
+/// <param name="Path">The PNG file, relative to the recording's folder.</param>
+/// <param name="Width">The picture's width, the capture session's.</param>
+/// <param name="Height">The picture's height, the capture session's.</param>
+/// <param name="Session">The capture session the picture belongs to.</param>
+/// <param name="PacketByteOffset">Where the picture's packet starts in the stream file.</param>
+/// <param name="PresentationMicroseconds">The packet's phone time, as the server gave it.</param>
+/// <param name="ByteLength">The PNG file's length.</param>
+/// <param name="PixelFormat">The PNG's pixels: R8G8B8, 8 bits for each of red, green and blue.</param>
+/// <param name="EncodedFormat">png.</param>
+/// <param name="ColourMatrix">The YUV matrix the picture was converted with: bt709, bt601 or bt2020.</param>
+/// <param name="ColourRange">limited (16 to 235) or full (0 to 255).</param>
+/// <param name="ChromaUpsampling">How the half-size colour planes were brought to full size: nearest.</param>
+/// <param name="Decoder">The decoder that made the picture: media-foundation-h264 for Windows' Media Foundation H.264 decoder.</param>
+/// <param name="DecodedWidth">The decoder's picture width, before the picture was cut to the session's size.</param>
+/// <param name="DecodedHeight">The decoder's picture height, before the picture was cut to the session's size.</param>
+/// <param name="RepeatsBefore">Decoded pictures since the previous frame that were the same as it, so not written.</param>
+/// <param name="WrittenAtNanoseconds">The session time the PNG file was complete; its delay from the packet's arrival shows how far decoding was behind.</param>
+public sealed record AndroidDeviceFrame(
+    string Path,
+    int Width,
+    int Height,
+    int Session,
+    long PacketByteOffset,
+    long PresentationMicroseconds,
+    long ByteLength,
+    string PixelFormat,
+    string EncodedFormat,
+    string ColourMatrix,
+    string ColourRange,
+    string ChromaUpsampling,
+    string Decoder,
+    int DecodedWidth,
+    int DecodedHeight,
+    long RepeatsBefore,
+    long WrittenAtNanoseconds);
+
+/// <summary>Why the phone's frames stopped being made; the stream is still recorded.</summary>
+public sealed record AndroidFramesUnavailable(string Reason);

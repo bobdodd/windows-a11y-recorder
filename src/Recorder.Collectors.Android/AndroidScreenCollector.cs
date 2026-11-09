@@ -27,6 +27,10 @@ namespace Recorder.Collectors.Android;
 /// A capture session's record, and a configuration packet's, which has no
 /// phone time, are placed at the time of the picture packet that follows
 /// them, so the channel's times do not go backward.
+///
+/// While the stream is recorded, <see cref="PhoneFrames"/> makes a PNG frame
+/// of each picture that differs from the one before, on
+/// <see cref="AndroidFrameRecords.FramesChannel"/>, at its packet's time.
 /// </summary>
 public sealed class AndroidScreenCollector : ICaptureCollector
 {
@@ -44,6 +48,7 @@ public sealed class AndroidScreenCollector : ICaptureCollector
     private readonly string _serial;
     private readonly IPhoneClock? _clock;
     private readonly Func<string, CancellationToken, Task<ScrcpyVideoConnection>> _open;
+    private readonly Func<int, int, IH264Decoder> _decoders;
     private readonly object _gate = new();
     private readonly List<long> _delays = [];
 
@@ -52,6 +57,8 @@ public sealed class AndroidScreenCollector : ICaptureCollector
     private CancellationTokenSource? _running;
     private Task? _reading;
     private ulong _videoSequence;
+    private ulong _frameSequence;
+    private PhoneFrames? _frames;
     private ulong _lifecycleSequence;
     private long _lastTime = long.MinValue;
     private long _packets;
@@ -64,23 +71,26 @@ public sealed class AndroidScreenCollector : ICaptureCollector
     /// <param name="serverPath">The bundled scrcpy server.</param>
     /// <param name="clock">The companion collector's clock fit; null to place every packet at its receipt.</param>
     /// <param name="open">Opens the stream, given the server log's path; tests give fake bytes. By default, <see cref="ScrcpyLink.OpenAsync"/>.</param>
+    /// <param name="decoders">Makes an H.264 decoder for a capture session's width and height; by default Windows' Media Foundation decoder.</param>
     public AndroidScreenCollector(
         IAdb adb,
         string serial,
         string serverPath,
         IPhoneClock? clock,
-        Func<string, CancellationToken, Task<ScrcpyVideoConnection>>? open = null)
+        Func<string, CancellationToken, Task<ScrcpyVideoConnection>>? open = null,
+        Func<int, int, IH264Decoder>? decoders = null)
     {
         ArgumentNullException.ThrowIfNull(adb);
         ArgumentException.ThrowIfNullOrWhiteSpace(serial);
         _serial = serial;
         _clock = clock;
         _open = open ?? ((log, cancellation) => ScrcpyLink.OpenAsync(adb, serial, serverPath, log, cancellation));
+        _decoders = decoders ?? ((width, height) => new MediaFoundationH264Decoder(width, height));
         Descriptor = CollectorDescriptor.Create(
             Type,
             nameof(AndroidScreenCollector),
             typeof(AndroidScreenCollector).Assembly.GetName().Version?.ToString() ?? "0.0.0",
-            [AndroidScreenRecords.VideoChannel],
+            [AndroidScreenRecords.VideoChannel, AndroidFrameRecords.FramesChannel],
             "scrcpy-server-" + AndroidTools.ScrcpyVersion);
     }
 
@@ -112,6 +122,15 @@ public sealed class AndroidScreenCollector : ICaptureCollector
                 text += sessions > 1
                     ? string.Create(CultureInfo.InvariantCulture, $", {sessions} capture sessions, now {size}")
                     : ", " + size;
+            }
+
+            if (_frames is { } frames)
+            {
+                text += string.Create(CultureInfo.InvariantCulture, $", {frames.Written} frames");
+                if (frames.Waiting > 0 && !frames.Failed)
+                {
+                    text += string.Create(CultureInfo.InvariantCulture, $" ({frames.Waiting} packets waiting to be decoded)");
+                }
             }
 
             if (MedianDelay() is { } delay)
@@ -205,6 +224,15 @@ public sealed class AndroidScreenCollector : ICaptureCollector
                 AndroidScreenRecords.StreamPath),
             qualityFlags: [AndroidScreenRecords.ReceiptTimeFlag]);
 
+        _frames = new PhoneFrames(
+            context.SessionDirectory,
+            streamPath,
+            _decoders,
+            context.ArtifactHashes,
+            context.Clock.GetElapsedNanoseconds,
+            FrameWritten,
+            FramesFailed,
+            Math.Clamp(Environment.ProcessorCount / 2, 1, 4));
         _running = new CancellationTokenSource();
         var token = _running.Token;
         var connection = _connection;
@@ -251,6 +279,7 @@ public sealed class AndroidScreenCollector : ICaptureCollector
 
         await CloseAsync().ConfigureAwait(false);
         _running?.Dispose();
+        _frames?.Dispose();
         LifecycleState = CollectorLifecycleState.Disposed;
     }
 
@@ -273,6 +302,13 @@ public sealed class AndroidScreenCollector : ICaptureCollector
             {
                 // Stopped.
             }
+        }
+
+        // The frames not yet made are made from the stored stream before the
+        // recording is completed.
+        if (_frames is { } frames)
+        {
+            await frames.CompleteAsync().ConfigureAwait(false);
         }
     }
 
@@ -316,6 +352,7 @@ public sealed class AndroidScreenCollector : ICaptureCollector
                     session++;
                     Interlocked.Increment(ref _sessions);
                     _size = string.Create(CultureInfo.InvariantCulture, $"{started.Width} by {started.Height}");
+                    _frames?.Session(started.Width, started.Height);
                     pending.Add(new Pending(
                         AndroidScreenRecords.SessionEventType,
                         new AndroidVideoSession(session, started.Width, started.Height, started.ClientResized, offset),
@@ -341,6 +378,8 @@ public sealed class AndroidScreenCollector : ICaptureCollector
 
                 var receivedAt = context.Clock.GetElapsedNanoseconds();
                 await file.WriteAsync(buffer.AsMemory(0, packet.Size), CancellationToken.None).ConfigureAwait(false);
+                // Out of the file's buffer, so the frames can read it back.
+                await file.FlushAsync(CancellationToken.None).ConfigureAwait(false);
                 hash.AppendData(buffer, 0, packet.Size);
                 var record = new AndroidVideoPacket(
                     session,
@@ -357,10 +396,12 @@ public sealed class AndroidScreenCollector : ICaptureCollector
                 if (packet.PresentationMicroseconds is not { } pts)
                 {
                     pending.Add(new Pending(AndroidScreenRecords.PacketEventType, record, receivedAt));
+                    _frames?.Packet(new FramePacket(session, record.ByteOffset, record.Size, true, null, receivedAt, receivedAt, null, null, null, []));
                     continue;
                 }
 
-                EmitPicture(record, pts * 1000, receivedAt, ready, pending);
+                var placed = EmitPicture(record, pts * 1000, receivedAt, ready, pending);
+                _frames?.Packet(placed);
             }
 
             // What came before a picture that never arrived is placed at its receipt.
@@ -389,7 +430,7 @@ public sealed class AndroidScreenCollector : ICaptureCollector
             connectionLost: true);
     }
 
-    private void EmitPicture(AndroidVideoPacket record, long phoneTime, long receivedAt, bool ready, List<Pending> pending)
+    private FramePacket EmitPicture(AndroidVideoPacket record, long phoneTime, long receivedAt, bool ready, List<Pending> pending)
     {
         var mapped = ready ? _clock?.Map(phoneTime) : null;
         long time;
@@ -421,14 +462,53 @@ public sealed class AndroidScreenCollector : ICaptureCollector
 
         pending.Clear();
         _lastTime = time;
+        var clockMapping = mapped is null ? null : AndroidCompanionRecords.FittedClockMapping;
         Emit(
             time,
             AndroidScreenRecords.PacketEventType,
             record,
             native: phoneTime,
             uncertainty: mapped?.UncertaintyNanoseconds,
-            clockMapping: mapped is null ? null : AndroidCompanionRecords.FittedClockMapping,
+            clockMapping: clockMapping,
             qualityFlags: [.. flags]);
+        return new FramePacket(
+            record.Session,
+            record.ByteOffset,
+            record.Size,
+            false,
+            record.PresentationMicroseconds,
+            receivedAt,
+            time,
+            phoneTime,
+            mapped?.UncertaintyNanoseconds,
+            clockMapping,
+            flags);
+    }
+
+    private void FrameWritten(WrittenFrame written)
+    {
+        var packet = written.Packet;
+        Emit(
+            packet.Time,
+            AndroidFrameRecords.FrameEventType,
+            written.Frame,
+            native: packet.NativeNanoseconds,
+            uncertainty: packet.UncertaintyNanoseconds,
+            clockMapping: packet.ClockMapping,
+            qualityFlags: [.. written.Flags],
+            channel: AndroidFrameRecords.FramesChannel);
+    }
+
+    private void FramesFailed(string reason)
+    {
+        var text = $"The phone's frames stopped being made: {reason} The phone's screen is still recorded as a video stream.";
+        HealthState = CollectorHealthState.Degraded;
+        HealthReason = text;
+        Emit(
+            Math.Max(_context?.Clock.GetElapsedNanoseconds() ?? 0, Volatile.Read(ref _lastTime)),
+            AndroidFrameRecords.UnavailableEventType,
+            new AndroidFramesUnavailable(reason),
+            channel: AndroidFrameRecords.FramesChannel);
     }
 
     private void EmitHeld(long time, string eventType, object payload, string[] flags, long? native)
@@ -491,7 +571,8 @@ public sealed class AndroidScreenCollector : ICaptureCollector
         long? native = null,
         long? uncertainty = null,
         string? clockMapping = null,
-        string[]? qualityFlags = null)
+        string[]? qualityFlags = null,
+        string channel = AndroidScreenRecords.VideoChannel)
     {
         var context = _context;
         if (context is null)
@@ -499,11 +580,13 @@ public sealed class AndroidScreenCollector : ICaptureCollector
             return;
         }
 
-        var next = Interlocked.Increment(ref _videoSequence);
+        var next = channel == AndroidFrameRecords.FramesChannel
+            ? Interlocked.Increment(ref _frameSequence)
+            : Interlocked.Increment(ref _videoSequence);
         var record = RecorderEventFactory.Create(
             context.SessionId,
             Descriptor,
-            AndroidScreenRecords.VideoChannel,
+            channel,
             next,
             monotonicNanoseconds,
             eventType,

@@ -279,6 +279,15 @@ internal static class EvidenceSamples
             J("{'serial':'58191FDCQ00ABZ','reason':'The server on the phone stopped before it connected.','connectionLost':false}")),
         ("graphics.android.video", "video-unavailable",
             J("{'serial':'58191FDCQ00ABZ','reason':'The screen stream ended: the server closed the stream.','connectionLost':true}")),
+        // Added with 0040_android_frames.sql: a portrait frame, a landscape
+        // one after turning the phone with repeats before it, and frames
+        // stopping while the stream goes on being recorded.
+        ("graphics.android.frames", "device-frame",
+            J("{'path':'frames/android/0000000001.png','width':1080,'height':2404,'session':1,'packetByteOffset':31,'presentationMicroseconds':5000123456,'byteLength':412345,'pixelFormat':'R8G8B8','encodedFormat':'png','colourMatrix':'bt709','colourRange':'limited','chromaUpsampling':'nearest','decoder':'media-foundation-h264','decodedWidth':1088,'decodedHeight':2416,'repeatsBefore':0,'writtenAtNanoseconds':901000000}")),
+        ("graphics.android.frames", "device-frame",
+            J("{'path':'frames/android/0000000002.png','width':2404,'height':1080,'session':2,'packetByteOffset':5123487,'presentationMicroseconds':5012000000,'byteLength':398765,'pixelFormat':'R8G8B8','encodedFormat':'png','colourMatrix':'bt601','colourRange':'full','chromaUpsampling':'nearest','decoder':'media-foundation-h264','decodedWidth':2416,'decodedHeight':1088,'repeatsBefore':9,'writtenAtNanoseconds':12950000000}")),
+        ("graphics.android.frames", "frames-unavailable",
+            J("{'reason':'The decoder could not be made: class not registered.'}")),
         ("input.mouse-hook", "hook-mouse",
             J("{'installation':1,'message':512,'kind':'move','button':null,'x':640,'y':-12,'mouseData':0,'wheelDelta':null,'flags':0,'injected':false,'lowerIntegrityInjected':false,'penOrTouch':null,'extraInformation':0,'eventTimeMilliseconds':123456789}")),
         ("input.mouse-hook", "hook-mouse",

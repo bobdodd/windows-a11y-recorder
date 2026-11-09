@@ -19,6 +19,10 @@ public sealed class AndroidScreenTests : IDisposable
     // The phone clock in the fake is this far ahead of the session clock.
     private const long PhoneOffset = 7_000_000_000_000;
 
+    // Frames are made with the fake decoder, which every Linux and Windows
+    // machine has; Windows' decoder is checked in AndroidFramesTests.
+    private static readonly Func<int, int, IH264Decoder> Decoders = (width, height) => new FakeDecoder(width, height);
+
     private readonly string _folder = Path.Combine(Path.GetTempPath(), "android-screen-" + Guid.NewGuid().ToString("N"));
 
     public AndroidScreenTests() => Directory.CreateDirectory(_folder);
@@ -239,7 +243,7 @@ public sealed class AndroidScreenTests : IDisposable
         var clock = new SessionClock();
         var hashes = new ArtifactHashRegistry();
         var phoneClock = new FakePhoneClock(true);
-        await using var collector = new AndroidScreenCollector(new ServerAdb(_ => { }), Serial, "unused", phoneClock, (_, _) => phone.ConnectAsync());
+        await using var collector = new AndroidScreenCollector(new ServerAdb(_ => { }), Serial, "unused", phoneClock, (_, _) => phone.ConnectAsync(), Decoders);
         await collector.InitializeAsync(new CollectorInitializationContext("session-1", _folder, clock, sink, hashes), CancellationToken.None);
 
         await collector.StartAsync(new SessionBoundary(0, DateTimeOffset.UtcNow), CancellationToken.None);
@@ -289,7 +293,21 @@ public sealed class AndroidScreenTests : IDisposable
         Assert.Equal(1_016_667_000, pictureRecord.MonotonicNanoseconds);
         Assert.Equal(5031, pictureRecord.Payload.GetProperty("byteOffset").GetInt64());
         Assert.Empty(pictureRecord.QualityFlags);
-        Assert.Matches(@"^Phone screen: 3 packets, 0\.0 MB, 1080 by 2404, median delay from phone to recorder -?\d+\.\d ms\.$", collector.Summary);
+
+        // Each picture differs from the one before, so each is a frame, at
+        // its packet's time; its payload gives the packet's place.
+        var frames = sink.Records.Where(record => record.Channel == AndroidFrameRecords.FramesChannel).ToList();
+        Assert.Equal([AndroidFrameRecords.FrameEventType, AndroidFrameRecords.FrameEventType], frames.Select(record => record.EventType));
+        Assert.Equal([keyRecord.MonotonicNanoseconds, pictureRecord.MonotonicNanoseconds], frames.Select(record => record.MonotonicNanoseconds));
+        Assert.Equal([31L, 5031L], frames.Select(record => record.Payload.GetProperty("packetByteOffset").GetInt64()));
+        Assert.Equal(keyRecord.NativeTimestamp, frames[0].NativeTimestamp);
+        Assert.Equal(AndroidCompanionRecords.FittedClockMapping, frames[0].ClockMappingId);
+        Assert.Equal([AndroidFrameRecords.CompressedOnPhoneFlag], frames[0].QualityFlags);
+        Assert.Equal("frames/android/0000000001.png", frames[0].Payload.GetProperty("path").GetString());
+        var frameFile = Path.Combine(_folder, "frames", "android", "0000000002.png");
+        Assert.True(hashes.TryGetUnchanged(frameFile, out var frameHash));
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(frameFile))).ToLowerInvariant(), frameHash);
+        Assert.Matches(@"^Phone screen: 3 packets, 0\.0 MB, 1080 by 2404, 2 frames, median delay from phone to recorder -?\d+\.\d ms\.$", collector.Summary);
     }
 
     [Fact]
@@ -306,7 +324,7 @@ public sealed class AndroidScreenTests : IDisposable
         await using var phone = await PhoneSocket.OpenAsync();
         var sink = new ListSink();
         var clock = new SessionClock();
-        await using var collector = new AndroidScreenCollector(new ServerAdb(_ => { }), Serial, "unused", new FakePhoneClock(true), (_, _) => phone.ConnectAsync());
+        await using var collector = new AndroidScreenCollector(new ServerAdb(_ => { }), Serial, "unused", new FakePhoneClock(true), (_, _) => phone.ConnectAsync(), Decoders);
         await collector.InitializeAsync(new CollectorInitializationContext("session-1", _folder, clock, sink), CancellationToken.None);
 
         await collector.StartAsync(new SessionBoundary(0, DateTimeOffset.UtcNow), CancellationToken.None);
@@ -325,6 +343,45 @@ public sealed class AndroidScreenTests : IDisposable
     }
 
     [Fact]
+    public async Task Collector_DecoderUnavailable_StoresTheStreamAndSaysWhy()
+    {
+        var phoneStart = PhoneOffset + 1_000_000_000;
+        byte[] stream =
+        [
+            .. ScrcpyProtocol.SessionHeader(1080, 2404),
+            .. ScrcpyProtocol.PacketHeader(phoneStart / 1000, true, 10), .. Bytes(10, 1)
+        ];
+        await using var phone = await PhoneSocket.OpenAsync();
+        var sink = new ListSink();
+        var clock = new SessionClock();
+        await using var collector = new AndroidScreenCollector(
+            new ServerAdb(_ => { }),
+            Serial,
+            "unused",
+            new FakePhoneClock(true),
+            (_, _) => phone.ConnectAsync(),
+            (_, _) => throw new DecoderUnavailableException("Windows Media Foundation is not installed."));
+        await collector.InitializeAsync(new CollectorInitializationContext("session-1", _folder, clock, sink), CancellationToken.None);
+
+        await collector.StartAsync(new SessionBoundary(0, DateTimeOffset.UtcNow), CancellationToken.None);
+        await phone.WriteAsync(stream);
+        await WaitUntilAsync(() => collector.HealthState == CollectorHealthState.Degraded);
+        await collector.StopAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
+
+        Assert.Equal(
+            "The phone's frames stopped being made: Windows Media Foundation is not installed. The phone's screen is still recorded as a video stream.",
+            collector.HealthReason);
+        var unavailable = Assert.Single(sink.Records, record => record.Channel == AndroidFrameRecords.FramesChannel);
+        Assert.Equal(AndroidFrameRecords.UnavailableEventType, unavailable.EventType);
+        Assert.Equal("Windows Media Foundation is not installed.", unavailable.Payload.GetProperty("reason").GetString());
+        Assert.Single(sink.Records, record => record.EventType == AndroidScreenRecords.PacketEventType);
+        Assert.Equal(10, new FileInfo(Path.Combine(_folder, "android", "screen.h264")).Length);
+        Assert.Contains(", 0 frames", collector.Summary);
+        var validator = new EventRecordValidator("session-1");
+        Assert.All(sink.Records, record => Assert.Empty(validator.Validate(record)));
+    }
+
+    [Fact]
     public async Task Collector_NoPhoneClock_PlacesByReceipt()
     {
         byte[] stream =
@@ -335,7 +392,7 @@ public sealed class AndroidScreenTests : IDisposable
         await using var phone = await PhoneSocket.OpenAsync();
         var sink = new ListSink();
         var clock = new SessionClock();
-        await using var collector = new AndroidScreenCollector(new ServerAdb(_ => { }), Serial, "unused", new FakePhoneClock(false), (_, _) => phone.ConnectAsync());
+        await using var collector = new AndroidScreenCollector(new ServerAdb(_ => { }), Serial, "unused", new FakePhoneClock(false), (_, _) => phone.ConnectAsync(), Decoders);
         await collector.InitializeAsync(new CollectorInitializationContext("session-1", _folder, clock, sink), CancellationToken.None);
 
         await collector.StartAsync(new SessionBoundary(0, DateTimeOffset.UtcNow), CancellationToken.None);
@@ -357,7 +414,7 @@ public sealed class AndroidScreenTests : IDisposable
         await using var phone = await PhoneSocket.OpenAsync();
         var sink = new ListSink();
         var clock = new SessionClock();
-        await using var collector = new AndroidScreenCollector(new ServerAdb(_ => { }), Serial, "unused", new FakePhoneClock(true), (_, _) => phone.ConnectAsync());
+        await using var collector = new AndroidScreenCollector(new ServerAdb(_ => { }), Serial, "unused", new FakePhoneClock(true), (_, _) => phone.ConnectAsync(), Decoders);
         await collector.InitializeAsync(new CollectorInitializationContext("session-1", _folder, clock, sink), CancellationToken.None);
         await collector.StartAsync(new SessionBoundary(0, DateTimeOffset.UtcNow), CancellationToken.None);
 
@@ -388,7 +445,8 @@ public sealed class AndroidScreenTests : IDisposable
             Serial,
             "unused",
             new FakePhoneClock(true),
-            (_, _) => throw new ScrcpyUnavailableException("scrcpy's server on the phone stopped before it connected."));
+            (_, _) => throw new ScrcpyUnavailableException("scrcpy's server on the phone stopped before it connected."),
+            Decoders);
         await collector.InitializeAsync(new CollectorInitializationContext("session-1", _folder, clock, sink), CancellationToken.None);
 
         var started = await collector.StartAsync(new SessionBoundary(0, DateTimeOffset.UtcNow), CancellationToken.None);

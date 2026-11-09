@@ -354,6 +354,34 @@ internal static class EvidenceCatalog
         Text("reason"),
         Bool("connectionLost"));
 
+    // Added by 0040_android_frames.sql. The phone's frames
+    // (graphics.android.frames): each PNG made from the stored stream, and
+    // why frames stopped being made. See
+    // docs/architecture/android-implementation-plan.md, slice 3, step 3b.
+    public static readonly EvidenceTable AndroidDeviceFrames = Evidence(
+        "android_device_frames",
+        Text("path"),
+        Int("width"),
+        Int("height"),
+        Int("session"),
+        BigInt("packetByteOffset"),
+        BigInt("presentationMicroseconds"),
+        BigInt("byteLength"),
+        Text("pixelFormat"),
+        Text("encodedFormat"),
+        Text("colourMatrix"),
+        Text("colourRange"),
+        Text("chromaUpsampling"),
+        Text("decoder"),
+        Int("decodedWidth"),
+        Int("decodedHeight"),
+        BigInt("repeatsBefore"),
+        BigInt("writtenAtNanoseconds"));
+
+    public static readonly EvidenceTable AndroidFrameUnavailabilities = Evidence(
+        "android_frame_unavailabilities",
+        Text("reason"));
+
     // Added by 0026_assistive_technology.sql. The assistive technology
     // collector's records (system.assistive-technology): what it watches,
     // each watched process's start and exit, each of its modules seen in or
@@ -1710,7 +1738,8 @@ internal static class EvidenceCatalog
         (39, "android_screen",
         [
             AndroidVideoStreams, AndroidVideoSessions, AndroidVideoPackets, AndroidVideoUnavailabilities
-        ])
+        ]),
+        (40, "android_frames", [AndroidDeviceFrames, AndroidFrameUnavailabilities])
     ];
 
     /// <summary>
@@ -1751,6 +1780,8 @@ internal static class EvidenceCatalog
             [(Recorder.Contracts.AndroidScreenRecords.VideoChannel, Recorder.Contracts.AndroidScreenRecords.SessionEventType)] = AndroidVideoSessions,
             [(Recorder.Contracts.AndroidScreenRecords.VideoChannel, Recorder.Contracts.AndroidScreenRecords.PacketEventType)] = AndroidVideoPackets,
             [(Recorder.Contracts.AndroidScreenRecords.VideoChannel, Recorder.Contracts.AndroidScreenRecords.UnavailableEventType)] = AndroidVideoUnavailabilities,
+            [(Recorder.Contracts.AndroidFrameRecords.FramesChannel, Recorder.Contracts.AndroidFrameRecords.FrameEventType)] = AndroidDeviceFrames,
+            [(Recorder.Contracts.AndroidFrameRecords.FramesChannel, Recorder.Contracts.AndroidFrameRecords.UnavailableEventType)] = AndroidFrameUnavailabilities,
             [("system.assistive-technology", "assistive-technology-watch")] = AssistiveTechnologyWatches,
             [("system.assistive-technology", "assistive-technology-process-started")] = AssistiveTechnologyProcessStarts,
             [("system.assistive-technology", "assistive-technology-process-exited")] = AssistiveTechnologyProcessExits,

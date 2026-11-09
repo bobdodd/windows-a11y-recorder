@@ -41,7 +41,8 @@ internal static class EventPayloadValidator
         Recorder.Contracts.AndroidCompanionRecords.CompanionChannel,
         Recorder.Contracts.AndroidCompanionRecords.ClockChannel,
         Recorder.Contracts.AndroidCompanionRecords.DisplayChannel,
-        Recorder.Contracts.AndroidScreenRecords.VideoChannel
+        Recorder.Contracts.AndroidScreenRecords.VideoChannel,
+        Recorder.Contracts.AndroidFrameRecords.FramesChannel
     ];
 
     /// <summary>Whether the recorder defines the channel.</summary>
@@ -166,6 +167,12 @@ internal static class EventPayloadValidator
                 break;
             case (Recorder.Contracts.AndroidScreenRecords.VideoChannel, Recorder.Contracts.AndroidScreenRecords.UnavailableEventType):
                 ValidateAndroidCompanionUnavailable(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidFrameRecords.FramesChannel, Recorder.Contracts.AndroidFrameRecords.FrameEventType):
+                ValidateAndroidDeviceFrame(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidFrameRecords.FramesChannel, Recorder.Contracts.AndroidFrameRecords.UnavailableEventType):
+                ValidateShape(payload, [RequiredString("reason")], issues);
                 break;
             case ("system.assistive-technology", "assistive-technology-watch"):
                 ValidateAssistiveTechnologyWatch(payload, issues);
@@ -1972,6 +1979,59 @@ internal static class EventPayloadValidator
                 "android-video-packet-time",
                 "#/payload/presentationMicroseconds",
                 "A configuration packet has no presentation time, and every other packet has one.");
+        }
+    }
+
+    // A phone frame (android-implementation-plan.md, slice 3, step 3b): a
+    // PNG under frames/android, the session's size, made from a picture
+    // packet, which always has a presentation time.
+    private static void ValidateAndroidDeviceFrame(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredString("path"),
+                RequiredInteger("width", positive: true),
+                RequiredInteger("height", positive: true),
+                RequiredInteger("session", positive: true),
+                RequiredInteger("packetByteOffset", nonnegative: true),
+                RequiredInteger("presentationMicroseconds", nonnegative: true),
+                RequiredInteger("byteLength", positive: true),
+                RequiredEnum("pixelFormat", "R8G8B8"),
+                RequiredEnum("encodedFormat", "png"),
+                RequiredEnum("colourMatrix", "bt709", "bt601", "bt2020"),
+                RequiredEnum("colourRange", "limited", "full"),
+                RequiredEnum("chromaUpsampling", "nearest"),
+                RequiredString("decoder"),
+                RequiredInteger("decodedWidth", positive: true),
+                RequiredInteger("decodedHeight", positive: true),
+                RequiredInteger("repeatsBefore", nonnegative: true),
+                RequiredInteger("writtenAtNanoseconds")
+            ],
+            issues);
+        if (payload.TryGetProperty("path", out var path) && path.ValueKind == JsonValueKind.String &&
+            !System.Text.RegularExpressions.Regex.IsMatch(path.GetString()!, "^frames/android/[0-9]{10}[.]png$"))
+        {
+            AddError(
+                issues,
+                "android-device-frame-path",
+                "#/payload/path",
+                "A phone frame is a PNG file named by its sequence under frames/android.");
+        }
+
+        if (payload.TryGetProperty("width", out var width) && width.TryGetInt64(out var w) &&
+            payload.TryGetProperty("decodedWidth", out var decodedWidth) && decodedWidth.TryGetInt64(out var dw) &&
+            payload.TryGetProperty("height", out var height) && height.TryGetInt64(out var h) &&
+            payload.TryGetProperty("decodedHeight", out var decodedHeight) && decodedHeight.TryGetInt64(out var dh) &&
+            (w > dw || h > dh))
+        {
+            AddError(
+                issues,
+                "android-device-frame-size",
+                "#/payload/width",
+                "A phone frame is cut from the decoded picture, so it is no larger than it.");
         }
     }
 

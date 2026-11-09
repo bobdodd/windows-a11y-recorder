@@ -432,7 +432,9 @@ slice's full test goes into a validation plan,
   compressed on the phone. The server repeats the last frame after
   100 ms without change
   ([scrcpy 5.0.1, SurfaceEncoder.java](https://github.com/Genymobile/scrcpy/blob/a60891aea193d92e7e5c3942700eca63f9d19a5f/server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder.java)),
-  so the pixel comparison keeps such repeats out. Every changed frame
+  and a picture the same in every byte as the one before is not
+  written. On the Pixel such repeats are not copies (step 3b). Every
+  changed frame
   becomes a PNG, with no rate limit, so nothing brief is missed. Disk
   use and processor load are measured on the Pixel in this slice before
   any limit is considered. If decoding falls behind, the stream is still
@@ -504,6 +506,82 @@ slice's full test goes into a validation plan,
     `android_video_unavailabilities`. The payload validator checks that
     a packet has no presentation time exactly when it is a configuration
     packet.
+
+- **Built, step 3b (2026-11-09).** `PhoneFrames` makes the frames while
+  the stream is recorded. The collector flushes each packet to
+  `android/screen.h264` and passes its place to `PhoneFrames`, which
+  reads the packet back from the file, so a decoder that falls behind
+  holds only the packets' places in memory, never their bytes. At Stop
+  the collector waits for the frames still to be made before the
+  recording is completed.
+  - **Decoding.** One thread decodes in order, as H.264 needs.
+    `MediaFoundationH264Decoder` uses Windows' H.264 decoder in software,
+    with NV12 out and low latency asked for, through its function
+    tables, as the MP4 export calls Media Foundation. A configuration
+    packet's bytes go to the decoder with the next picture packet. Each
+    capture session gets a new decoder, as its size and parameter sets
+    differ; the old one is drained first, so no picture is lost at a
+    rotation. Each packet's tag goes in as the sample time, and each
+    picture out is matched to its packet by it.
+  - **Picture.** The decoder pads the picture to whole 16-pixel blocks
+    (1088 by 2416 for 1080 by 2404), so each picture is cut to its
+    session's size from the top left. It is compared with the picture
+    before in every byte, and written only if it differs. It is
+    converted to 8-bit RGB with the matrix and range the decoder reports
+    from the stream; each 2 by 2 block of pixels takes its own colour
+    sample, not one blended from its neighbours (`chromaUpsampling`
+    `nearest`). If the decoder reports no matrix or range, BT.709
+    limited range is used, the Pixel's, and the frame is flagged
+    `colour-assumed`.
+  - **PNG.** Written with the Up filter and zlib at its fastest level,
+    which changes only the file's size, by up to four workers at once
+    (half the processors), with the records given in order. Each file is
+    written under a temporary name and renamed when complete, and its
+    SHA-256 recorded.
+  - **Record.** `device-frame` on `graphics.android.frames`, at its
+    packet's session time, phone time, uncertainty and clock mapping,
+    with the packet's flags and `compressed-on-phone`. The payload gives
+    the path, size, session, the packet's byte offset and phone time,
+    the PNG's length, pixel format, matrix, range, chroma upsampling,
+    the decoder, the decoder's padded size, the number of pictures the
+    same as the frame before it, and the session time the PNG was
+    complete, so its delay behind the packet can be read.
+  - **Failures.** If Windows' decoder cannot be made (an N edition of
+    Windows without the Media Feature Pack) or fails, or a frame cannot
+    be written, frames stop, `frames-unavailable` gives the reason once,
+    the collector is Degraded with "The phone's frames stopped being
+    made: <reason> The phone's screen is still recorded as a video
+    stream.", and the stream goes on being recorded.
+  - **Status.** The "Phone screen:" line adds the number of frames, and
+    "(N packets waiting to be decoded)" while decoding is behind.
+  - **Storage.** Migration 0040 adds `android_device_frames` and
+    `android_frame_unavailabilities`.
+  - **Checked on the development PC (2026-11-09).** A check program fed
+    test 18's stream (237 packets, 13 portrait and 222 landscape
+    pictures) through `PhoneFrames` with Windows' decoder. It made 235
+    frames in 1.9 seconds, 24 processors and four workers; decoding took
+    5.7 ms a picture (median, largest 22.3 ms). The decoder reported
+    BT.709 and limited range, and padded the pictures to 1088 by 2416
+    and 2416 by 1088. The first portrait and the hundredth frame are byte
+    for byte the same files as those made by the same conversion from
+    FFmpeg's decoding of the same pictures, so Windows' decoder gives
+    FFmpeg's pixels exactly. Against FFmpeg's own conversion to RGB
+    (BT.709, limited range, nearest), no value differs by more than 3.
+  - **Repeats are not copies.** No picture of test 18 was the same as
+    the one before, so none was left out. When the screen stops
+    changing, the Pixel's encoder sends a picture every 100 ms for about
+    a second. The first of these differ from the one before in tens of
+    thousands of samples or more, the last ones in 768 to 1,784 samples
+    by 1 level, which suggests each refines the last; that is an
+    inference from the pixels, not documented. Each is kept, as a rule that ignored small
+    differences could also miss a small change on the screen.
+  - **Disk use.** Test 18's 235 frames take 146 MB, 0.62 MB a frame on
+    average: 2.4 to 3.0 MB for a detailed portrait screen, 0.17 to 0.6
+    MB for the landscape pictures. While the screen moves the phone
+    sends up to 120 pictures a second (8 ms apart in test 18), so
+    scrolling a detailed screen can use well over 100 MB a second, and
+    the check made frames at about 125 a second. Both are measured again
+    on the Pixel in tests 21 to 23 before any limit is considered.
 
 ### Slice 4: the phone's sound
 

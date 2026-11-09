@@ -671,3 +671,108 @@ recording" ends the recording as usual.
   text is changing during a recording. The owner wants the way text is
   copied in the recorder replaced later, so it is left as it is for now,
   and tests read changing lines from the screen or a screenshot.
+
+## Part 3, step 3b: the phone's screen as pictures
+
+Step 3b decodes the phone's stream while it is recorded and writes each
+picture that differs from the one before as a PNG file in
+`frames\android` in the recording's folder, with a record for each. The
+player does not show them yet; that is step 3c.
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings, and 23 new tests pass. A 24th,
+of Windows' decoder against a stream the phone's size, runs only on
+Windows and has not been run yet. The 23 cover the colour conversion (white, black, grey, and BT.709's red, green and
+blue in limited range; BT.601 in full range), cutting the decoder's
+padded picture to the session's size, PNG files read back pixel for
+pixel, and, with a fake decoder, frames made in order, repeats left out,
+a new decoder at each capture session, a decoder that holds pictures
+back, and a decoder that cannot be made or that fails. Then, on the
+development PC, a check program made 235 frames from test 18's stream
+with Windows' decoder in 1.9 seconds; two of them were compared with
+FFmpeg's decoding of the same pictures and are the same in every pixel
+(see the implementation plan, "Built, step 3b"). None of that shows the
+frames made during a recording on the Pixel, the processor load and disk
+use while the phone's screen moves, or the frames after a rotation.
+Tests 20 to 23 do.
+
+### Test 20: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Connect the Pixel by USB, unlocked. Start the recorder from the Start
+   menu, and in "Recording target" choose "Android device".
+4. If the panel offers "Install companion app", choose it, and wait until
+   the panel shows "Companion app: installed, on, and answering".
+5. Read the note under "Android device checks".
+
+**On screen:** the build ends with `INSTALLER BUILT`. In step 5 the
+panel shows "Companion app: installed, on, and answering (version
+1.1.0", and the note reads "A recording of the phone records the
+companion app's connection, the phone's clock, its display's rotation
+and size, and the phone's screen as a video stream and as a picture for
+each change. The phone's screen is not yet shown in the player."
+
+### Test 21: a recording with the phone's screen moving
+
+With the panel from test 20 showing, and the phone unlocked on its home
+screen:
+
+1. Choose "Start recording", and wait 5 seconds.
+2. On the phone, open Settings, and scroll its list up and down with
+   your finger for 10 seconds.
+3. Put the phone down without touching it, and wait 10 seconds.
+4. Take a screenshot of "Collector status" under "Current session".
+5. Choose "Stop recording".
+
+**On screen:** in step 4 the "android.screen" line reads
+"android.screen: Running, Healthy. Phone screen:" with a number of
+packets, a number of MB, "1080 by 2404", a number of frames, and the
+median delay. The number of frames is expected to be close to the number
+of packets: one less for each configuration packet. If the line says
+"packets waiting to be decoded" after the 10 seconds without touching
+the phone, decoding is behind; that is not a failure, but is recorded.
+Send the screenshot. "Stop recording" may take a few seconds longer than
+before if frames are still being made.
+
+### Test 22: the pictures in the recording's folder
+
+1. Open File Explorer, and go to Documents, then "Windows A11y
+   Recorder".
+2. Open the newest folder, the recording of test 21.
+3. Open the folder `frames`, then the folder `android`.
+4. Open the first file, `0000000001.png`.
+5. Close it, and open the last file in the folder.
+
+**On screen:** in step 3 the folder holds PNG files named by number,
+from `0000000001.png` up, as many as the frames in the line of test 21,
+and no file ending `.tmp`. The first picture, in step 4, is the phone's
+home screen, upright, 1080 by 2404, its colours as on the phone. The
+last, in step 5, is the Settings list where scrolling stopped. Send the
+folder's total size: select all its files, and read the size in the
+Details pane, or in Properties.
+
+### Test 23: the phone rotated during a recording
+
+1. On the Pixel, turn on Auto-rotate (swipe down twice from the top of
+   the screen), and open Chrome.
+2. In the recorder, choose "Start recording", and wait 5 seconds.
+3. Turn the phone on its side, wait 5 seconds, then choose "Stop
+   recording".
+4. Turn the phone upright.
+5. In File Explorer, open the newest recording's folder, then `frames`,
+   then `android`, and in the View menu choose "Large icons".
+
+**On screen:** in step 5 the first pictures are tall and show Chrome
+upright; the last pictures are wide and show Chrome in landscape,
+upright as the phone was held. No picture is stretched or cut off.

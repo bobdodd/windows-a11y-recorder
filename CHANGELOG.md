@@ -149,6 +149,24 @@ Changes on `main` since 1.1.0, not yet released.
 - Database migration 0039 adds the tables of the screen's records.
 - The player does not show the phone's screen yet (part 3c).
 
+### Android recording, part 3b: the phone's screen as pictures
+
+- While the phone's stream is recorded, Windows' Media Foundation H.264
+  decoder decodes it, and each picture that differs from the one before
+  in any byte is written as a PNG file in `frames/android`, cut to the
+  capture session's size and converted with the matrix and range the
+  stream gives. Each is recorded as `device-frame` on
+  `graphics.android.frames` at its packet's time.
+- The packets are read back from `android/screen.h264`, so decoding that
+  falls behind costs no memory for the packets, and the frames still to
+  be made are made at Stop, before the recording is completed.
+- The "android.screen" status adds the number of frames, and the packets
+  waiting to be decoded while decoding is behind. If frames cannot be
+  made, the reason is recorded and the collector is Degraded; the stream
+  is still recorded.
+- Database migration 0040 adds the tables of the frame records.
+- The player does not show the phone's frames yet (part 3c).
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now
