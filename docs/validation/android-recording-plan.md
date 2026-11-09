@@ -953,3 +953,6 @@ moves on.
   cannot be read; that is noted for the later work on the player, not
   changed here. The test now checks the re-indexing by the pictures
   being shown, as the stored index holds none.
+- 2026-11-09, test 25, as revised, passed. At 3 seconds the picture was
+  tall, with Chrome upright filling the frame area's height; at 10
+  seconds it was wide, with Chrome in landscape filling its width.
