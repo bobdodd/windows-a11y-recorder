@@ -1100,3 +1100,8 @@ recorded before the cable was unplugged. The "android.screen" and
 "android.companion" lines are Degraded too, as in tests 19 and 14, and
 "windows.audio: Running, Healthy" is unchanged. "Stop recording" ends
 the recording as usual. Send the screenshot.
+
+### Results of part 4, step 4a
+
+- 2026-11-09, installer built from `70795cc`: test 29 passed. The note
+  read as expected, copied from the panel.
