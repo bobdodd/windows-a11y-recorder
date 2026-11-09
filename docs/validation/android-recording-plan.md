@@ -599,3 +599,43 @@ recording goes on without it." and "Phone screen:" with the packets
 recorded before the cable was unplugged; that number no longer goes up.
 The "android.companion" line is Degraded too, as in test 14. "Stop
 recording" ends the recording as usual.
+
+### Results of part 3, step 3a
+
+- 2026-11-09, installer built from `a05bb8a`: test 15 passed, after
+  "Install companion app" updated the companion from version code 690
+  to 695. The version code goes up with every build of the installer,
+  so the panel offers the update after each one, even when the app has
+  not changed.
+- 2026-11-09, test 16 passed, read from a screenshot: "android.screen:
+  Running, Healthy. Phone screen: 114 packets, 1.7 MB, 1080 by 2404,
+  median delay from phone to recorder 36.0 ms." The owner could not
+  copy the line, as it changes while it is being selected; that is
+  followed up separately. The recording
+  (`20261109-135903-c2b69908eabf4ad6a2c1fbd6fb45bd76`, 113.5 seconds,
+  completed) has one `video-stream`, one `video-session` (1080 by 2404,
+  so scrcpy did not round the size down) and 125 `video-packet` events:
+  one configuration packet and 124 pictures, the first a key frame.
+  The packets' byte offsets run without a gap to the end of
+  `android/screen.h264` (1,864,028 bytes), and its SHA-256 in the
+  manifest matches the file. ffmpeg decoded all 124 pictures with no
+  error: H.264 High profile, 1080 by 2404, limited range, BT.709. The
+  pictures show the phone's home screen, its clock going from 8:59 to
+  9:00 as the recording did.
+- The delay from a packet's mapped phone time to the time it arrived
+  was 15.6 to 68.6 ms, median 36.9 ms, with the clock fit's
+  uncertainty 2.0 ms (median, largest 20.0 ms). A delay that small and
+  never below zero supports the inference that the packets' times are
+  on the companion's CLOCK_MONOTONIC; it does not prove it.
+- The phone sends far fewer packets than expected. After a change it
+  repeated the picture every 100 ms for about a second, then sent
+  nothing while the screen stayed still: gaps of 44.3, 28.8 and 15.3
+  seconds. scrcpy asks the encoder to repeat after 100 ms; that the
+  Pixel's encoder stops repeating is seen here, not documented. A gap
+  in the packets is therefore a screen that did not change, not lost
+  evidence, and the player in step 3c shows the last picture until the
+  next one.
+- Test 17 was checked from the recording's folder on the development
+  PC: `android` holds `screen.h264` (1.86 MB) and `scrcpy-server.log`,
+  whose one line is "[server] INFO: Device: [Google] google Pixel 10
+  Pro XL (Android 17)".
