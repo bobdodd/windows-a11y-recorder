@@ -326,14 +326,14 @@ build and left off, so the recorder offers to update it.
 2. Run the newest installer in `artifacts\installer\output` and go
    through its pages. On the last page, uncheck "Start the recorder and
    set up the analysis models", then choose Finish.
-3. Connect the Pixel by USB, unlocked, with TalkBack on.
+3. Connect the Pixel by USB, unlocked, with TalkBack on or off.
 4. Start the recorder from the Start menu, and in "Recording target"
    choose "Android device".
 5. Wait 5 seconds, then read "Android device checks".
 
 **On screen:** the build ends with `INSTALLER BUILT` and, before that,
 `COMPANION APP BUILT` with `1.1.0, version code` and a number. In the
-panel, the lines of test 6 with "TalkBack: on.", and a line "Companion
+panel, the lines of test 6, and a line "Companion
 app: version code" with a number, "is installed, older than the
 recorder's" with a larger number, and "Choose "Install companion app" to
 update it." Under the checks, a button "Install companion app", and the
@@ -343,7 +343,7 @@ screen, sound, touches and accessibility evidence come in later parts."
 
 ### Test 11: install and turn on the companion app
 
-With the panel from test 10 showing and TalkBack still on:
+With the panel from test 10 showing, and TalkBack as it was there:
 
 1. Choose "Install companion app".
 2. Wait until the text under the button changes from "Installing the
@@ -354,8 +354,9 @@ With the panel from test 10 showing and TalkBack still on:
 **On screen:** under the button, "The companion app is installed and
 on." The button is gone, and the panel shows "Companion app: installed,
 on, and answering (version 1.1.0, version code" with the larger number
-from test 10 ", protocol 1)." "TalkBack: on." is still there. On the
-Pixel, "A11y Recorder companion" shows as on, and TalkBack as on. If the
+from test 10 ", protocol 1)." The TalkBack line is as it was in test
+10. On the Pixel, "A11y Recorder companion" shows as on, and TalkBack as
+it was. If the
 result is anything else, or the phone shows a message about the
 companion app, send its words; this is where the plan's risk about
 Android's restricted settings is settled.
@@ -411,3 +412,19 @@ taken before the cable was unplugged; that number no longer goes up.
 "Stop recording" ends the recording as usual. After step 5, within 10
 seconds, the panel shows "Companion app: installed, on, and answering"
 again.
+
+### Results of part 2
+
+- 2026-11-08, installer built from `4174f35`: test 10 passed; the panel
+  offered to update the companion app installed in test 4. Test 11
+  passed with TalkBack off: "Install companion app" installed the app
+  and turned it on, the panel then showed "installed, on, and answering
+  (version 1.1.0, version code 686, protocol 1)", and the Pixel's
+  Accessibility settings showed the companion on. So Android 17 accepts
+  `settings put secure enabled_accessibility_services` for an app
+  installed with `adb install`, and the plan's restricted settings risk
+  does not arise for the recorder's way of turning it on. Keeping
+  TalkBack on while the companion is turned on is checked only by the
+  build environment's tests; the owner turns TalkBack on only for
+  screen reader tests, so it is checked on the Pixel the first time one
+  is recorded.

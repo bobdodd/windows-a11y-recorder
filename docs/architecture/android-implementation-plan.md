@@ -378,9 +378,11 @@ slice's full test goes into a validation plan,
     `android_display_states`, and the payload validator checks that each
     sample's error bound agrees with its four times and that rotation is
     0, 90, 180 or 270.
-  - **Not checked.** Whether Android 17 on the Pixel accepts the
-    `settings put` for an app installed with `adb install`, and keeps
-    TalkBack on, is what test 11 shows. That the display mode's width
+  - **Checked (test 11).** Android 17 on the Pixel accepted the
+    `settings put` for the app installed with `adb install`, with
+    TalkBack off. Keeping TalkBack on through it is checked only by the
+    build environment's tests, until the first screen reader recording.
+  - **Not checked.** That the display mode's width
     and height stay in the phone's natural orientation when it rotates,
     so that rotation changes and size does not, is inference: the
     reference describes the mode's physical width and height without
@@ -597,7 +599,7 @@ slice's full test goes into a validation plan,
 | Media Foundation decodes the phone's 1080 by 2404 H.264 | Checked on the development PC with one frame; the Alienware not checked | slice 3 |
 | Video packet times are CLOCK_MONOTONIC | Inference | slice 8, one-timeline check |
 | Accessibility event times match CLOCK_MONOTONIC | Inference from source | slice 8 |
-| `adb install` avoids the restricted settings block | Reported by developers; the recorder turns the app on with `settings put`, not through Settings | slice 2, test 11 |
+| `adb install` avoids the restricted settings block | Checked for the recorder's way: Android 17 on the Pixel accepted `settings put` for the app installed with `adb install` (test 11) | slice 2 |
 | Accessibility volume can be read or set over adb | Not checked | slice 4 |
 | "Display speech output" can be read over adb | Not checked | slice 1 |
 | PNG for every changed frame keeps up on the PC | Not measured | slice 3 |
