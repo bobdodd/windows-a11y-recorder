@@ -667,3 +667,7 @@ recording" ends the recording as usual.
   quoted the server's greeting, an INFO line naming the device, which
   explains nothing; a reason now quotes only the server's warnings,
   errors and lines with no level, while the log keeps every line.
+- 2026-11-09, the owner: copying the collector status fails while its
+  text is changing during a recording. The owner wants the way text is
+  copied in the recorder replaced later, so it is left as it is for now,
+  and tests read changing lines from the screen or a screenshot.
