@@ -124,8 +124,11 @@ Changes on `main` since 1.1.0, not yet released.
   connection lost part way, is recorded and marks the collector
   Degraded; the recording goes on.
 - Database migration 0038 adds the tables of the companion's records.
-- Tests 10 to 14 of the validation plan check it on the Pixel; not yet
-  run.
+- The collector status in "Current session" is wrapping text that can
+  be selected and copied, not a separate list with a horizontal scroll
+  bar.
+- Tests 10 to 14 passed on the development PC and the Pixel 10 Pro XL on
+  2026-11-08.
 
 ## 1.1.0 - 2026-10-13
 

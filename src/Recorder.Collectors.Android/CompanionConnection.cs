@@ -186,7 +186,10 @@ public sealed class CompanionConnection : IAsyncDisposable
 
     private async Task ReadLoopAsync()
     {
-        var reason = "The companion app closed the connection.";
+        // adb's forward closes the connection in the same way whether the
+        // cable was unplugged, adb stopped, or the app was turned off, so
+        // the reason does not say which (validation plan, test 14).
+        var reason = "The connection closed: the phone was unplugged, adb stopped, or the companion app was turned off.";
         try
         {
             while (true)

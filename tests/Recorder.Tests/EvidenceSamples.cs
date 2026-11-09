@@ -250,7 +250,7 @@ internal static class EvidenceSamples
         ("android.companion", "companion-unavailable",
             J("{'serial':'58191FDCQ00ABZ','reason':'Nothing on the phone answered.','connectionLost':false}")),
         ("android.companion", "companion-unavailable",
-            J("{'serial':'58191FDCQ00ABZ','reason':'The companion app closed the connection.','connectionLost':true}")),
+            J("{'serial':'58191FDCQ00ABZ','reason':'The connection closed: the phone was unplugged, adb stopped, or the companion app was turned off.','connectionLost':true}")),
         ("clock.android", "clock-sample",
             J("{'segment':1,'discontinuity':false,'recorderSendNanoseconds':1000000,'phoneReceiveNanoseconds':5000400000,'phoneSendNanoseconds':5000450000,'recorderReceiveNanoseconds':1900000,'errorBoundNanoseconds':425000}")),
         ("clock.android", "clock-sample",

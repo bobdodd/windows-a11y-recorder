@@ -3,7 +3,7 @@
 Written 2026-11-07 for the first version agreed in
 [Recording an Android device](android-recording.md): the phone connected
 to the PC by USB, recorded with the PC's microphone. Slices 0 and 1 are
-built and tested; slice 2 is built and waits for its tests on the Pixel;
+built and tested; slice 2 is built and passed its tests on the Pixel;
 the others are not built. The owner answered its three questions on 2026-11-08;
 see [Decisions of 2026-11-08](#decisions-of-2026-11-08).
 
@@ -296,9 +296,12 @@ slice's full test goes into a validation plan,
   Accessibility shows the service and TalkBack both on. Start and stop a
   recording of 30 seconds; the recording's details show clock samples
   with a largest error bound in milliseconds.
-- **Built (2026-11-08), not yet tested on the Pixel.** Tests 10 to 14
-  of [the validation plan](../validation/android-recording-plan.md)
-  check it there.
+- **Passed (2026-11-08).** Tests 10 to 14 of
+  [the validation plan](../validation/android-recording-plan.md) on the
+  development PC and the Pixel: install and turn on, a recording's
+  clock samples (median error bound 2.4 ms), rotation, and the cable
+  unplugged during a recording.
+- **Built (2026-11-08).**
   - **App.** `RecorderAccessibilityService` starts `RecorderLink` when
     Android connects the service and stops it when the service is turned
     off. The service configuration is as above, with
@@ -353,7 +356,9 @@ slice's full test goes into a validation plan,
     companion cannot be reached at the start, or the connection ends
     during the recording, the collector records `companion-unavailable`
     with the reason, reports itself Degraded with that reason, and the
-    recording goes on. This slice does not connect again after a lost
+    recording goes on. adb's forward closes the connection in the same
+    way whether the cable was unplugged, adb stopped or the app was
+    turned off, so a lost connection's reason names all three. This slice does not connect again after a lost
     connection.
   - **The fit.** `PhoneClockMapper` fits session midpoint on phone
     midpoint by least squares within each segment, each sample weighted

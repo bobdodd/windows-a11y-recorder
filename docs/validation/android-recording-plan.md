@@ -472,3 +472,15 @@ again.
   at 20.6 s, each 1080 by 2404, each placed by the clock fit with an
   uncertainty of 1.8 to 7.7 ms. So the size does not follow rotation, as
   the plan expected.
+- 2026-11-08, test 14 passed. With the cable unplugged, the line showed
+  the phone as disconnected. The recording
+  (`20261109-022229-b8e37a794389454dbc750d9e7e74710c`, 37.7 seconds,
+  completed) has 26 clock samples up to 6.3 s, then at 6.5 s
+  `companion-unavailable` with `connectionLost` true, and the
+  collector is recorded as Degraded. Its reason was "The companion app
+  closed the connection.", which was wrong: the cable was unplugged.
+  Through `adb forward` the recorder cannot tell an unplugged cable from
+  adb stopping or the app being turned off, so the reason now names all
+  three. Step 5, the companion line after plugging in again, was not
+  reported, so its return is not checked on the Pixel. All of part 2's
+  other checks have passed.
