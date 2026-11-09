@@ -457,3 +457,10 @@ again.
   every sample's own error bound, and has the phone's clock running 36
   parts per million faster than the PC's, about 3.3 ms over the
   recording. Which of the two clocks is off is not known.
+- 2026-11-08, installer built from `d2c7952`: the collector status
+  wrapped as text, and its line was selected and copied during a
+  recording: "android.companion: Running, Healthy. Companion app 1.1.0:
+  279 clock samples, largest error bound 29.1 ms, screen rotated 0
+  degrees, 1080 by 2404." That recording (91.3 seconds) has 366 clock
+  samples in one segment, median error bound 2.4 ms, largest 29.1 ms,
+  and no rotation, as the phone was not turned in it.
