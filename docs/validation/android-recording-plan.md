@@ -959,3 +959,13 @@ moves on.
 - 2026-11-09, test 26: the window's paragraph and "Picture:" line read
   exactly as expected, copied from the window. The file's path is
   checked by test 27's status line, which names it.
+- 2026-11-09, test 27 passed. The status line read "Saved
+  C:\Users\User\Videos\20261109-153003-26acc41259cf41d6a09c4f7f78e3990f.mp4:
+  2304 by 2304 pixels, no sound. Encoded with the Windows encoder,
+  graphics card allowed." No sound is expected until part 4. In Media
+  Player, at 0:03 Chrome was tall and upright, filling the height with
+  black on both sides, and at 0:10 wide and in landscape, filling the
+  width with black above and below. The owner did not notice a
+  horizontal scroll bar in the export window; its scroll viewer has
+  horizontal scrolling turned off in the code (`ExportMp4Window`), so
+  none can appear.
