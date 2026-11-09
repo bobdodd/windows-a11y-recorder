@@ -369,12 +369,16 @@ With the panel from test 11 showing:
 2. Wait 30 seconds.
 3. Read the list under "Current session".
 4. Choose "Stop recording".
+5. Press on the start of the "android.companion" line, drag to its end,
+   and press Ctrl+C.
 
 **On screen:** in step 3 the list has one line, starting
 "android.companion: Running, Healthy." and going on "Companion app
 1.1.0:" with a number of clock samples, about 120 (four a second),
 "largest error bound" with a number of milliseconds, and "screen rotated
-0 degrees, 1080 by 2404." No desktop or browser lines. Send the line, as
+0 degrees, 1080 by 2404." No desktop or browser lines. In step 5 the
+line's text is highlighted as it is dragged over, and stays highlighted;
+paste it into the reply. Send the line, as
 its error bound is the first measure of how closely the phone's clock is
 placed on the recording's.
 
@@ -428,3 +432,9 @@ again.
   build environment's tests; the owner turns TalkBack on only for
   screen reader tests, so it is checked on the Pixel the first time one
   is recorded.
+- Found during test 12: the lines of the collector status list could not
+  be selected or copied, against the owner's rule that all text can be
+  (player-layout.md, "Selecting and copying text"). Each line is now
+  selectable text, and the list is not refreshed while text in it is
+  selected, so a selection made during a recording stays. Step 5 of test
+  12 checks it.

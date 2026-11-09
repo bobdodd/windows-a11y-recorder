@@ -1574,7 +1574,7 @@ public partial class MainWindow : Window
             $"Events: {status.AcceptedEvents:N0} accepted, " +
             $"{status.DroppedEvents:N0} dropped" +
             DatabaseEvidenceText(status.Database);
-        CollectorStatusListBox.ItemsSource = status.Collectors.Select(collector =>
+        var collectorLines = status.Collectors.Select(collector =>
             (collector.HealthReason is null
                 ? $"{collector.CollectorType}: {collector.Lifecycle}, {collector.Health}" +
                     (collector.Summary is null ? "" : ".")
@@ -1582,6 +1582,18 @@ public partial class MainWindow : Window
                     $"{collector.Health}. {collector.HealthReason}") +
             (collector.Summary is { } summary && summary != collector.HealthReason ? $" {summary}" : ""))
             .ToArray();
+        // The lines are selectable text, refreshed four times a second while
+        // recording; they are left as they are while text in them is being
+        // selected or is selected, so a selection is not lost as it is made.
+        var selecting = CollectorStatusListBox.IsMouseCaptureWithin ||
+            (Keyboard.FocusedElement is SelectableText focused &&
+             focused.SelectionLength > 0 &&
+             CollectorStatusListBox.IsAncestorOf(focused));
+        if (!selecting &&
+            !(CollectorStatusListBox.ItemsSource is string[] shown && shown.SequenceEqual(collectorLines)))
+        {
+            CollectorStatusListBox.ItemsSource = collectorLines;
+        }
 
         // A collector that stops supplying evidence while recording is spoken
         // once, because the recording continues and nothing else would tell a

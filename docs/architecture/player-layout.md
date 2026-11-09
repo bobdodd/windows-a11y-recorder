@@ -158,7 +158,8 @@ ever affect clickable lists (because they are never clicked)".
   background, and the colour and font of what it is in. It is not a tab
   stop, so Tab moves between controls as before. To UI Automation it is
   text, named by what it says, as a text block is.
-- **Where:** the main window's status lines, the worker line, the
+- **Where:** the main window's status lines and its collector status
+  list, the worker line, the
   analysis task rows and their "Why:" lines, the panels' messages, the
   rows of the properties panel, the reading position steps, what NVDA had
   to announce, and the accessibility tree; the report window; the model

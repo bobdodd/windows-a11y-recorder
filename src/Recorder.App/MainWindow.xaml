@@ -510,7 +510,16 @@
                          Foreground="#CDCCCA"
                          BorderBrush="{StaticResource PanelBorder}"
                          AutomationProperties.Name="Collector status"
-                         IsTabStop="True" />
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         IsTabStop="True">
+                  <!-- Each line can be selected and copied
+                       (player-layout.md, "Selecting and copying text"). -->
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <local:SelectableText Text="{Binding Mode=OneWay}" TextWrapping="Wrap" />
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
                 <local:SelectableText Margin="0,8,0,2" Text="Session folder:" />
                 <TextBox x:Name="SessionFolderTextBox"
                          IsReadOnly="True"
