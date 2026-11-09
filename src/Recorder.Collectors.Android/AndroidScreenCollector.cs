@@ -305,7 +305,9 @@ public sealed class AndroidScreenCollector : ICaptureCollector
 
                 if (header is null)
                 {
-                    ended = "the phone's server closed the stream.";
+                    // Through adb an unplugged cable, adb stopping and the server
+                    // stopping all look the same here (test 19, 2026-11-09).
+                    ended = "the connection closed: the phone was unplugged, adb stopped, or scrcpy's server on the phone stopped.";
                     break;
                 }
 

@@ -171,7 +171,14 @@ public sealed class AndroidScreenTests : IDisposable
     [Fact]
     public async Task Link_ServerStopsBeforeConnecting_QuotesIt()
     {
-        var adb = new ServerAdb(phone => phone.Print("[server] ERROR: Could not create video encoder"), connects: false);
+        // The INFO line is kept in the log but not quoted (test 19, 2026-11-09).
+        var adb = new ServerAdb(
+            phone =>
+            {
+                phone.Print("[server] INFO: Device: [Google] google Pixel 10 Pro XL (Android 17)");
+                phone.Print("[server] ERROR: Could not create video encoder");
+            },
+            connects: false);
 
         var failure = await Assert.ThrowsAsync<ScrcpyUnavailableException>(() =>
             ScrcpyLink.OpenAsync(adb, Serial, ServerFile(), Path.Combine(_folder, "log.txt"), CancellationToken.None));
@@ -196,6 +203,8 @@ public sealed class AndroidScreenTests : IDisposable
         {
             Assert.Equal(ScrcpyProtocol.H264CodecId, connection.CodecId);
             Assert.Equal(new ScrcpySessionHeader(1080, 2404, false), await connection.ReadHeaderAsync(CancellationToken.None));
+            // Only the server's greeting so far, which explains nothing.
+            Assert.Null(connection.ServerLog());
         }
 
         var commands = adb.Commands;
@@ -360,7 +369,7 @@ public sealed class AndroidScreenTests : IDisposable
         var lost = Assert.Single(sink.Records, record => record.EventType == AndroidScreenRecords.UnavailableEventType);
         Assert.True(lost.Payload.GetProperty("connectionLost").GetBoolean());
         Assert.Equal(
-            "The phone's screen stopped being recorded during the recording. The screen stream ended: the phone's server closed the stream. The recording goes on without it.",
+            "The phone's screen stopped being recorded during the recording. The screen stream ended: the connection closed: the phone was unplugged, adb stopped, or scrcpy's server on the phone stopped. The recording goes on without it.",
             collector.HealthReason);
         // The session header with no picture after it is placed at its receipt.
         var session = Assert.Single(sink.Records, record => record.EventType == AndroidScreenRecords.SessionEventType);

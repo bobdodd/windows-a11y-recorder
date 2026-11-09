@@ -652,3 +652,18 @@ recording" ends the recording as usual.
   all 235 pictures with no error, 13 at 1080 by 2404 and 222 at 2404 by
   1080. Delay from phone to recorder: median 26.2 ms, 14.8 to 83.0 ms,
   none below zero; no packet time had to be held back.
+- 2026-11-09, test 19 passed. With the cable unplugged both lines
+  showed Degraded, and this time they could be copied. The recording
+  (`20261109-141258-21c9169603174fe4b1f24224fb836f0e`, completed, both
+  collectors Degraded) has `companion-unavailable` at 12.807 s and
+  `video-unavailable` at 12.808 s, both with `connectionLost` true. Its
+  12 packets end at 2.1 s, as the screen did not change after that; they
+  run without a gap to the end of `android/screen.h264` (328,619 bytes,
+  SHA-256 matching the manifest), and ffmpeg decoded its 11 pictures
+  with no error. Two parts of the screen's reason were wrong. "the
+  phone's server closed the stream" named one cause where, as for the
+  companion in test 14, adb cannot tell an unplugged cable from adb or
+  the server stopping; it now names all three. And "The server said:"
+  quoted the server's greeting, an INFO line naming the device, which
+  explains nothing; a reason now quotes only the server's warnings,
+  errors and lines with no level, while the log keeps every line.

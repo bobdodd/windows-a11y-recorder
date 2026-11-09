@@ -305,6 +305,9 @@ public static class ScrcpyLink
     /// <summary>The server's printed lines: written to the recording's log, and the last few kept for reasons.</summary>
     private sealed class ServerLog(string path) : IDisposable
     {
+        private static readonly System.Text.RegularExpressions.Regex InformationLine =
+            new(@"^\s*\[server\]\s+(VERBOSE|DEBUG|INFO):", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
         private readonly object _gate = new();
         private readonly Queue<string> _last = new();
         private StreamWriter? _writer;
@@ -319,7 +322,14 @@ public static class ScrcpyLink
                     return;
                 }
 
-                _last.Enqueue(line);
+                // Only warnings, errors and lines with no level are quoted
+                // in a reason: the server's INFO lines, such as its
+                // greeting naming the device, say nothing about a failure.
+                if (Quotable(line))
+                {
+                    _last.Enqueue(line);
+                }
+
                 while (_last.Count > QuotedLines)
                 {
                     _last.Dequeue();
@@ -341,6 +351,11 @@ public static class ScrcpyLink
                 }
             }
         }
+
+        /// <summary>Whether a printed line may explain a failure: not one of the server's VERBOSE, DEBUG or INFO lines.</summary>
+        internal static bool Quotable(string line) =>
+            !string.IsNullOrWhiteSpace(line) &&
+            !InformationLine.IsMatch(line);
 
         public string? Last(int count)
         {

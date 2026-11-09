@@ -494,7 +494,11 @@ slice's full test goes into a validation plan,
   - **Failures.** A server that cannot start, or a stream that ends
     during the recording, is recorded as `video-unavailable` and marks
     the collector Degraded; the recording goes on, as with the
-    companion.
+    companion. A stream that closes is reported as "the phone was
+    unplugged, adb stopped, or scrcpy's server on the phone stopped",
+    as adb cannot tell them apart (test 19). A reason quotes up to three
+    of the server's last warnings, errors or lines with no level, not
+    its INFO lines.
   - **Storage.** Migration 0039 adds `android_video_streams`,
     `android_video_sessions`, `android_video_packets` and
     `android_video_unavailabilities`. The payload validator checks that
