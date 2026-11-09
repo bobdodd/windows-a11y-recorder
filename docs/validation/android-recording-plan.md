@@ -750,7 +750,9 @@ before if frames are still being made.
 1. Open File Explorer, and go to Documents, then "Windows A11y
    Recorder".
 2. Open the newest folder, the recording of test 21.
-3. Open the folder `frames`, then the folder `android`.
+3. Open the folder `frames`, then the folder `android` inside it. (The
+   recording's folder also has an `android` folder of its own, which
+   holds the stream, `screen.h264`; that is not the one.)
 4. Open the first file, `0000000001.png`.
 5. Close it, and open the last file in the folder.
 
@@ -771,7 +773,7 @@ Details pane, or in Properties.
    recording".
 4. Turn the phone upright.
 5. In File Explorer, open the newest recording's folder, then `frames`,
-   then `android`, and in the View menu choose "Large icons".
+   then `android` inside it, and in the View menu choose "Large icons".
 
 **On screen:** in step 5 the first pictures are tall and show Chrome
 upright; the last pictures are wide and show Chrome in landscape,
