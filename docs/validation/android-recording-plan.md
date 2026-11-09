@@ -778,3 +778,45 @@ Details pane, or in Properties.
 **On screen:** in step 5 the first pictures are tall and show Chrome
 upright; the last pictures are wide and show Chrome in landscape,
 upright as the phone was held. No picture is stretched or cut off.
+
+### Results of part 3, step 3b
+
+- 2026-11-09, installer built from `a94bc6c`: test 20 passed. "Install
+  companion app" updated the companion to version code 700, and the note
+  read as expected, followed by its earlier last sentence, "Its sound,
+  touches and accessibility evidence come in later parts."
+- 2026-11-09, test 21 passed, read from a screenshot: "android.screen:
+  Running, Healthy. Phone screen: 3070 packets, 26.5 MB, 1080 by 2404,
+  3069 frames, median delay from phone to recorder 26.3 ms." No packets
+  were waiting to be decoded, so decoding kept up with scrolling. The
+  same screenshot shows "Events: 6,403 accepted, 0 dropped. Database:
+  6," cut off at the panel's right edge instead of wrapping; that is
+  noted for the later work on the panel, not changed here.
+- 2026-11-09, test 22 passed. The first step at first opened the
+  recording's own `android` folder, which holds the stream; the steps
+  of tests 22 and 23 now say "the `android` folder inside" `frames`.
+  Checked from the recording's folder on the development PC
+  (`20261109-151338-aaebf1d4650e49118ef48e5fb1e4c170`): `frames\android`
+  holds 3,080 PNG files and no `.tmp` file, 11 more than the screenshot
+  in test 21, as frames went on being made until "Stop recording". The
+  owner saw the first, the home screen, upright with the phone's
+  colours, and the last, the Settings list where scrolling stopped.
+- The 3,080 pictures use 2,244 MB for about 76 seconds of recording,
+  against 26.5 MB for the stream they were decoded from: about 2.9 MB
+  for a picture of the home screen and 0.57 MB for the last pictures of
+  Settings. At that rate an hour of a moving screen would use more than
+  100 GB. No picture was left out as a repeat, as expected from the
+  check on the development PC. The stream holds every picture the PNG
+  files do, so how many PNG files to make, and when, is a question of
+  disk use and speed, not of evidence; it is decided before step 3c.
+- 2026-11-09, test 23 passed. The owner saw every picture in the right
+  orientation, tall then wide, and pictures of the phone's turning
+  animation between them. Checked from the recording
+  (`20261109-153003-26acc41259cf41d6a09c4f7f78e3990f`): 131 pictures,
+  1 to 13 at 1080 by 2404, 14 to 82 at 2404 by 1080 (14 is black, the
+  first picture of the turn), and 83 to 131 at 1080 by 2404 again, 83
+  showing the screen still on its side within the tall picture. The
+  last 49 pictures were made in the last 1.4 seconds, so the phone was
+  turned upright again before its screen stopped being recorded; the
+  pictures follow the phone in both turns. None is stretched or cut
+  off. All of step 3b's tests have passed.
