@@ -367,18 +367,19 @@ With the panel from test 11 showing:
 
 1. Choose "Start recording".
 2. Wait 30 seconds.
-3. Read the list under "Current session".
+3. Read "Collector status" under "Current session".
 4. Press on the start of the "android.companion" line, drag to its end,
    and press Ctrl+C.
 5. Choose "Stop recording".
 
-**On screen:** in step 3 the list has one line, starting
+**On screen:** in step 3 "Collector status" has one line, wrapped to
+the width of the side panel with no scroll bar, starting
 "android.companion: Running, Healthy." and going on "Companion app
 1.1.0:" with a number of clock samples, about 120 (four a second),
 "largest error bound" with a number of milliseconds, and "screen rotated
 0 degrees, 1080 by 2404." No desktop or browser lines. In step 4 the
 line's text is highlighted as it is dragged over, and stays highlighted
-while the list goes on changing under it; paste it into the reply. Send the line, as
+while the recording goes on; paste it into the reply. Send the line, as
 its error bound is the first measure of how closely the phone's clock is
 placed on the recording's.
 
@@ -432,11 +433,14 @@ again.
   build environment's tests; the owner turns TalkBack on only for
   screen reader tests, so it is checked on the Pixel the first time one
   is recorded.
-- Found during test 12: the lines of the collector status list could not
-  be selected or copied, against the owner's rule that all text can be
-  (player-layout.md, "Selecting and copying text"). Each line is now
-  selectable text, and the list is not refreshed while text in it is
-  selected, so a selection made during a recording stays. Step 4 of test
+- Found during test 12: the collector status was a separate list, with
+  a horizontal scroll bar, whose lines could not be selected or copied,
+  against the owner's rules that all text can be (player-layout.md,
+  "Selecting and copying text") and that there are no horizontal scroll
+  bars unless they cannot be avoided. It is now wrapping text under
+  "Collector status:", like the lines above it, and is not refreshed
+  while some of it is selected, so a selection made during a recording
+  stays. Step 4 of test
   12 checks it.
 - 2026-11-08, test 12 passed, judged from the recording itself, as the
   line could not yet be copied and had gone once the recording stopped.

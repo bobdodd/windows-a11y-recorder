@@ -504,22 +504,12 @@
                            Margin="0,4,0,0"
                            Text="Events: 0 accepted, 0 dropped" />
                 <local:SelectableText Margin="0,8,0,2" Text="Collector status:" />
-                <ListBox x:Name="CollectorStatusListBox"
-                         MaxHeight="110"
-                         Background="#201F1D"
-                         Foreground="#CDCCCA"
-                         BorderBrush="{StaticResource PanelBorder}"
-                         AutomationProperties.Name="Collector status"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                         IsTabStop="True">
-                  <!-- Each line can be selected and copied
-                       (player-layout.md, "Selecting and copying text"). -->
-                  <ListBox.ItemTemplate>
-                    <DataTemplate>
-                      <local:SelectableText Text="{Binding Mode=OneWay}" TextWrapping="Wrap" />
-                    </DataTemplate>
-                  </ListBox.ItemTemplate>
-                </ListBox>
+                <!-- One line per collector, as wrapping text like the lines above it
+                     (owner, 2026-11-08: no separate block and no horizontal
+                     scroll bar); it can be selected and copied
+                     (player-layout.md, "Selecting and copying text"). -->
+                <local:SelectableText x:Name="CollectorStatusText"
+                           TextWrapping="Wrap" />
                 <local:SelectableText Margin="0,8,0,2" Text="Session folder:" />
                 <TextBox x:Name="SessionFolderTextBox"
                          IsReadOnly="True"

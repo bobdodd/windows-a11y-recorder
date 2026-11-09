@@ -1582,17 +1582,15 @@ public partial class MainWindow : Window
                     $"{collector.Health}. {collector.HealthReason}") +
             (collector.Summary is { } summary && summary != collector.HealthReason ? $" {summary}" : ""))
             .ToArray();
-        // The lines are selectable text, refreshed four times a second while
-        // recording; they are left as they are while text in them is being
-        // selected or is selected, so a selection is not lost as it is made.
-        var selecting = CollectorStatusListBox.IsMouseCaptureWithin ||
-            (Keyboard.FocusedElement is SelectableText focused &&
-             focused.SelectionLength > 0 &&
-             CollectorStatusListBox.IsAncestorOf(focused));
-        if (!selecting &&
-            !(CollectorStatusListBox.ItemsSource is string[] shown && shown.SequenceEqual(collectorLines)))
+        // The text is refreshed four times a second while recording; it is
+        // left as it is while some of it is being selected or is selected,
+        // so a selection is not lost as it is made.
+        var text = string.Join(Environment.NewLine, collectorLines);
+        var selecting = CollectorStatusText.IsMouseCaptured ||
+            (CollectorStatusText.IsKeyboardFocused && CollectorStatusText.SelectionLength > 0);
+        if (!selecting && CollectorStatusText.Text != text)
         {
-            CollectorStatusListBox.ItemsSource = collectorLines;
+            CollectorStatusText.Text = text;
         }
 
         // A collector that stops supplying evidence while recording is spoken
