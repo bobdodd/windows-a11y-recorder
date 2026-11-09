@@ -1080,8 +1080,14 @@ arrived", or Degraded, send it as it is. Send both screenshots.
 5. Close it, and do the same with `microphone.wav`.
 
 **On screen:** in step 3 the folder holds two files, `device.wav` and
-`microphone.wav`. In steps 4 and 5 each length is close to the length of
-the recording of test 30, within a few seconds.
+`microphone.wav`. In step 5 the microphone's length is close to the
+length of the recording of test 30, within a few seconds. In step 4 the
+phone's sound is expected to be about 5 to 6 seconds shorter than that:
+test 30's lines show its packets covering about 5.5 seconds less than
+the recording's duration (994 packets of 1024 samples at 48 kHz, 21.2
+seconds, at 27 seconds; 5,136 packets, 109.6 seconds, at 1 minute 55
+seconds), so it starts that much after the recording does. Write down
+both lengths.
 
 ### Test 32: the cable unplugged during a recording
 
@@ -1105,3 +1111,24 @@ the recording as usual. Send the screenshot.
 
 - 2026-11-09, installer built from `70795cc`: test 29 passed. The note
   read as expected, copied from the panel.
+- 2026-11-09, test 30: both screenshots showed the four lines expected,
+  each "Running, Healthy", with the "android.sound" line ending "playing
+  on Speakers (Realtek(R) Audio)." At 27 seconds, after the first swipes
+  and before the volume was changed, the line read "loudest in the last
+  10 seconds 36% of full scale" with no quiet message. At 1 minute 55
+  seconds, after the volume was set to about 80% and the second swipes,
+  it read 14%, again with no message. So the quiet message was not seen
+  on the Pixel: the volume set before the capture did count here,
+  unlike check 1, where the level as found was 2.9% and raising the
+  volume to the maximum before the run left it at 2.9%. Why the level
+  fell from 36% to 14% after the volume was set to about 80% is not
+  known; one explanation, not checked, is that the slider was above
+  80% before. The median delay from phone to recorder was 3.1 ms and
+  2.9 ms, against 28.9 ms and 30.9 ms for the screen: positive and
+  small, so the sound's packets are on the companion's clock. That a
+  packet's time is its last sample's fits a delay of a few milliseconds
+  (if it were the first sample's, the delay would be at least the
+  packet's 21.3 ms), but that remains inference. The packet counts
+  cover about 5.5 seconds less than the duration in both screenshots,
+  so the phone's sound starts about 5.5 seconds after the recording;
+  test 31 checks the files' lengths.
