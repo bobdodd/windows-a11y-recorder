@@ -873,18 +873,15 @@ touches and accessibility evidence come in later parts."
 1. In the recorder, choose "Open recording...".
 2. Open the recording of test 23,
    `20261109-153003-26acc41259cf41d6a09c4f7f78e3990f`.
-3. Read the status line at the bottom of the window.
-4. Drag the playback slider to 00:00:03.000, and look at the picture.
-5. Drag the playback slider to 00:00:10.000, and look at the picture.
+3. Drag the playback slider to 00:00:03.000, and look at the picture.
+4. Drag the playback slider to 00:00:10.000, and look at the picture.
 
-**On screen:** in step 3 the status line includes "131 frames" and
-ends "Read from its recording file. The recording file's playback index
-is version 19", as the recording was made before this version and its
-index is made again on opening. If the line is cut off at the right,
-send a screenshot. In step 4 the picture is tall and shows Chrome
-upright, filling the frame area's height. In step 5 it is wide and
-shows Chrome in landscape, upright as the phone was held, filling the
-frame area's width. Neither is stretched or cut off.
+**On screen:** in step 3 the picture is tall and shows Chrome upright,
+filling the frame area's height. In step 4 it is wide and shows Chrome
+in landscape, upright as the phone was held, filling the frame area's
+width. Neither is stretched or cut off. The recording was made before
+this version, and its stored index holds no phone frames, so pictures
+shown at all mean its index was made again on opening.
 
 ### Test 26: the MP4 export window for the phone
 
@@ -946,3 +943,13 @@ moves on.
 
 - 2026-11-09, installer built from `697f624`: test 24 passed. The note
   read as expected.
+- 2026-11-09, test 25 as first written asked for the status line at the
+  bottom of the window just after opening, which was to end "The
+  recording file's playback index is version 19". It did not show that:
+  the line showed the nearest event, "No matching event before this
+  position." at the start, and "00:00:02.822 | clock.android |
+  clock-sample" at 3 seconds. The message about the recording being
+  opened is replaced by the nearest event straight after opening, so it
+  cannot be read; that is noted for the later work on the player, not
+  changed here. The test now checks the re-indexing by the pictures
+  being shown, as the stored index holds none.
