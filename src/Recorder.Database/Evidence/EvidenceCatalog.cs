@@ -317,6 +317,43 @@ internal static class EvidenceCatalog
         Int("modeWidth"),
         Int("modeHeight"));
 
+    // Added by 0039_android_screen.sql. The Android screen collector's
+    // records (graphics.android.video): the stream's start, each capture
+    // session, each packet's place in android/screen.h264, and why the
+    // screen is missing. See docs/architecture/android-implementation-plan.md,
+    // slice 3.
+    public static readonly EvidenceTable AndroidVideoStreams = Evidence(
+        "android_video_streams",
+        Text("serial"),
+        Text("serverVersion"),
+        Text("codec"),
+        Int("videoBitRate"),
+        Text("path"));
+
+    public static readonly EvidenceTable AndroidVideoSessions = Evidence(
+        "android_video_sessions",
+        Int("session"),
+        Int("width"),
+        Int("height"),
+        Bool("clientResized"),
+        BigInt("byteOffset"));
+
+    public static readonly EvidenceTable AndroidVideoPackets = Evidence(
+        "android_video_packets",
+        Int("session"),
+        BigInt("byteOffset"),
+        Int("size"),
+        BigInt("presentationMicroseconds", N),
+        Bool("config"),
+        Bool("keyFrame"),
+        BigInt("receivedAtNanoseconds"));
+
+    public static readonly EvidenceTable AndroidVideoUnavailabilities = Evidence(
+        "android_video_unavailabilities",
+        Text("serial"),
+        Text("reason"),
+        Bool("connectionLost"));
+
     // Added by 0026_assistive_technology.sql. The assistive technology
     // collector's records (system.assistive-technology): what it watches,
     // each watched process's start and exit, each of its modules seen in or
@@ -1669,6 +1706,10 @@ internal static class EvidenceCatalog
         (38, "android_companion",
         [
             AndroidCompanionConnections, AndroidCompanionUnavailabilities, AndroidClockSamples, AndroidDisplayStates
+        ]),
+        (39, "android_screen",
+        [
+            AndroidVideoStreams, AndroidVideoSessions, AndroidVideoPackets, AndroidVideoUnavailabilities
         ])
     ];
 
@@ -1706,6 +1747,10 @@ internal static class EvidenceCatalog
             [(Recorder.Contracts.AndroidCompanionRecords.CompanionChannel, Recorder.Contracts.AndroidCompanionRecords.UnavailableEventType)] = AndroidCompanionUnavailabilities,
             [(Recorder.Contracts.AndroidCompanionRecords.ClockChannel, Recorder.Contracts.AndroidCompanionRecords.ClockSampleEventType)] = AndroidClockSamples,
             [(Recorder.Contracts.AndroidCompanionRecords.DisplayChannel, Recorder.Contracts.AndroidCompanionRecords.DisplayEventType)] = AndroidDisplayStates,
+            [(Recorder.Contracts.AndroidScreenRecords.VideoChannel, Recorder.Contracts.AndroidScreenRecords.StreamEventType)] = AndroidVideoStreams,
+            [(Recorder.Contracts.AndroidScreenRecords.VideoChannel, Recorder.Contracts.AndroidScreenRecords.SessionEventType)] = AndroidVideoSessions,
+            [(Recorder.Contracts.AndroidScreenRecords.VideoChannel, Recorder.Contracts.AndroidScreenRecords.PacketEventType)] = AndroidVideoPackets,
+            [(Recorder.Contracts.AndroidScreenRecords.VideoChannel, Recorder.Contracts.AndroidScreenRecords.UnavailableEventType)] = AndroidVideoUnavailabilities,
             [("system.assistive-technology", "assistive-technology-watch")] = AssistiveTechnologyWatches,
             [("system.assistive-technology", "assistive-technology-process-started")] = AssistiveTechnologyProcessStarts,
             [("system.assistive-technology", "assistive-technology-process-exited")] = AssistiveTechnologyProcessExits,

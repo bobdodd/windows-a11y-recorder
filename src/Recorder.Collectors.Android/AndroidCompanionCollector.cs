@@ -14,7 +14,7 @@ namespace Recorder.Collectors.Android;
 /// every <see cref="SampleInterval"/>, and places each display change on the
 /// session clock by the line fitted to the samples so far.
 /// </summary>
-public sealed class AndroidCompanionCollector : ICaptureCollector
+public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock
 {
     public const string Type = "android.companion";
 
@@ -114,6 +114,10 @@ public sealed class AndroidCompanionCollector : ICaptureCollector
     /// <summary>The fit the collector places phone times by.</summary>
     public PhoneClockMapper Mapper => _mapper;
 
+    public Task<bool> FirstSample => _firstSample.Task;
+
+    public PhoneTimeMapping? Map(long phoneNanoseconds) => _mapper.Map(phoneNanoseconds);
+
     public ValueTask<CapabilityResult> InitializeAsync(
         CollectorInitializationContext context,
         CancellationToken cancellationToken)
@@ -168,6 +172,7 @@ public sealed class AndroidCompanionCollector : ICaptureCollector
         }
         catch (CompanionUnavailableException exception)
         {
+            _firstSample.TrySetResult(false);
             Unavailable(exception.Message, connectionLost: false);
             return CollectorTransitionResult.Success(LifecycleState);
         }

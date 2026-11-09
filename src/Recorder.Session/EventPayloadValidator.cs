@@ -40,7 +40,8 @@ internal static class EventPayloadValidator
         "browser.preferences",
         Recorder.Contracts.AndroidCompanionRecords.CompanionChannel,
         Recorder.Contracts.AndroidCompanionRecords.ClockChannel,
-        Recorder.Contracts.AndroidCompanionRecords.DisplayChannel
+        Recorder.Contracts.AndroidCompanionRecords.DisplayChannel,
+        Recorder.Contracts.AndroidScreenRecords.VideoChannel
     ];
 
     /// <summary>Whether the recorder defines the channel.</summary>
@@ -153,6 +154,18 @@ internal static class EventPayloadValidator
                 break;
             case (Recorder.Contracts.AndroidCompanionRecords.DisplayChannel, Recorder.Contracts.AndroidCompanionRecords.DisplayEventType):
                 ValidateAndroidDisplayState(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidScreenRecords.VideoChannel, Recorder.Contracts.AndroidScreenRecords.StreamEventType):
+                ValidateAndroidVideoStream(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidScreenRecords.VideoChannel, Recorder.Contracts.AndroidScreenRecords.SessionEventType):
+                ValidateAndroidVideoSession(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidScreenRecords.VideoChannel, Recorder.Contracts.AndroidScreenRecords.PacketEventType):
+                ValidateAndroidVideoPacket(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidScreenRecords.VideoChannel, Recorder.Contracts.AndroidScreenRecords.UnavailableEventType):
+                ValidateAndroidCompanionUnavailable(payload, issues);
                 break;
             case ("system.assistive-technology", "assistive-technology-watch"):
                 ValidateAssistiveTechnologyWatch(payload, issues);
@@ -1899,6 +1912,66 @@ internal static class EventPayloadValidator
                 "android-display-rotation",
                 "#/payload/rotation",
                 "rotation must be 0, 90, 180 or 270.");
+        }
+    }
+
+    // The Android screen collector's records (android-implementation-plan.md,
+    // slice 3): the stream's start, each capture session, each packet's place
+    // in the stream file, and why the screen is missing. The unavailable
+    // record has the companion's shape, so it shares its check.
+    private static void ValidateAndroidVideoStream(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues) =>
+        ValidateShape(
+            payload,
+            [
+                RequiredString("serial"),
+                RequiredString("serverVersion"),
+                RequiredString("codec"),
+                RequiredInteger("videoBitRate", positive: true),
+                RequiredString("path")
+            ],
+            issues);
+
+    private static void ValidateAndroidVideoSession(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues) =>
+        ValidateShape(
+            payload,
+            [
+                RequiredInteger("session", positive: true),
+                RequiredInteger("width", positive: true),
+                RequiredInteger("height", positive: true),
+                RequiredBoolean("clientResized"),
+                RequiredInteger("byteOffset", nonnegative: true)
+            ],
+            issues);
+
+    private static void ValidateAndroidVideoPacket(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredInteger("session", nonnegative: true),
+                RequiredInteger("byteOffset", nonnegative: true),
+                RequiredInteger("size", positive: true),
+                NullableInteger("presentationMicroseconds", nonnegative: true),
+                RequiredBoolean("config"),
+                RequiredBoolean("keyFrame"),
+                RequiredInteger("receivedAtNanoseconds")
+            ],
+            issues);
+        if (payload.TryGetProperty("config", out var config) && config.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+            payload.TryGetProperty("presentationMicroseconds", out var presentation) &&
+            config.GetBoolean() != (presentation.ValueKind == JsonValueKind.Null))
+        {
+            AddError(
+                issues,
+                "android-video-packet-time",
+                "#/payload/presentationMicroseconds",
+                "A configuration packet has no presentation time, and every other packet has one.");
         }
     }
 

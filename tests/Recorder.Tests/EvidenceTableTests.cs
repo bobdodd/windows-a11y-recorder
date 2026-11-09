@@ -894,7 +894,9 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         // 0038 added the tables of the Android companion records.
         record.Channel is not (Recorder.Contracts.AndroidCompanionRecords.CompanionChannel or
             Recorder.Contracts.AndroidCompanionRecords.ClockChannel or
-            Recorder.Contracts.AndroidCompanionRecords.DisplayChannel);
+            Recorder.Contracts.AndroidCompanionRecords.DisplayChannel) &&
+        // 0039 added the tables of the Android screen records.
+        record.Channel != Recorder.Contracts.AndroidScreenRecords.VideoChannel;
 
     private static List<string> Sorted(List<string> rows)
     {

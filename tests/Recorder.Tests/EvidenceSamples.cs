@@ -259,6 +259,26 @@ internal static class EvidenceSamples
             J("{'reason':'initial','rotation':0,'modeWidth':1344,'modeHeight':2992}")),
         ("android.display", "display-state",
             J("{'reason':'changed','rotation':90,'modeWidth':1344,'modeHeight':2992}")),
+        // Added with 0039_android_screen.sql: the screen stream's start, its
+        // first capture session and one after turning the phone, a
+        // configuration packet, a key frame and another picture, and the
+        // screen's absence at the start and its loss during a recording.
+        ("graphics.android.video", "video-stream",
+            J("{'serial':'58191FDCQ00ABZ','serverVersion':'5.0.1','codec':'h264','videoBitRate':8000000,'path':'android/screen.h264'}")),
+        ("graphics.android.video", "video-session",
+            J("{'session':1,'width':1080,'height':2404,'clientResized':false,'byteOffset':0}")),
+        ("graphics.android.video", "video-session",
+            J("{'session':2,'width':2404,'height':1080,'clientResized':false,'byteOffset':5123456}")),
+        ("graphics.android.video", "video-packet",
+            J("{'session':1,'byteOffset':0,'size':31,'presentationMicroseconds':null,'config':true,'keyFrame':false,'receivedAtNanoseconds':812000000}")),
+        ("graphics.android.video", "video-packet",
+            J("{'session':1,'byteOffset':31,'size':183402,'presentationMicroseconds':5000123456,'config':false,'keyFrame':true,'receivedAtNanoseconds':830000000}")),
+        ("graphics.android.video", "video-packet",
+            J("{'session':1,'byteOffset':183433,'size':2210,'presentationMicroseconds':5000140123,'config':false,'keyFrame':false,'receivedAtNanoseconds':846000000}")),
+        ("graphics.android.video", "video-unavailable",
+            J("{'serial':'58191FDCQ00ABZ','reason':'The server on the phone stopped before it connected.','connectionLost':false}")),
+        ("graphics.android.video", "video-unavailable",
+            J("{'serial':'58191FDCQ00ABZ','reason':'The screen stream ended: the server closed the stream.','connectionLost':true}")),
         ("input.mouse-hook", "hook-mouse",
             J("{'installation':1,'message':512,'kind':'move','button':null,'x':640,'y':-12,'mouseData':0,'wheelDelta':null,'flags':0,'injected':false,'lowerIntegrityInjected':false,'penOrTouch':null,'extraInformation':0,'eventTimeMilliseconds':123456789}")),
         ("input.mouse-hook", "hook-mouse",

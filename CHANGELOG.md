@@ -130,6 +130,25 @@ Changes on `main` since 1.1.0, not yet released.
 - Tests 10 to 14 passed on the development PC and the Pixel 10 Pro XL on
   2026-11-08.
 
+### Android recording, part 3a: the phone's screen stored
+
+- "Start recording" with the Android device chosen also records the
+  phone's screen: the recorder pushes the bundled scrcpy 5.0.1 server,
+  reaches it through `adb reverse`, and stores the H.264 stream as
+  received in `android/screen.h264`, with the server's output in
+  `android/scrcpy-server.log`. The server is started with control,
+  sound and clean-up off, and nothing that changes the phone.
+- Each packet is recorded on `graphics.android.video` with its byte
+  offset, size, flags and capture session, placed on the session clock
+  through the companion's clock fit, or by the time it arrived when there
+  is no phone clock. A new capture session is recorded on each rotation.
+- The "android.screen" collector status shows the packets, megabytes,
+  size, capture sessions and the median delay from phone to recorder. A
+  server that cannot start, or a stream that ends part way, is recorded
+  and marks the collector Degraded; the recording goes on.
+- Database migration 0039 adds the tables of the screen's records.
+- The player does not show the phone's screen yet (part 3c).
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now

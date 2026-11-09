@@ -23,6 +23,19 @@ public sealed record PhoneClockExchange(
     public long ErrorBound => Math.Max(0, (RecorderReceive - RecorderSend) - (PhoneSend - PhoneReceive)) / 2;
 }
 
+/// <summary>
+/// The phone clock as the companion collector fits it, for the other phone
+/// collectors to place phone times by.
+/// </summary>
+public interface IPhoneClock
+{
+    /// <summary>Completes with true at the first clock sample, or false when there will be none.</summary>
+    Task<bool> FirstSample { get; }
+
+    /// <summary>Null until there is a sample to map by.</summary>
+    PhoneTimeMapping? Map(long phoneNanoseconds);
+}
+
 /// <summary>Where a phone time falls on the session clock, and how far it could be out.</summary>
 public sealed record PhoneTimeMapping(long SessionNanoseconds, long UncertaintyNanoseconds, int Segment);
 

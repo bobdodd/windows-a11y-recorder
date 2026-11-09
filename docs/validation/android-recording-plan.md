@@ -486,3 +486,116 @@ again.
   degrees, 1080 by 2404.", matching the recording. In step 5 the
   companion line came back after the cable was plugged in again. All of
   part 2's tests have passed.
+
+## Part 3, step 3a: the phone's screen stored
+
+Part 3 is built in three steps (see
+[the implementation plan](../architecture/android-implementation-plan.md),
+"Slice 3"). Step 3a records the phone's screen as the H.264 stream the
+phone sends, `android\screen.h264` in the recording's folder, with an
+event for each packet. The player does not show it yet; that is step
+3c. The phone's sound is not recorded yet.
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings, and 24 new tests pass. They cover
+the codec id, session and packet headers read from bytes written out by
+hand from scrcpy 5.0.1's source; a server that is missing, that stops
+before it connects, or that reports a disabled or failed stream; the
+order of the adb commands (push, reverse, start, reverse removed); and a
+recording with packets placed by the phone's clock, with a rotation,
+with no phone clock, with the stream ending part way, and with the
+server not starting. None of that shows the server on Android 17, the
+real `adb reverse`, the phone's packet times on the companion's clock,
+or the stream's size and rate. Tests 15 to 19 do.
+
+### Test 15: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Connect the Pixel by USB, unlocked.
+4. Start the recorder from the Start menu, and in "Recording target"
+   choose "Android device".
+5. Wait 5 seconds, then read the note under "Android device checks".
+
+**On screen:** the build ends with `INSTALLER BUILT`. The panel shows
+"Companion app: installed, on, and answering (version 1.1.0", as in
+test 11. The note reads "A recording of the phone records the companion
+app's connection, the phone's clock, its display's rotation and size,
+and the phone's screen as a video stream. The phone's screen is not yet
+shown in the player."
+
+### Test 16: a recording of 30 seconds with the phone's screen
+
+With the panel from test 15 showing, and the phone unlocked:
+
+1. Choose "Start recording".
+2. Wait 30 seconds.
+3. Read "Collector status" under "Current session".
+4. Press on the start of the "android.screen" line, drag to its end,
+   and press Ctrl+C.
+5. Choose "Stop recording".
+
+**On screen:** in step 3 "Collector status" has two lines: the
+"android.companion" line of test 12, and a line starting
+"android.screen: Running, Healthy. Phone screen:" with a number of
+packets, a number of MB, a size, and "median delay from phone to
+recorder" with a number of milliseconds. Paste the line into the reply.
+The size is expected to be "1080 by 2404". scrcpy rounds the size down
+to a multiple the phone's encoder needs, which is not known for the
+Pixel, so a size a few pixels smaller is not a failure, but is
+recorded. The median delay is the first measure of whether the phone's
+packet times are on the companion's clock: a few tens of milliseconds
+says they are; a number below zero, or of seconds or more, says they
+are not. If the line ends "placed by the time each packet arrived, as
+there is no phone clock", or says Degraded, send it as it is.
+
+### Test 17: the stream in the recording's folder
+
+1. Open File Explorer, and go to Documents, then "Windows A11y
+   Recorder".
+2. Open the newest folder, the recording of test 16.
+3. Open the folder `android`.
+
+**On screen:** two files, `screen.h264`, with a size close to the MB of
+the line sent in test 16, and `scrcpy-server.log`.
+
+### Test 18: the phone rotated during a recording
+
+1. On the Pixel, turn on Auto-rotate (swipe down twice from the top of
+   the screen), and open Chrome.
+2. In the recorder, choose "Start recording", and wait 5 seconds.
+3. Turn the phone on its side, wait 5 seconds, and read the
+   "android.screen" line under "Current session".
+4. Choose "Stop recording".
+5. Turn the phone upright.
+
+**On screen:** in step 3 the line has "2 capture sessions, now" and the
+size of test 16 with its two numbers swapped, for example "2404 by
+1080". If the size reads otherwise, send the line.
+
+### Test 19: the cable unplugged during a recording
+
+1. In the recorder, choose "Start recording", and wait 10 seconds.
+2. Unplug the USB cable from the phone.
+3. Within 5 seconds, read the "android.screen" line under "Current
+   session".
+4. Choose "Stop recording".
+5. Plug the cable in again and unlock the phone.
+
+**On screen:** in step 3 the line starts "android.screen: Running,
+Degraded. The phone's screen stopped being recorded during the
+recording. The screen stream ended:" followed by the reason, then "The
+recording goes on without it." and "Phone screen:" with the packets
+recorded before the cable was unplugged; that number no longer goes up.
+The "android.companion" line is Degraded too, as in test 14. "Stop
+recording" ends the recording as usual.

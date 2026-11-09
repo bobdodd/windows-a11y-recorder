@@ -396,17 +396,24 @@ slice's full test goes into a validation plan,
 
 ### Slice 3: the screen
 
+- **Steps.** The slice is built in three steps, each tested on the Pixel
+  before the next: 3a stores the stream and an event per packet; 3b
+  decodes it to frames; 3c shows the frames in the player and the MP4
+  export. Until slice 4 the server is started with `audio=false`.
 - **Server.** The recorder pushes the bundled server to
-  `/data/local/tmp`, sets up `adb reverse localabstract:scrcpy_<scid>` to
-  a loopback port it listens on, and starts the server with matching
-  version `5.0.1`, `video_codec=h264`, `audio_source=output`,
-  `audio_codec=raw`, `control=false`, and nothing that changes the phone
-  (no `show_touches`, no `stay_awake`). The socket order, codec id,
-  session packets and 12-byte packet headers are as scrcpy documents
+  `/data/local/tmp/a11yrecorder-scrcpy-server.jar`, sets up
+  `adb reverse localabstract:scrcpy_<scid>` to a loopback port it listens
+  on, and starts the server with matching version `5.0.1`,
+  `video_codec=h264`, `video_bit_rate=8000000`, `control=false`,
+  `send_device_meta=false`, `cleanup=false`, and nothing that changes the
+  phone (no `show_touches`, no `stay_awake`, no `power_on`). Slice 4 adds
+  `audio_source=output` and `audio_codec=raw`. The socket order, codec
+  id, session packets and 12-byte packet headers are as scrcpy documents
   ([scrcpy, develop.md](https://github.com/Genymobile/scrcpy/blob/master/doc/develop.md),
   "Protocol"). That page warns the protocol "may (and will) change at any
   time", so the client is written against the 5.0.1 source and tested
-  with captured bytes.
+  with bytes written out by hand from it
+  ([scrcpy 5.0.1, Streamer.java](https://github.com/Genymobile/scrcpy/blob/a60891aea193d92e7e5c3942700eca63f9d19a5f/server/src/main/java/com/genymobile/scrcpy/device/Streamer.java)).
 - **Stored.** `android/screen.h264`, the stream as received, with an event
   per packet on `graphics.android.video`: byte offset, size, phone time,
   key frame and configuration flags, and the capture session (width and
@@ -443,6 +450,56 @@ slice's full test goes into a validation plan,
   time bar moves, upright and filling the frame's height. Rotate the
   phone during a second recording; the player shows the landscape
   picture after the rotation.
+
+- **Built, step 3a (2026-11-08).** `ScrcpyProtocol` reads the codec id,
+  session packets and packet headers; `ScrcpyLink` pushes the server,
+  opens the reverse tunnel, starts the server through a long-running adb
+  shell, waits up to 15 seconds for the phone to connect (or for the
+  server to stop, quoting the last three lines of its log), then removes
+  the reverse tunnel, as scrcpy does once connected. The server's own
+  output is kept as `android/scrcpy-server.log`.
+  `AndroidScreenCollector`, `android.screen`, starts after the companion
+  and stops before it. It writes each packet to `android/screen.h264` as
+  received, with its SHA-256 recorded as it is written, and records on
+  `graphics.android.video` a `video-stream` event (server version, codec,
+  bit rate, path), a `video-session` event for each capture session
+  (width, height, byte offset) and a `video-packet` event for each packet
+  (session, byte offset, size, phone time, configuration and key frame
+  flags, and the time the recorder received it).
+  - **Placing packets.** scrcpy sends the encoder's presentation time
+    unchanged
+    ([scrcpy 5.0.1, Streamer.java](https://github.com/Genymobile/scrcpy/blob/a60891aea193d92e7e5c3942700eca63f9d19a5f/server/src/main/java/com/genymobile/scrcpy/device/Streamer.java),
+    `writePacket`). The encoder is fed by a surface, so that time is
+    the frame's timestamp from Android's graphics system, not one scrcpy
+    sets. That it is on CLOCK_MONOTONIC, the clock the companion
+    samples, is an inference, not checked. The collector's status shows
+    the median delay from the mapped phone time to the time the packet
+    arrived, so a wrong clock shows as a delay far from tens of
+    milliseconds, or below zero. Packets are mapped through the
+    companion's clock
+    fit; times are held non-decreasing, flagged `clock-fit-held` where
+    one is held. Without the phone's clock (companion not reached within
+    3 seconds of the start), each packet is placed by the time it
+    arrived, with the `receipt-time-stamp` flag. Session and
+    configuration packets have no presentation time and are placed at
+    the next picture packet's time, with the `next-packet-time` flag.
+  - **Size.** scrcpy rounds the picture's width and height down to a
+    multiple of the phone's H.264 encoder's alignment
+    ([scrcpy 5.0.1, SurfaceEncoder.java](https://github.com/Genymobile/scrcpy/blob/a60891aea193d92e7e5c3942700eca63f9d19a5f/server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder.java)),
+    not known for the Pixel, so the stream may be a few pixels smaller
+    than 1080 by 2404. Each session records the size sent.
+  - **Status.** "Phone screen:" with the number of packets, megabytes,
+    the size, the number of capture sessions when there is more than
+    one, and the median delay.
+  - **Failures.** A server that cannot start, or a stream that ends
+    during the recording, is recorded as `video-unavailable` and marks
+    the collector Degraded; the recording goes on, as with the
+    companion.
+  - **Storage.** Migration 0039 adds `android_video_streams`,
+    `android_video_sessions`, `android_video_packets` and
+    `android_video_unavailabilities`. The payload validator checks that
+    a packet has no presentation time exactly when it is a configuration
+    packet.
 
 ### Slice 4: the phone's sound
 

@@ -186,9 +186,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        // An Android recording (android-implementation-plan.md, slice 2)
-        // records the companion app, the phone clock and the display; the
-        // PC's own collectors are not used.
+        // An Android recording (android-implementation-plan.md, slices 2
+        // and 3) records the companion app, the phone clock, the display and
+        // the screen; the PC's own collectors are not used.
         var android = AndroidTargetRadioButton.IsChecked == true;
         string? androidSerial = null;
         if (android)
@@ -242,7 +242,7 @@ public partial class MainWindow : Window
         {
             _coordinator = android
                 ? new SessionCoordinator(
-                    _ => [new AndroidCompanionCollector(new AdbProcess(AndroidTools.Adb(AndroidTools.DataFolder)), androidSerial!)],
+                    _ => AndroidCollectors(androidSerial!),
                     _database)
                 : new SessionCoordinator(WindowsCollectorFactory.Create, _database);
             var status = await _coordinator.StartAsync(new RecordingOptions
@@ -293,6 +293,17 @@ public partial class MainWindow : Window
             busy.Dispose();
             _transitioning = false;
         }
+    }
+
+    // The companion collector is first, so it is started first and stopped
+    // last: the screen collector places its packets by the companion's clock
+    // fit, and its first packets wait for the first clock sample.
+    private static Recorder.Contracts.ICaptureCollector[] AndroidCollectors(string serial)
+    {
+        var adb = new AdbProcess(AndroidTools.Adb(AndroidTools.DataFolder));
+        var companion = new AndroidCompanionCollector(adb, serial);
+        var server = Path.Combine(AndroidTools.BundledFolder(AppContext.BaseDirectory), AndroidTools.ScrcpyServer.Name);
+        return [companion, new AndroidScreenCollector(adb, serial, server, companion)];
     }
 
     private async void StopButton_Click(object sender, RoutedEventArgs e)

@@ -32,6 +32,21 @@ public interface IAdb
     /// not started by a command whose output is being read.
     /// </summary>
     Task<int> StartServerAsync(TimeSpan timeout, CancellationToken cancellation);
+
+    /// <summary>
+    /// Starts adb with the arguments and leaves it running, as for a program
+    /// started on the phone with <c>shell</c>, passing each line it prints to
+    /// <paramref name="onLine"/>.
+    /// </summary>
+    IAdbRunning Start(IReadOnlyList<string> arguments, Action<string> onLine) =>
+        throw new NotSupportedException("This adb cannot start a program that keeps running.");
+}
+
+/// <summary>An adb command left running. Disposing it waits briefly for it to end, then stops it.</summary>
+public interface IAdbRunning : IAsyncDisposable
+{
+    /// <summary>Completes with adb's exit code when it ends.</summary>
+    Task<int> Exited { get; }
 }
 
 /// <summary>Runs the recorder's own adb.exe as a process.</summary>
@@ -61,6 +76,64 @@ public sealed class AdbProcess(string path) : IAdb
         {
             cancellation.ThrowIfCancellationRequested();
             throw new IOException($"adb start-server did not finish within {timeout.TotalSeconds:0} seconds.");
+        }
+    }
+
+    public IAdbRunning Start(IReadOnlyList<string> arguments, Action<string> onLine)
+    {
+        ArgumentNullException.ThrowIfNull(onLine);
+        var info = new ProcessStartInfo(Path)
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = System.IO.Path.GetDirectoryName(Path) ?? ""
+        };
+        foreach (var argument in arguments)
+        {
+            info.ArgumentList.Add(argument);
+        }
+
+        var process = new Process { StartInfo = info, EnableRaisingEvents = true };
+        var exited = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        process.OutputDataReceived += (_, line) => { if (line.Data is { } text) onLine(text); };
+        process.ErrorDataReceived += (_, line) => { if (line.Data is { } text) onLine(text); };
+        process.Exited += (_, _) => exited.TrySetResult(process.ExitCode);
+        if (!process.Start())
+        {
+            process.Dispose();
+            throw new IOException($"{Path} could not be started.");
+        }
+
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        return new Running(process, exited.Task);
+    }
+
+    private sealed class Running(Process process, Task<int> exited) : IAdbRunning
+    {
+        public Task<int> Exited { get; } = exited;
+
+        public async ValueTask DisposeAsync()
+        {
+            try
+            {
+                await Exited.WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch (InvalidOperationException)
+                {
+                    // It ended between the wait and the kill.
+                }
+            }
+
+            process.Dispose();
         }
     }
 
