@@ -656,8 +656,9 @@ slice's full test goes into a validation plan,
     ([Microsoft, H.264 video decoder](https://learn.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder)),
     so both levels are past what is documented, and level 6.0 further
     past it; that other players and phones play level 6.0 is not
-    checked. 60 is kept for now; 120 would show almost every picture
-    and is an owner's decision.
+    checked. Decided by the owner on 2026-11-09: the phone's export
+    stays at 60 frames a second, level 5.2, though 120 would show almost
+    every picture.
 
 ### Slice 4: the phone's sound
 

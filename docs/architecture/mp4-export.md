@@ -230,8 +230,8 @@ The records are read in bulk: from the recording file
   Windows decoded both, but Microsoft documents its decoder only up to
   level 5.1
   ([Microsoft, H.264 video decoder](https://learn.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder)),
-  and that other players play level 6.0 is not checked, so the phone's
-  rate is 60.
+  and that other players play level 6.0 is not checked. The owner
+  decided on 2026-11-09 to keep the phone's rate at 60.
 - Windows N editions lack Media Foundation until the Media Feature Pack is
   installed
   ([Microsoft](https://support.microsoft.com/en-us/windows/experience/platform-variants/media-feature-pack-for-windows-n)).
