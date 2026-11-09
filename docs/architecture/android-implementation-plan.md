@@ -659,6 +659,11 @@ slice's full test goes into a validation plan,
     checked. Decided by the owner on 2026-11-09: the phone's export
     stays at 60 frames a second, level 5.2, though 120 would show almost
     every picture.
+  - **Tested on the Pixel (2026-11-09).** Tests 24 to 28 of the
+    validation plan passed, with the installer built from `697f624`:
+    test 23's recording shown upright in both shapes in the player and
+    in its MP4, and a recording of three apps played back in order.
+    Slice 3 is complete.
 
 ### Slice 4: the phone's sound
 

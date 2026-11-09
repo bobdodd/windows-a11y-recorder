@@ -969,3 +969,8 @@ moves on.
   horizontal scroll bar in the export window; its scroll viewer has
   horizontal scrolling turned off in the code (`ExportMp4Window`), so
   none can appear.
+- 2026-11-09, test 28 passed. Played back, the picture showed the home
+  screen, Settings, the home screen, Chrome, the home screen and Clock in
+  order, each upright and filling the frame area's height. All of step
+  3c's tests have passed, and with them slice 3's target test: the
+  three apps here, and the rotation in tests 25 and 27.
