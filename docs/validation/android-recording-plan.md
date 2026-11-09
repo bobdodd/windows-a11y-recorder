@@ -464,3 +464,11 @@ again.
   degrees, 1080 by 2404." That recording (91.3 seconds) has 366 clock
   samples in one segment, median error bound 2.4 ms, largest 29.1 ms,
   and no rotation, as the phone was not turned in it.
+- 2026-11-08, test 13 passed. The line followed the phone as it was
+  turned in Chrome. The recording
+  (`20261109-022011-9ed2af3da77045c996838c2acc2cadd8`, 22.8 seconds of
+  clock samples) has the initial display state and five changes:
+  rotation 270 at 7.6 s, 0 at 13.6 s, 90 at 16.3 s, 0 at 19.4 s and 270
+  at 20.6 s, each 1080 by 2404, each placed by the clock fit with an
+  uncertainty of 1.8 to 7.7 ms. So the size does not follow rotation, as
+  the plan expected.

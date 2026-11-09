@@ -382,13 +382,12 @@ slice's full test goes into a validation plan,
     `settings put` for the app installed with `adb install`, with
     TalkBack off. Keeping TalkBack on through it is checked only by the
     build environment's tests, until the first screen reader recording.
-  - **Not checked.** That the display mode's width
-    and height stay in the phone's natural orientation when it rotates,
-    so that rotation changes and size does not, is inference: the
-    reference describes the mode's physical width and height without
-    saying whether they follow rotation
+  - **Checked (test 13).** The display mode's width and height stay in
+    the phone's natural orientation when it rotates: on the Pixel,
+    rotation went 0, 270, 0, 90, 0, 270 and the size stayed 1080 by
+    2404. The reference describes the mode's physical width and height
+    without saying whether they follow rotation
     ([Android, Display.Mode](https://developer.android.com/reference/android/view/Display.Mode)).
-    Test 13 shows it.
 
 ### Slice 3: the screen
 
