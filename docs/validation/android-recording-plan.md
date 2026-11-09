@@ -481,6 +481,8 @@ again.
   closed the connection.", which was wrong: the cable was unplugged.
   Through `adb forward` the recorder cannot tell an unplugged cable from
   adb stopping or the app being turned off, so the reason now names all
-  three. Step 5, the companion line after plugging in again, was not
-  reported, so its return is not checked on the Pixel. All of part 2's
-  other checks have passed.
+  three. The line copied after the cable was unplugged ended "Companion app
+  1.1.0: 26 clock samples, largest error bound 6.1 ms, screen rotated 0
+  degrees, 1080 by 2404.", matching the recording. In step 5 the
+  companion line came back after the cable was plugged in again. All of
+  part 2's tests have passed.
