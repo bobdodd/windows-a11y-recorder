@@ -582,6 +582,14 @@ slice's full test goes into a validation plan,
     scrolling a detailed screen can use well over 100 MB a second, and
     the check made frames at about 125 a second. Both are measured again
     on the Pixel in tests 21 to 23 before any limit is considered.
+  - **Measured on the Pixel, and decided (2026-11-09).** In test 21,
+    3,080 frames from about 76 seconds of scrolling took 2,244 MB,
+    against 26.5 MB for the stream, and decoding kept up. Decided by the
+    owner: every frame is kept as it is made, with no limit on how many
+    and no harder compression. Disk space is cheap and plentiful, and
+    temporary folders of 100 GB are not a problem. Evidence for analysis
+    uses only the frames that differ from the one before, as for the
+    desktop, and step 3b already writes only those.
 
 ### Slice 4: the phone's sound
 
