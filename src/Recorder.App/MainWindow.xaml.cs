@@ -187,9 +187,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        // An Android recording (android-implementation-plan.md, slices 2
-        // and 3) records the companion app, the phone clock, the display and
-        // the screen; the PC's own collectors are not used.
+        // An Android recording (android-implementation-plan.md, slices 2 to
+        // 4) records the companion app, the phone clock, the display, the
+        // screen, the phone's sound and the PC's microphone; the PC's other
+        // collectors are not used.
         var android = AndroidTargetRadioButton.IsChecked == true;
         string? androidSerial = null;
         if (android)
@@ -253,7 +254,7 @@ public partial class MainWindow : Window
                 CaptureUiAutomation = !android && AutomationCheckBox.IsChecked == true,
                 CaptureForegroundWindow = !android && WindowCheckBox.IsChecked == true,
                 CaptureDesktopFrames = !android && FramesCheckBox.IsChecked == true,
-                CaptureMicrophone = !android && MicrophoneCheckBox.IsChecked == true,
+                CaptureMicrophone = android || MicrophoneCheckBox.IsChecked == true,
                 CaptureSystemAudio = !android && SystemAudioCheckBox.IsChecked == true,
                 CaptureBrowserEvidence = !android && BrowserEvidenceCheckBox.IsChecked == true,
                 ChromiumExecutablePath = chromiumPath,
@@ -298,13 +299,23 @@ public partial class MainWindow : Window
 
     // The companion collector is first, so it is started first and stopped
     // last: the screen collector places its packets by the companion's clock
-    // fit, and its first packets wait for the first clock sample.
+    // fit, and its first packets wait for the first clock sample. The sound
+    // collector comes after the screen collector, whose server sends the
+    // sound, and so stops before it (slice 4). The PC's microphone is
+    // recorded with the phone, as the design decided ("phone plus PC's mic").
     private static Recorder.Contracts.ICaptureCollector[] AndroidCollectors(string serial)
     {
         var adb = new AdbProcess(AndroidTools.Adb(AndroidTools.DataFolder));
         var companion = new AndroidCompanionCollector(adb, serial);
         var server = Path.Combine(AndroidTools.BundledFolder(AppContext.BaseDirectory), AndroidTools.ScrcpyServer.Name);
-        return [companion, new AndroidScreenCollector(adb, serial, server, companion)];
+        var screen = new AndroidScreenCollector(adb, serial, server, companion);
+        return
+        [
+            companion,
+            screen,
+            new AndroidSoundCollector(serial, screen, companion),
+            new Recorder.Collectors.Audio.AudioCollector(new Recorder.Collectors.Audio.AudioCaptureOptions(true, false))
+        ];
     }
 
     private async void StopButton_Click(object sender, RoutedEventArgs e)

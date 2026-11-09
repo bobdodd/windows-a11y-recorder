@@ -10,6 +10,11 @@
     <ProjectReference Include="../Recorder.Contracts/Recorder.Contracts.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The phone's sound is written as WAV and played on the PC while
+         recording (slice 4), as the desktop's sound is written. -->
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="Recorder.Tests" />
   </ItemGroup>
 </Project>

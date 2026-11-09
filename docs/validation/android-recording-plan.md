@@ -974,3 +974,129 @@ moves on.
   order, each upright and filling the frame area's height. All of step
   3c's tests have passed, and with them slice 3's target test: the
   three apps here, and the rotation in tests 25 and 27.
+
+## Part 4, step 4a: the phone's sound recorded and played on the PC
+
+Part 4 is built in three steps (see
+[the implementation plan](../architecture/android-implementation-plan.md),
+"Slice 4"). Step 4a records the phone's whole sound as
+`audio\device.wav` in the recording's folder, with an event for each
+packet, shows its level while recording with a message when it is too
+quiet, and plays it on the PC as it arrives, because while the sound is
+captured the phone does not play it itself. A recording of the phone
+now also records the PC's microphone, as `audio\microphone.wav`. The
+player does not label the phone's sound yet, and the MP4 export does
+not include it; that is step 4b.
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings, and the tests pass, 13 of them
+new. They cover the audio socket's codec id (sound, the phone unable to
+capture, closed at once), read from bytes written out by hand from
+scrcpy 5.0.1's source; the level and the quiet threshold at check 1's
+2.9% and 32.0%; a recording with packets placed by the phone's clock,
+stored and passed to a stand-in player; the quiet message; no phone
+clock; no PC playback device; the screen stream not started; and the
+cable unplugged part way. None of that shows the Pixel's sound
+arriving, its packet times on the companion's clock, the level the
+Pixel sends, or the sound playing on the PC. Tests 29 to 32 do.
+
+TalkBack is needed for test 30 only; turn it off after test 30.
+
+### Test 29: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Connect the Pixel by USB, unlocked. Start the recorder from the Start
+   menu, and in "Recording target" choose "Android device".
+4. If the panel offers "Install companion app", choose it, and wait until
+   the panel shows "Companion app: installed, on, and answering".
+5. Read the note under "Android device checks".
+
+**On screen:** the build ends with `INSTALLER BUILT`. In step 5 the
+panel shows "Companion app: installed, on, and answering (version
+1.1.0", and the note reads "A recording of the phone records the
+companion app's connection, the phone's clock, its display's rotation
+and size, and the phone's screen as a video stream and as a picture for
+each change, which the player shows and an MP4 export saves. It also
+records the phone's sound, shows its level while recording and plays it
+on this PC, and records this PC's microphone. The phone's sound in the
+player and in an MP4 export, touches and accessibility evidence come in
+later parts."
+
+### Test 30: the phone's sound level while recording, with TalkBack
+
+Before the test, turn on TalkBack (Settings, Accessibility, TalkBack),
+and go to the phone's home screen. Leave the Accessibility volume as it
+is.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. On the phone, swipe right 3 times, slowly, then at once take a
+   screenshot of "Collector status" under "Current session".
+3. Press the phone's volume-up key, open the volume panel's settings,
+   and set "Accessibility volume" to about 80%. If it is already there,
+   move it down and back up to about 80%.
+4. Swipe right 3 times, slowly, then at once take a screenshot of
+   "Collector status".
+5. Choose "Stop recording", and turn TalkBack off.
+
+**On screen:** in both screenshots "Collector status" has four lines:
+"android.companion", "android.screen", a line starting "android.sound:
+Running, Healthy." and the line "windows.audio: Running, Healthy". The
+"android.sound" line has "Phone sound:" with a number of packets, a
+number of MB, "loudest in the last 10 seconds" with a percentage of full
+scale, "median delay from phone to recorder" with a number of
+milliseconds, and ends "playing on" with the name of the PC's speakers
+or headphones. In step 2 the line is expected to have "The phone's sound
+is very quiet. Raise the phone's Accessibility volume now." after
+"Healthy.", and a percentage below 10% (check 1 found 2.9% before the
+volume was changed during the capture). In step 4 that message is gone
+and the percentage is 10% or more (check 1 found 32.0%). If the step 2
+line has no message and its percentage is already 10% or more, that is
+not a failure, but is recorded: it would mean the volume set before the
+capture counts after all. The median delay checks the sound's times: a
+few tens of milliseconds says the packets are on the companion's clock;
+a number below zero, or of seconds or more, says they are not. If the
+line says "not played on this PC", "placed by the time each packet
+arrived", or Degraded, send it as it is. Send both screenshots.
+
+### Test 31: the sound files in the recording's folder
+
+1. Open File Explorer, and go to Documents, then "Windows A11y
+   Recorder".
+2. Open the newest folder, the recording of test 30.
+3. Open the folder `audio`.
+4. Open `device.wav` in Media Player, and read its length, shown at the
+   right end of the time bar.
+5. Close it, and do the same with `microphone.wav`.
+
+**On screen:** in step 3 the folder holds two files, `device.wav` and
+`microphone.wav`. In steps 4 and 5 each length is close to the length of
+the recording of test 30, within a few seconds.
+
+### Test 32: the cable unplugged during a recording
+
+1. In the recorder, choose "Start recording", and wait 10 seconds.
+2. Unplug the USB cable from the phone.
+3. Within 5 seconds, take a screenshot of "Collector status" under
+   "Current session".
+4. Choose "Stop recording".
+5. Plug the cable in again and unlock the phone.
+
+**On screen:** in step 3 the "android.sound" line starts "android.sound:
+Running, Degraded. The phone's sound stopped being recorded during the
+recording. The sound stream ended:" followed by the reason, then "The
+recording goes on without it." and "Phone sound:" with the packets
+recorded before the cable was unplugged. The "android.screen" and
+"android.companion" lines are Degraded too, as in tests 19 and 14, and
+"windows.audio: Running, Healthy" is unchanged. "Stop recording" ends
+the recording as usual. Send the screenshot.

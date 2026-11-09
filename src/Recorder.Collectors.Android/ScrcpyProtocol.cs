@@ -3,7 +3,7 @@ using System.Globalization;
 
 namespace Recorder.Collectors.Android;
 
-/// <summary>A 12-byte header on scrcpy's video socket.</summary>
+/// <summary>A 12-byte header on scrcpy's video or audio socket. The audio socket has no session headers.</summary>
 public abstract record ScrcpyHeader;
 
 /// <summary>A capture session starts: the picture's size from here on.</summary>
@@ -35,6 +35,21 @@ public static class ScrcpyProtocol
     /// <summary>"h264".</summary>
     public const uint H264CodecId = 0x68323634;
 
+    /// <summary>"raw": the phone's sound as PCM, not encoded (AudioCodec.java).</summary>
+    public const uint RawCodecId = 0x00726177;
+
+    /// <summary>The sound the server's raw codec gives (AudioConfig.java): 48 kHz.</summary>
+    public const int SoundSampleRate = 48_000;
+
+    /// <summary>Two channels, interleaved.</summary>
+    public const int SoundChannels = 2;
+
+    /// <summary>16-bit little-endian samples.</summary>
+    public const int SoundBitsPerSample = 16;
+
+    /// <summary>Bytes per sample frame, both channels.</summary>
+    public const int SoundBlockAlign = SoundChannels * SoundBitsPerSample / 8;
+
     /// <summary>The codec id the server sends when it disables the stream, as when it cannot capture.</summary>
     public const uint DisabledCodecId = 0;
 
@@ -60,9 +75,12 @@ public static class ScrcpyProtocol
 
     /// <summary>
     /// The arguments to <c>adb -s serial shell</c> that start the server:
-    /// video only, H.264, no control, so nothing on the phone is changed or
-    /// controlled; the device name is not sent, and no clean-up process is
-    /// started, as there is nothing to restore. The phone's sound is slice 4.
+    /// H.264 video and the phone's sound, no control, so nothing on the phone
+    /// is controlled; the device name is not sent, and no clean-up process is
+    /// started, as there is nothing to restore. The sound (slice 4) is the
+    /// whole audio output, <c>audio_source=output</c>, which check 1 found
+    /// holds TalkBack's speech and which stops the phone playing it itself;
+    /// it is sent raw, as PCM, so nothing is lost to an encoder.
     /// </summary>
     public static IReadOnlyList<string> ServerCommand(int scid, string version) =>
     [
@@ -74,9 +92,11 @@ public static class ScrcpyProtocol
         "scid=" + scid.ToString("x8", CultureInfo.InvariantCulture),
         "log_level=info",
         "video=true",
-        "audio=false",
+        "audio=true",
         "control=false",
         "video_codec=h264",
+        "audio_codec=raw",
+        "audio_source=output",
         "video_bit_rate=" + VideoBitRate.ToString(CultureInfo.InvariantCulture),
         "send_device_meta=false",
         "cleanup=false"
@@ -85,6 +105,7 @@ public static class ScrcpyProtocol
     public static string CodecName(uint id) => id switch
     {
         H264CodecId => "h264",
+        RawCodecId => "raw",
         0x68323635 => "h265",
         0x00617631 => "av1",
         DisabledCodecId => "disabled",

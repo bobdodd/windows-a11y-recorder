@@ -9,7 +9,8 @@ using Recorder.Session;
 namespace Recorder.Tests;
 
 // Slice 3 of docs/architecture/android-implementation-plan.md, first step:
-// scrcpy 5.0.1's video socket, the server's start, and the screen collector,
+// scrcpy 5.0.1's video socket, the server's start (with the audio socket of
+// slice 4), and the screen collector,
 // against bytes laid out as the 5.0.1 server's Streamer.java writes them, a
 // fake adb, and a fake phone clock.
 public sealed class AndroidScreenTests : IDisposable
@@ -113,8 +114,8 @@ public sealed class AndroidScreenTests : IDisposable
         Assert.Equal(
             [
                 "CLASSPATH=/data/local/tmp/a11yrecorder-scrcpy-server.jar", "app_process", "/", "com.genymobile.scrcpy.Server", "5.0.1",
-                "scid=1234abcd", "log_level=info", "video=true", "audio=false", "control=false", "video_codec=h264",
-                "video_bit_rate=8000000", "send_device_meta=false", "cleanup=false"
+                "scid=1234abcd", "log_level=info", "video=true", "audio=true", "control=false", "video_codec=h264",
+                "audio_codec=raw", "audio_source=output", "video_bit_rate=8000000", "send_device_meta=false", "cleanup=false"
             ],
             command);
         Assert.DoesNotContain(command, argument => argument.StartsWith("show_touches", StringComparison.Ordinal));
@@ -203,7 +204,8 @@ public sealed class AndroidScreenTests : IDisposable
         });
         var log = Path.Combine(_folder, "android", "scrcpy-server.log");
 
-        await using (var connection = await ScrcpyLink.OpenAsync(adb, Serial, ServerFile(), log, CancellationToken.None))
+        var connections = await ScrcpyLink.OpenAsync(adb, Serial, ServerFile(), log, CancellationToken.None);
+        await using (var connection = connections.Video)
         {
             Assert.Equal(ScrcpyProtocol.H264CodecId, connection.CodecId);
             Assert.Equal(new ScrcpySessionHeader(1080, 2404, false), await connection.ReadHeaderAsync(CancellationToken.None));
@@ -211,10 +213,15 @@ public sealed class AndroidScreenTests : IDisposable
             Assert.Null(connection.ServerLog());
         }
 
+        // The server is stopped once both sockets are closed.
+        Assert.False(adb.Disposed);
+        await connections.Audio.DisposeAsync();
+
         var commands = adb.Commands;
         Assert.Equal($"-s {Serial} push {ServerFile()} /data/local/tmp/a11yrecorder-scrcpy-server.jar", commands[0]);
         Assert.Matches($"^-s {Serial} reverse localabstract:scrcpy_[0-9a-f]{{8}} tcp:\\d+$", commands[1]);
         Assert.StartsWith($"-s {Serial} shell CLASSPATH=/data/local/tmp/a11yrecorder-scrcpy-server.jar app_process / com.genymobile.scrcpy.Server 5.0.1 scid=", commands[2]);
+        Assert.Contains(" video=true audio=true control=false video_codec=h264 audio_codec=raw audio_source=output ", commands[2]);
         var socket = commands[1].Split(' ')[3];
         Assert.Equal($"-s {Serial} reverse --remove {socket}", commands[3]);
         Assert.Contains("scid=" + socket["localabstract:scrcpy_".Length..], commands[2]);
@@ -514,7 +521,11 @@ public sealed class AndroidScreenTests : IDisposable
             return Task.FromResult(socket);
         }
 
-        public async Task<ScrcpyVideoConnection> ConnectAsync()
+        /// <summary>The video socket, and an audio socket the screen collector does not read.</summary>
+        public async Task<ScrcpyConnections> ConnectAsync() =>
+            new(await ConnectVideoAsync(), new ScrcpyAudioConnection(new MemoryStream()));
+
+        private async Task<ScrcpyVideoConnection> ConnectVideoAsync()
         {
             var recorder = new TcpClient();
             var accepting = _listener.AcceptTcpClientAsync();
@@ -600,13 +611,18 @@ public sealed class AndroidScreenTests : IDisposable
 
             var exited = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
             TcpClient? client = null;
+            TcpClient? sound = null;
             _ = Task.Run(async () =>
             {
                 Phone? phone = null;
                 if (connects)
                 {
+                    // The video socket first, then the audio socket, as
+                    // DesktopConnection.java connects them.
                     client = new TcpClient();
                     await client.ConnectAsync(IPAddress.Loopback, _port);
+                    sound = new TcpClient();
+                    await sound.ConnectAsync(IPAddress.Loopback, _port);
                 }
 
                 phone = new Phone(onLine, client?.GetStream());
@@ -619,6 +635,7 @@ public sealed class AndroidScreenTests : IDisposable
             return new Running(exited, () =>
             {
                 client?.Dispose();
+                sound?.Dispose();
                 Disposed = true;
             });
         }

@@ -142,13 +142,130 @@ public sealed class ScrcpyVideoConnection : IAsyncDisposable
 }
 
 /// <summary>
-/// Starts scrcpy's server on the phone and connects to its video socket
-/// (android-implementation-plan.md, slice 3).
+/// scrcpy's audio socket, from its start. The server writes the codec id
+/// only once it has started capturing, or 0 when it cannot capture the
+/// sound, in which case the screen goes on without it
+/// (AudioRawRecorder.java, Streamer.writeDisableStream); read it with
+/// <see cref="ReadCodecAsync"/>, then the packets as on the video socket,
+/// which for the raw codec are all sound, with no session or configuration
+/// headers. Disposing it closes the socket; the server then stops capturing
+/// the sound and goes on with the screen.
+/// </summary>
+public sealed class ScrcpyAudioConnection : IAsyncDisposable
+{
+    private readonly Stream _stream;
+    private readonly Func<ValueTask>? _onDispose;
+    private readonly byte[] _header = new byte[ScrcpyProtocol.HeaderSize];
+    private int _disposed;
+
+    public ScrcpyAudioConnection(Stream stream, Func<ValueTask>? onDispose = null, Func<string?>? serverLog = null)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        _stream = stream;
+        _onDispose = onDispose;
+        ServerLog = serverLog ?? (() => null);
+    }
+
+    /// <summary>The server's last lines, for a reason the sound ended.</summary>
+    public Func<string?> ServerLog { get; }
+
+    /// <summary>
+    /// The codec id, once the server has started capturing. A sound that is
+    /// not raw PCM is reported, not read.
+    /// </summary>
+    /// <exception cref="ScrcpyUnavailableException">The server sent no codec, or not the raw one.</exception>
+    public async Task ReadCodecAsync(TimeSpan timeout, CancellationToken cancellation)
+    {
+        var codec = new byte[4];
+        int read;
+        try
+        {
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+            limit.CancelAfter(timeout);
+            read = await _stream.ReadAtLeastAsync(codec, codec.Length, throwOnEndOfStream: false, limit.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+        {
+            throw new ScrcpyUnavailableException(
+                $"scrcpy's server on the phone did not start the sound within {timeout.TotalSeconds:0} seconds.{ScrcpyVideoConnection.Said(ServerLog())}");
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+            throw new ScrcpyUnavailableException($"The sound's connection to scrcpy's server failed: {ex.Message}{ScrcpyVideoConnection.Said(ServerLog())}", ex);
+        }
+
+        if (read < codec.Length)
+        {
+            throw new ScrcpyUnavailableException($"scrcpy's server on the phone closed the sound's connection at once.{ScrcpyVideoConnection.Said(ServerLog())}");
+        }
+
+        var id = ScrcpyProtocol.ParseCodecId(codec);
+        if (id != ScrcpyProtocol.RawCodecId)
+        {
+            var meaning = id switch
+            {
+                ScrcpyProtocol.DisabledCodecId => "the phone could not capture its sound",
+                ScrcpyProtocol.ErrorCodecId => "the server reported a configuration error",
+                _ => $"it sent codec {ScrcpyProtocol.CodecName(id)}, not raw sound"
+            };
+            throw new ScrcpyUnavailableException($"scrcpy's server did not start the sound: {meaning}.{ScrcpyVideoConnection.Said(ServerLog())}");
+        }
+    }
+
+    /// <summary>The next packet's header, or null when the stream ended cleanly between packets.</summary>
+    /// <exception cref="FormatException">The bytes are not a 5.0.1 header.</exception>
+    /// <exception cref="EndOfStreamException">The stream ended inside a header.</exception>
+    public async ValueTask<ScrcpyHeader?> ReadHeaderAsync(CancellationToken cancellation)
+    {
+        var read = await _stream.ReadAtLeastAsync(_header, _header.Length, throwOnEndOfStream: false, cancellation).ConfigureAwait(false);
+        if (read == 0)
+        {
+            return null;
+        }
+
+        if (read < _header.Length)
+        {
+            throw new EndOfStreamException("The stream ended inside a header.");
+        }
+
+        return ScrcpyProtocol.ParseHeader(_header);
+    }
+
+    /// <exception cref="EndOfStreamException">The stream ended inside the packet.</exception>
+    public async ValueTask ReadPacketAsync(Memory<byte> packet, CancellationToken cancellation) =>
+        await _stream.ReadExactlyAsync(packet, cancellation).ConfigureAwait(false);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        await _stream.DisposeAsync().ConfigureAwait(false);
+        if (_onDispose is not null)
+        {
+            await _onDispose().ConfigureAwait(false);
+        }
+    }
+}
+
+/// <summary>
+/// The server's two sockets. The server on the phone is stopped once both
+/// are closed.
+/// </summary>
+public sealed record ScrcpyConnections(ScrcpyVideoConnection Video, ScrcpyAudioConnection Audio);
+
+/// <summary>
+/// Starts scrcpy's server on the phone and connects to its video and audio
+/// sockets (android-implementation-plan.md, slices 3 and 4).
 ///
 /// The recorder listens on a free loopback port and has adb reverse the
 /// server's socket name to it, so the server, once started, connects to the
-/// recorder, as scrcpy itself does by default. Once connected the reverse
-/// is removed. The server's printed lines go to a log in the recording.
+/// recorder, as scrcpy itself does by default: the video socket first, then
+/// the audio socket (DesktopConnection.java). Once both are connected the
+/// reverse is removed. The server's printed lines go to a log in the
+/// recording.
 /// </summary>
 public static class ScrcpyLink
 {
@@ -161,7 +278,7 @@ public static class ScrcpyLink
 
     /// <param name="serverPath">The bundled server, scrcpy-server-v5.0.1.</param>
     /// <param name="logPath">Where the server's printed lines are written.</param>
-    public static async Task<ScrcpyVideoConnection> OpenAsync(
+    public static async Task<ScrcpyConnections> OpenAsync(
         IAdb adb,
         string serial,
         string serverPath,
@@ -184,12 +301,14 @@ public static class ScrcpyLink
             cancellation).ConfigureAwait(false);
 
         var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start(1);
+        listener.Start(2);
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         var scid = Random.Shared.Next() & 0x7FFF_FFFF;
         var socketName = ScrcpyProtocol.SocketName(scid);
         var reversed = false;
         IAdbRunning? server = null;
+        TcpClient? video = null;
+        TcpClient? audio = null;
         var log = new ServerLog(logPath);
         try
         {
@@ -205,48 +324,67 @@ public static class ScrcpyLink
 
             using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             limit.CancelAfter(ConnectTimeout);
-            var accepting = listener.AcceptTcpClientAsync(limit.Token).AsTask();
-            var first = await Task.WhenAny(accepting, server.Exited).ConfigureAwait(false);
-            if (first != accepting)
-            {
-                limit.Cancel();
-                throw new ScrcpyUnavailableException(
-                    $"scrcpy's server on the phone stopped before it connected.{ScrcpyVideoConnection.Said(log.Last(QuotedLines))}");
-            }
-
-            TcpClient client;
-            try
-            {
-                client = await accepting.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
-            {
-                throw new ScrcpyUnavailableException(
-                    $"scrcpy's server on the phone did not connect within {ConnectTimeout.TotalSeconds:0} seconds.{ScrcpyVideoConnection.Said(log.Last(QuotedLines))}");
-            }
-
-            client.NoDelay = true;
+            video = await AcceptAsync(listener, server, log, limit, cancellation).ConfigureAwait(false);
+            audio = await AcceptAsync(listener, server, log, limit, cancellation).ConfigureAwait(false);
             listener.Stop();
             await RemoveReverseAsync(adb, serial, socketName).ConfigureAwait(false);
             reversed = false;
 
+            // The server is stopped once both sockets are closed: the sound
+            // collector closes its socket before the screen collector closes
+            // the video socket, and the server goes on with the screen alone
+            // (Server.java, Completion).
             var running = server;
             server = null;
-            return await ScrcpyVideoConnection.ConnectAsync(
-                client.GetStream(),
-                CodecTimeout,
-                cancellation,
-                async () =>
+            var open = 2;
+            async ValueTask Release()
+            {
+                if (Interlocked.Decrement(ref open) == 0)
                 {
-                    client.Dispose();
                     await running.DisposeAsync().ConfigureAwait(false);
                     log.Dispose();
+                }
+            }
+
+            var audioClient = audio;
+            var sound = new ScrcpyAudioConnection(
+                audioClient.GetStream(),
+                async () =>
+                {
+                    audioClient.Dispose();
+                    await Release().ConfigureAwait(false);
                 },
-                () => log.Last(QuotedLines)).ConfigureAwait(false);
+                () => log.Last(QuotedLines));
+            audio = null;
+            var videoClient = video;
+            video = null;
+            ScrcpyVideoConnection screen;
+            try
+            {
+                screen = await ScrcpyVideoConnection.ConnectAsync(
+                    videoClient.GetStream(),
+                    CodecTimeout,
+                    cancellation,
+                    async () =>
+                    {
+                        videoClient.Dispose();
+                        await Release().ConfigureAwait(false);
+                    },
+                    () => log.Last(QuotedLines)).ConfigureAwait(false);
+            }
+            catch
+            {
+                await sound.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
+
+            return new ScrcpyConnections(screen, sound);
         }
         catch
         {
             listener.Stop();
+            video?.Dispose();
+            audio?.Dispose();
             if (server is not null)
             {
                 await server.DisposeAsync().ConfigureAwait(false);
@@ -260,6 +398,39 @@ public static class ScrcpyLink
             log.Dispose();
             throw;
         }
+    }
+
+    /// <summary>The server's next connection, or why it did not come.</summary>
+    private static async Task<TcpClient> AcceptAsync(
+        TcpListener listener,
+        IAdbRunning server,
+        ServerLog log,
+        CancellationTokenSource limit,
+        CancellationToken cancellation)
+    {
+        var accepting = listener.AcceptTcpClientAsync(limit.Token).AsTask();
+        var first = await Task.WhenAny(accepting, server.Exited).ConfigureAwait(false);
+        if (first != accepting)
+        {
+            limit.Cancel();
+            _ = accepting.ContinueWith(task => task.Result.Dispose(), TaskContinuationOptions.OnlyOnRanToCompletion);
+            throw new ScrcpyUnavailableException(
+                $"scrcpy's server on the phone stopped before it connected.{ScrcpyVideoConnection.Said(log.Last(QuotedLines))}");
+        }
+
+        TcpClient client;
+        try
+        {
+            client = await accepting.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+        {
+            throw new ScrcpyUnavailableException(
+                $"scrcpy's server on the phone did not connect within {ConnectTimeout.TotalSeconds:0} seconds.{ScrcpyVideoConnection.Said(log.Last(QuotedLines))}");
+        }
+
+        client.NoDelay = true;
+        return client;
     }
 
     private static async Task<AdbResult> RunAsync(

@@ -399,7 +399,7 @@ slice's full test goes into a validation plan,
 - **Steps.** The slice is built in three steps, each tested on the Pixel
   before the next: 3a stores the stream and an event per packet; 3b
   decodes it to frames; 3c shows the frames in the player and the MP4
-  export. Until slice 4 the server is started with `audio=false`.
+  export. Until slice 4 the server was started with `audio=false`.
 - **Server.** The recorder pushes the bundled server to
   `/data/local/tmp/a11yrecorder-scrcpy-server.jar`, sets up
   `adb reverse localabstract:scrcpy_<scid>` to a loopback port it listens
@@ -667,6 +667,15 @@ slice's full test goes into a validation plan,
 
 ### Slice 4: the phone's sound
 
+- **Steps.** The slice is built in three steps, each tested on the Pixel
+  before the next: 4a stores the sound with its times, shows its level
+  and the quiet message while recording, plays it on the PC, and adds the
+  PC's microphone; 4b gives it a "Phone sound" lane and slider in the
+  player and makes the MP4 export treat it as the system sound; 4c checks
+  setting the volume over adb. Playing the sound on the PC and recording
+  the PC's microphone are in the design ([Recording an Android
+  device](android-recording.md), "Device sound", and the owner's answer
+  "phone plus PC's mic") but were missing from this slice until 4a.
 - **Stored.** The audio socket gives raw PCM at 48 kHz, two channels,
   16 bits
   ([scrcpy 5.0.1, AudioConfig.java](https://github.com/Genymobile/scrcpy/blob/a60891aea193d92e7e5c3942700eca63f9d19a5f/server/src/main/java/com/genymobile/scrcpy/audio/AudioConfig.java)).
@@ -683,12 +692,14 @@ slice's full test goes into a validation plan,
 - **Volume over adb.** Not checked. Android's shell has
   `media_session volume --stream <n> --get` and `--set`
   ([AOSP, VolumeCtrl.java](https://github.com/aosp-mirror/platform_frameworks_base/blob/1cdfff555f4a21f71ccc978290e2e212e2f8b168/services/core/java/com/android/server/media/VolumeCtrl.java)).
-  This slice checks whether it reads and sets the Accessibility volume on
+  Step 4c checks whether it reads and sets the Accessibility volume on
   the Pixel, and whether setting it during the capture changes the
   captured level, as the volume keys do
   ([scrcpy issue 3790](https://github.com/Genymobile/scrcpy/issues/3790#issuecomment-1472079314)).
   If it does, the recorder offers to set it; if not, the message above is
-  all it does.
+  all it does. The check is run by the owner: on 2026-11-09 the
+  assistant's access to the PC could not run adb (adb could not create
+  its `.android` folder there) or read the folder adb keeps its keys in.
 - **Player and export.** The phone's sound takes the system sound's place,
   labelled "Phone sound", with its own volume slider. The MP4 export
   treats it as the system sound, as the design says.
@@ -697,7 +708,83 @@ slice's full test goes into a validation plan,
   during the recording. The level shown in the recorder rises after each
   swipe, and the quiet message goes once the volume is raised. In the
   player the timeline has a "Phone sound" lane across the whole
-  recording, and the volume panel has a "Phone sound" slider.
+  recording, and the volume panel has a "Phone sound" slider. Steps 4a
+  and 4b split this test in two.
+- **Built, step 4a (2026-11-09).**
+  - **Server.** The server is started with `audio=true`,
+    `audio_codec=raw` and `audio_source=output`. It connects the audio
+    socket after the video socket
+    ([scrcpy 5.0.1, Server.java](https://github.com/Genymobile/scrcpy/blob/a60891aea193d92e7e5c3942700eca63f9d19a5f/server/src/main/java/com/genymobile/scrcpy/Server.java)),
+    so `ScrcpyLink` accepts two connections in that order, removes the
+    reverse tunnel after both, and stops the server's adb shell only
+    when both are closed. The audio socket starts with a codec id, sent
+    once the phone has started capturing, or 0 if it could not capture,
+    or 1 for another error, and then a 12-byte header and up to 4096
+    bytes (1024 sample frames) per packet
+    ([AudioRawRecorder.java](https://github.com/Genymobile/scrcpy/blob/a60891aea193d92e7e5c3942700eca63f9d19a5f/server/src/main/java/com/genymobile/scrcpy/audio/AudioRawRecorder.java),
+    [Streamer.java](https://github.com/Genymobile/scrcpy/blob/a60891aea193d92e7e5c3942700eca63f9d19a5f/server/src/main/java/com/genymobile/scrcpy/device/Streamer.java)).
+    When the recorder closes the audio socket, the server stops
+    capturing the sound, the phone plays its own sound again, and the
+    screen goes on: the server treats a closed audio socket as expected
+    and not as an error that ends it (AudioRawRecorder.java).
+  - **Collector.** `AndroidSoundCollector`, `android.sound`, starts
+    after the screen collector and stops before it. It writes each
+    packet to `audio/device.wav` as received and records on
+    `audio.device` the desktop audio collector's events:
+    `audio-stream-started` at the first sample's time, an
+    `audio-buffer` per packet (byte offset, sample frames, placed time,
+    estimated first sample time), and `audio-stream-stopped` with the
+    totals and the loudest sample. Each buffer also keeps the phone time
+    as sent (`presentationMicroseconds`) and the time the recorder read
+    it (`receivedAtNanoseconds`), so its placement can be checked again
+    later.
+  - **Times.** The server times each packet by Android's audio timestamp
+    on the monotonic clock
+    ([AudioRecordReader.java](https://github.com/Genymobile/scrcpy/blob/a60891aea193d92e7e5c3942700eca63f9d19a5f/server/src/main/java/com/genymobile/scrcpy/audio/AudioRecordReader.java)),
+    the clock the companion app samples, so a packet is placed through
+    the companion's clock fit, flagged `phone-audio-time`. That the time
+    is that of the packet's last sample is inference: the server reads
+    the timestamp just after reading the packet. The status's median
+    delay from phone to recorder is how this is checked on the Pixel.
+    With no clock sample within 3 seconds of the codec id, packets are
+    placed at the time they were read, flagged as such.
+  - **Level and message.** `PhoneSoundLevel` keeps each packet's
+    loudest sample for 10 seconds. The status line reads, for example,
+    "Phone sound: 512 packets, 2.1 MB, loudest in the last 10 seconds
+    32% of full scale, median delay from phone to recorder 15.2 ms,
+    playing on Speakers (Realtek(R) Audio)." When sound is present but
+    its loudest sample in the last 10 seconds is below 10% of full
+    scale, the collector's health reason is the quiet message, which the
+    app announces once; it goes when the level passes 10%. Exact silence
+    gives "silent in the last 10 seconds" and no message, as TalkBack is
+    silent between swipes. The 10% is a choice between check 1's 2.9%,
+    unusable, and 32.0%, usable; it has not been tried at other levels.
+    Below 10% the level is shown with one decimal.
+  - **Played on the PC.** `audio_source=output` "disables playback on
+    the device"
+    ([scrcpy, audio.md](https://github.com/Genymobile/scrcpy/blob/master/doc/audio.md)),
+    so each packet is also played on Windows' default playback device
+    (`WasapiPhoneSoundOutput`, shared mode, 60 ms latency). When more
+    than 250 ms is waiting to be played, as after a pause in the
+    packets, it is dropped so what is heard does not drift behind the
+    phone; the recording keeps every packet. If the PC cannot play it,
+    the status ends "not played on this PC:" with the reason, and the
+    sound is still recorded.
+  - **PC microphone.** A recording of the phone also records the PC's
+    default microphone, with the desktop's audio collector set to the
+    microphone only, whether or not the microphone box is checked. As
+    for the desktop, a PC with no working microphone cannot start the
+    recording.
+  - **Failures.** If the screen stream did not start, if the phone could
+    not capture its sound, or if the sound's connection closes during the
+    recording, the collector reports itself degraded with the reason,
+    records an `audio-stream-error`, and the recording goes on without
+    the sound.
+  - **Not yet.** The player already plays a recording's `audio.device`
+    track at the system sound's volume, but it is not labelled, has no
+    lane and has no slider of its own, its events are counted under the
+    timeline's "Other" filter, and the MP4 export does not offer it as
+    the system sound; that is step 4b.
 
 ### Slice 5: touches
 

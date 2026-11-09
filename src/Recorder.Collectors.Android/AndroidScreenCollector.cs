@@ -47,13 +47,15 @@ public sealed class AndroidScreenCollector : ICaptureCollector
 
     private readonly string _serial;
     private readonly IPhoneClock? _clock;
-    private readonly Func<string, CancellationToken, Task<ScrcpyVideoConnection>> _open;
+    private readonly Func<string, CancellationToken, Task<ScrcpyConnections>> _open;
+    private readonly TaskCompletionSource<PhoneSoundSource> _sound = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Func<int, int, IH264Decoder> _decoders;
     private readonly object _gate = new();
     private readonly List<long> _delays = [];
 
     private CollectorInitializationContext? _context;
     private ScrcpyVideoConnection? _connection;
+    private ScrcpyAudioConnection? _audio;
     private CancellationTokenSource? _running;
     private Task? _reading;
     private ulong _videoSequence;
@@ -77,7 +79,7 @@ public sealed class AndroidScreenCollector : ICaptureCollector
         string serial,
         string serverPath,
         IPhoneClock? clock,
-        Func<string, CancellationToken, Task<ScrcpyVideoConnection>>? open = null,
+        Func<string, CancellationToken, Task<ScrcpyConnections>>? open = null,
         Func<int, int, IH264Decoder>? decoders = null)
     {
         ArgumentNullException.ThrowIfNull(adb);
@@ -101,6 +103,13 @@ public sealed class AndroidScreenCollector : ICaptureCollector
     public CollectorHealthState HealthState { get; private set; } = CollectorHealthState.Unknown;
 
     public string? HealthReason { get; private set; }
+
+    /// <summary>
+    /// The server's audio socket for the sound collector, once this
+    /// collector has started, or why there is none: the sound comes from the
+    /// same server as the screen.
+    /// </summary>
+    public Task<PhoneSoundSource> Sound => _sound.Task;
 
     public string? Summary
     {
@@ -203,14 +212,23 @@ public sealed class AndroidScreenCollector : ICaptureCollector
         Directory.CreateDirectory(Path.GetDirectoryName(streamPath)!);
         try
         {
-            _connection = await _open(
+            var connections = await _open(
                 Path.Combine(context.SessionDirectory, AndroidScreenRecords.ServerLogPath),
                 cancellationToken).ConfigureAwait(false);
+            _connection = connections.Video;
+            _audio = connections.Audio;
+            _sound.TrySetResult(new PhoneSoundSource(_audio, null));
         }
         catch (ScrcpyUnavailableException exception)
         {
+            _sound.TrySetResult(new PhoneSoundSource(null, "the phone's screen stream did not start, and the sound comes from the same server. " + exception.Message));
             Unavailable(exception.Message, connectionLost: false);
             return CollectorTransitionResult.Success(LifecycleState);
+        }
+        catch (Exception exception)
+        {
+            _sound.TrySetResult(new PhoneSoundSource(null, "the phone's screen stream did not start: " + exception.Message));
+            throw;
         }
 
         Emit(
@@ -277,6 +295,7 @@ public sealed class AndroidScreenCollector : ICaptureCollector
             _stopping = true;
         }
 
+        _sound.TrySetResult(new PhoneSoundSource(null, "the phone's screen collector was not started."));
         await CloseAsync().ConfigureAwait(false);
         _running?.Dispose();
         _frames?.Dispose();
@@ -285,8 +304,15 @@ public sealed class AndroidScreenCollector : ICaptureCollector
 
     private async Task CloseAsync()
     {
-        // Closing the socket ends the server on the phone and the read.
+        // Closing the socket ends the server on the phone and the read. The
+        // sound collector has closed the audio socket already, as it stops
+        // first; closing it again does nothing.
         _running?.Cancel();
+        if (_audio is not null)
+        {
+            await _audio.DisposeAsync().ConfigureAwait(false);
+        }
+
         if (_connection is not null)
         {
             await _connection.DisposeAsync().ConfigureAwait(false);
@@ -624,3 +650,6 @@ public sealed class AndroidScreenCollector : ICaptureCollector
 
     private sealed record Pending(string EventType, object Payload, long ReceivedAt);
 }
+
+/// <summary>The audio socket the sound collector reads, or why there is none.</summary>
+public sealed record PhoneSoundSource(ScrcpyAudioConnection? Connection, string? Reason);

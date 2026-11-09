@@ -364,7 +364,7 @@
                 <local:SelectableText Margin="0,8,0,0"
                            Foreground="{StaticResource MutedText}"
                            TextWrapping="Wrap"
-                           Text="A recording of the phone records the companion app's connection, the phone's clock, its display's rotation and size, and the phone's screen as a video stream and as a picture for each change, which the player shows and an MP4 export saves. Its sound, touches and accessibility evidence come in later parts." />
+                           Text="A recording of the phone records the companion app's connection, the phone's clock, its display's rotation and size, and the phone's screen as a video stream and as a picture for each change, which the player shows and an MP4 export saves. It also records the phone's sound, shows its level while recording and plays it on this PC, and records this PC's microphone. The phone's sound in the player and in an MP4 export, touches and accessibility evidence come in later parts." />
               </StackPanel>
             </GroupBox>
 

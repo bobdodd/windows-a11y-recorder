@@ -180,6 +180,24 @@ Changes on `main` since 1.1.0, not yet released.
 - The playback index is version 20 and keeps the phone's frame records,
   so recordings made before are indexed again when opened.
 
+### Android recording, part 4a: the phone's sound
+
+- A recording of the phone records the phone's whole sound through
+  scrcpy's server (`audio_source=output`, raw, 48 kHz, two channels,
+  16 bits) as `audio/device.wav`, with an `audio-buffer` record per packet
+  on `audio.device`, placed by the companion's clock fit.
+- While recording, the "android.sound" status line shows the loudest
+  level in the last 10 seconds, and below 10% of full scale says "The
+  phone's sound is very quiet. Raise the phone's Accessibility volume
+  now."
+- The phone's sound is played on the PC's default playback device as it
+  arrives, as the phone does not play it while it is captured.
+- A recording of the phone also records the PC's microphone.
+- If the phone's sound cannot be recorded, or stops, the collector says
+  why and the recording goes on without it.
+- The player and the MP4 export do not treat the phone's sound as its
+  own track yet (part 4b).
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now

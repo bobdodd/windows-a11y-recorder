@@ -42,7 +42,8 @@ internal static class EventPayloadValidator
         Recorder.Contracts.AndroidCompanionRecords.ClockChannel,
         Recorder.Contracts.AndroidCompanionRecords.DisplayChannel,
         Recorder.Contracts.AndroidScreenRecords.VideoChannel,
-        Recorder.Contracts.AndroidFrameRecords.FramesChannel
+        Recorder.Contracts.AndroidFrameRecords.FramesChannel,
+        Recorder.Contracts.AndroidSoundRecords.Channel
     ];
 
     /// <summary>Whether the recorder defines the channel.</summary>
@@ -205,6 +206,8 @@ internal static class EventPayloadValidator
             case ("audio.system", "audio-stream-stopped"):
             case ("audio.screen-reader", "audio-stream-started"):
             case ("audio.screen-reader", "audio-stream-stopped"):
+            case (Recorder.Contracts.AndroidSoundRecords.Channel, "audio-stream-started"):
+            case (Recorder.Contracts.AndroidSoundRecords.Channel, "audio-stream-stopped"):
                 ValidateAudioStream(payload, issues);
                 break;
             case ("audio.microphone", "audio-buffer"):
@@ -212,9 +215,13 @@ internal static class EventPayloadValidator
             case ("audio.screen-reader", "audio-buffer"):
                 ValidateAudioBuffer(payload, issues);
                 break;
+            case (Recorder.Contracts.AndroidSoundRecords.Channel, "audio-buffer"):
+                ValidateAudioBuffer(payload, issues, phone: true);
+                break;
             case ("audio.microphone", "audio-stream-error"):
             case ("audio.system", "audio-stream-error"):
             case ("audio.screen-reader", "audio-stream-error"):
+            case (Recorder.Contracts.AndroidSoundRecords.Channel, "audio-stream-error"):
                 ValidateAudioError(payload, issues);
                 break;
             case ("browser.lifecycle", "browser-connected"):
@@ -2599,7 +2606,7 @@ internal static class EventPayloadValidator
         ValidateShape(
             payload,
             [
-                RequiredEnum("stream", "microphone", "system", "screen-reader"),
+                RequiredEnum("stream", AudioStreams),
                 RequiredSafePath("path"),
                 RequiredString("device"),
                 OptionalNullableNumber("endpointVolumeScalar", nonnegative: true),
@@ -2632,23 +2639,38 @@ internal static class EventPayloadValidator
         }
     }
 
+    // The phone's sound (android-implementation-plan.md, slice 4) has the
+    // desktop's buffer shape and also the phone time the server gave the
+    // packet and the time the recorder read it.
     private static void ValidateAudioBuffer(
         JsonElement payload,
-        ICollection<EventValidationIssue> issues) =>
-        ValidateShape(
-            payload,
-            [
-                RequiredEnum("stream", "microphone", "system", "screen-reader"),
-                RequiredSafePath("path"),
-                RequiredInteger("bufferSequence", nonnegative: true),
-                RequiredInteger("dataByteOffset", nonnegative: true),
-                RequiredInteger("byteLength", nonnegative: true),
-                RequiredInteger("sampleFrames", nonnegative: true),
-                RequiredInteger("durationNanoseconds", nonnegative: true),
-                RequiredInteger("estimatedFirstSampleMonotonicNanoseconds", nonnegative: true),
-                RequiredInteger("callbackMonotonicNanoseconds", nonnegative: true)
-            ],
-            issues);
+        ICollection<EventValidationIssue> issues,
+        bool phone = false)
+    {
+        List<PropertyRule> rules =
+        [
+            RequiredEnum("stream", AudioStreams),
+            RequiredSafePath("path"),
+            RequiredInteger("bufferSequence", nonnegative: true),
+            RequiredInteger("dataByteOffset", nonnegative: true),
+            RequiredInteger("byteLength", nonnegative: true),
+            RequiredInteger("sampleFrames", nonnegative: true),
+            RequiredInteger("durationNanoseconds", nonnegative: true),
+            RequiredInteger("estimatedFirstSampleMonotonicNanoseconds", nonnegative: true),
+            RequiredInteger("callbackMonotonicNanoseconds", nonnegative: true)
+        ];
+        if (phone)
+        {
+            rules.Add(RequiredInteger("presentationMicroseconds", nonnegative: true));
+            rules.Add(RequiredInteger("receivedAtNanoseconds"));
+        }
+
+        ValidateShape(payload, rules, issues);
+    }
+
+    /// <summary>The desktop's three sound streams and the phone's.</summary>
+    private static readonly string[] AudioStreams =
+        ["microphone", "system", "screen-reader", Recorder.Contracts.AndroidSoundRecords.StreamName];
 
     private static void ValidateAudioError(
         JsonElement payload,
@@ -2656,7 +2678,7 @@ internal static class EventPayloadValidator
         ValidateShape(
             payload,
             [
-                RequiredEnum("stream", "microphone", "system", "screen-reader"),
+                RequiredEnum("stream", AudioStreams),
                 NullableString("errorType"),
                 NullableString("message")
             ],

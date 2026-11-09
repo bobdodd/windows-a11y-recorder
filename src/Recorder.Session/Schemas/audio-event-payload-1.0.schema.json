@@ -13,7 +13,7 @@
       "pattern": "^(?![A-Za-z]:)(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$))[^\\\\]+$"
     },
     "streamName": {
-      "enum": ["microphone", "system", "screen-reader"]
+      "enum": ["microphone", "system", "screen-reader", "device"]
     },
     "format": {
       "type": "object",
@@ -95,6 +95,15 @@
         "callbackMonotonicNanoseconds": {
           "type": "integer",
           "minimum": 0
+        },
+        "presentationMicroseconds": {
+          "description": "The phone's sound only: the phone time scrcpy's server gave the packet, in microseconds of CLOCK_MONOTONIC.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "receivedAtNanoseconds": {
+          "description": "The phone's sound only: the session time the recorder had read the whole packet.",
+          "type": "integer"
         }
       }
     },
