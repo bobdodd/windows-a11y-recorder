@@ -941,3 +941,8 @@ still "Android device":
 Settings, the home screen, Chrome, the home screen and Clock, each
 upright and filling the frame area's height, changing as the time
 moves on.
+
+### Results of part 3, step 3c
+
+- 2026-11-09, installer built from `697f624`: test 24 passed. The note
+  read as expected.
