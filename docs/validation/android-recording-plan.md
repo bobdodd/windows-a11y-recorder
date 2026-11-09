@@ -639,3 +639,16 @@ recording" ends the recording as usual.
   PC: `android` holds `screen.h264` (1.86 MB) and `scrcpy-server.log`,
   whose one line is "[server] INFO: Device: [Google] google Pixel 10
   Pro XL (Android 17)".
+- 2026-11-09, test 18 passed, read from a screenshot: "android.screen:
+  Running, Healthy. Phone screen: 226 packets, 1.7 MB, 2 capture
+  sessions, now 2404 by 1080, median delay from phone to recorder
+  25.6 ms." The recording
+  (`20261109-140901-503a19342a294848894f51c30c01dbf7`, completed) has
+  the companion's rotation to 270 degrees at 8.898 s and the stream's
+  second capture session, 2404 by 1080, at 9.066 s, 168 ms later, each
+  session beginning with a configuration packet and a key frame. The
+  byte offsets run without a gap to the end of `android/screen.h264`
+  (1,673,449 bytes), whose SHA-256 matches the manifest. ffmpeg decoded
+  all 235 pictures with no error, 13 at 1080 by 2404 and 222 at 2404 by
+  1080. Delay from phone to recorder: median 26.2 ms, 14.8 to 83.0 ms,
+  none below zero; no packet time had to be held back.
