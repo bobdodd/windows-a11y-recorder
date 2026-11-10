@@ -1450,3 +1450,8 @@ line beginning "The MP4 could not be saved" is a failure. A line
   8,124. That every packet was a full 4,096 bytes and the header 44
   bytes is inference from the file's size, but the match says the
   filter covers the phone's sound records and nothing else.
+- 2026-11-10, test 40: passed. With the "Phone sound" slider at -12 dB,
+  the export window's "Sound" section had two checked boxes,
+  "Microphone, mixed at 0 dB" and "Phone sound, mixed at -12 dB", and no
+  "System sound" box. The screenshot showed only that section, so the
+  absence of the screen reader sentence below it was not seen.
