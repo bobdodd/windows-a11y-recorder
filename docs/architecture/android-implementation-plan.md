@@ -883,6 +883,14 @@ slice's full test goes into a validation plan,
     shown for a recording of a phone, which has no screen reader track,
     so they change nothing. TalkBack's speech is part of the phone's
     sound.
+  - **Tested (2026-11-10).** Tests 37 to 41 passed on the development
+    PC with a recording of the Pixel: the note, the green "Phone sound"
+    band under the microphone's, the "Phone sound:" slider and the lane
+    list; the filter hid 8,124 records, the phone sound's 8,122 packets
+    and its start and stop; the export window offered "Phone sound,
+    mixed at -12 dB" from the slider; and the MP4 had 3 sound tracks,
+    "mixed, then microphone, phone sound". Step 4b is complete, and
+    with it slice 4.
 
 ### Slice 5: touches
 

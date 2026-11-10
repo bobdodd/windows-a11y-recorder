@@ -1455,3 +1455,12 @@ line beginning "The MP4 could not be saved" is a failure. A line
   "Microphone, mixed at 0 dB" and "Phone sound, mixed at -12 dB", and no
   "System sound" box. The screenshot showed only that section, so the
   absence of the screen reader sentence below it was not seen.
+- 2026-11-10, test 41: passed. The status line read "Saved
+  C:\Users\User\Videos\20261110-010817-dcc254d7d611414a80dcf7858839add3.mp4:
+  1034 by 2304 pixels, 3 sound tracks: mixed, then microphone, phone
+  sound. Encoded with the Windows encoder, graphics card allowed.", with
+  no "Phone sound:" line, so the export read the phone's packet records
+  and found no silences to insert. The whole window was in the
+  screenshot, and it had no sentence about a separate screen reader
+  sound, which completes test 40's check. Step 4b is complete, and with
+  it slice 4.
