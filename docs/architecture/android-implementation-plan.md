@@ -1018,6 +1018,14 @@ slice's full test goes into a validation plan,
     check reported, to within half a pixel. Test 43 read the Pixel's own
     ranges on 2026-11-10, x 0 to 13439 and y 0 to 29919, the same as the
     tests use.
+  - **Tested (2026-11-10).** Tests 42 to 44 passed on the Pixel: the
+    note; three taps recorded at the top, middle and bottom with one
+    volume key press, a median delay from phone to recorder of 5.4 ms,
+    and the touch screen `/dev/input/event1` "synaptics_tcm_touch"; and
+    two fingers held still followed together, "with 2 fingers". Test 43
+    also recorded a touch before the taps, a short drag, which is
+    inference to have been the tester's. Held fingers send over 100
+    reports a second, each kept. Step 5a is complete.
 
 ### Slice 6: what TalkBack said
 
