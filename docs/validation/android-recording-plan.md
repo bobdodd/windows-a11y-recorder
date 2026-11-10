@@ -1365,8 +1365,10 @@ it. Touches and accessibility evidence come in later parts."
 
 **On screen:** in the timeline, directly under the pink band of the
 microphone's marks, there is a green band of marks from a few seconds
-after the start to the end of the recording, and no grey band on the
-bottom lane. In the row of volume sliders under the picture, the second
+after the start to the end of the recording. (The grey marks on the
+bottom lane are the companion app's and the screen stream's records,
+which are under "Other"; test 39 shows the phone's sound is not among
+them.) In the row of volume sliders under the picture, the second
 slider's label reads "Phone sound:" where a desktop recording reads
 "System audio:". At the right of the status line at the bottom of the
 window: "Keyboard | Mouse | UIA | Window | Frames | Mic | Phone sound".
@@ -1429,3 +1431,14 @@ line beginning "The MP4 could not be saved" is a failure. A line
   error, and committed without building again. After `2564bc8` wrote
   them as `&quot;`, test 37 passed: the note read as expected, copied
   from the panel.
+- 2026-11-10, test 38: passed. With the recording open (2:57.603 long),
+  the second slider read "Phone sound:", the list at the right of the
+  status line read "Keyboard | Mouse | UIA | Window | Frames | Mic |
+  Phone sound", and a green band ran directly under the pink
+  microphone band, both from near the start to the end. The test as
+  first written also expected no grey band on the bottom lane; that was
+  wrong, as the companion app's and the screen stream's records are
+  drawn there, and the screenshot showed them. The text above is
+  corrected. The recording's `device.wav` holds 173.3 s and its
+  `microphone.wav` 173.1 s. The picture was black at 00:00:00.000,
+  before the first frame; this was not looked into.
