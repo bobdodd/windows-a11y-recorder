@@ -2451,3 +2451,41 @@ yet", "could not be read", "missing", "placed by the time each
 arrived", Degraded, or no "android.accessibility-tree" line is a
 failure; send the line as it is. "cut short" or "stopped early" is not
 a failure, but say so. Send the screenshot.
+
+### Results of part 7, step 7b
+
+Run on the development PC with the Pixel on 2026-11-10.
+
+- **Test 61: passed.** The note under "Android device checks" ended
+  with the sentence about snapshots of the accessibility tree, and the
+  panel showed the companion app installed and on. The recorder refuses
+  a companion app that speaks protocol 3, so the app answering means the
+  new one was installed.
+- **Test 62: passed.** The line read "android.accessibility-tree:
+  Running, Healthy. Accessibility tree snapshots: 11 (at most 5 in one
+  second), 2 of every window, the latest with 4 windows and 162 items,
+  the largest 209 items and 274 KB, the app took a median 302.8 ms to
+  take each and at most 374.1 ms, median delay from phone to recorder
+  28.9 ms." The "android.accessibility" line above it read
+  "Accessibility events: 64, including 33 content changes (at most 18
+  in one second), 1 accessibility focus event and 1 window change", with
+  the latest accessibility focus on "Search Settings".
+  - **The snapshots' times.** The 28.9 ms delay is within the range that
+    shows the snapshots on the companion's clock, and close to the
+    events' 14.5 ms and 7a's 28.0 ms.
+  - **The rate of content changes.** This is the rate step 7a could not
+    measure: 33 content changes in a short recording, at most 18 in one
+    second, while scrolling Settings.
+  - **Coalescing.** The 2 snapshots of every window are the one at the
+    start and the one for the window change. The other 9 covered the 33
+    content changes, so changes that arrived while a snapshot was taken
+    were covered by the next, as designed.
+  - **The time each took.** A median 302.8 ms, at most 374.1 ms, for up
+    to 209 items. That time covers reading the windows and items and
+    building the message, not writing it out. Where the time goes is not
+    yet known. It means a snapshot shows the tree as it was over about
+    a third of a second, and content that changed and changed back
+    within that time may not appear in any snapshot. The events in
+    `accessibility.android.events` still record each change.
+  - **Size.** The largest snapshot was 274 KB for 209 items, about 1.3 KB
+    an item.
