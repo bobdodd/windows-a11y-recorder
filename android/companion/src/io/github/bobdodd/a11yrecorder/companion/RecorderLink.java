@@ -48,20 +48,27 @@ import java.util.concurrent.RejectedExecutionException;
  * asked for (see {@link AccessibilityVolume}), and, for a connection that
  * asked, does so again and says so whenever the volume becomes separate or
  * stops being separate, as when TalkBack is turned on or off during a
- * recording. See docs/architecture/android-implementation-plan.md, slices 2
- * and 4, and src/Recorder.Collectors.Android/CompanionProtocol.cs, which
- * must agree with this file.
+ * recording. From protocol 3 it answers an "accessibility-events" request
+ * by sending that connection every accessibility event the service
+ * receives from then on, each as an "accessibility-event" message with an
+ * "index" counting from 1 on that connection (see
+ * {@link AccessibilityEventJson}); a connection that did not ask, such as
+ * the recorder's checks, is sent none. See
+ * docs/architecture/android-implementation-plan.md, slices 2, 4 and 7, and
+ * src/Recorder.Collectors.Android/CompanionProtocol.cs, which must agree
+ * with this file.
  */
 final class RecorderLink {
     static final String SOCKET_NAME = "a11yrecorder_companion";
-    static final int PROTOCOL = 2;
+    static final int PROTOCOL = 3;
     private static final String TAG = "A11yRecorderCompanion";
 
     private final Context context;
     private final CopyOnWriteArrayList<Client> clients = new CopyOnWriteArrayList<>();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    // Display changes arrive on the main thread; they are sent from this
-    // one, so a slow connection never holds up the service.
+    // Display changes and accessibility events arrive on the main thread;
+    // they are sent from this one, so a slow connection never holds up the
+    // service.
     private final ExecutorService sender = Executors.newSingleThreadExecutor();
     private volatile boolean stopping;
     private LocalServerSocket server;
@@ -189,6 +196,32 @@ final class RecorderLink {
         }
     }
 
+    /** True when a connection has asked for accessibility events. */
+    boolean wantsEvents() {
+        for (Client client : clients) {
+            if (client.eventsWanted) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Sends an event's message to each connection that asked for events. */
+    void sendEvent(JSONObject message) {
+        if (stopping) {
+            return;
+        }
+        try {
+            sender.execute(() -> {
+                for (Client client : clients) {
+                    client.sendEvent(message);
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            // The link stopped meanwhile.
+        }
+    }
+
     private void displayChanged() {
         String key = displayKey();
         if (key.equals(lastDisplay)) {
@@ -298,6 +331,10 @@ final class RecorderLink {
         // The share of the Accessibility volume this connection asked for,
         // or 0 if it has not asked.
         private volatile int volumeMinimum;
+        // True once this connection has asked for accessibility events.
+        volatile boolean eventsWanted;
+        // The events sent on this connection; used on the sender thread only.
+        private long eventIndex;
         // Written and used under writeLock only.
         private OutputStream output;
 
@@ -361,6 +398,8 @@ final class RecorderLink {
                 }
                 volumeMinimum = minimum;
                 send(AccessibilityVolume.raise(context, minimum, "requested"));
+            } else if ("accessibility-events".equals(type)) {
+                eventsWanted = true;
             } else {
                 sendError("unknown type: " + type);
             }
@@ -373,6 +412,21 @@ final class RecorderLink {
             }
             try {
                 send(AccessibilityVolume.raise(context, minimum, reason));
+            } catch (IOException | JSONException exception) {
+                close();
+            }
+        }
+
+        // On the sender thread, which alone adds the index, so the message
+        // can be shared by the connections.
+        void sendEvent(JSONObject message) {
+            if (!eventsWanted) {
+                return;
+            }
+            try {
+                eventIndex++;
+                message.put("index", eventIndex);
+                send(message);
             } catch (IOException | JSONException exception) {
                 close();
             }

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Recorder.Contracts;
 
 namespace Recorder.Collectors.Android;
 
@@ -13,8 +14,11 @@ namespace Recorder.Collectors.Android;
 /// </summary>
 public static class CompanionProtocol
 {
-    /// <summary>2 from slice 4, step 4c, which added the Accessibility volume request.</summary>
-    public const int Version = 2;
+    /// <summary>
+    /// 2 from slice 4, step 4c, which added the Accessibility volume
+    /// request; 3 from slice 7, step 7a, which added accessibility events.
+    /// </summary>
+    public const int Version = 3;
 
     /// <summary>The companion app's socket, in Linux's abstract namespace.</summary>
     public const string SocketName = "a11yrecorder_companion";
@@ -40,6 +44,15 @@ public static class CompanionProtocol
         return "{\"type\":\"accessibility-volume\",\"minimumPercent\":" +
             minimumPercent.ToString(CultureInfo.InvariantCulture) + "}\n";
     }
+
+    /// <summary>
+    /// Asks the app to send this connection every accessibility event its
+    /// service receives from now on, each as an "accessibility-event" line.
+    /// </summary>
+    public const string AccessibilityEventsRequest = "{\"type\":\"accessibility-events\"}\n";
+
+    // The app's names are the records' names (AccessibilityEventJson.java).
+    private static readonly JsonSerializerOptions EventOptions = new(JsonSerializerDefaults.Web);
 
     /// <summary>
     /// Reads one line from the app. A line that is not a JSON object with a
@@ -98,9 +111,26 @@ public static class CompanionProtocol
                     String(root, "outcome"),
                     root.TryGetProperty("detail", out var detail) && detail.ValueKind == JsonValueKind.String ? detail.GetString() : null,
                     Long(root, "time")),
+                "accessibility-event" => AccessibilityEvent(root),
                 "error" => new CompanionError(String(root, "message")),
                 _ => new CompanionUnknown(type)
             };
+        }
+    }
+
+    // An event that cannot be read is told, not thrown, so that one such
+    // event does not end the connection and with it the phone's clock.
+    private static CompanionAccessibilityEvent AccessibilityEvent(JsonElement root)
+    {
+        try
+        {
+            return root.Deserialize<AndroidAccessibilityEvent>(EventOptions) is { } read
+                ? new CompanionAccessibilityEvent(read, null)
+                : new CompanionAccessibilityEvent(null, "the event is empty");
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException or InvalidOperationException)
+        {
+            return new CompanionAccessibilityEvent(null, ex.Message);
         }
     }
 
@@ -214,6 +244,13 @@ public sealed record CompanionAccessibilityVolume(
     string Outcome,
     string? Detail,
     long Time) : CompanionMessage;
+
+/// <summary>
+/// An accessibility event, sent to a connection that asked for them (slice
+/// 7, step 7a); <see cref="AndroidAccessibilityEvent.ReceivedAtNanoseconds"/>
+/// is not yet set. Null, with the problem, for one the recorder could not read.
+/// </summary>
+public sealed record CompanionAccessibilityEvent(AndroidAccessibilityEvent? Event, string? Problem) : CompanionMessage;
 
 public sealed record CompanionError(string Message) : CompanionMessage;
 

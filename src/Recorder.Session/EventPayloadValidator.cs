@@ -48,7 +48,8 @@ internal static class EventPayloadValidator
         Recorder.Contracts.AndroidTouchRecords.TouchChannel,
         Recorder.Contracts.AndroidTouchRecords.KeyChannel,
         Recorder.Contracts.AndroidTalkBackRecords.LogChannel,
-        Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel
+        Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel,
+        Recorder.Contracts.AndroidAccessibilityRecords.EventsChannel
     ];
 
     /// <summary>Whether the recorder defines the channel.</summary>
@@ -198,6 +199,10 @@ internal static class EventPayloadValidator
             case (Recorder.Contracts.AndroidTalkBackRecords.LogChannel, Recorder.Contracts.AndroidTalkBackRecords.LineEventType):
                 ValidateAndroidTalkBackLine(payload, issues);
                 break;
+            case (Recorder.Contracts.AndroidAccessibilityRecords.EventsChannel, Recorder.Contracts.AndroidAccessibilityRecords.EventType):
+                ValidateAndroidAccessibilityEvent(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidAccessibilityRecords.EventsChannel, Recorder.Contracts.AndroidAccessibilityRecords.UnavailableEventType):
             case (Recorder.Contracts.AndroidTalkBackRecords.LogChannel, Recorder.Contracts.AndroidTalkBackRecords.UnavailableEventType):
                 ValidateAndroidCompanionUnavailable(payload, issues);
                 break;
@@ -2200,6 +2205,244 @@ internal static class EventPayloadValidator
             lines.GetArrayLength() == 0)
         {
             AddError(issues, "android-getevent-lines-empty", "#/payload/lines", "A record of getevent's lines has at least one.");
+        }
+    }
+
+    // The fields an accessibility event shares with its extra records
+    // (slice 7, step 7a).
+    private static readonly PropertyRule[] AndroidAccessibilityRecordFields =
+    [
+        RequiredInteger("fromIndex"),
+        RequiredInteger("toIndex"),
+        RequiredInteger("addedCount"),
+        RequiredInteger("removedCount"),
+        RequiredInteger("itemCount"),
+        RequiredInteger("currentItemIndex"),
+        RequiredInteger("scrollX"),
+        RequiredInteger("scrollY"),
+        RequiredInteger("maxScrollX"),
+        RequiredInteger("maxScrollY"),
+        RequiredBoolean("checked"),
+        RequiredBoolean("enabled"),
+        RequiredBoolean("password"),
+        RequiredBoolean("fullScreen"),
+        RequiredBoolean("scrollable")
+    ];
+
+    // One accessibility event as the companion app sent it (slice 7, step
+    // 7a), with its extra records and the item it came from.
+    private static void ValidateAndroidAccessibilityEvent(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredInteger("index", positive: true),
+                RequiredInteger("eventType", positive: true),
+                RequiredString("eventTypeName"),
+                RequiredInteger("eventTimeMilliseconds", nonnegative: true),
+                RequiredInteger("receivedPhoneNanoseconds", nonnegative: true),
+                RequiredInteger("handledPhoneNanoseconds", nonnegative: true),
+                NullableText("packageName"),
+                NullableText("className"),
+                RequiredInteger("windowId"),
+                NullableInteger("displayId"),
+                RequiredTextArray("text"),
+                NullableText("contentDescription"),
+                NullableText("beforeText"),
+                RequiredInteger("contentChangeTypes", nonnegative: true),
+                RequiredStringArray("contentChangeTypeNames"),
+                RequiredInteger("windowChanges", nonnegative: true),
+                RequiredStringArray("windowChangeNames"),
+                NullableInteger("speechStateChangeTypes", nonnegative: true),
+                RequiredInteger("action"),
+                RequiredInteger("movementGranularity", nonnegative: true),
+                .. AndroidAccessibilityRecordFields,
+                RequiredInteger("scrollDeltaX"),
+                RequiredInteger("scrollDeltaY"),
+                NullableBoolean("accessibilityDataSensitive"),
+                NullableString("parcelableDataClass"),
+                RequiredObjectArray("records"),
+                NullableObject("source"),
+                RequiredInteger("receivedAtNanoseconds")
+            ],
+            issues);
+        if (payload.TryGetProperty("handledPhoneNanoseconds", out var handled) && IsInteger(handled) &&
+            payload.TryGetProperty("receivedPhoneNanoseconds", out var receivedOnPhone) && IsInteger(receivedOnPhone) &&
+            handled.GetInt64() < receivedOnPhone.GetInt64())
+        {
+            AddError(
+                issues,
+                "android-accessibility-event-handled-early",
+                "#/payload/handledPhoneNanoseconds",
+                "An event is read after the service receives it.");
+        }
+
+        if (payload.TryGetProperty("records", out var records) && records.ValueKind == JsonValueKind.Array)
+        {
+            var index = 0;
+            foreach (var record in records.EnumerateArray())
+            {
+                if (record.ValueKind == JsonValueKind.Object)
+                {
+                    ValidateShape(
+                        record,
+                        [
+                            NullableText("className"),
+                            RequiredInteger("windowId"),
+                            RequiredTextArray("text"),
+                            NullableText("contentDescription"),
+                            NullableText("beforeText"),
+                            .. AndroidAccessibilityRecordFields
+                        ],
+                        issues,
+                        $"#/payload/records/{index.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+                }
+
+                index++;
+            }
+        }
+
+        if (payload.TryGetProperty("source", out var source) && source.ValueKind == JsonValueKind.Object)
+        {
+            ValidateAndroidAccessibilityNode(source, issues, "#/payload/source");
+        }
+    }
+
+    // One item of a phone window's tree, without its place in the tree
+    // (slice 7).
+    private static void ValidateAndroidAccessibilityNode(
+        JsonElement node,
+        ICollection<EventValidationIssue> issues,
+        string path)
+    {
+        ValidateShape(
+            node,
+            [
+                RequiredInteger("windowId"),
+                NullableText("className"),
+                NullableText("packageName"),
+                NullableText("viewId"),
+                NullableText("uniqueId"),
+                NullableText("text"),
+                NullableText("contentDescription"),
+                NullableText("stateDescription"),
+                NullableText("hint"),
+                NullableText("paneTitle"),
+                NullableText("tooltip"),
+                NullableText("error"),
+                NullableText("containerTitle"),
+                NullableText("supplementalDescription"),
+                RequiredObject("bounds"),
+                RequiredInteger("childCount", nonnegative: true),
+                RequiredInteger("drawingOrder"),
+                RequiredEnum("checked", [.. Recorder.Contracts.AndroidAccessibilityRecords.CheckedStates]),
+                NullableInteger("expandedState", nonnegative: true),
+                RequiredBoolean("importantForAccessibility"),
+                RequiredBoolean("visibleToUser"),
+                RequiredBoolean("accessibilityFocused"),
+                RequiredBoolean("focused"),
+                RequiredBoolean("focusable"),
+                RequiredBoolean("screenReaderFocusable"),
+                RequiredBoolean("selected"),
+                RequiredBoolean("checkable"),
+                RequiredBoolean("enabled"),
+                RequiredBoolean("clickable"),
+                RequiredBoolean("longClickable"),
+                RequiredBoolean("contextClickable"),
+                RequiredBoolean("scrollable"),
+                RequiredBoolean("editable"),
+                RequiredBoolean("password"),
+                RequiredBoolean("heading"),
+                RequiredBoolean("showingHint"),
+                RequiredBoolean("multiLine"),
+                RequiredBoolean("dismissable"),
+                RequiredBoolean("contentInvalid"),
+                RequiredBoolean("textEntryKey"),
+                NullableBoolean("fieldRequired"),
+                RequiredInteger("inputType", nonnegative: true),
+                RequiredInteger("maxTextLength"),
+                RequiredInteger("liveRegion", nonnegative: true),
+                RequiredInteger("textSelectionStart"),
+                RequiredInteger("textSelectionEnd"),
+                RequiredObjectArray("actions"),
+                NullableObject("collectionInfo"),
+                NullableObject("collectionItemInfo"),
+                NullableObject("rangeInfo")
+            ],
+            issues,
+            path);
+        if (node.TryGetProperty("bounds", out var bounds) && bounds.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                bounds,
+                [RequiredInteger("left"), RequiredInteger("top"), RequiredInteger("right"), RequiredInteger("bottom")],
+                issues,
+                path + "/bounds");
+        }
+
+        if (node.TryGetProperty("actions", out var actions) && actions.ValueKind == JsonValueKind.Array)
+        {
+            var index = 0;
+            foreach (var action in actions.EnumerateArray())
+            {
+                if (action.ValueKind == JsonValueKind.Object)
+                {
+                    ValidateShape(
+                        action,
+                        [RequiredInteger("id"), NullableText("label")],
+                        issues,
+                        $"{path}/actions/{index.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+                }
+
+                index++;
+            }
+        }
+
+        if (node.TryGetProperty("collectionInfo", out var collection) && collection.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                collection,
+                [
+                    RequiredInteger("rowCount"),
+                    RequiredInteger("columnCount"),
+                    RequiredBoolean("hierarchical"),
+                    RequiredInteger("selectionMode", nonnegative: true)
+                ],
+                issues,
+                path + "/collectionInfo");
+        }
+
+        if (node.TryGetProperty("collectionItemInfo", out var item) && item.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                item,
+                [
+                    RequiredInteger("rowIndex"),
+                    RequiredInteger("rowSpan"),
+                    RequiredInteger("columnIndex"),
+                    RequiredInteger("columnSpan"),
+                    RequiredBoolean("selected"),
+                    NullableText("rowTitle"),
+                    NullableText("columnTitle")
+                ],
+                issues,
+                path + "/collectionItemInfo");
+        }
+
+        if (node.TryGetProperty("rangeInfo", out var range) && range.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                range,
+                [
+                    RequiredInteger("type", nonnegative: true),
+                    RequiredNullableNumber("min"),
+                    RequiredNullableNumber("max"),
+                    RequiredNullableNumber("current")
+                ],
+                issues,
+                path + "/rangeInfo");
         }
     }
 

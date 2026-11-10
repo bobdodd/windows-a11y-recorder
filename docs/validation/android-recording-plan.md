@@ -2253,3 +2253,86 @@ Run on the development PC with the Pixel on 2026-11-10.
   the owner's own, a block in the TalkBack said strip read "Mostly
   clear. 9°", with the degree sign and no "Â". So text from the phone
   outside ASCII is now read as it was written.
+
+## Part 7, step 7a: the phone's accessibility events
+
+The companion app now sends the recorder every accessibility event its
+service receives, with the item each came from, and the recorder stores
+them (see
+[the implementation plan](../architecture/android-implementation-plan.md),
+"Slice 7", "Built, step 7a"). While recording, a new line under
+"Collector status", starting "android.accessibility", counts the events
+and names the item last given accessibility focus. The player shows the
+records only in the inspector; the tree and the events lane are steps
+7b and 7c. The companion app now speaks protocol 3, so it has to be
+installed again.
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings, the companion app compiles with
+warnings as errors, and the tests pass, 2,122 in all, with 13 new tests
+(18 cases) and 1 changed. They read an event as the companion app writes
+it, with every field, and cover a recording with a stand-in companion
+connection and phone clock: the events' times, an event from before the
+recording, an event that cannot be read, no phone clock, no companion
+connection, the connection ending, and the record's checks; and a
+stand-in companion app sent the request and passing the events on. None
+of that shows the app reading events on the Pixel, or their times on the
+companion's clock. Tests 59 and 60 do.
+
+### Test 59: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Connect the Pixel by USB, unlocked. Start the recorder from the Start
+   menu, and in "Recording target" choose "Android device".
+4. The panel offers "Install companion app". Choose it, and wait until
+   the panel shows "Companion app: installed, on, and answering".
+5. Read the companion line and the note under "Android device checks".
+
+**On screen:** the build ends with `INSTALLER BUILT`. Before step 4 the
+companion line says the installed version code is older than the
+recorder's. In step 5 it reads "Companion app: installed, on, and
+answering (version 1.1.0, version code" with a number, and ends
+"protocol 3)." The note ends "It also records every accessibility event
+the phone sends to accessibility services, with the item each one came
+from. The accessibility tree and the player's view of the events come in
+later parts."
+
+### Test 60: three swipes through Settings with TalkBack on
+
+Before the test, on the phone, open Settings, scroll to the top, then
+turn TalkBack on. Leave the recorder open from test 59, with "Android
+device" chosen. After the test, turn TalkBack off.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. On the phone, swipe right with one finger, three times, waiting 2
+   seconds after each swipe.
+3. While it is still recording, take a screenshot of "Collector status"
+   under "Current session".
+4. Choose "Stop recording".
+
+**On screen:** in step 3 "Collector status" has a line starting
+"android.accessibility: Running, Healthy. Accessibility events:", then a
+number of events, a number of content changes with "at most" a number
+"in one second", a number of accessibility focus events, at least 3, and
+a number of window changes. Then "latest accessibility focus on" and, in
+quotes, the words of the third item TalkBack moved to, such as its name
+followed by its summary; then "the app took a median" a number of
+milliseconds "to read each", and it ends "median delay from phone to
+recorder" with a number of milliseconds. The delay checks the events'
+times: a few milliseconds to a few hundred says they are on the
+companion's clock; a number below zero, or of seconds or more, says they
+are not. "none yet", "placed by the time each event arrived", Degraded,
+or no "android.accessibility" line is a failure; send the line as it is.
+"an item with no text" in place of the quoted words is not a failure,
+but say so. Send the screenshot.

@@ -11,6 +11,6 @@ pinned and checked by its SHA-256.
 - `src/`: the Java source.
 
 What the app does, and the protocol it speaks with the recorder, are in
-`docs/architecture/android-implementation-plan.md`, slices 0 and 2.
+`docs/architecture/android-implementation-plan.md`, slices 0, 2 and 7.
 `src/Recorder.Collectors.Android/CompanionProtocol.cs` is the recorder's
 side of the protocol and must agree with `RecorderLink.java`.

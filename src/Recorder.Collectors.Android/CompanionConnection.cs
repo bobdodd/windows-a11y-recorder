@@ -19,6 +19,15 @@ public sealed record ReceivedDisplay(CompanionDisplay Display, long ReceivedAt);
 public sealed record ReceivedAccessibilityVolume(CompanionAccessibilityVolume Volume, long ReceivedAt);
 
 /// <summary>
+/// An accessibility event and the session time the recorder read it; the
+/// event is null, with the problem, for one the recorder could not read.
+/// </summary>
+public sealed record ReceivedAccessibilityEvent(
+    Recorder.Contracts.AndroidAccessibilityEvent? Event,
+    long ReceivedAt,
+    string? Problem = null);
+
+/// <summary>
 /// One connection to the companion app. The app sends its greeting first;
 /// after that the recorder asks for clock samples and the app sends display
 /// changes as they happen, each on its own line. Every line is stamped with
@@ -36,6 +45,8 @@ public sealed class CompanionConnection : IAsyncDisposable
     private readonly Channel<ReceivedDisplay> _displays = Channel.CreateUnbounded<ReceivedDisplay>(
         new UnboundedChannelOptions { SingleReader = true });
     private readonly Channel<ReceivedAccessibilityVolume> _volumes = Channel.CreateUnbounded<ReceivedAccessibilityVolume>(
+        new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<ReceivedAccessibilityEvent> _events = Channel.CreateUnbounded<ReceivedAccessibilityEvent>(
         new UnboundedChannelOptions { SingleReader = true });
     private readonly CancellationTokenSource _closing = new();
     private Task? _readLoop;
@@ -60,6 +71,12 @@ public sealed class CompanionConnection : IAsyncDisposable
 
     /// <summary>Accessibility volume messages, in the order they arrived; completes when the connection ends.</summary>
     public ChannelReader<ReceivedAccessibilityVolume> AccessibilityVolumes => _volumes.Reader;
+
+    /// <summary>
+    /// Accessibility events, in the order they arrived, once asked for with
+    /// <see cref="RequestAccessibilityEventsAsync"/>; completes when the connection ends.
+    /// </summary>
+    public ChannelReader<ReceivedAccessibilityEvent> AccessibilityEvents => _events.Reader;
 
     /// <summary>Completes when the connection ends, with the reason it ended.</summary>
     public Task<string> Closed => _closed.Task;
@@ -196,9 +213,19 @@ public sealed class CompanionConnection : IAsyncDisposable
     /// Asks the app to raise the Accessibility volume; its answer comes on
     /// <see cref="AccessibilityVolumes"/>.
     /// </summary>
-    public async Task RequestAccessibilityVolumeAsync(int minimumPercent, CancellationToken cancellation)
+    public Task RequestAccessibilityVolumeAsync(int minimumPercent, CancellationToken cancellation) =>
+        SendAsync(CompanionProtocol.AccessibilityVolumeRequest(minimumPercent), cancellation);
+
+    /// <summary>
+    /// Asks the app for every accessibility event from now on; they come on
+    /// <see cref="AccessibilityEvents"/>.
+    /// </summary>
+    public Task RequestAccessibilityEventsAsync(CancellationToken cancellation) =>
+        SendAsync(CompanionProtocol.AccessibilityEventsRequest, cancellation);
+
+    private async Task SendAsync(string line, CancellationToken cancellation)
     {
-        var bytes = Encoding.UTF8.GetBytes(CompanionProtocol.AccessibilityVolumeRequest(minimumPercent));
+        var bytes = Encoding.UTF8.GetBytes(line);
         await _writeLock.WaitAsync(cancellation).ConfigureAwait(false);
         try
         {
@@ -258,6 +285,9 @@ public sealed class CompanionConnection : IAsyncDisposable
                     case CompanionAccessibilityVolume volume:
                         _volumes.Writer.TryWrite(new ReceivedAccessibilityVolume(volume, at));
                         break;
+                    case CompanionAccessibilityEvent accessibilityEvent:
+                        _events.Writer.TryWrite(new ReceivedAccessibilityEvent(accessibilityEvent.Event, at, accessibilityEvent.Problem));
+                        break;
                     case CompanionError error:
                         LastAppError = error.Message;
                         break;
@@ -276,6 +306,7 @@ public sealed class CompanionConnection : IAsyncDisposable
         {
             _displays.Writer.TryComplete();
             _volumes.Writer.TryComplete();
+            _events.Writer.TryComplete();
             foreach (var waiting in _pending.Values)
             {
                 waiting.TrySetException(new CompanionUnavailableException(reason));
@@ -309,6 +340,7 @@ public sealed class CompanionConnection : IAsyncDisposable
         _closed.TrySetResult("The recorder closed the connection.");
         _displays.Writer.TryComplete();
         _volumes.Writer.TryComplete();
+        _events.Writer.TryComplete();
         _reader.Dispose();
         _closing.Dispose();
         if (_onDispose is not null)

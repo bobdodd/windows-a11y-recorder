@@ -325,7 +325,10 @@ public partial class MainWindow : Window
     // position by the companion's display rotation (slice 5). The TalkBack
     // collector reads TalkBack's log lines with logcat, placed the same way
     // (slice 6); it is kept so that Stop can remind the tester that
-    // TalkBack's log level is still Verbose.
+    // TalkBack's log level is still Verbose. The accessibility collector
+    // asks the companion app for every accessibility event and places each
+    // by the same clock fit (slice 7, step 7a); it comes after the companion
+    // collector and so stops before it.
     private Recorder.Contracts.ICaptureCollector[] AndroidCollectors(string serial)
     {
         var adb = new AdbProcess(AndroidTools.Adb(AndroidTools.DataFolder));
@@ -343,6 +346,7 @@ public partial class MainWindow : Window
             new AndroidSoundCollector(serial, screen, companion, companion.RaiseAccessibilityVolume),
             new AndroidTouchCollector(adb, serial, companion, companion),
             _talkBack,
+            new AndroidAccessibilityCollector(serial, companion, companion),
             new Recorder.Collectors.Audio.AudioCollector(new Recorder.Collectors.Audio.AudioCaptureOptions(true, false))
         ];
     }

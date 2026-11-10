@@ -224,6 +224,18 @@ scrcpy source (`mic`), and could be added later.
   deprecated from API level 36 and "accessibility services may choose to
   ignore dispatch of this event type" (same page), so newer apps may use
   other means.
+- Since step 7a of the implementation plan (2026-11-10), the recorder
+  asks the companion app for every event as the recording starts, and
+  stores each on `accessibility.android.events` with every field it
+  carries, its extra records and the item it came from. An event's time
+  is set by Android, as the app sends it, from the clock that
+  `System.nanoTime()` is based on, in milliseconds, so the event is
+  placed on the session clock through the companion app's clock fit.
+  The status line counts the events, content changes, accessibility
+  focus events and window changes, and gives the most content changes in
+  one second, the item last given accessibility focus, and the time the
+  app takes to read each event. The details are in the implementation
+  plan, slice 7.
 - It takes a tree snapshot at the start, on each window change and on
   content changes. How often content changes arrive is measured before
   any limit is set, so nothing small is missed by design.

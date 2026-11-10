@@ -1325,6 +1325,103 @@ slice's full test goes into a validation plan,
   opening one page. The events lane shows an accessibility focus event at
   each swipe; selecting one shows, in the tree, the item TalkBack spoke,
   and its outline on the phone's picture.
+- **Steps (planned 2026-11-10).** As for slices 5 and 6, the slice is
+  built in steps, each with its own tests.
+  - **Step 7a: events.** The companion app sends every accessibility
+    event, with the item it came from, to a connection that asks for
+    them; the recorder stores them on `accessibility.android.events` and
+    counts them on the status line, including the most content changes
+    in one second, which is the rate measured before step 7b sets any
+    limit. The player shows the records only in the inspector and on the
+    timeline's "Other" lane.
+  - **Step 7b: tree snapshots.** Snapshots of every window's tree on
+    `accessibility.android.tree`, at the start, on each window change and
+    on content changes, with their size and rate measured on the Pixel.
+  - **Step 7c: show.** The events lane, the tree view at the selected
+    time, the accessibility-focused item's outline on the phone's
+    picture, and the target test above.
+- **Built, step 7a (2026-11-10).**
+  - **App.** The companion app speaks protocol 3. A connection that sends
+    `{"type":"accessibility-events"}` is sent, from then on, an
+    `accessibility-event` message for every event the service receives,
+    with an `index` counting from 1 on that connection, so a gap shows a
+    missing event. The recorder's checks do not ask, and are sent none;
+    with no connection asking, the service does not read the events. The
+    service reads each event as it is delivered, while Android's copy is
+    the service's, and sends it from the link's own thread, so a slow
+    connection does not hold up the service.
+  - **Fields.** Each message has every getter of the event and its
+    records (Android,
+    [AccessibilityEvent](https://developer.android.com/reference/android/view/accessibility/AccessibilityEvent)),
+    such as type, time, package, class, window, display, text, content
+    description, before text, content change and window change types,
+    indexes, counts, scroll positions and deltas, and states; the class of
+    its parcelable data, such as a notification's; its extra records; and
+    its source, the item it came from, with that item's own fields: view
+    id, texts, state description, hint, pane title, tooltip, error,
+    bounds on screen, checked state, states such as focused,
+    accessibility focused, heading and visible, input type, live region,
+    actions with their labels, and collection, collection item and range
+    information. A field the phone's Android version does not have is
+    null; the API level of each was taken from the SDK's
+    `api-versions.xml`. The item's children and its place in the tree
+    are step 7b's.
+  - **Times.** `getEventTime()` is set by Android's AccessibilityManager
+    as the app sends the event, as `SystemClock.uptimeMillis()`
+    ([AOSP, AccessibilityManager.java](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/view/accessibility/AccessibilityManager.java)).
+    That clock "is the basis for most interval timing such as ...
+    `System.nanoTime()`" and stops in deep sleep
+    ([Android, SystemClock](https://developer.android.com/reference/android/os/SystemClock)),
+    and `System.nanoTime()` is the clock the companion app samples. So
+    each event is placed on the session clock through the companion
+    collector's clock fit, flagged `phone-event-time`, with a millisecond
+    more uncertainty as the time is in whole milliseconds. An event with
+    no time is placed by when the service received it, flagged
+    `phone-receipt-time`; with no clock fit, by when the recorder read
+    it, flagged `receipt-time-stamp`. An event from before the
+    recording's start is not kept, and a time earlier than the channel's
+    last is held at it, flagged `clock-fit-held`, with the phone's own
+    time kept in the record. Each message also gives the phone times the
+    service received and had read the event, so the time the app takes
+    to read each one is measured.
+  - **Records.** `accessibility.android.events` has an
+    `accessibility-event` for every event, with the fields above, the
+    names of its change bits (a bit Android adds later named by its
+    value, such as "0x20000"), and the session time the recorder read
+    it; and an `accessibility-events-unavailable` when an event could not
+    be read or the events are missing. One event the recorder cannot
+    read is recorded as such and does not end the connection.
+  - **Status line.** "Accessibility events: none yet." until the first;
+    then "Accessibility events: N, including N content changes (at most
+    N in one second), N accessibility focus events and N window changes,
+    latest accessibility focus on "...", the app took a median X ms to
+    read each, median delay from phone to recorder X ms." The item is
+    named by its words, cut to 60 characters, or by its class when it
+    has none. A window change is a `TYPE_WINDOW_STATE_CHANGED` or
+    `TYPE_WINDOWS_CHANGED`.
+  - **Failures.** If the companion app is not connected or the
+    connection ends, the collector records why, reports itself degraded,
+    and the recording goes on: "The phone's accessibility events could
+    not be recorded: ..." or "The phone's accessibility events stopped
+    being recorded during the recording: ...".
+  - **Not pooled.** From Android 13 (API 33) `AccessibilityEvent.obtain()`
+    and `recycle()` are deprecated, as the event pool was discontinued
+    (AccessibilityEvent), so the service keeps no event after it returns
+    and recycles none.
+  - **Tests.** `AndroidAccessibilityTests` read an event line with every
+    field, an extra record and a source; check that an unreadable event
+    is a problem and not a failure; and test the collector's placement,
+    flags, uncertainty, dropped early event, held time, count of content
+    changes in one second, status line, failures and the validator, with
+    a fake connection and a fake phone clock. `AndroidCompanionTests`
+    check that the companion collector asks the app for the events and
+    passes them on, that one bad event does not end the connection, and
+    that an app with protocol 2 is refused. The full suite gave 2,122
+    passed; the 10 that fail on Linux are the browser receiver's and
+    Chromium launcher's tests, which need Windows. The companion app was
+    built on Linux with `javac -Werror` against Android 17's
+    `android.jar`; that it sends the events on the Pixel is for tests 59
+    and 60.
 
 ### Slice 8: settings, the one-timeline check, and the whole recording
 

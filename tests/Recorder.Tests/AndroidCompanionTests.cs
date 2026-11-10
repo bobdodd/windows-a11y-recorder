@@ -200,12 +200,12 @@ public sealed class AndroidCompanionTests
     [Fact]
     public async Task Connection_OtherProtocol_IsRefused()
     {
-        // The companion app from before slice 4, step 4c.
-        await using var app = new FakeApp(greeting: FakeApp.Hello(protocol: 1));
+        // The companion app from before slice 7, step 7a.
+        await using var app = new FakeApp(greeting: FakeApp.Hello(protocol: 2));
 
         var exception = await Assert.ThrowsAsync<CompanionUnavailableException>(() => app.ConnectAsync());
 
-        Assert.Contains("speaks protocol 1; this recorder speaks 2", exception.Message);
+        Assert.Contains("speaks protocol 2; this recorder speaks 3", exception.Message);
     }
 
     [Fact]
@@ -436,6 +436,45 @@ public sealed class AndroidCompanionTests
         // the sample's bound and the test's own scheduling.
         var expected = turned.NativeTimestamp!.Value - FakeApp.PhoneOffset - clock.OriginNanoseconds();
         Assert.InRange(turned.MonotonicNanoseconds, expected - 50_000_000, expected + 50_000_000);
+    }
+
+    [Fact]
+    public async Task Collector_AsksForAccessibilityEvents_AndPassesThemOn()
+    {
+        await using var app = new FakeApp();
+        var sink = new ListSink();
+        var clock = new SessionClock();
+        await using var collector = new AndroidCompanionCollector(
+            new ScriptedAdb(_ => new AdbResult(1, "", "")),
+            Serial,
+            (now, cancellation) => app.ConnectAsync(now));
+        await collector.InitializeAsync(new CollectorInitializationContext("session-1", Path.GetTempPath(), clock, sink), CancellationToken.None);
+        Assert.Null(await collector.RequestAccessibilityEventsAsync(CancellationToken.None));
+
+        await collector.StartAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
+        await WaitUntilAsync(() => collector.Mapper.SampleCount >= 1);
+        var events = await collector.RequestAccessibilityEventsAsync(CancellationToken.None);
+        Assert.NotNull(events);
+        await app.EventsAsked.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await app.SendAsync(AndroidAccessibilityTests.EventLine(index: 1));
+        await app.SendAsync("{\"type\":\"accessibility-event\",\"index\":\"two\"}");
+        await app.SendAsync(AndroidAccessibilityTests.EventLine(index: 3));
+        var first = await events.ReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        var second = await events.ReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        var third = await events.ReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await collector.StopAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
+
+        // An event the recorder cannot read does not end the connection.
+        Assert.Equal(1, first.Event!.Index);
+        Assert.Null(second.Event);
+        Assert.NotNull(second.Problem);
+        Assert.Equal(3, third.Event!.Index);
+        Assert.True(third.ReceivedAt >= first.ReceivedAt);
+        Assert.Equal(CollectorHealthState.Healthy, collector.HealthState);
+
+        // The reader completes when the connection ends.
+        await events.Completion.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.Null(await collector.RequestAccessibilityEventsAsync(CancellationToken.None));
     }
 
     [Fact]
@@ -695,6 +734,7 @@ public sealed class AndroidCompanionTests
         private readonly CancellationTokenSource _stop = new();
         private readonly TaskCompletionSource<NetworkStream> _client = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly SemaphoreSlim _write = new(1, 1);
+        private readonly TaskCompletionSource _eventsAsked = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private Task? _serving;
 
         public FakeApp(string? greeting = "default", Func<int, string>? volumeReply = null)
@@ -706,6 +746,9 @@ public sealed class AndroidCompanionTests
         }
 
         public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
+
+        /// <summary>Completes when the recorder asks for the accessibility events.</summary>
+        public Task EventsAsked => _eventsAsked.Task;
 
         /// <summary>The minimum percents the recorder asked for, in order.</summary>
         public IReadOnlyList<int> VolumeRequests
@@ -794,6 +837,12 @@ public sealed class AndroidCompanionTests
                             await WriteAsync(stream, _volumeReply(percent));
                         }
 
+                        continue;
+                    }
+
+                    if (request.RootElement.GetProperty("type").GetString() == "accessibility-events")
+                    {
+                        _eventsAsked.TrySetResult();
                         continue;
                     }
 

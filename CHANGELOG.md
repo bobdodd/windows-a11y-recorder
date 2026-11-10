@@ -294,6 +294,28 @@ Changes on `main` since 1.1.0, not yet released.
 - adb's output is read as UTF-8, so text from the phone such as "12°C"
   is no longer stored as "12Â°C".
 
+### Android recording, part 7a: the phone's accessibility events
+
+- The companion app speaks protocol 3: a connection that asks is sent
+  every accessibility event the app's service receives, with an index
+  counting from 1, every field of the event and its extra records, and
+  the item it came from, with that item's texts, states, bounds, actions
+  and collection and range information. The recorder's checks do not
+  ask, and are sent none. The companion app has to be installed again.
+- The recorder stores the events on `accessibility.android.events`, placed
+  on the session clock through the companion app's clock fit by the time
+  Android gave each event, with a millisecond more uncertainty. An
+  event from before the recording is not kept, and one the recorder
+  cannot read is recorded as such without ending the connection.
+- The android.accessibility status line counts the events, content
+  changes, accessibility focus events and window changes, and gives the
+  most content changes in one second, the item last given accessibility
+  focus, the time the app took to read each event, and the delay from
+  phone to recorder.
+- The player shows the events only in the inspector and on the timeline's
+  "Other" lane; the tree and the player's view of the events come in
+  parts 7b and 7c.
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now

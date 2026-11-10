@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Threading.Channels;
 using Recorder.Contracts;
 
 namespace Recorder.Collectors.Android;
@@ -19,8 +20,12 @@ namespace Recorder.Collectors.Android;
 /// phone's Accessibility volume to at least
 /// <see cref="AccessibilityVolumePercent"/>, and records what the app found
 /// and did. The volume is left where it is when the recording ends.
+///
+/// From slice 7, step 7a, it asks the app for accessibility events when
+/// the accessibility collector calls
+/// <see cref="RequestAccessibilityEventsAsync"/>; that collector records them.
 /// </summary>
-public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock, IPhoneDisplay
+public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock, IPhoneDisplay, IPhoneAccessibilityEvents
 {
     public const string Type = "android.companion";
 
@@ -440,6 +445,26 @@ public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock, 
                 // WatchAsync records the connection's end.
             }
         });
+    }
+
+    public async Task<ChannelReader<ReceivedAccessibilityEvent>?> RequestAccessibilityEventsAsync(CancellationToken cancellation)
+    {
+        if (_connection is not { } connection || connection.Closed.IsCompleted || _stopping)
+        {
+            return null;
+        }
+
+        try
+        {
+            await connection.RequestAccessibilityEventsAsync(cancellation).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is CompanionUnavailableException or ObjectDisposedException)
+        {
+            // WatchAsync records the connection's end.
+            return null;
+        }
+
+        return connection.AccessibilityEvents;
     }
 
     private async Task VolumesAsync(CompanionConnection connection)
