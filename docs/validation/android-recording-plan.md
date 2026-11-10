@@ -1734,3 +1734,22 @@ phone upright, and set Auto-rotate back as it was.
   there, without "comes in later parts."; that the copy was cut short,
   rather than the note, is inference, as the words are in the same
   sentence of the note's text.
+- 2026-11-10, test 46: passed, with three touches more than the test
+  asked for and circles that are small at the size the picture was
+  shown. In recording
+  `20261110-143257-1fdbc6c5536b401aaf61426e21d9641a`, with only the
+  "Touches" filter and the screen reader sound checked, the second lane
+  had seven runs of blue marks: three in the first few seconds, the
+  three taps 2 to 3 seconds apart, at 20.6, 23.8 and 26.0 s, and the
+  swipe, from about 38 to 43 s. That the first three were the tester's
+  touches before step 2 is inference. The filters read "Phone keys" and
+  "Touches", and the status line ended "Phone keys | Touches | UIA |
+  Window | Frames | Mic | Phone sound". Selecting each tap drew one
+  circle without a number near the top, in the middle, and just above
+  the bottom row of icons. Selecting the middle of the swipe, at
+  40.85 s, drew two circles numbered 1 and 2, each with a yellow line
+  below it. They were not at the same height, as the test's check said:
+  finger 1, on the right, was higher than finger 2, which is how the
+  fingers were placed, not a fault. The picture was shown about 157
+  pixels wide, so each circle, 80 of the phone's 1,080 pixels across,
+  was about 12 pixels across on the PC's screen, and hard to see.
