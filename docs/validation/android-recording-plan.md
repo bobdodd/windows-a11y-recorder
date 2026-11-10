@@ -2048,3 +2048,89 @@ Run on the development PC with the Pixel on 2026-11-10.
   companion's clock with a median delay of 6.8 ms. Whether the 5
   utterances are the three items swiped to and their usage hints is for
   step 6b's lane to show.
+
+## Part 6, step 6b: what TalkBack said, shown in the player
+
+In a recording of the phone, the player now shows what TalkBack said in
+the Screen reader lane's place, and the filter that reads "Screen
+reader" for a desktop recording reads "TalkBack said". Under that lane,
+just above the timeline's bottom lane, a teal strip shows each
+utterance from its start to the next one, or to its interruption, with
+its text where it fits, cut short with "…" where it does not. An
+utterance cut off is striped, and its text ends ", interrupted"; where
+no text fits, the block reads "interrupted" or nothing. Clicking a
+block selects it, and the properties panel's Screen reader group gives
+"TalkBack said", the utterance's text in quotation marks, and "Words
+reached", the words the speech engine reached in it with their count.
+TalkBack's log says when speech started and when it was cut off, not
+when it ended, so a block shows how long the utterance was the latest
+TalkBack started, not how long it was heard (see
+[the implementation plan](../architecture/android-implementation-plan.md),
+"Built, step 6b").
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings, and the tests pass, 7 of them
+new. They read check 3's TalkBack lines with step 6a's reader and find
+the six utterances, "Session", "O SCANada" and "Speedtest", each
+followed by its usage hint, the two hints cut off by the next swipe,
+the words reached in each, the blocks' starts and ends, and the
+properties panel's rows. They do not show the strip or the rows drawn
+on Windows; tests 55 and 56 do.
+
+### Test 55: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the installer
+runs to its last page.
+
+### Test 56: three swipes shown as what TalkBack said
+
+Before the test, on the phone, check that TalkBack's "Log output level"
+is still "Verbose" (Settings, Accessibility, TalkBack, Settings,
+Advanced settings, Developer settings). Then turn TalkBack on, and go
+to the home screen. Connect the Pixel by USB, unlocked, start the
+recorder from the Start menu, and in "Recording target" choose "Android
+device". After the test, turn TalkBack off.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. On the phone, swipe right with one finger, three times, waiting 3
+   seconds after each swipe.
+3. Choose "Stop recording", wait until the recording has opened in the
+   player, and take a screenshot of the whole recorder window.
+4. In the timeline, click the first teal block in the strip just above
+   the bottom lane. Set "Timeline zoom" to 4×, and take a screenshot of
+   the whole recorder window.
+5. Click the next block to the right, and take a screenshot of the
+   whole recorder window.
+
+**On screen:** in step 3 the filter that reads "Screen reader" for a
+desktop recording reads "TalkBack said". Just above the bottom lane of
+the timeline is a strip of teal blocks in three groups, each starting
+at a run of blue touch marks on the second lane from the top, which are
+the swipes. Each group's first block is the item TalkBack moved to, and
+the block after it, its usage hint, is striped when the next swipe cut
+it off; the last group's hint is solid and runs to the end. The lane
+just above the strip has marks at the same times. In step 4 the first
+block reads the name of the item TalkBack moved to first, perhaps cut
+short with "…", and in the properties panel, under "Screen reader",
+"TalkBack said" reads that name in quotation marks and "Words reached"
+reads its words and their count, such as "Session (1 word)". In step 5
+the block is striped and reads "Double-tap" or as much of it as fits,
+then ", interrupted"; "TalkBack said" reads "“Double-tap to activate."
+and more, then "”, interrupted at" and a time, and "Words reached"
+starts "Double tap to activate" and ends with a count of words. No
+strip, a block marked interrupted that the next swipe did not cut off,
+or rows that do not match the block selected, is a failure. Send the
+screenshots.

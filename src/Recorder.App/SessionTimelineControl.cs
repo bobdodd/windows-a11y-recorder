@@ -88,6 +88,17 @@ public sealed class SessionTimelineControl : FrameworkElement
     private static readonly Brush ReadingKnownBrush = Freeze("#6A4C93");
     private static readonly Brush ReadingUncertainBrush = CreateStripeBrush("#6A4C93", new Point(0, 0), new Point(8, 8), 1.5);
 
+    // What TalkBack said (Android slice 6, step 6b), in a fourth strip under
+    // the reading position strip, as a recording of a phone has none of
+    // NVDA's: each utterance solid teal from its start to the next
+    // utterance's, or to its interruption, with its text where it fits,
+    // cut short with an ellipsis where it does not. An interrupted one is
+    // teal stripes with ", interrupted" after its text, so it does not rely
+    // on colour. White on #2F6F73 is about 5.8:1.
+    private const double TalkBackStripHeight = 16;
+    private static readonly Brush TalkBackBrush = Freeze("#2F6F73");
+    private static readonly Brush TalkBackInterruptedBrush = CreateStripeBrush("#2F6F73", new Point(0, 0), new Point(8, 8), 1.5);
+
     private readonly DrawingVisual _eventLayer = new();
     private readonly DrawingVisual _overlayLayer = new();
     private readonly VisualCollection _layers;
@@ -114,6 +125,7 @@ public sealed class SessionTimelineControl : FrameworkElement
     private IReadOnlyList<Recorder.Session.ScreenReaderModeSpan> _modeSpans = [];
     private IReadOnlyList<Recorder.Session.ScreenReaderWindowSpan> _windowSpans = [];
     private IReadOnlyList<Recorder.Session.ReadingPositionSpan> _readingSpans = [];
+    private IReadOnlyList<Recorder.Session.TalkBackSpeechSpan> _talkBackSpans = [];
     private List<SessionTimelineEvent> _windowEvents = [];
 
     // Whether the keys step through the window strip's events rather than a
@@ -150,7 +162,9 @@ public sealed class SessionTimelineControl : FrameworkElement
 
     private double ReadingHeight => _readingSpans.Count > 0 ? ReadingStripHeight : 0;
 
-    private double StripHeight => ModeHeight + WindowHeight + ReadingHeight;
+    private double TalkBackHeight => _talkBackSpans.Count > 0 ? TalkBackStripHeight : 0;
+
+    private double StripHeight => ModeHeight + WindowHeight + ReadingHeight + TalkBackHeight;
 
     private double LaneHeight => Math.Max(3, (ActualHeight - StripHeight) / LaneCount);
 
@@ -197,6 +211,7 @@ public sealed class SessionTimelineControl : FrameworkElement
         _unrecordable = [];
         _modeSpans = [];
         _readingSpans = [];
+        _talkBackSpans = [];
         RebuildShownChannels();
         SelectEvent(null);
         RedrawAll();
@@ -235,6 +250,18 @@ public sealed class SessionTimelineControl : FrameworkElement
     {
         ArgumentNullException.ThrowIfNull(spans);
         _readingSpans = spans;
+        RedrawAll();
+    }
+
+    /// <summary>
+    /// What TalkBack said, drawn as a strip under the reading position strip.
+    /// Clicking an utterance selects its record, and the properties panel's
+    /// TalkBack said and Words reached rows give its text and words.
+    /// </summary>
+    public void SetTalkBackSpeechSpans(IReadOnlyList<Recorder.Session.TalkBackSpeechSpan> spans)
+    {
+        ArgumentNullException.ThrowIfNull(spans);
+        _talkBackSpans = spans;
         RedrawAll();
     }
 
@@ -327,6 +354,27 @@ public sealed class SessionTimelineControl : FrameworkElement
             }
 
             SelectWindowEvent(clicked.Events.MinBy(item => Math.Abs(item.MonotonicNanoseconds - timestamp))!);
+            return;
+        }
+
+        var talkBackTop = stripTop + ModeHeight + WindowHeight + ReadingHeight;
+        if (TalkBackHeight > 0 && point.Y >= talkBackTop && point.Y < talkBackTop + TalkBackHeight)
+        {
+            // The TalkBack said strip: the utterance clicked, or the playhead
+            // there where none had started.
+            e.Handled = true;
+            _inWindowStrip = false;
+            var said = _talkBackSpans.LastOrDefault(span => span.Start <= timestamp && span.Event is not null);
+            if (said?.Event is not { } utterance)
+            {
+                _request++;
+                SelectEvent(null);
+                PositionRequested?.Invoke(this, Math.Clamp(timestamp, 0, _durationNanoseconds));
+                return;
+            }
+
+            _request++;
+            SelectTimelineEvent(utterance);
             return;
         }
 
@@ -756,6 +804,34 @@ public sealed class SessionTimelineControl : FrameworkElement
             }
         }
 
+        var talkBackTop = readingTop + ReadingHeight;
+        foreach (var span in _talkBackSpans)
+        {
+            if (span.End < _viewportStartNanoseconds || span.Start > viewportEnd)
+            {
+                continue;
+            }
+
+            var left = Math.Max(0, ToX(Math.Max(span.Start, _viewportStartNanoseconds)));
+            var right = Math.Min(width, ToX(Math.Min(span.End, viewportEnd)));
+            // A pixel short at the right, so utterances that follow one
+            // another show as two.
+            var band = new Rect(left, talkBackTop + 1, Math.Max(2, right - left - 1), TalkBackStripHeight - 2);
+            drawingContext.DrawRectangle(span.Interrupted ? TalkBackInterruptedBrush : TalkBackBrush, null, band);
+            if (TalkBackLabel(span, band.Width - 8, pixelsPerDip) is { } text)
+            {
+                var origin = new Point(band.Left + 4, band.Top + (band.Height - text.Height) / 2);
+                if (span.Interrupted)
+                {
+                    // The stripes would cross the words: a backing behind them.
+                    drawingContext.DrawRectangle(
+                        TalkBackBrush, null, new Rect(origin.X - 2, band.Top + 1, text.Width + 4, band.Height - 2));
+                }
+
+                drawingContext.DrawText(text, origin);
+            }
+        }
+
         foreach (var series in SeriesDrawOrder)
         {
             var lane = LaneOfSeries(series);
@@ -810,6 +886,62 @@ public sealed class SessionTimelineControl : FrameworkElement
                 new Point(playheadX, 0),
                 new Point(playheadX, ActualHeight));
         }
+    }
+
+    // An utterance's words for its span: the whole text, or as much as fits
+    // with an ellipsis, then ", interrupted" for one cut off; just
+    // "interrupted" where no text fits with it; null where nothing fits.
+    private static FormattedText? TalkBackLabel(Recorder.Session.TalkBackSpeechSpan span, double room, double pixelsPerDip)
+    {
+        if (room <= 0)
+        {
+            return null;
+        }
+
+        FormattedText Format(string words) => new(
+            words,
+            System.Globalization.CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight,
+            new Typeface("Segoe UI"),
+            11,
+            ModeLightTextBrush,
+            pixelsPerDip);
+
+        var suffix = span.Interrupted ? ", interrupted" : string.Empty;
+        var whole = Format(span.Text + suffix);
+        if (whole.Width <= room)
+        {
+            return whole;
+        }
+
+        // The longest start of the text that fits with the ellipsis, found
+        // by halving; at least three characters, or it says too little.
+        int low = 3, high = span.Text.Length - 1, best = -1;
+        while (low <= high)
+        {
+            var middle = (low + high) / 2;
+            if (Format(span.Text[..middle].TrimEnd() + "…" + suffix).Width <= room)
+            {
+                best = middle;
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle - 1;
+            }
+        }
+
+        if (best > 0)
+        {
+            return Format(span.Text[..best].TrimEnd() + "…" + suffix);
+        }
+
+        if (span.Interrupted && Format("interrupted") is { } word && word.Width <= room)
+        {
+            return word;
+        }
+
+        return null;
     }
 
     private bool CanDraw() =>
@@ -908,7 +1040,9 @@ public sealed class SessionTimelineControl : FrameworkElement
         "system.preferences" => 7,
         "graphics.magnifier" => 8,
         "browser.preferences" => 9,
-        "system.assistive-technology" => 10,
+        // What TalkBack said shares the Screen reader lane: a recording of a
+        // phone has no NVDA (Android slice 6, step 6b).
+        "system.assistive-technology" or Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel => 10,
         _ => OtherLane
     };
 

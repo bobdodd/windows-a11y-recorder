@@ -1127,7 +1127,8 @@ slice's full test goes into a validation plan,
     TalkBack line kept. The player shows the records only in the
     inspector and on the timeline's "Other" lane.
   - **Step 6b: show.** The "TalkBack said" lane and its filter, and the
-    target test above.
+    target test above. As built, the lane is the Screen reader lane,
+    with a strip under it (see "Built, step 6b").
 - **Test data (decided 2026-11-10).** The owner said that the phone used
   for the checks holds nothing that needs to be hidden and that the test
   data needs no review, so the tests use all 1,189 of check 3's lines
@@ -1238,6 +1239,45 @@ slice's full test goes into a validation plan,
   utterances, 2 interrupted and 15 words reached, 1,006 TalkBack lines
   out of 3,300 read, and a median delay from phone to recorder of
   6.8 ms, and Stop gave the reminder.
+- **Built, step 6b (2026-11-10).**
+  - **Lane and strip.** What TalkBack said takes the Screen reader
+    lane's place rather than a new lane, as a recording of the phone has
+    no NVDA and the timeline keeps its number of lanes: the speech
+    records are drawn on the Screen reader lane, and the filter that
+    reads "Screen reader" for a desktop recording reads "TalkBack said".
+    Under the lane, where a desktop recording has NVDA's mode, window
+    and reading position strips, a 16 pixel "TalkBack said" strip shows
+    each utterance in teal (#2F6F73, white text at about 5.8:1) with its
+    text, cut short with an ellipsis where it does not fit. An
+    interrupted one is striped and its text ends ", interrupted", so it
+    does not rely on colour; where no text fits, it reads "interrupted".
+    Clicking an utterance in the strip selects its `utterance-started`
+    record.
+  - **Spans.** An utterance's span runs from its start to the next
+    utterance's start, or to its interruption where that comes first;
+    the last runs to the end of the recording. TalkBack's log says when
+    speech started and when it was cut off, not when it ended, so a span
+    is how long the utterance was the latest TalkBack started, not how
+    long it was heard.
+  - **Properties.** In the Screen reader group, "TalkBack said" gives
+    the latest utterance's text in quotation marks, with "interrupted at"
+    and the time for one cut off, and "Words reached" gives the words
+    the speech engine reached in it, in order, with their count. The
+    TalkBack said row's buttons step through the utterances. A word or
+    interruption of an utterance that started before the recording is
+    left out.
+  - **Index.** The playback index is version 22: it keeps the speech
+    records with their payloads, and an older index is derived again,
+    so recordings made with step 6a show what TalkBack said.
+  - **Tests.** `TalkBackSpeechTimelineTests` read check 3's lines with
+    the step 6a reader and check the 6 utterances talkback_13 to 18,
+    their texts (fragments joined), starts, the two interruptions, the
+    words reached in each, the spans, the rows before and during an
+    utterance, the summaries in the event list, records that belong to
+    no utterance, a recording without speech, and the index keeping each
+    speech record with its payload. The full suite
+    gave 2,101 passed; the 10 that fail on Linux are the browser
+    receiver's and Chromium launcher's tests, which need Windows.
 
 ### Slice 7: accessibility events and tree
 

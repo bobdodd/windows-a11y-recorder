@@ -113,6 +113,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<KeyEvidenceRecord> _keyEvidence = [];
     private readonly List<KeyEvidenceRecord> _mouseEvidence = [];
     private readonly List<(long Time, JsonElement Payload)> _phoneTouches = [];
+    private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _talkBackSpeech = [];
     private readonly List<KeyEvidenceRecord> _accessibilityRequests = [];
     private readonly List<BrowserPageCommit> _pageCommits = [];
     private readonly List<(string EventId, long Time, JsonElement Payload)> _pageFocus = [];
@@ -291,6 +292,12 @@ public sealed class SessionPlaybackArchiveBuilder
             payload.ValueKind == JsonValueKind.Object)
         {
             _phoneTouches.Add((timestamp, payload.Clone()));
+        }
+
+        if (TalkBackSpeechTimeline.IsSpeechRecord(timelineEvent.Channel, timelineEvent.EventType) &&
+            payload.ValueKind == JsonValueKind.Object)
+        {
+            _talkBackSpeech.Add((timelineEvent, payload.Clone()));
         }
 
         if (timelineEvent.Channel == WindowsPreferenceSettings.Channel &&
@@ -529,6 +536,9 @@ public sealed class SessionPlaybackArchiveBuilder
             PhoneTouches = _phoneTouches.Count == 0
                 ? PhoneTouchTimeline.Empty
                 : new PhoneTouchTimeline(_phoneTouches),
+            TalkBackSpeech = _talkBackSpeech.Count == 0
+                ? TalkBackSpeechTimeline.Empty
+                : new TalkBackSpeechTimeline(_talkBackSpeech, duration),
             WindowsPreferences = _preferences.Count == 0
                 ? WindowsPreferenceTimeline.Empty
                 : new WindowsPreferenceTimeline(_preferences),
@@ -869,6 +879,15 @@ public sealed class SessionPlaybackArchiveBuilder
         {
             var snapshot = WindowSnapshots.Compact(payload);
             return JoinSummary(eventType, ReadString(snapshot, "windowName"), ReadString(snapshot, "summary"));
+        }
+
+        if (channel == AndroidTalkBackRecords.SpeechChannel)
+        {
+            // What TalkBack said, for the status line and the event list:
+            // a fragment's or a cut-off utterance's text, a word reached.
+            return eventType == AndroidTalkBackRecords.WordReachedEventType
+                ? JoinSummary(eventType, ReadString(payload, "word"))
+                : JoinSummary(eventType, ReadString(payload, "text"), ReadString(payload, "utteranceId"));
         }
 
         if (channel == "accessibility.uia.events")

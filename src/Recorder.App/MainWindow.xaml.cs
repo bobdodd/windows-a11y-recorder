@@ -57,6 +57,7 @@ public partial class MainWindow : Window
         "graphics.magnifier",
         "browser.preferences",
         "system.assistive-technology",
+        Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel,
         "audio.microphone",
         "audio.system",
         Recorder.Contracts.AndroidSoundRecords.Channel,
@@ -936,6 +937,7 @@ public partial class MainWindow : Window
             TimelineControl.SetScreenReaderModeSpans(_playbackArchive.ScreenReaderMode.Spans);
             TimelineControl.SetScreenReaderWindowSpans(_playbackArchive.ScreenReaderWindows.Spans);
             TimelineControl.SetReadingPositionSpans(_playbackArchive.ReadingPosition.Spans);
+            TimelineControl.SetTalkBackSpeechSpans(_playbackArchive.TalkBackSpeech.Spans);
             BindReadingSteps();
             BindAnnouncements();
             BindAccessibilityTree();
@@ -1424,7 +1426,8 @@ public partial class MainWindow : Window
     private static bool IsPhoneInput(SessionPlaybackArchive archive) =>
         archive.FrameSource == SessionFrameSource.Phone ||
         archive.PhoneTouches.Recorded ||
-        archive.Timeline.ChannelCounts.ContainsKey(Recorder.Contracts.AndroidTouchRecords.KeyChannel);
+        archive.Timeline.ChannelCounts.ContainsKey(Recorder.Contracts.AndroidTouchRecords.KeyChannel) ||
+        archive.TalkBackSpeech.Recorded;
 
     private void NameInputLanes(bool phone)
     {
@@ -1432,6 +1435,9 @@ public partial class MainWindow : Window
         _pointerName = phone ? "Touches" : "Mouse";
         FilterKeyboardCheckBox.Content = phone ? "Phone _keys" : "_Keyboard";
         FilterMouseCheckBox.Content = phone ? "Touches" : "_Mouse";
+        // What TalkBack said takes the screen reader's filter (Android
+        // slice 6, step 6b).
+        FilterAssistiveTechnologyCheckBox.Content = phone ? "TalkBack said" : "Screen reader";
         ShowTimelineLegend();
     }
 
@@ -1524,6 +1530,12 @@ public partial class MainWindow : Window
         AddVisibleChannel(FilterMagnifierCheckBox, "graphics.magnifier", visibleChannels);
         AddVisibleChannel(FilterBrowserSettingsCheckBox, "browser.preferences", visibleChannels);
         AddVisibleChannel(FilterAssistiveTechnologyCheckBox, "system.assistive-technology", visibleChannels);
+        // What TalkBack said takes the screen reader's place and filter,
+        // named "TalkBack said" (Android slice 6, step 6b).
+        AddVisibleChannel(
+            FilterAssistiveTechnologyCheckBox,
+            Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel,
+            visibleChannels);
         AddVisibleChannel(
             FilterFramesCheckBox,
             "graphics.desktop.frames",

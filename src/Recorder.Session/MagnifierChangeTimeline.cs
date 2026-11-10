@@ -72,6 +72,7 @@ public static class PropertyChangeSteps
     /// The NVDA window row's are those of <see cref="ScreenReaderWindowTimeline.ChangeTimesOf"/>.
     /// The Pointer and NVDA mouse tracking rows' are those of <see cref="MouseActivity.ChangeTimesOf"/>.
     /// The Under the pointer (Chromium) row's are those of <see cref="AccessibilityRequests.ChangeTimesOf"/>.
+    /// The TalkBack said row's are those of <see cref="TalkBackSpeechTimeline.ChangeTimesOf"/>.
     /// </summary>
     public static IReadOnlyList<long>? TimesOf(
         PropertyRow row,
@@ -84,7 +85,8 @@ public static class PropertyChangeSteps
         ScreenReaderWindowTimeline? screenReaderWindows = null,
         MouseActivity? mouse = null,
         AccessibilityRequests? accessibilityRequests = null,
-        ReadingPositionTimeline? readingPosition = null)
+        ReadingPositionTimeline? readingPosition = null,
+        TalkBackSpeechTimeline? talkBackSpeech = null)
     {
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(settings);
@@ -93,6 +95,11 @@ public static class PropertyChangeSteps
             row.Key.StartsWith(BrowserPreferenceTimeline.PageKeyPrefix, StringComparison.Ordinal))
         {
             return (browser ?? BrowserPreferenceTimeline.Empty).ChangeTimesOf(row.Key);
+        }
+
+        if (row.Key is TalkBackSpeechTimeline.SaidKey or TalkBackSpeechTimeline.WordsKey)
+        {
+            return (talkBackSpeech ?? TalkBackSpeechTimeline.Empty).ChangeTimesOf(row.Key);
         }
 
         if (row.Key == ReadingPositionTimeline.Key)

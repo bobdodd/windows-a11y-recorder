@@ -91,6 +91,7 @@ public partial class MainWindow
         .. archive.ScreenReaderMode.RowsAt(time),
         .. archive.ScreenReaderWindows.RowsAt(time),
         .. archive.ReadingPosition.RowsAt(time),
+        .. archive.TalkBackSpeech.RowsAt(time),
         .. archive.Mouse.RowsAt(time),
         .. archive.AccessibilityRequests.RowsAt(time),
         .. archive.InputRecordability.RowsAt(time)
@@ -117,7 +118,8 @@ public partial class MainWindow
             times = PropertyChangeSteps.TimesOf(
                 row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences,
                 archive.AssistiveTechnology, archive.InputRecordability, archive.ScreenReaderMode,
-                archive.ScreenReaderWindows, archive.Mouse, archive.AccessibilityRequests, archive.ReadingPosition);
+                archive.ScreenReaderWindows, archive.Mouse, archive.AccessibilityRequests, archive.ReadingPosition,
+                archive.TalkBackSpeech);
             _propertyChangeTimes[row.Key] = times;
         }
 

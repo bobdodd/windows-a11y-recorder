@@ -276,7 +276,21 @@ Changes on `main` since 1.1.0, not yet released.
 - If the lines cannot be read, or stop, the collector says why and the
   recording goes on without them.
 - The player shows the records only in the inspector and on the "Other"
-  lane (part 6b).
+  lane; part 6b shows them.
+
+### Android recording, part 6b: what TalkBack said, shown
+
+- In a recording of the phone, the Screen reader lane shows TalkBack's
+  speech records, and its filter reads "TalkBack said".
+- A strip under the lane shows each utterance from its start to the
+  next, or to its interruption, with its text where it fits. An
+  interrupted one is striped and marked ", interrupted". Clicking one
+  selects it.
+- The properties panel's Screen reader group gives "TalkBack said", the
+  latest utterance's text and when it was cut off, and "Words reached",
+  the words the speech engine reached in it.
+- The playback index is version 22, and recordings made with part 6a
+  are indexed again so that they show what TalkBack said.
 
 ## 1.1.0 - 2026-10-13
 

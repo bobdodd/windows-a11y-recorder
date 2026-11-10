@@ -120,6 +120,13 @@ public sealed record SessionPlaybackArchive(
     /// </summary>
     public PhoneTouchTimeline PhoneTouches { get; init; } = PhoneTouchTimeline.Empty;
 
+    /// <summary>
+    /// What TalkBack said, for the "TalkBack said" strip and the properties
+    /// panel's TalkBack rows (Android slice 6, step 6b); empty for a
+    /// recording without TalkBack's speech records.
+    /// </summary>
+    public TalkBackSpeechTimeline TalkBackSpeech { get; init; } = TalkBackSpeechTimeline.Empty;
+
     private ISessionTimeline? _timeline;
 
     /// <summary>

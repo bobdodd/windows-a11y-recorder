@@ -73,7 +73,12 @@ public sealed record PlaybackIndex
     // screen size (PhoneTouchTimeline.Compact), for drawing the fingers on
     // the phone's picture; an older index is derived again, so recordings
     // made with step 5a draw their touches.
-    public const int CurrentVersion = 21;
+    // Version 22 keeps TalkBack's speech records (screen-reader.talkback.speech,
+    // Android slice 6, step 6b) with their whole payloads, for the "TalkBack
+    // said" strip and the properties panel's TalkBack rows; an older index
+    // is derived again, so recordings made with step 6a show what TalkBack
+    // said.
+    public const int CurrentVersion = 22;
 
     public required int Version { get; init; }
 
@@ -270,7 +275,8 @@ public sealed class PlaybackIndexBuilder
             return;
         }
 
-        if (PhoneTouchTimeline.IsTouchReport(channel, record.EventType))
+        if (PhoneTouchTimeline.IsTouchReport(channel, record.EventType) ||
+            TalkBackSpeechTimeline.IsSpeechRecord(channel, record.EventType))
         {
             Keep(eventKey, record);
             return;
@@ -444,7 +450,8 @@ public sealed class PlaybackIndexBuilder
              MouseActivity.IsMouseEvidence(record.Channel, record.EventType) ||
              AccessibilityRequests.IsRequestEvidence(record.Channel, record.EventType) ||
              AccessibilityRequests.IsTreeEvidence(record.Channel, record.EventType) ||
-             ReadingPositionTimeline.IsFocusEvidence(record.Channel, record.EventType)) &&
+             ReadingPositionTimeline.IsFocusEvidence(record.Channel, record.EventType) ||
+             TalkBackSpeechTimeline.IsSpeechRecord(record.Channel, record.EventType)) &&
             record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()
                 : WindowSnapshots.IsSnapshot(record.Channel, record.EventType)

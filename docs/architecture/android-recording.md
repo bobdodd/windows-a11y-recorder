@@ -193,9 +193,13 @@ scrcpy source (`mic`), and could be added later.
   interrupted. The status line says when no speech lines have arrived,
   so a tester who forgot to set TalkBack's log output level to Verbose
   can fix it at once, and the status at Stop reminds the tester that the
-  level is still Verbose. The player shows the records only in the
-  inspector until step 6b. The details are in the implementation plan,
-  slice 6.
+  level is still Verbose. The player shows what TalkBack said in the
+  Screen reader lane's place, with its filter named "TalkBack said", and
+  in a strip under it with each utterance's text, interrupted ones
+  striped and marked; the properties panel gives the latest utterance
+  and the words the speech engine reached in it. The log gives no end
+  for speech, so an utterance's span runs to the next one or to its
+  interruption. The details are in the implementation plan, slice 6.
 - Like the NVDA design ([screen reader activity](screen-reader-activity.md)),
   what TalkBack had to announce can also be inferred from the
   accessibility events below. That is later work, and is kept apart from
