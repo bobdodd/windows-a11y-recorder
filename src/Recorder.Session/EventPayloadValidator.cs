@@ -46,7 +46,9 @@ internal static class EventPayloadValidator
         Recorder.Contracts.AndroidSoundRecords.Channel,
         Recorder.Contracts.AndroidTouchRecords.RawChannel,
         Recorder.Contracts.AndroidTouchRecords.TouchChannel,
-        Recorder.Contracts.AndroidTouchRecords.KeyChannel
+        Recorder.Contracts.AndroidTouchRecords.KeyChannel,
+        Recorder.Contracts.AndroidTalkBackRecords.LogChannel,
+        Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel
     ];
 
     /// <summary>Whether the recorder defines the channel.</summary>
@@ -192,6 +194,54 @@ internal static class EventPayloadValidator
                 break;
             case (Recorder.Contracts.AndroidTouchRecords.TouchChannel, Recorder.Contracts.AndroidTouchRecords.TouchEventType):
                 ValidateAndroidTouchReport(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidTalkBackRecords.LogChannel, Recorder.Contracts.AndroidTalkBackRecords.LineEventType):
+                ValidateAndroidTalkBackLine(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidTalkBackRecords.LogChannel, Recorder.Contracts.AndroidTalkBackRecords.UnavailableEventType):
+                ValidateAndroidCompanionUnavailable(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel, Recorder.Contracts.AndroidTalkBackRecords.UtteranceStartedEventType):
+            case (Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel, Recorder.Contracts.AndroidTalkBackRecords.FragmentStartedEventType):
+                ValidateShape(
+                    payload,
+                    [
+                        RequiredString("utteranceId"),
+                        RequiredText("text"),
+                        NullableString("causeType"),
+                        NullableString("causeSubtype"),
+                        NullableInteger("causePhoneMilliseconds", nonnegative: true),
+                        RequiredString("cause"),
+                        RequiredInteger("phoneMicroseconds", nonnegative: true),
+                        RequiredInteger("receivedAtNanoseconds"),
+                        RequiredInteger("readerVersion", positive: true)
+                    ],
+                    issues);
+                break;
+            case (Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel, Recorder.Contracts.AndroidTalkBackRecords.WordReachedEventType):
+                ValidateShape(
+                    payload,
+                    [
+                        NullableString("utteranceId"),
+                        RequiredText("word"),
+                        RequiredInteger("phoneMicroseconds", nonnegative: true),
+                        RequiredInteger("receivedAtNanoseconds"),
+                        RequiredInteger("readerVersion", positive: true)
+                    ],
+                    issues);
+                break;
+            case (Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel, Recorder.Contracts.AndroidTalkBackRecords.UtteranceInterruptedEventType):
+                ValidateShape(
+                    payload,
+                    [
+                        RequiredString("utteranceId"),
+                        NullableText("text"),
+                        NullableInteger("fragmentStartIndex", nonnegative: true),
+                        RequiredInteger("phoneMicroseconds", nonnegative: true),
+                        RequiredInteger("receivedAtNanoseconds"),
+                        RequiredInteger("readerVersion", positive: true)
+                    ],
+                    issues);
                 break;
             case (Recorder.Contracts.AndroidTouchRecords.KeyChannel, Recorder.Contracts.AndroidTouchRecords.KeyEventType):
                 ValidateShape(
@@ -2150,6 +2200,33 @@ internal static class EventPayloadValidator
             lines.GetArrayLength() == 0)
         {
             AddError(issues, "android-getevent-lines-empty", "#/payload/lines", "A record of getevent's lines has at least one.");
+        }
+    }
+
+    // One line TalkBack wrote, as logcat printed it (slice 6). The parts are
+    // all given for a log entry, and all null for a line that is not one.
+    private static void ValidateAndroidTalkBackLine(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredString("line"),
+                NullableInteger("phoneMicroseconds", nonnegative: true),
+                NullableInteger("processId", positive: true),
+                NullableInteger("threadId", positive: true),
+                NullableEnum("level", [.. Recorder.Contracts.AndroidTalkBackRecords.Levels]),
+                NullableText("tag"),
+                NullableText("message"),
+                RequiredInteger("receivedAtNanoseconds")
+            ],
+            issues);
+        var given = new[] { "phoneMicroseconds", "processId", "threadId", "level", "tag", "message" }
+            .Count(name => payload.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null);
+        if (given is not (0 or 6))
+        {
+            AddError(issues, "android-talkback-line-parts", "#/payload", "A TalkBack line has all of its parts, or none for a line that is not a log entry.");
         }
     }
 

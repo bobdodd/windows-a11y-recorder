@@ -1120,6 +1120,98 @@ slice's full test goes into a validation plan,
   the Home screen. The lane shows three app names and their usage hints
   at the times of the swipes, and the hint cut off by the next swipe is
   marked interrupted.
+- **Steps (planned 2026-11-10).** As for slices 4 and 5, the slice is
+  built in two steps, each with its own tests.
+  - **Step 6a: read and store.** The TalkBack collector, its two
+    channels and their records, and the status line, with every
+    TalkBack line kept. The player shows the records only in the
+    inspector and on the timeline's "Other" lane.
+  - **Step 6b: show.** The "TalkBack said" lane and its filter, and the
+    target test above.
+- **Test data (decided 2026-11-10).** The owner said that the phone used
+  for the checks holds nothing that needs to be hidden and that the test
+  data needs no review, so the tests use all 1,189 of check 3's lines
+  with TalkBack's tag, unchanged, rather than lines cut and reviewed
+  first as planned above.
+- **Built, step 6a (2026-11-10).**
+  - **Collector.** `AndroidTalkBackCollector`, `android.talkback`, starts
+    after the touch collector. It runs
+    `adb -s <serial> logcat -v monotonic -v usec -T 1 -s talkback:V` for
+    the whole recording. `-s` silences every tag but those named, and
+    `-T 1` starts at the newest line rather than printing the whole log
+    first
+    ([AOSP, logcat.cpp](https://android.googlesource.com/platform/system/logging/+/refs/heads/main/logcat/logcat.cpp)).
+  - **By tag, not by process (decided 2026-11-10).** The plan above
+    kept TalkBack's lines by its process. Check 3 found 1,189 of the
+    1,196 lines of TalkBack's process had the tag `talkback`; the others
+    were a media buffer pool's and a logging library's lines, and two
+    lines logcat printed itself. Keeping lines by tag needs no process
+    id, follows TalkBack to a new process with no work, and does not read
+    other apps' lines from the phone at all.
+  - **Phone times.** `-v monotonic` prints each line's time as seconds
+    since boot, and `-v usec` with six decimals. The log stamps lines
+    with the wall clock, and logcat converts that to CLOCK_MONOTONIC. It
+    first reads `dmesg` for suspend and resume markers, then takes the
+    difference between the two clocks at the time it prints its first
+    line
+    ([AOSP, logprint.cpp](https://android.googlesource.com/platform/system/logging/+/refs/heads/main/liblog/logprint.cpp)).
+    On the Pixel `dmesg` is refused ("dmesg: klogctl: Permission denied",
+    check 3), so that single difference is used for every line. As
+    logcat starts with each recording, the difference is taken at the
+    recording's start. From the code, it follows that a change to the
+    phone's wall clock during the recording would shift the later
+    lines; that is inference, not measured. CLOCK_MONOTONIC is the
+    clock the companion app samples, so each record is placed on the
+    session clock through the companion collector's clock fit, flagged
+    `phone-log-time`, and otherwise at the time the recorder read it,
+    flagged `receipt-time-stamp`. A line placed before the recording's start,
+    such as the newest line `-T 1` gives, is not kept.
+  - **Prompt delivery.** When following the log, logcat flushes its
+    output after each read (logcat.cpp), so the lines can be read through
+    a pipe as they come. That the pipe through adb delivers them promptly
+    is inference; the status line's median delay from phone to recorder
+    measures it.
+  - **Two channels.** `screen-reader.talkback.log` has a
+    `talkback-log-line` for every line as received, with its time,
+    process, thread, level, tag and message, or with those null for a
+    line that is not a log entry, such as "--------- beginning of
+    main"; and a `talkback-log-unavailable` when the lines are missing.
+    `screen-reader.talkback.speech` has what the reader, version 1,
+    made of them: `utterance-started` for the first "Speaking fragment"
+    line of an utterance, with its text, id and cause, `fragment-started`
+    for a later one, `word-reached` for each "speak word" line, and
+    `utterance-interrupted` for each "interrupting current item" line,
+    with the cut-off text and fragment start index. A "speak word" line
+    names no utterance, so it is given the utterance last started, or
+    none when that one was cut off. Each speech record has the reader's
+    version, so a later reader can be run again on the raw lines.
+  - **Status line.** "TalkBack: no speech lines yet, N TalkBack log
+    lines. If TalkBack is on, set "Log output level" to "Verbose" in
+    TalkBack's settings, Advanced settings, Developer settings." until
+    the first utterance; then "TalkBack: N utterances, N interrupted, N
+    words reached, latest "...", N TalkBack log lines, median delay from
+    phone to recorder X ms.", the latest utterance cut to 60 characters,
+    and the delay measured for speech lines only.
+  - **Reminder at Stop.** When a line at level Verbose arrived, the
+    status at Stop ends: "TalkBack's log output level is still Verbose,
+    which writes what is on the phone's screen to the phone's log. If
+    you prefer, set it back in TalkBack's settings, Advanced settings,
+    Developer settings, "Log output level"."
+  - **Failures.** If logcat cannot start or ends during the recording,
+    the collector records why, reports itself degraded, and the
+    recording goes on: "What TalkBack said could not be recorded: ..."
+    or "What TalkBack said stopped being recorded during the recording.
+    logcat on the phone ended with exit code N: the phone was unplugged,
+    adb stopped, or the phone ended it. The recording goes on without
+    it."
+  - **Tests.** Against check 3's lines
+    (`tests/Recorder.Tests/TestData/android-talkback-check3.txt`), the
+    reader finds the utterances talkback_13 to talkback_18 ("Session",
+    "O SCANada" and "Speedtest", each followed by its usage hint),
+    talkback_12, 14 and 16 interrupted at fragment start indexes 105, 14
+    and 14, and 42 words; the collector's arguments, records, times,
+    status line, reminder and failures are tested with a fake adb and
+    a fake phone clock.
 
 ### Slice 7: accessibility events and tree
 

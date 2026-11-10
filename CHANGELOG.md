@@ -255,6 +255,26 @@ Changes on `main` since 1.1.0, not yet released.
   the PC's screen, with its rings and paths at least 2 thick, however
   small the phone's picture is shown.
 
+### Android recording, part 6a: what TalkBack said, stored
+
+- A recording of the phone runs `logcat` on the phone through adb for
+  the whole recording, keeping only lines with TalkBack's tag.
+- Every line is kept on `screen-reader.talkback.log`, and what TalkBack
+  said is read from them onto `screen-reader.talkback.speech`: each
+  utterance started, with its text and the event that caused it, each
+  later fragment, each word the speech engine reached, and each
+  utterance cut off. Each record is placed by the phone's clock through
+  the companion app's clock fit.
+- While recording, the status line counts the utterances, the cut-off
+  utterances, the words and the lines, and gives the latest utterance;
+  until the first utterance it says to set TalkBack's log output level
+  to Verbose. At Stop, the status reminds the tester that the level is
+  still Verbose.
+- If the lines cannot be read, or stop, the collector says why and the
+  recording goes on without them.
+- The player shows the records only in the inspector and on the "Other"
+  lane (part 6b).
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now

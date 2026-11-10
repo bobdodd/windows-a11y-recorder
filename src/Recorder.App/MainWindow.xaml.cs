@@ -79,6 +79,10 @@ public partial class MainWindow : Window
     // (Android slice 5b).
     private string _keysName = "Keyboard";
     private string _pointerName = "Mouse";
+    // The TalkBack collector of the Android recording in progress, for its
+    // reminder at Stop; null for a desktop recording.
+    private AndroidTalkBackCollector? _talkBack;
+
     private readonly HashSet<string> _announcedHealthReasons =
         new(StringComparer.Ordinal);
     private SessionCoordinator? _coordinator;
@@ -247,6 +251,7 @@ public partial class MainWindow : Window
         OpenRecordingButton.IsEnabled = false;
         StatusTextBlock.Text = "Starting recording.";
         _announcedHealthReasons.Clear();
+        _talkBack = null;
         var busy = _busy.Begin("Starting recording.");
 
         try
@@ -316,8 +321,11 @@ public partial class MainWindow : Window
     // Accessibility volume to at least 80% and leaves it there (slice 4,
     // step 4c). The touch collector reads the phone's raw input events with
     // getevent, placing them by the companion's clock fit and turning each
-    // position by the companion's display rotation (slice 5).
-    private static Recorder.Contracts.ICaptureCollector[] AndroidCollectors(string serial)
+    // position by the companion's display rotation (slice 5). The TalkBack
+    // collector reads TalkBack's log lines with logcat, placed the same way
+    // (slice 6); it is kept so that Stop can remind the tester that
+    // TalkBack's log level is still Verbose.
+    private Recorder.Contracts.ICaptureCollector[] AndroidCollectors(string serial)
     {
         var adb = new AdbProcess(AndroidTools.Adb(AndroidTools.DataFolder));
         var companion = new AndroidCompanionCollector(
@@ -326,12 +334,14 @@ public partial class MainWindow : Window
             accessibilityVolumePercent: AndroidCompanionCollector.AccessibilityVolumePercent);
         var server = Path.Combine(AndroidTools.BundledFolder(AppContext.BaseDirectory), AndroidTools.ScrcpyServer.Name);
         var screen = new AndroidScreenCollector(adb, serial, server, companion);
+        _talkBack = new AndroidTalkBackCollector(adb, serial, companion);
         return
         [
             companion,
             screen,
             new AndroidSoundCollector(serial, screen, companion, companion.RaiseAccessibilityVolume),
             new AndroidTouchCollector(adb, serial, companion, companion),
+            _talkBack,
             new Recorder.Collectors.Audio.AudioCollector(new Recorder.Collectors.Audio.AudioCaptureOptions(true, false))
         ];
     }
@@ -840,6 +850,10 @@ public partial class MainWindow : Window
             if (status.Database?.Problem is { } databaseProblem)
             {
                 StatusTextBlock.Text += $" Database: {databaseProblem}";
+            }
+            if (_talkBack?.StopReminder is { } reminder)
+            {
+                StatusTextBlock.Text += $" {reminder}";
             }
             _busy.AnnounceCompleted(StatusTextBlock.Text);
         }

@@ -181,6 +181,19 @@ scrcpy source (`mic`), and could be added later.
   parses them as a separate, versioned step. That the word lines match
   when the words were heard is inference: they come from the speech
   engine's progress, not from the sound.
+- Since step 6a of the implementation plan (2026-11-10), the recorder
+  runs `logcat` for the whole recording, keeping only lines with the tag
+  `talkback`, which check 3 found on 1,189 of the 1,196 lines of
+  TalkBack's process. Every line is kept on
+  `screen-reader.talkback.log`, and a versioned reader makes
+  `screen-reader.talkback.speech` from them: each utterance started,
+  each later fragment, each word reached and each utterance
+  interrupted. The status line says when no speech lines have arrived,
+  so a tester who forgot to set TalkBack's log output level to Verbose
+  can fix it at once, and the status at Stop reminds the tester that the
+  level is still Verbose. The player shows the records only in the
+  inspector until step 6b. The details are in the implementation plan,
+  slice 6.
 - Like the NVDA design ([screen reader activity](screen-reader-activity.md)),
   what TalkBack had to announce can also be inferred from the
   accessibility events below. That is later work, and is kept apart from
