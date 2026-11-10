@@ -1132,3 +1132,136 @@ the recording as usual. Send the screenshot.
   cover about 5.5 seconds less than the duration in both screenshots,
   so the phone's sound starts about 5.5 seconds after the recording;
   test 31 checks the files' lengths.
+
+## Part 4, step 4c: the Accessibility volume raised by the recorder
+
+Step 4c makes the recorder set the phone's Accessibility volume, as the
+owner decided on 2026-11-09 (see
+[the implementation plan](../architecture/android-implementation-plan.md),
+"Slice 4", "Built, step 4c"). adb's shell cannot set it, but the
+companion app can, as an accessibility service that is on. When the
+first sound packet arrives, the companion app raises the Accessibility
+volume to at least 80% if TalkBack, or another service that uses it, is
+on, never lowers it, and leaves it there when the recording ends. With
+no such service on, the Accessibility volume is the media volume, and
+the app changes nothing. The companion's status line ends with what it
+found and did. The companion app now speaks protocol 2, so it has to be
+installed again.
+
+Android keeps a volume for each output, and while the sound is captured
+the phone plays to the capture instead of its speaker, so the volume is
+set once the capture is running. That this is why check 1 saw no change
+from a volume set before the run, and why test 30 started at 36% (a
+volume left from an earlier capture), is inference from Android's
+source. A consequence, also inference: after a recording the phone's
+own speaker volume is as it was, and the 80% stays with the capture.
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings, the companion app compiles with
+warnings as errors, and the tests pass, with 5 new tests (11 cases) and
+2 changed. They
+cover reading the app's answer and writing the request, the status
+line's words for each outcome, a recording against a stand-in app that
+answers "raised" and then "not-separate" when TalkBack is turned off,
+the request sent once and only when the sound collector says the
+capture has begun, no request without a percent, the sound collector
+saying so at the first packet only, and the record's checks. None of
+that shows Android accepting the companion's change on the Pixel, or
+the volume being that of the capture. Tests 33 to 36 do.
+
+TalkBack is needed for tests 34 and 36 only; each says when to turn it
+on and off.
+
+### Test 33: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Connect the Pixel by USB, unlocked. Start the recorder from the Start
+   menu, and in "Recording target" choose "Android device".
+4. The panel offers "Install companion app". Choose it, and wait until
+   the panel shows "Companion app: installed, on, and answering".
+5. Read the companion line and the note under "Android device checks".
+
+**On screen:** the build ends with `INSTALLER BUILT`. Before step 4 the
+companion line says the installed version code is older than the
+recorder's. In step 5 it reads "Companion app: installed, on, and
+answering (version 1.1.0, version code" with a number, and ends
+"protocol 2)." The note reads "A recording of the phone records the
+companion app's connection, the phone's clock, its display's rotation
+and size, and the phone's screen as a video stream and as a picture for
+each change, which the player shows and an MP4 export saves. It also
+records the phone's sound, shows its level while recording and plays it
+on this PC, and records this PC's microphone. When TalkBack is on, the
+companion app raises the phone's Accessibility volume to at least 80% as
+the recording starts and leaves it there. The phone's sound in the
+player and in an MP4 export, touches and accessibility evidence come in
+later parts."
+
+### Test 34: a lowered Accessibility volume raised to 80%
+
+Before the test, turn on TalkBack, and go to the phone's home screen.
+
+1. In the recorder, choose "Start recording", and wait 10 seconds.
+2. Press the phone's volume-up key, open the volume panel's settings,
+   set "Accessibility volume" to about 30%, then choose "Stop
+   recording".
+3. Choose "Start recording", and wait 10 seconds.
+4. Take a screenshot of "Collector status" under "Current session".
+5. Press the phone's volume-up key, open the volume panel's settings,
+   and read where the "Accessibility volume" slider is. Then choose
+   "Stop recording", and leave TalkBack on.
+
+**On screen:** in step 4 the "android.companion" line starts
+"android.companion: Running, Healthy." and ends "Accessibility volume
+raised from" a number of steps, "of" the largest step, "steps" and a
+percentage near 30%, "to" a number of steps with a percentage of 80% or
+more, for example "raised from 8 of 25 steps (32%) to 20 of 25 steps
+(80%)." In step 5 the slider is at about 80%. If the line says "could
+not be raised", "not changed" or "could not be read", send it as it
+is. Send the screenshot, and write down where the slider was.
+
+### Test 35: the volume left alone with TalkBack off
+
+Before the test, turn TalkBack off.
+
+1. In the recorder, choose "Start recording", and wait 10 seconds.
+2. Take a screenshot of "Collector status" under "Current session".
+3. Choose "Stop recording".
+
+**On screen:** in step 2 the "android.companion" line starts
+"android.companion: Running, Healthy." and ends "Accessibility volume
+not changed: no service that uses it, such as TalkBack, is on, so it is
+the media volume." Send the screenshot.
+
+### Test 36: TalkBack turned on during a recording
+
+Before the test, check that TalkBack is off.
+
+1. In the recorder, choose "Start recording", and wait 10 seconds.
+2. On the phone, open Settings, Accessibility, TalkBack, turn on "Use
+   TalkBack", and choose "Allow" if asked.
+3. Wait 5 seconds, then take a screenshot of "Collector status" under
+   "Current session".
+4. Choose "Stop recording".
+5. Turn TalkBack off.
+
+**On screen:** in step 3 the "android.companion" line no longer ends
+"not changed". It ends either "Accessibility volume already" with a
+number of steps and a percentage of 80% or more, then "at least the 80%
+asked for", or "Accessibility volume raised from" and "to" a number of
+steps with a percentage of 80% or more. "already" is what is expected
+after test 34, if the 80% stays with the capture. Send the screenshot.
+
+### Results of part 4, step 4c
+
+None yet.

@@ -117,6 +117,47 @@ public sealed class AndroidCompanionTests
     }
 
     [Fact]
+    public void Protocol_ReadsAccessibilityVolume()
+    {
+        Assert.Equal(
+            "{\"type\":\"accessibility-volume\",\"minimumPercent\":80}\n",
+            CompanionProtocol.AccessibilityVolumeRequest(80));
+        Assert.Throws<ArgumentOutOfRangeException>(() => CompanionProtocol.AccessibilityVolumeRequest(0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => CompanionProtocol.AccessibilityVolumeRequest(101));
+
+        var raised = Assert.IsType<CompanionAccessibilityVolume>(CompanionProtocol.Parse(VolumeLine("requested", true, 5, 20, "raised", time: 77)));
+        Assert.Equal("requested", raised.Reason);
+        Assert.Equal(80, raised.MinimumPercent);
+        Assert.True(raised.Separate);
+        Assert.Equal([TalkBack], raised.Services);
+        Assert.Equal((25, 5, 20, 20), (raised.Max, raised.Before, raised.Target, raised.After));
+        Assert.Equal("raised", raised.Outcome);
+        Assert.Null(raised.Detail);
+        Assert.Equal(77, raised.Time);
+
+        var failed = Assert.IsType<CompanionAccessibilityVolume>(CompanionProtocol.Parse(
+            "{\"type\":\"accessibility-volume\",\"reason\":\"requested\",\"minimumPercent\":80,\"separate\":false,\"services\":[],\"outcome\":\"failed\",\"detail\":\"No audio service.\",\"time\":3}"));
+        Assert.Null(failed.Max);
+        Assert.Null(failed.After);
+        Assert.Equal("No audio service.", failed.Detail);
+
+        Assert.Throws<FormatException>(() => CompanionProtocol.Parse(
+            "{\"type\":\"accessibility-volume\",\"reason\":\"requested\",\"minimumPercent\":80,\"separate\":\"yes\",\"services\":[],\"outcome\":\"failed\",\"time\":3}"));
+    }
+
+    [Theory]
+    [InlineData("raised", 5, 20, "Accessibility volume raised from 5 of 25 steps (20%) to 20 of 25 steps (80%)")]
+    [InlineData("already", 22, 22, "Accessibility volume already 22 of 25 steps (88%), at least the 80% asked for")]
+    [InlineData("not-separate", 9, 9, "Accessibility volume not changed: no service that uses it, such as TalkBack, is on, so it is the media volume")]
+    [InlineData("refused", 5, 5, "Accessibility volume could not be raised: Android left it at 5 of 25 steps (20%)")]
+    public void Volume_IsDescribed(string outcome, int before, int after, string expected)
+    {
+        var volume = (CompanionAccessibilityVolume)CompanionProtocol.Parse(VolumeLine("requested", outcome != "not-separate", before, after, outcome));
+
+        Assert.Equal(expected, AndroidCompanionCollector.DescribeVolume(volume));
+    }
+
+    [Fact]
     public void Protocol_RejectsBadLines()
     {
         Assert.Throws<FormatException>(() => CompanionProtocol.Parse("hello"));
@@ -159,11 +200,12 @@ public sealed class AndroidCompanionTests
     [Fact]
     public async Task Connection_OtherProtocol_IsRefused()
     {
-        await using var app = new FakeApp(greeting: FakeApp.Hello(protocol: 2));
+        // The companion app from before slice 4, step 4c.
+        await using var app = new FakeApp(greeting: FakeApp.Hello(protocol: 1));
 
         var exception = await Assert.ThrowsAsync<CompanionUnavailableException>(() => app.ConnectAsync());
 
-        Assert.Contains("protocol 2", exception.Message);
+        Assert.Contains("speaks protocol 1; this recorder speaks 2", exception.Message);
     }
 
     [Fact]
@@ -179,7 +221,7 @@ public sealed class AndroidCompanionTests
 
         await using (var connection = await CompanionLink.OpenAsync(adb, Serial, CompanionLink.StopwatchNanoseconds, CancellationToken.None))
         {
-            Assert.Equal(1, connection.Hello.Protocol);
+            Assert.Equal(CompanionProtocol.Version, connection.Hello.Protocol);
         }
 
         Assert.Contains($"-s {Serial} forward --remove tcp:{app.Port}", adb.Commands);
@@ -397,6 +439,98 @@ public sealed class AndroidCompanionTests
     }
 
     [Fact]
+    public async Task Collector_AsksForAccessibilityVolume_AndRecordsEachAnswer()
+    {
+        await using var app = new FakeApp(volumeReply: percent =>
+            VolumeLine("requested", true, 5, 20, "raised", percent: percent, time: CompanionLink.StopwatchNanoseconds() + FakeApp.PhoneOffset));
+        var sink = new ListSink();
+        var clock = new SessionClock();
+        await using var collector = new AndroidCompanionCollector(
+            new ScriptedAdb(_ => new AdbResult(1, "", "")),
+            Serial,
+            (now, _) => app.ConnectAsync(now),
+            AndroidCompanionCollector.AccessibilityVolumePercent);
+        await collector.InitializeAsync(new CollectorInitializationContext("session-1", Path.GetTempPath(), clock, sink), CancellationToken.None);
+
+        await collector.StartAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
+        // Asked only when the sound collector says the capture has begun, and once.
+        await WaitUntilAsync(() => collector.Mapper.SampleCount >= 2);
+        Assert.Empty(app.VolumeRequests);
+        collector.RaiseAccessibilityVolume();
+        collector.RaiseAccessibilityVolume();
+        await WaitUntilAsync(() => Volumes(sink).Count >= 1);
+        Assert.EndsWith(", Accessibility volume raised from 5 of 25 steps (20%) to 20 of 25 steps (80%).", collector.Summary);
+        // TalkBack is turned off during the recording.
+        await app.SendAsync(VolumeLine("services-changed", false, 20, 20, "not-separate", time: CompanionLink.StopwatchNanoseconds() + FakeApp.PhoneOffset));
+        await WaitUntilAsync(() => Volumes(sink).Count >= 2);
+        await collector.StopAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
+
+        Assert.Equal([80], app.VolumeRequests);
+        Assert.Equal(CollectorHealthState.Healthy, collector.HealthState);
+        Assert.Contains("Accessibility volume not changed: no service that uses it", collector.Summary);
+        var validator = new EventRecordValidator("session-1");
+        Assert.All(sink.Records, record => Assert.Empty(validator.Validate(record)));
+        var volumes = Volumes(sink);
+        Assert.Equal(["requested", "services-changed"], volumes.Select(record => record.Payload.GetProperty("reason").GetString()));
+        Assert.Equal(["raised", "not-separate"], volumes.Select(record => record.Payload.GetProperty("outcome").GetString()));
+        Assert.All(volumes, volume => Assert.Equal(AndroidCompanionRecords.ClockDomain, volume.NativeTimestamp!.Domain));
+        Assert.Equal(20, volumes[0].Payload.GetProperty("after").GetInt32());
+        Assert.Equal(TalkBack, volumes[0].Payload.GetProperty("services")[0].GetString());
+    }
+
+    [Fact]
+    public async Task Collector_WithoutAPercent_DoesNotAsk()
+    {
+        await using var app = new FakeApp();
+        var sink = new ListSink();
+        var clock = new SessionClock();
+        await using var collector = new AndroidCompanionCollector(
+            new ScriptedAdb(_ => new AdbResult(1, "", "")),
+            Serial,
+            (now, _) => app.ConnectAsync(now));
+        await collector.InitializeAsync(new CollectorInitializationContext("session-1", Path.GetTempPath(), clock, sink), CancellationToken.None);
+
+        await collector.StartAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
+        await WaitUntilAsync(() => collector.Mapper.SampleCount >= 2);
+        collector.RaiseAccessibilityVolume();
+        await Task.Delay(200, TestContext.Current.CancellationToken);
+        await collector.StopAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
+
+        Assert.Empty(app.VolumeRequests);
+        Assert.Empty(Volumes(sink));
+        Assert.DoesNotContain("Accessibility volume", collector.Summary);
+    }
+
+    [Theory]
+    [InlineData("{\"reason\":\"requested\",\"minimumPercent\":80,\"separate\":true,\"services\":[\"a/b\"],\"max\":25,\"before\":20,\"target\":20,\"after\":20,\"outcome\":\"raised\",\"detail\":null}", "android-volume-order")]
+    [InlineData("{\"reason\":\"requested\",\"minimumPercent\":80,\"separate\":true,\"services\":[\"a/b\"],\"max\":25,\"before\":5,\"target\":30,\"after\":5,\"outcome\":\"refused\",\"detail\":null}", "android-volume-order")]
+    [InlineData("{\"reason\":\"requested\",\"minimumPercent\":80,\"separate\":true,\"services\":[\"a/b\"],\"max\":null,\"before\":null,\"target\":null,\"after\":null,\"outcome\":\"already\",\"detail\":null}", "android-volume-steps")]
+    [InlineData("{\"reason\":\"requested\",\"minimumPercent\":180,\"separate\":true,\"services\":[\"a/b\"],\"max\":25,\"before\":22,\"target\":20,\"after\":22,\"outcome\":\"already\",\"detail\":null}", "android-volume-percent")]
+    public async Task VolumeRecord_BadValues_AreRejected(string payload, string code)
+    {
+        await using var collector = new AndroidCompanionCollector(new ScriptedAdb(_ => new AdbResult(1, "", "")), Serial);
+        var record = RecorderEventFactory.Create(
+            "session-1",
+            collector.Descriptor,
+            AndroidCompanionRecords.CompanionChannel,
+            1,
+            1_000,
+            AndroidCompanionRecords.AccessibilityVolumeEventType,
+            JsonDocument.Parse(payload).RootElement,
+            []);
+
+        Assert.Contains(new EventRecordValidator("session-1").Validate(record), issue => issue.Code == code);
+    }
+
+    private static List<RecorderEvent> Volumes(ListSink sink) =>
+        [.. sink.Records.Where(record => record.EventType == AndroidCompanionRecords.AccessibilityVolumeEventType)];
+
+    /// <summary>An Accessibility volume answer with 25 steps and a target of 20.</summary>
+    private static string VolumeLine(string reason, bool separate, int before, int after, string outcome, int percent = 80, long time = 1) =>
+        $"{{\"type\":\"accessibility-volume\",\"reason\":\"{reason}\",\"minimumPercent\":{percent},\"separate\":{(separate ? "true" : "false")}," +
+        $"\"services\":[{(separate ? "\"" + TalkBack + "\"" : "")}],\"max\":25,\"before\":{before},\"target\":20,\"after\":{after},\"outcome\":\"{outcome}\",\"time\":{time}}}";
+
+    [Fact]
     public async Task Collector_CompanionUnreachable_RecordsWhyAndGoesOn()
     {
         var sink = new ListSink();
@@ -556,21 +690,36 @@ public sealed class AndroidCompanionTests
 
         private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
         private readonly string? _greeting;
+        private readonly Func<int, string>? _volumeReply;
+        private readonly List<int> _volumeRequests = [];
         private readonly CancellationTokenSource _stop = new();
         private readonly TaskCompletionSource<NetworkStream> _client = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly SemaphoreSlim _write = new(1, 1);
         private Task? _serving;
 
-        public FakeApp(string? greeting = "default")
+        public FakeApp(string? greeting = "default", Func<int, string>? volumeReply = null)
         {
             _greeting = greeting == "default" ? Hello() : greeting;
+            _volumeReply = volumeReply;
             _listener.Start();
             _serving = Task.Run(ServeAsync);
         }
 
         public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
 
-        public static string Hello(int protocol = 1) =>
+        /// <summary>The minimum percents the recorder asked for, in order.</summary>
+        public IReadOnlyList<int> VolumeRequests
+        {
+            get
+            {
+                lock (_volumeRequests)
+                {
+                    return [.. _volumeRequests];
+                }
+            }
+        }
+
+        public static string Hello(int protocol = CompanionProtocol.Version) =>
             $"{{\"type\":\"hello\",\"protocol\":{protocol},\"versionName\":\"1.1.0\",\"versionCode\":685,\"androidRelease\":\"17\",\"sdk\":37,\"time\":{Now()}}}";
 
         public async Task<CompanionConnection> ConnectAsync(Func<long>? now = null)
@@ -632,6 +781,22 @@ public sealed class AndroidCompanionTests
                 {
                     var received = Now();
                     using var request = JsonDocument.Parse(line);
+                    if (request.RootElement.GetProperty("type").GetString() == "accessibility-volume")
+                    {
+                        var percent = request.RootElement.GetProperty("minimumPercent").GetInt32();
+                        lock (_volumeRequests)
+                        {
+                            _volumeRequests.Add(percent);
+                        }
+
+                        if (_volumeReply is not null)
+                        {
+                            await WriteAsync(stream, _volumeReply(percent));
+                        }
+
+                        continue;
+                    }
+
                     var id = request.RootElement.GetProperty("id").GetInt64();
                     await WriteAsync(stream, $"{{\"type\":\"clock\",\"id\":{id},\"received\":{received},\"sent\":{Now()}}}");
                 }

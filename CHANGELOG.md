@@ -198,6 +198,20 @@ Changes on `main` since 1.1.0, not yet released.
 - The player and the MP4 export do not treat the phone's sound as its
   own track yet (part 4b).
 
+### Android recording, part 4c: the Accessibility volume
+
+- When the first sound packet arrives, the companion app raises the
+  phone's Accessibility volume to at least 80% if TalkBack, or another
+  service that uses it, is on. It never lowers it, and leaves it there
+  when the recording ends. With no such service on, it changes nothing,
+  as the Accessibility volume is then the media volume.
+- If TalkBack is turned on or off during a recording, on Android 13 and
+  later, the app does the same again.
+- Each answer is an `accessibility-volume` record on `android.companion`,
+  and the companion's status line ends with it.
+- The companion app's protocol is 2. A companion app of protocol 1 is
+  refused, and the checks panel offers to install the recorder's own.
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now

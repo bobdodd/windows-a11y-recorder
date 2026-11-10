@@ -15,6 +15,7 @@ import android.os.Process;
 import android.util.Log;
 import android.view.Display;
 import android.view.Surface;
+import android.view.accessibility.AccessibilityManager;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -42,13 +43,18 @@ import java.util.concurrent.RejectedExecutionException;
  * companion sends "hello" and then "display". It answers each "clock"
  * request with its System.nanoTime() when the request was read and when the
  * reply was sent, and sends "display" again whenever the display's rotation
- * or size changes. See docs/architecture/android-implementation-plan.md,
- * slice 2, and src/Recorder.Collectors.Android/CompanionProtocol.cs, which
+ * or size changes. From protocol 2 it answers an "accessibility-volume"
+ * request by raising the phone's Accessibility volume to at least the share
+ * asked for (see {@link AccessibilityVolume}), and, for a connection that
+ * asked, does so again and says so whenever the volume becomes separate or
+ * stops being separate, as when TalkBack is turned on or off during a
+ * recording. See docs/architecture/android-implementation-plan.md, slices 2
+ * and 4, and src/Recorder.Collectors.Android/CompanionProtocol.cs, which
  * must agree with this file.
  */
 final class RecorderLink {
     static final String SOCKET_NAME = "a11yrecorder_companion";
-    static final int PROTOCOL = 1;
+    static final int PROTOCOL = 2;
     private static final String TAG = "A11yRecorderCompanion";
 
     private final Context context;
@@ -63,6 +69,10 @@ final class RecorderLink {
     private DisplayManager displayManager;
     private DisplayManager.DisplayListener displayListener;
     private volatile String lastDisplay = "";
+    private AccessibilityManager accessibilityManager;
+    private AccessibilityManager.AccessibilityServicesStateChangeListener servicesListener;
+    // Used on the sender thread only.
+    private boolean lastSeparate;
 
     RecorderLink(Context context) {
         this.context = context;
@@ -102,6 +112,15 @@ final class RecorderLink {
             lastDisplay = displayKey();
         }
 
+        // The listener taking an executor is in Android 13 (API 33) and
+        // later; on earlier phones the volume is raised only when asked.
+        accessibilityManager = context.getSystemService(AccessibilityManager.class);
+        if (accessibilityManager != null && Build.VERSION.SDK_INT >= 33) {
+            lastSeparate = AccessibilityVolume.servicesUsingIt(context).length() > 0;
+            servicesListener = manager -> servicesChanged();
+            accessibilityManager.addAccessibilityServicesStateChangeListener(sender, servicesListener);
+        }
+
         acceptThread = new Thread(this::acceptLoop, "A11y Recorder link");
         acceptThread.setDaemon(true);
         acceptThread.start();
@@ -111,6 +130,9 @@ final class RecorderLink {
         stopping = true;
         if (displayManager != null && displayListener != null) {
             displayManager.unregisterDisplayListener(displayListener);
+        }
+        if (accessibilityManager != null && servicesListener != null) {
+            accessibilityManager.removeAccessibilityServicesStateChangeListener(servicesListener);
         }
         sender.shutdownNow();
         for (Client client : clients) {
@@ -175,6 +197,23 @@ final class RecorderLink {
         lastDisplay = key;
         for (Client client : clients) {
             client.sendDisplay("changed");
+        }
+    }
+
+    // On the sender thread. Services are turned on and off for many
+    // reasons, so a connection hears only when the Accessibility volume
+    // becomes separate or stops being separate.
+    private void servicesChanged() {
+        if (stopping) {
+            return;
+        }
+        boolean separate = AccessibilityVolume.servicesUsingIt(context).length() > 0;
+        if (separate == lastSeparate) {
+            return;
+        }
+        lastSeparate = separate;
+        for (Client client : clients) {
+            client.sendVolume("services-changed");
         }
     }
 
@@ -256,6 +295,9 @@ final class RecorderLink {
     private final class Client {
         private final LocalSocket socket;
         private final Object writeLock = new Object();
+        // The share of the Accessibility volume this connection asked for,
+        // or 0 if it has not asked.
+        private volatile int volumeMinimum;
         // Written and used under writeLock only.
         private OutputStream output;
 
@@ -311,8 +353,28 @@ final class RecorderLink {
                     reply.put("sent", System.nanoTime());
                     write(reply);
                 }
+            } else if ("accessibility-volume".equals(type)) {
+                int minimum = request.optInt("minimumPercent", 0);
+                if (minimum < 1 || minimum > 100) {
+                    sendError("minimumPercent must be from 1 to 100");
+                    return;
+                }
+                volumeMinimum = minimum;
+                send(AccessibilityVolume.raise(context, minimum, "requested"));
             } else {
                 sendError("unknown type: " + type);
+            }
+        }
+
+        void sendVolume(String reason) {
+            int minimum = volumeMinimum;
+            if (minimum == 0) {
+                return;
+            }
+            try {
+                send(AccessibilityVolume.raise(context, minimum, reason));
+            } catch (IOException | JSONException exception) {
+                close();
             }
         }
 

@@ -15,6 +15,9 @@ public sealed class CompanionUnavailableException(string message, Exception? inn
 /// <summary>A display message and the session time the recorder read it.</summary>
 public sealed record ReceivedDisplay(CompanionDisplay Display, long ReceivedAt);
 
+/// <summary>An Accessibility volume message and the session time the recorder read it.</summary>
+public sealed record ReceivedAccessibilityVolume(CompanionAccessibilityVolume Volume, long ReceivedAt);
+
 /// <summary>
 /// One connection to the companion app. The app sends its greeting first;
 /// after that the recorder asks for clock samples and the app sends display
@@ -31,6 +34,8 @@ public sealed class CompanionConnection : IAsyncDisposable
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly ConcurrentDictionary<long, TaskCompletionSource<(CompanionClockReply Reply, long At)>> _pending = new();
     private readonly Channel<ReceivedDisplay> _displays = Channel.CreateUnbounded<ReceivedDisplay>(
+        new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<ReceivedAccessibilityVolume> _volumes = Channel.CreateUnbounded<ReceivedAccessibilityVolume>(
         new UnboundedChannelOptions { SingleReader = true });
     private readonly CancellationTokenSource _closing = new();
     private Task? _readLoop;
@@ -52,6 +57,9 @@ public sealed class CompanionConnection : IAsyncDisposable
 
     /// <summary>Display messages, in the order they arrived; completes when the connection ends.</summary>
     public ChannelReader<ReceivedDisplay> Displays => _displays.Reader;
+
+    /// <summary>Accessibility volume messages, in the order they arrived; completes when the connection ends.</summary>
+    public ChannelReader<ReceivedAccessibilityVolume> AccessibilityVolumes => _volumes.Reader;
 
     /// <summary>Completes when the connection ends, with the reason it ended.</summary>
     public Task<string> Closed => _closed.Task;
@@ -184,6 +192,29 @@ public sealed class CompanionConnection : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Asks the app to raise the Accessibility volume; its answer comes on
+    /// <see cref="AccessibilityVolumes"/>.
+    /// </summary>
+    public async Task RequestAccessibilityVolumeAsync(int minimumPercent, CancellationToken cancellation)
+    {
+        var bytes = Encoding.UTF8.GetBytes(CompanionProtocol.AccessibilityVolumeRequest(minimumPercent));
+        await _writeLock.WaitAsync(cancellation).ConfigureAwait(false);
+        try
+        {
+            await _stream.WriteAsync(bytes, cancellation).ConfigureAwait(false);
+            await _stream.FlushAsync(cancellation).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+            throw new CompanionUnavailableException($"The connection to the companion app failed: {ex.Message}", ex);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
     private async Task ReadLoopAsync()
     {
         // adb's forward closes the connection in the same way whether the
@@ -224,6 +255,9 @@ public sealed class CompanionConnection : IAsyncDisposable
                     case CompanionDisplay display:
                         _displays.Writer.TryWrite(new ReceivedDisplay(display, at));
                         break;
+                    case CompanionAccessibilityVolume volume:
+                        _volumes.Writer.TryWrite(new ReceivedAccessibilityVolume(volume, at));
+                        break;
                     case CompanionError error:
                         LastAppError = error.Message;
                         break;
@@ -241,6 +275,7 @@ public sealed class CompanionConnection : IAsyncDisposable
         finally
         {
             _displays.Writer.TryComplete();
+            _volumes.Writer.TryComplete();
             foreach (var waiting in _pending.Values)
             {
                 waiting.TrySetException(new CompanionUnavailableException(reason));
@@ -273,6 +308,7 @@ public sealed class CompanionConnection : IAsyncDisposable
 
         _closed.TrySetResult("The recorder closed the connection.");
         _displays.Writer.TryComplete();
+        _volumes.Writer.TryComplete();
         _reader.Dispose();
         _closing.Dispose();
         if (_onDispose is not null)

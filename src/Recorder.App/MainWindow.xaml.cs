@@ -303,17 +303,23 @@ public partial class MainWindow : Window
     // collector comes after the screen collector, whose server sends the
     // sound, and so stops before it (slice 4). The PC's microphone is
     // recorded with the phone, as the design decided ("phone plus PC's mic").
+    // When the first sound packet arrives, the companion raises the phone's
+    // Accessibility volume to at least 80% and leaves it there (slice 4,
+    // step 4c).
     private static Recorder.Contracts.ICaptureCollector[] AndroidCollectors(string serial)
     {
         var adb = new AdbProcess(AndroidTools.Adb(AndroidTools.DataFolder));
-        var companion = new AndroidCompanionCollector(adb, serial);
+        var companion = new AndroidCompanionCollector(
+            adb,
+            serial,
+            accessibilityVolumePercent: AndroidCompanionCollector.AccessibilityVolumePercent);
         var server = Path.Combine(AndroidTools.BundledFolder(AppContext.BaseDirectory), AndroidTools.ScrcpyServer.Name);
         var screen = new AndroidScreenCollector(adb, serial, server, companion);
         return
         [
             companion,
             screen,
-            new AndroidSoundCollector(serial, screen, companion),
+            new AndroidSoundCollector(serial, screen, companion, companion.RaiseAccessibilityVolume),
             new Recorder.Collectors.Audio.AudioCollector(new Recorder.Collectors.Audio.AudioCaptureOptions(true, false))
         ];
     }

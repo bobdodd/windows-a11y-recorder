@@ -151,6 +151,9 @@ internal static class EventPayloadValidator
             case (Recorder.Contracts.AndroidCompanionRecords.CompanionChannel, Recorder.Contracts.AndroidCompanionRecords.UnavailableEventType):
                 ValidateAndroidCompanionUnavailable(payload, issues);
                 break;
+            case (Recorder.Contracts.AndroidCompanionRecords.CompanionChannel, Recorder.Contracts.AndroidCompanionRecords.AccessibilityVolumeEventType):
+                ValidateAndroidAccessibilityVolume(payload, issues);
+                break;
             case (Recorder.Contracts.AndroidCompanionRecords.ClockChannel, Recorder.Contracts.AndroidCompanionRecords.ClockSampleEventType):
                 ValidateAndroidClockSample(payload, issues);
                 break;
@@ -1863,6 +1866,62 @@ internal static class EventPayloadValidator
                 RequiredBoolean("connectionLost")
             ],
             issues);
+
+    // What the companion app found and did when asked to raise the
+    // Accessibility volume (slice 4, step 4c). The steps are null only when
+    // the phone has no audio service, and a raise never lowers it.
+    private static void ValidateAndroidAccessibilityVolume(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredEnum("reason", [.. Recorder.Contracts.AndroidCompanionRecords.AccessibilityVolumeReasons]),
+                RequiredInteger("minimumPercent", positive: true),
+                RequiredBoolean("separate"),
+                RequiredStringArray("services"),
+                NullableInteger("max", positive: true),
+                NullableInteger("before", nonnegative: true),
+                NullableInteger("target", nonnegative: true),
+                NullableInteger("after", nonnegative: true),
+                RequiredEnum("outcome", [.. Recorder.Contracts.AndroidCompanionRecords.AccessibilityVolumeOutcomes]),
+                NullableString("detail")
+            ],
+            issues);
+        int? Read(string name) =>
+            payload.TryGetProperty(name, out var value) && IsInteger(value) ? (int)value.GetInt64() : null;
+        if (Read("minimumPercent") is > 100)
+        {
+            AddError(
+                issues,
+                "android-volume-percent",
+                "#/payload/minimumPercent",
+                "minimumPercent must be from 1 to 100.");
+        }
+
+        var outcome = payload.TryGetProperty("outcome", out var outcomeValue) && outcomeValue.ValueKind == JsonValueKind.String
+            ? outcomeValue.GetString()
+            : null;
+        var steps = new[] { Read("max"), Read("before"), Read("target"), Read("after") };
+        if (outcome is not null && outcome != "failed" && steps.Any(step => step is null))
+        {
+            AddError(
+                issues,
+                "android-volume-steps",
+                "#/payload",
+                "max, before, target and after are null only when the outcome is failed.");
+        }
+        else if (steps is [{ } max, { } before, { } target, { } after] &&
+                 (before > max || target > max || after > max || (outcome == "raised" && after <= before)))
+        {
+            AddError(
+                issues,
+                "android-volume-order",
+                "#/payload",
+                "Volume steps cannot be above max, and a raised volume must end above where it began.");
+        }
+    }
 
     private static void ValidateAndroidClockSample(
         JsonElement payload,

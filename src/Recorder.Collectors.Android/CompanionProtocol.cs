@@ -13,7 +13,8 @@ namespace Recorder.Collectors.Android;
 /// </summary>
 public static class CompanionProtocol
 {
-    public const int Version = 1;
+    /// <summary>2 from slice 4, step 4c, which added the Accessibility volume request.</summary>
+    public const int Version = 2;
 
     /// <summary>The companion app's socket, in Linux's abstract namespace.</summary>
     public const string SocketName = "a11yrecorder_companion";
@@ -26,6 +27,19 @@ public static class CompanionProtocol
     /// <summary>A clock request; the app answers with the same id.</summary>
     public static string ClockRequest(long id) =>
         "{\"type\":\"clock\",\"id\":" + id.ToString(CultureInfo.InvariantCulture) + "}\n";
+
+    /// <summary>
+    /// Asks the app to raise the phone's Accessibility volume to at least
+    /// this share of its largest step, now and whenever it becomes separate
+    /// from the media volume while the connection lasts.
+    /// </summary>
+    public static string AccessibilityVolumeRequest(int minimumPercent)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(minimumPercent, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(minimumPercent, 100);
+        return "{\"type\":\"accessibility-volume\",\"minimumPercent\":" +
+            minimumPercent.ToString(CultureInfo.InvariantCulture) + "}\n";
+    }
 
     /// <summary>
     /// Reads one line from the app. A line that is not a JSON object with a
@@ -72,6 +86,18 @@ public static class CompanionProtocol
                     Int(root, "modeWidth"),
                     Int(root, "modeHeight"),
                     Long(root, "time")),
+                "accessibility-volume" => new CompanionAccessibilityVolume(
+                    String(root, "reason"),
+                    Int(root, "minimumPercent"),
+                    Bool(root, "separate"),
+                    Strings(root, "services"),
+                    OptionalInt(root, "max"),
+                    OptionalInt(root, "before"),
+                    OptionalInt(root, "target"),
+                    OptionalInt(root, "after"),
+                    String(root, "outcome"),
+                    root.TryGetProperty("detail", out var detail) && detail.ValueKind == JsonValueKind.String ? detail.GetString() : null,
+                    Long(root, "time")),
                 "error" => new CompanionError(String(root, "message")),
                 _ => new CompanionUnknown(type)
             };
@@ -98,6 +124,35 @@ public static class CompanionProtocol
             ? number
             : throw new FormatException($"The companion app's \"{name}\" is not a whole number.");
     }
+
+    private static bool Bool(JsonElement root, string name)
+    {
+        var value = Member(root, name);
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => throw new FormatException($"The companion app's \"{name}\" is not true or false.")
+        };
+    }
+
+    private static IReadOnlyList<string> Strings(JsonElement root, string name)
+    {
+        var value = Member(root, name);
+        if (value.ValueKind != JsonValueKind.Array)
+        {
+            throw new FormatException($"The companion app's \"{name}\" is not a list.");
+        }
+
+        return value.EnumerateArray()
+            .Select(item => item.ValueKind == JsonValueKind.String
+                ? item.GetString()!
+                : throw new FormatException($"The companion app's \"{name}\" holds something that is not text."))
+            .ToArray();
+    }
+
+    private static int? OptionalInt(JsonElement root, string name) =>
+        root.TryGetProperty(name, out _) ? Int(root, name) : null;
 
     private static int Int(JsonElement root, string name)
     {
@@ -132,6 +187,32 @@ public sealed record CompanionDisplay(
     int Rotation,
     int ModeWidth,
     int ModeHeight,
+    long Time) : CompanionMessage;
+
+/// <summary>
+/// What the app found and did when asked to raise the Accessibility volume
+/// (RecorderLink.java and AccessibilityVolume.java), in volume steps.
+/// </summary>
+/// <param name="Reason">"requested", or "services-changed" when the volume became separate or stopped being separate.</param>
+/// <param name="Separate">True when a service that asks for a separate Accessibility volume, such as TalkBack, is on.</param>
+/// <param name="Services">Those services, as Android names them.</param>
+/// <param name="Outcome">
+/// "raised"; "already", at or above the target; "not-separate", left alone
+/// as it is the media volume; "refused", Android did not change it; or
+/// "failed", the phone has no audio service.
+/// </param>
+/// <param name="Time">The phone's CLOCK_MONOTONIC when it was sent, in nanoseconds.</param>
+public sealed record CompanionAccessibilityVolume(
+    string Reason,
+    int MinimumPercent,
+    bool Separate,
+    IReadOnlyList<string> Services,
+    int? Max,
+    int? Before,
+    int? Target,
+    int? After,
+    string Outcome,
+    string? Detail,
     long Time) : CompanionMessage;
 
 public sealed record CompanionError(string Message) : CompanionMessage;

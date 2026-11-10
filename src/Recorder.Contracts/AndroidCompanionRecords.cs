@@ -25,6 +25,9 @@ public static class AndroidCompanionRecords
     public const string ClockSampleEventType = "clock-sample";
     public const string DisplayEventType = "display-state";
 
+    /// <summary>What the companion app found and did when asked to raise the Accessibility volume (slice 4, step 4c).</summary>
+    public const string AccessibilityVolumeEventType = "accessibility-volume";
+
     /// <summary>The phone's CLOCK_MONOTONIC, in nanoseconds.</summary>
     public const string ClockDomain = "android-monotonic";
 
@@ -48,6 +51,10 @@ public static class AndroidCompanionRecords
     public static IReadOnlyList<string> DisplayReasons { get; } = [InitialReason, ChangedReason];
 
     public static IReadOnlyList<int> Rotations { get; } = [0, 90, 180, 270];
+
+    public static IReadOnlyList<string> AccessibilityVolumeReasons { get; } = ["requested", "services-changed"];
+
+    public static IReadOnlyList<string> AccessibilityVolumeOutcomes { get; } = ["raised", "already", "not-separate", "refused", "failed"];
 }
 
 /// <summary>The companion app's greeting when the recorder connects.</summary>
@@ -80,3 +87,25 @@ public sealed record AndroidClockSample(
 
 /// <summary>The phone display's rotation, in degrees, and its display mode's size in pixels.</summary>
 public sealed record AndroidDisplayState(string Reason, int Rotation, int ModeWidth, int ModeHeight);
+
+/// <summary>
+/// What the companion app found and did when asked to raise the phone's
+/// Accessibility volume to at least <paramref name="MinimumPercent"/> of its
+/// largest step, in volume steps. The volume steps are null when the phone
+/// has no audio service.
+/// </summary>
+/// <param name="Reason">"requested" at the start, or "services-changed" when the volume became separate from the media volume, or stopped being separate, during the recording.</param>
+/// <param name="Separate">True when a service that asks for a separate Accessibility volume, such as TalkBack, was on.</param>
+/// <param name="Services">Those services, as Android names them.</param>
+/// <param name="Outcome">raised, already, not-separate, refused or failed.</param>
+public sealed record AndroidAccessibilityVolume(
+    string Reason,
+    int MinimumPercent,
+    bool Separate,
+    IReadOnlyList<string> Services,
+    int? Max,
+    int? Before,
+    int? Target,
+    int? After,
+    string Outcome,
+    string? Detail);

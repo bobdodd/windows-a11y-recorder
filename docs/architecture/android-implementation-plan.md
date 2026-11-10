@@ -671,8 +671,9 @@ slice's full test goes into a validation plan,
   before the next: 4a stores the sound with its times, shows its level
   and the quiet message while recording, plays it on the PC, and adds the
   PC's microphone; 4b gives it a "Phone sound" lane and slider in the
-  player and makes the MP4 export treat it as the system sound; 4c checks
-  setting the volume over adb. Playing the sound on the PC and recording
+  player and makes the MP4 export treat it as the system sound; 4c raises
+  the phone's Accessibility volume as the recording starts. The owner
+  chose on 2026-11-09 to build 4c before 4b. Playing the sound on the PC and recording
   the PC's microphone are in the design ([Recording an Android
   device](android-recording.md), "Device sound", and the owner's answer
   "phone plus PC's mic") but were missing from this slice until 4a.
@@ -689,17 +690,29 @@ slice's full test goes into a validation plan,
   now." The threshold is set from check 1: a loudest half second of 2.9%
   of full scale was too quiet to use, and 32.0% at about 80%
   Accessibility volume was usable.
-- **Volume over adb.** Not checked. Android's shell has
-  `media_session volume --stream <n> --get` and `--set`
-  ([AOSP, VolumeCtrl.java](https://github.com/aosp-mirror/platform_frameworks_base/blob/1cdfff555f4a21f71ccc978290e2e212e2f8b168/services/core/java/com/android/server/media/VolumeCtrl.java)).
-  Step 4c checks whether it reads and sets the Accessibility volume on
-  the Pixel, and whether setting it during the capture changes the
-  captured level, as the volume keys do
-  ([scrcpy issue 3790](https://github.com/Genymobile/scrcpy/issues/3790#issuecomment-1472079314)).
-  If it does, the recorder offers to set it; if not, the message above is
-  all it does. The check is run by the owner: on 2026-11-09 the
-  assistant's access to the PC could not run adb (adb could not create
-  its `.android` folder there) or read the folder adb keeps its keys in.
+- **Volume over adb.** Settled from Android's source, step 4c: adb's
+  shell cannot set the Accessibility volume, but the companion app can.
+  Android's shell has `media_session volume --stream <n> --get` and
+  `--set`
+  ([AOSP, VolumeCtrl.java](https://github.com/aosp-mirror/platform_frameworks_base/blob/1cdfff555f4a21f71ccc978290e2e212e2f8b168/services/core/java/com/android/server/media/VolumeCtrl.java))
+  and `cmd audio set-volume`
+  ([AOSP, AudioManagerShellCommand.java](https://github.com/aosp-mirror/platform_frameworks_base/blob/main/services/core/java/com/android/server/audio/AudioManagerShellCommand.java)).
+  Both reach the audio service's `setStreamVolume`, which ignores a
+  change to the Accessibility volume, with only a warning in the log,
+  unless the caller holds `CHANGE_ACCESSIBILITY_VOLUME` or is an
+  accessibility service that is on (`canChangeAccessibilityVolume`,
+  [AOSP, AudioService.java](https://github.com/aosp-mirror/platform_frameworks_base/blob/main/services/core/java/com/android/server/audio/AudioService.java)).
+  The shell does not hold that permission
+  ([AOSP, Shell's AndroidManifest.xml](https://github.com/aosp-mirror/platform_frameworks_base/blob/main/packages/Shell/AndroidManifest.xml)).
+  Every accessibility service that is on is given that right
+  (`updateServicesLocked`,
+  [AOSP, AccessibilityManagerService.java](https://github.com/aosp-mirror/platform_frameworks_base/blob/main/services/accessibility/java/com/android/server/accessibility/AccessibilityManagerService.java)),
+  so the companion app sets it. That setting it during the capture
+  changes the captured level, as the volume keys do
+  ([scrcpy issue 3790](https://github.com/Genymobile/scrcpy/issues/3790#issuecomment-1472079314)),
+  was seen in test 30: the level fell from 36% to 14% when the owner
+  moved the volume. That Android accepts the companion's change on the
+  Pixel is not yet checked; step 4c's tests check it.
 - **Player and export.** The phone's sound takes the system sound's place,
   labelled "Phone sound", with its own volume slider. The MP4 export
   treats it as the system sound, as the design says.
@@ -785,6 +798,56 @@ slice's full test goes into a validation plan,
     lane and has no slider of its own, its events are counted under the
     timeline's "Other" filter, and the MP4 export does not offer it as
     the system sound; that is step 4b.
+- **Built, step 4c (2026-11-09).**
+  - **Decision.** The owner decided on 2026-11-09 that the recorder sets
+    the Accessibility volume itself, as check 1 found TalkBack usable at
+    about 80% and every recording needs it, and that it is left at that
+    level when the recording ends.
+  - **Request.** Protocol 2 of the companion app adds a request,
+    `{"type":"accessibility-volume","minimumPercent":80}`. The companion
+    collector sends it once per recording, when the sound collector reads
+    the first sound packet. The app answers with one
+    `accessibility-volume` message: whether the volume is separate, the
+    services that make it so, its largest step, the step before, the
+    target step, the step after, and the outcome. The target is the
+    smallest step at or above 80% of the largest.
+  - **When.** Android keeps a volume for each output, and `setStreamVolume`
+    sets the volume of the output the stream plays to at that moment
+    (`getDeviceForStream`, AudioService.java). While the sound is
+    captured, the phone plays to the capture (remote submix) and not to
+    its speaker, so the volume is set only once the capture is running.
+    This explains check 1, where raising the volume before the run
+    changed nothing and raising it during the run did; that explanation
+    is inference from the source. A consequence, also inference: the
+    phone's own speaker volume is not changed, and the 80% stays with the
+    capture, so the next recording should find it "already" set.
+  - **Raised only.** The app raises the volume to the target if it is
+    lower, and never lowers it ("already"). It reads the volume again
+    after setting it, as Android ignores a change it does not allow
+    without an error, and says "refused" if it did not change.
+  - **Only when separate.** The Accessibility volume is a volume of its
+    own only while a service that asks for one
+    (`FLAG_ENABLE_ACCESSIBILITY_VOLUME`), such as TalkBack, is on
+    (`isAccessibilityVolumeStreamActive`,
+    [AOSP, AccessibilityManager.java](https://github.com/aosp-mirror/platform_frameworks_base/blob/main/core/java/android/view/accessibility/AccessibilityManager.java)).
+    Otherwise Android treats it as the media volume (`updateA11yVolumeAlias`,
+    AudioService.java), and setting it would raise the media volume. So
+    with TalkBack off the app changes nothing and says "not-separate".
+  - **During the recording.** On Android 13 and later the app listens
+    for accessibility services being turned on and off. When the volume
+    becomes separate, or stops being separate, as when TalkBack is
+    turned on or off during a recording, it does the same again and
+    sends another message, with the reason "services-changed".
+  - **Recorded.** Each answer is an `accessibility-volume` event on
+    `android.companion`, placed by the companion's clock fit, and the
+    companion's status line ends with it, for example "Accessibility
+    volume raised from 9 of 25 steps (36%) to 20 of 25 steps (80%)", or
+    "Accessibility volume not changed: no service that uses it, such as
+    TalkBack, is on, so it is the media volume". The quiet message of
+    step 4a stays, for a volume lowered during the recording.
+  - **Older companion.** A companion app of protocol 1 is refused with
+    "speaks protocol 1; this recorder speaks 2", and the checks panel
+    offers to install the recorder's own, as its version code is lower.
 
 ### Slice 5: touches
 
@@ -912,7 +975,7 @@ slice's full test goes into a validation plan,
 | Video packet times are CLOCK_MONOTONIC | Inference | slice 8, one-timeline check |
 | Accessibility event times match CLOCK_MONOTONIC | Inference from source | slice 8 |
 | `adb install` avoids the restricted settings block | Checked for the recorder's way: Android 17 on the Pixel accepted `settings put` for the app installed with `adb install` (test 11) | slice 2 |
-| Accessibility volume can be read or set over adb | Not checked | slice 4 |
+| Accessibility volume can be read or set over adb | Settled from Android's source: adb's shell cannot set it; the companion app can, as an accessibility service that is on. Not yet checked on the Pixel | slice 4, step 4c |
 | "Display speech output" can be read over adb | Not checked | slice 1 |
 | PNG for every changed frame keeps up on the PC | Not measured | slice 3 |
 | Content change rate allows a snapshot per change | Not measured | slice 7 |

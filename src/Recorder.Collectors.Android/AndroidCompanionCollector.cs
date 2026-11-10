@@ -13,6 +13,12 @@ namespace Recorder.Collectors.Android;
 /// without the phone's clock. While connected it asks for a clock sample
 /// every <see cref="SampleInterval"/>, and places each display change on the
 /// session clock by the line fitted to the samples so far.
+///
+/// From slice 4, step 4c, it also asks the app, once the phone's sound is
+/// being captured (<see cref="RaiseAccessibilityVolume"/>), to raise the
+/// phone's Accessibility volume to at least
+/// <see cref="AccessibilityVolumePercent"/>, and records what the app found
+/// and did. The volume is left where it is when the recording ends.
 /// </summary>
 public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock
 {
@@ -20,11 +26,19 @@ public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock
 
     public static readonly TimeSpan SampleInterval = TimeSpan.FromMilliseconds(250);
 
+    /// <summary>
+    /// The least Accessibility volume a recording asks for, as a share of
+    /// its largest step: check 1 found TalkBack usable at about 80%, and the
+    /// owner decided on 2026-11-09 to set it and leave it there.
+    /// </summary>
+    public const int AccessibilityVolumePercent = 80;
+
     private static readonly TimeSpan ClockTimeout = TimeSpan.FromSeconds(1);
 
     private readonly IAdb _adb;
     private readonly string _serial;
     private readonly Func<Func<long>, CancellationToken, Task<CompanionConnection>> _open;
+    private readonly int? _volumePercent;
     private readonly PhoneClockMapper _mapper = new();
     private readonly object _gate = new();
     private readonly TaskCompletionSource<bool> _firstSample = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -35,6 +49,9 @@ public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock
     private Task? _sampling;
     private Task? _displays;
     private Task? _watching;
+    private Task? _volumes;
+    private Task? _volumeRequest;
+    private int _volumeAsked;
     private ulong _companionSequence;
     private ulong _clockSequence;
     private ulong _displaySequence;
@@ -43,14 +60,24 @@ public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock
     private int _missedSamples;
     private int _discontinuities;
     private volatile string? _lastDisplay;
+    private volatile string? _lastVolume;
     private bool _stopping;
 
     /// <param name="open">Opens the connection; tests give a fake app. By default, <see cref="CompanionLink.OpenAsync"/>.</param>
+    /// <param name="accessibilityVolumePercent">The least Accessibility volume to ask the app for, or null not to ask.</param>
     public AndroidCompanionCollector(
         IAdb adb,
         string serial,
-        Func<Func<long>, CancellationToken, Task<CompanionConnection>>? open = null)
+        Func<Func<long>, CancellationToken, Task<CompanionConnection>>? open = null,
+        int? accessibilityVolumePercent = null)
     {
+        if (accessibilityVolumePercent is { } percent)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(percent, 1);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(percent, 100);
+        }
+
+        _volumePercent = accessibilityVolumePercent;
         ArgumentNullException.ThrowIfNull(adb);
         ArgumentException.ThrowIfNullOrWhiteSpace(serial);
         _adb = adb;
@@ -93,6 +120,11 @@ public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock
             if (_lastDisplay is { } shown)
             {
                 text += ", " + shown;
+            }
+
+            if (_lastVolume is { } volume)
+            {
+                text += ", " + volume;
             }
 
             if (_discontinuities > 0)
@@ -193,6 +225,7 @@ public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock
         _sampling = Task.Run(() => SampleAsync(connection, token), CancellationToken.None);
         _displays = Task.Run(() => DisplaysAsync(connection, token), CancellationToken.None);
         _watching = Task.Run(() => WatchAsync(connection), CancellationToken.None);
+        _volumes = Task.Run(() => VolumesAsync(connection), CancellationToken.None);
         return CollectorTransitionResult.Success(LifecycleState);
     }
 
@@ -228,7 +261,9 @@ public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock
             await _connection.DisposeAsync().ConfigureAwait(false);
         }
 
+        await WaitQuietlyAsync(_volumeRequest).ConfigureAwait(false);
         await WaitQuietlyAsync(_displays).ConfigureAwait(false);
+        await WaitQuietlyAsync(_volumes).ConfigureAwait(false);
         await WaitQuietlyAsync(_watching).ConfigureAwait(false);
 
         LifecycleState = CollectorLifecycleState.Stopped;
@@ -251,7 +286,9 @@ public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock
             await _connection.DisposeAsync().ConfigureAwait(false);
         }
 
+        await WaitQuietlyAsync(_volumeRequest).ConfigureAwait(false);
         await WaitQuietlyAsync(_displays).ConfigureAwait(false);
+        await WaitQuietlyAsync(_volumes).ConfigureAwait(false);
         await WaitQuietlyAsync(_watching).ConfigureAwait(false);
         _running?.Dispose();
         LifecycleState = CollectorLifecycleState.Disposed;
@@ -363,6 +400,101 @@ public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock
                 clockMapping: AndroidCompanionRecords.FittedClockMapping,
                 qualityFlags: flags);
         }
+    }
+
+    /// <summary>
+    /// Asks the app, once per recording, to raise the Accessibility volume,
+    /// if this collector was given a percent and is connected; the answer is
+    /// recorded as it arrives. The sound collector calls it when the first
+    /// sound packet arrives. Android keeps a volume for each output, and
+    /// while the sound is captured the phone plays to the capture instead of
+    /// its speaker (AudioService.setStreamVolume sets the volume of the
+    /// output the stream plays to now), so the volume is set then: check 1
+    /// found a volume set before the capture changed nothing.
+    /// </summary>
+    public void RaiseAccessibilityVolume()
+    {
+        if (_volumePercent is not { } percent || _connection is not { } connection || _stopping ||
+            Interlocked.Exchange(ref _volumeAsked, 1) == 1)
+        {
+            return;
+        }
+
+        _volumeRequest = Task.Run(async () =>
+        {
+            try
+            {
+                await connection.RequestAccessibilityVolumeAsync(percent, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is CompanionUnavailableException or ObjectDisposedException)
+            {
+                // WatchAsync records the connection's end.
+            }
+        });
+    }
+
+    private async Task VolumesAsync(CompanionConnection connection)
+    {
+        await foreach (var received in connection.AccessibilityVolumes.ReadAllAsync(CancellationToken.None).ConfigureAwait(false))
+        {
+            var volume = received.Volume;
+            _lastVolume = DescribeVolume(volume);
+            var payload = new AndroidAccessibilityVolume(
+                volume.Reason,
+                volume.MinimumPercent,
+                volume.Separate,
+                volume.Services,
+                volume.Max,
+                volume.Before,
+                volume.Target,
+                volume.After,
+                volume.Outcome,
+                volume.Detail);
+            var mapped = await _firstSample.Task.ConfigureAwait(false) ? _mapper.Map(volume.Time) : null;
+            if (mapped is null)
+            {
+                Emit(
+                    AndroidCompanionRecords.CompanionChannel,
+                    ref _companionSequence,
+                    received.ReceivedAt,
+                    AndroidCompanionRecords.AccessibilityVolumeEventType,
+                    payload,
+                    native: volume.Time,
+                    qualityFlags: ["receipt-time-stamp"]);
+                continue;
+            }
+
+            Emit(
+                AndroidCompanionRecords.CompanionChannel,
+                ref _companionSequence,
+                mapped.SessionNanoseconds,
+                AndroidCompanionRecords.AccessibilityVolumeEventType,
+                payload,
+                native: volume.Time,
+                uncertainty: mapped.UncertaintyNanoseconds,
+                clockMapping: AndroidCompanionRecords.FittedClockMapping);
+        }
+    }
+
+    /// <summary>The Accessibility volume as the status line gives it.</summary>
+    public static string DescribeVolume(CompanionAccessibilityVolume volume)
+    {
+        string Steps(int? value) => value is { } steps && volume.Max is { } max and > 0
+            ? string.Create(CultureInfo.InvariantCulture, $"{steps} of {max} steps ({Math.Round(steps * 100.0 / max):0}%)")
+            : "unknown";
+
+        return volume.Outcome switch
+        {
+            "raised" => $"Accessibility volume raised from {Steps(volume.Before)} to {Steps(volume.After)}",
+            "already" => string.Create(
+                CultureInfo.InvariantCulture,
+                $"Accessibility volume already {Steps(volume.Before)}, at least the {volume.MinimumPercent}% asked for"),
+            "not-separate" =>
+                "Accessibility volume not changed: no service that uses it, such as TalkBack, is on, so it is the media volume",
+            "refused" => $"Accessibility volume could not be raised: Android left it at {Steps(volume.After)}" +
+                (volume.Detail is { } detail ? $" ({detail.TrimEnd('.')})" : ""),
+            _ => "Accessibility volume could not be read" + (volume.Detail is { } failure ? $": {failure.TrimEnd('.')}" : "")
+        };
     }
 
     private async Task WatchAsync(CompanionConnection connection)

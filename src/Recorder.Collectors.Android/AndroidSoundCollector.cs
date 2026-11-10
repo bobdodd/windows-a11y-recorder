@@ -56,6 +56,7 @@ public sealed class AndroidSoundCollector : ICaptureCollector
     private readonly string _serial;
     private readonly Func<Task<PhoneSoundSource>> _source;
     private readonly IPhoneClock? _clock;
+    private readonly Action? _captured;
     private readonly Func<IPhoneSoundOutput>? _output;
     private readonly object _gate = new();
     private readonly List<long> _delays = [];
@@ -81,11 +82,17 @@ public sealed class AndroidSoundCollector : ICaptureCollector
     /// <param name="source">The audio socket, from the screen collector's <see cref="AndroidScreenCollector.Sound"/>.</param>
     /// <param name="clock">The companion collector's clock fit; null to place every packet at its receipt.</param>
     /// <param name="output">Plays the sound on the PC; null not to play it. By default the PC's default playback device.</param>
+    /// <param name="captured">
+    /// Called once, when the first packet arrives, so the phone is playing
+    /// to the capture: the companion collector raises the Accessibility
+    /// volume then (slice 4, step 4c).
+    /// </param>
     public AndroidSoundCollector(
         string serial,
         Func<Task<PhoneSoundSource>> source,
         IPhoneClock? clock,
-        Func<IPhoneSoundOutput>? output)
+        Func<IPhoneSoundOutput>? output,
+        Action? captured = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serial);
         ArgumentNullException.ThrowIfNull(source);
@@ -93,6 +100,7 @@ public sealed class AndroidSoundCollector : ICaptureCollector
         _source = source;
         _clock = clock;
         _output = output;
+        _captured = captured;
         Descriptor = CollectorDescriptor.Create(
             Type,
             nameof(AndroidSoundCollector),
@@ -102,8 +110,8 @@ public sealed class AndroidSoundCollector : ICaptureCollector
     }
 
     /// <summary>The sound of the server the screen collector starts, played on the PC's default playback device.</summary>
-    public AndroidSoundCollector(string serial, AndroidScreenCollector screen, IPhoneClock? clock)
-        : this(serial, () => screen.Sound, clock, () => new WasapiPhoneSoundOutput())
+    public AndroidSoundCollector(string serial, AndroidScreenCollector screen, IPhoneClock? clock, Action? captured = null)
+        : this(serial, () => screen.Sound, clock, () => new WasapiPhoneSoundOutput(), captured)
     {
     }
 
@@ -382,7 +390,11 @@ public sealed class AndroidSoundCollector : ICaptureCollector
                 _level.Add(receivedAt, buffer.AsSpan(0, packet.Size));
                 Place(offset, packet.Size, pts, receivedAt, ready);
                 offset += packet.Size;
-                Interlocked.Increment(ref _packets);
+                if (Interlocked.Increment(ref _packets) == 1)
+                {
+                    _captured?.Invoke();
+                }
+
                 Interlocked.Add(ref _bytes, packet.Size);
             }
         }

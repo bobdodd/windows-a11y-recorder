@@ -134,14 +134,17 @@ public sealed class AndroidSoundTests : IDisposable
         var sink = new ListSink();
         var clock = new SessionClock();
         var speakers = new FakeOutput();
+        var captured = 0;
         await using var collector = new AndroidSoundCollector(
             Serial,
             () => Task.FromResult(new PhoneSoundSource(connection, null)),
             new FakePhoneClock(true),
-            () => speakers);
+            () => speakers,
+            () => Interlocked.Increment(ref captured));
         await collector.InitializeAsync(new CollectorInitializationContext("session-1", _folder, clock, sink), CancellationToken.None);
 
         await collector.StartAsync(new SessionBoundary(0, DateTimeOffset.UtcNow), CancellationToken.None);
+        Assert.Equal(0, captured);
         await phone.WriteAsync(stream);
         await WaitUntilAsync(() => sink.Records.Count(record => record.EventType == AndroidSoundRecords.BufferEventType) == 2);
         Assert.Matches(
@@ -151,6 +154,8 @@ public sealed class AndroidSoundTests : IDisposable
         await collector.StopAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
 
         Assert.Equal(CollectorHealthState.Healthy, collector.HealthState);
+        // Told once, at the first packet, for the Accessibility volume (step 4c).
+        Assert.Equal(1, captured);
         Assert.Equal([.. first, .. second], speakers.Played);
         Assert.True(speakers.Disposed);
 
