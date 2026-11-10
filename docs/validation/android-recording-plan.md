@@ -2180,3 +2180,60 @@ Run on the development PC with the Pixel on 2026-11-10, recording
   count ("2/3") is partly hidden at its right edge, with a horizontal
   scroll bar; and the filter "Screen reader sound" is cut off at the
   left panel's edge.
+
+## Part 6, step 6b: adb's output read as UTF-8
+
+The recorder now reads the output of every adb command as UTF-8, the
+encoding the phone writes, so "12°C" from TalkBack's log is no longer
+stored as "12Â°C" (see
+[the implementation plan](../architecture/android-implementation-plan.md),
+"Fix, step 6b").
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings, and the tests pass, 2 of them
+new: adb is started with UTF-8 named for its output and errors, and a
+line with "12°C" reads back unchanged. On Linux .NET reads UTF-8
+anyway, so they do not show the fix on Windows; test 58 does.
+
+### Test 57: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the installer
+runs to its last page.
+
+### Test 58: the weather's degree sign
+
+Before the test, on the phone, check that TalkBack's "Log output level"
+is still "Verbose" (Settings, Accessibility, TalkBack, Settings,
+Advanced settings, Developer settings). Then turn TalkBack on, and go
+to the home screen. Connect the Pixel by USB, unlocked, start the
+recorder from the Start menu, and in "Recording target" choose "Android
+device". After the test, turn TalkBack off.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. On the phone, swipe right with one finger, three times, waiting 3
+   seconds after each swipe.
+3. While it is still recording, take a screenshot of "Collector status"
+   under "Current session".
+4. Choose "Stop recording", wait until the recording has opened in the
+   player, and take a screenshot of the whole recorder window.
+
+**On screen:** in step 3 the line starting "android.talkback: Running,
+Healthy." gives "latest" and, in quotes, the weather item, such as
+"Partly cloudy day, 12°C", with the temperature followed by "°C". In
+step 4 the last teal block in the strip just above the timeline's
+bottom lane reads the same. "Â" before the degree sign in either is a
+failure. If the third item is not the weather, say what it was and
+send the screenshots anyway. Send the screenshots.

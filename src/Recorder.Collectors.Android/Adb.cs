@@ -60,6 +60,38 @@ public sealed class AdbProcess(string path) : IAdb
 {
     public string Path { get; } = path;
 
+    // adb passes on the phone's output as it is, and Android writes UTF-8.
+    // Without an encoding named, .NET reads a redirected stream on Windows
+    // with the console's code page, so "°" from TalkBack's log arrived as
+    // "Â°" (test 56, 2026-11-10).
+    private static readonly System.Text.Encoding Utf8 = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
+    /// <summary>
+    /// How adb is started for a command whose output is read: no window,
+    /// in adb's folder, with its output and errors read as UTF-8.
+    /// </summary>
+    public static ProcessStartInfo CreateStartInfo(string path, IReadOnlyList<string> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(arguments);
+        var info = new ProcessStartInfo(path)
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Utf8,
+            StandardErrorEncoding = Utf8,
+            CreateNoWindow = true,
+            WorkingDirectory = System.IO.Path.GetDirectoryName(path) ?? ""
+        };
+        foreach (var argument in arguments)
+        {
+            info.ArgumentList.Add(argument);
+        }
+
+        return info;
+    }
+
     public async Task<int> StartServerAsync(TimeSpan timeout, CancellationToken cancellation)
     {
         // Nothing is redirected: a server started with this command's
@@ -88,18 +120,7 @@ public sealed class AdbProcess(string path) : IAdb
     public IAdbRunning Start(IReadOnlyList<string> arguments, Action<string> onLine)
     {
         ArgumentNullException.ThrowIfNull(onLine);
-        var info = new ProcessStartInfo(Path)
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-            WorkingDirectory = System.IO.Path.GetDirectoryName(Path) ?? ""
-        };
-        foreach (var argument in arguments)
-        {
-            info.ArgumentList.Add(argument);
-        }
+        var info = CreateStartInfo(Path, arguments);
 
         var process = new Process { StartInfo = info, EnableRaisingEvents = true };
         var exited = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -159,18 +180,7 @@ public sealed class AdbProcess(string path) : IAdb
 
     public async Task<AdbResult> RunAsync(IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellation)
     {
-        var info = new ProcessStartInfo(Path)
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-            WorkingDirectory = System.IO.Path.GetDirectoryName(Path) ?? ""
-        };
-        foreach (var argument in arguments)
-        {
-            info.ArgumentList.Add(argument);
-        }
+        var info = CreateStartInfo(Path, arguments);
 
         using var process = Process.Start(info) ?? throw new IOException($"{Path} could not be started.");
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellation);

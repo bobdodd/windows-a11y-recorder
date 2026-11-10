@@ -291,6 +291,8 @@ Changes on `main` since 1.1.0, not yet released.
   the words the speech engine reached in it.
 - The playback index is version 22, and recordings made with part 6a
   are indexed again so that they show what TalkBack said.
+- adb's output is read as UTF-8, so text from the phone such as "12°C"
+  is no longer stored as "12Â°C".
 
 ## 1.1.0 - 2026-10-13
 

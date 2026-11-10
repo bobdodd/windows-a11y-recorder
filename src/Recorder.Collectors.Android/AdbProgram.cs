@@ -12,14 +12,7 @@ public static class AdbProgram
     /// </summary>
     public static async Task<string> VersionAsync(string adbPath, CancellationToken cancellation)
     {
-        var info = new ProcessStartInfo(adbPath, "version")
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-            WorkingDirectory = Path.GetDirectoryName(adbPath) ?? ""
-        };
+        var info = AdbProcess.CreateStartInfo(adbPath, ["version"]);
         using var process = Process.Start(info) ?? throw new IOException($"{adbPath} could not be started.");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         timeout.CancelAfter(TimeSpan.FromSeconds(15));

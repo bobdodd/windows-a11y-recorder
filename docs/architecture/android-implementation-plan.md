@@ -1284,6 +1284,17 @@ slice's full test goes into a validation plan,
     "°" from the phone was stored as "Â°", which suggests that adb's
     UTF-8 output is decoded with Windows' code page (inferred, not yet
     fixed).
+- **Fix, step 6b: adb's output read as UTF-8 (2026-11-10).** When a
+  process's output is redirected and no encoding is named, .NET reads it
+  with the console's code page on Windows, while adb passes on what the
+  phone writes, which on Android is UTF-8. Every adb command the
+  recorder reads now names UTF-8 for its output and errors:
+  `AdbProcess.CreateStartInfo` builds the start of each, for logcat,
+  `getevent`, the checks panel's commands and `adb version`. Lines
+  already stored keep the text as it was read. `AdbProcessTests` check
+  the start info and that a line with "12°C" reads back unchanged; the
+  tests run on Linux, where .NET reads UTF-8 anyway, so only test 58
+  shows the fix on Windows.
 
 ### Slice 7: accessibility events and tree
 
