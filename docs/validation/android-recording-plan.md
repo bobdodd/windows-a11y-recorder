@@ -1288,3 +1288,11 @@ after test 34, if the 80% stays with the capture. Send the screenshot.
   "android.companion: Running, Healthy." ending "Accessibility volume
   not changed: no service that uses it, such as TalkBack, is on, so it is
   the media volume."
+- 2026-11-10, test 36: passed. TalkBack was turned on about 10 seconds
+  into recording `20261110-011358-7ba2f05eef0e4abe86e263877803339c`; at
+  22 seconds the line was "android.companion: Running, Healthy." ending
+  "Accessibility volume already 12 of 15 steps (80%), at least the 80%
+  asked for.", and the "android.sound" line read "loudest in the last 10
+  seconds 36% of full scale". So the app heard TalkBack being turned on
+  and checked again, and the 80% from test 34 was still the capture's.
+  Step 4c is complete.

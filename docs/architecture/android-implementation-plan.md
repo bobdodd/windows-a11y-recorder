@@ -712,7 +712,8 @@ slice's full test goes into a validation plan,
   ([scrcpy issue 3790](https://github.com/Genymobile/scrcpy/issues/3790#issuecomment-1472079314)),
   was seen in test 30: the level fell from 36% to 14% when the owner
   moved the volume. That Android accepts the companion's change on the
-  Pixel is not yet checked; step 4c's tests check it.
+  Pixel was checked by tests 33 to 36 on 2026-11-10: it raised 5 of 15
+  steps (33%) to 12 of 15 (80%).
 - **Player and export.** The phone's sound takes the system sound's place,
   labelled "Phone sound", with its own volume slider. The MP4 export
   treats it as the system sound, as the design says.
@@ -848,6 +849,15 @@ slice's full test goes into a validation plan,
   - **Older companion.** A companion app of protocol 1 is refused with
     "speaks protocol 1; this recorder speaks 2", and the checks panel
     offers to install the recorder's own, as its version code is lower.
+  - **Tested (2026-11-10).** Tests 33 to 36 passed on the Pixel: the new
+    companion installed with protocol 2; a volume lowered to 5 of 15
+    steps during one recording was raised to 12 of 15 (80%) at the start
+    of the next, and the slider read 80%; with TalkBack off the volume
+    was left alone; and TalkBack turned on during a recording was
+    followed by "already 12 of 15 steps (80%)". A volume set during one
+    capture was what the next capture found, which fits the volume
+    staying with the capture; that the speaker's volume is kept apart is
+    still inference. Step 4c is complete.
 
 ### Slice 5: touches
 
@@ -975,7 +985,7 @@ slice's full test goes into a validation plan,
 | Video packet times are CLOCK_MONOTONIC | Inference | slice 8, one-timeline check |
 | Accessibility event times match CLOCK_MONOTONIC | Inference from source | slice 8 |
 | `adb install` avoids the restricted settings block | Checked for the recorder's way: Android 17 on the Pixel accepted `settings put` for the app installed with `adb install` (test 11) | slice 2 |
-| Accessibility volume can be read or set over adb | Settled from Android's source: adb's shell cannot set it; the companion app can, as an accessibility service that is on. Not yet checked on the Pixel | slice 4, step 4c |
+| Accessibility volume can be read or set over adb | Settled from Android's source: adb's shell cannot set it; the companion app can, as an accessibility service that is on. Checked on the Pixel by tests 34 to 36 | slice 4, step 4c |
 | "Display speech output" can be read over adb | Not checked | slice 1 |
 | PNG for every changed frame keeps up on the PC | Not measured | slice 3 |
 | Content change rate allows a snapshot per change | Not measured | slice 7 |
