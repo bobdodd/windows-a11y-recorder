@@ -1283,3 +1283,8 @@ after test 34, if the 80% stays with the capture. Send the screenshot.
   fits the volume staying with the capture. That it is kept apart from
   the phone's speaker volume is still inference. The phone has 15 steps,
   not the 25 of the examples.
+- 2026-11-10, test 35: passed. With TalkBack off, recording
+  `20261110-011117-9d9fdfe22e8a4b06aa0d9f14b15d2bbb` at 17 seconds:
+  "android.companion: Running, Healthy." ending "Accessibility volume
+  not changed: no service that uses it, such as TalkBack, is on, so it is
+  the media volume."
