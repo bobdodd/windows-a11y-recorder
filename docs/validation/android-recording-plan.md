@@ -2134,3 +2134,49 @@ starts "Double tap to activate" and ends with a count of words. No
 strip, a block marked interrupted that the next swipe did not cut off,
 or rows that do not match the block selected, is a failure. Send the
 screenshots.
+
+### Results of part 6, step 6b
+
+Run on the development PC with the Pixel on 2026-11-10, recording
+`20261110-191812-a8b5c937d33d489e82011c272213215d`, 19.5 seconds.
+
+- **Test 55: passed.** The new version was built and installed, and the
+  note under "Android device checks" ended with step 6b's sentence on
+  "TalkBack said".
+- **Test 56: passed, with the expected result corrected.** The test
+  expected three app names, each followed by its usage hint. On this
+  home screen, TalkBack's first three items were the date and weather
+  widget, which have no usage hint, so the strip had three blocks, not
+  three pairs: "Home screen 1 of 3. Home. Window Home, interrupted",
+  "Tue, Nov 10" and "Partly cloudy day, 12Â°C". The status line agreed:
+  3 utterances, 1 interrupted, 11 words reached. Each block started
+  just after a swipe's run of touch marks. The first was striped from
+  the end of its text to the start of the second swipe, where TalkBack
+  cut it off: TalkBack stopped speaking when the finger touched the
+  screen, about 0.8 seconds before it started the next item. Clicking
+  the first block selected its `utterance-started` record, talkback_1,
+  and moved the playhead there. The test did not say to scroll the
+  properties panel, where the Screen reader group comes after the
+  Magnifier, Display, keyboard and browser rows, all "not recorded" for
+  a phone; three further steps were given. With "Tue, Nov 10"
+  (talkback_2, caused by `TYPE_VIEW_ACCESSIBILITY_FOCUSED`, the phone's
+  green focus box on the date in the picture) selected, "TalkBack said"
+  read "“Tue, Nov 10”" with no interruption, set at 00:00:11.252, change
+  2 of 3, and "Words reached" read "Tue, Nov 10 (1 word)": the speech
+  engine reported one range for the whole date. The filter read
+  "TalkBack said". The record was placed with an uncertainty of 5.4 ms
+  and arrived 4.3 ms after the phone wrote it.
+- **Found: the degree sign read wrongly.** "12°C" was stored and shown
+  as "12Â°C", in the status line while recording as well as in the
+  player, so the text is wrong as it is read from adb, not as the
+  player draws it. The recorder starts adb without naming the encoding
+  of its output; "Â°" is the two UTF-8 bytes of "°" read as Windows'
+  Western European code page, which suggests that the phone's UTF-8
+  text is being decoded with Windows' code page. This is inferred from
+  the characters; the code page used has not been read on the PC.
+  Not fixed yet.
+- **Noted, not changed:** in a phone recording the TalkBack rows are
+  below many "not recorded" Windows rows; the properties panel's change
+  count ("2/3") is partly hidden at its right edge, with a horizontal
+  scroll bar; and the filter "Screen reader sound" is cut off at the
+  left panel's edge.

@@ -1278,6 +1278,12 @@ slice's full test goes into a validation plan,
     speech record with its payload. The full suite
     gave 2,101 passed; the 10 that fail on Linux are the browser
     receiver's and Chromium launcher's tests, which need Windows.
+    Tests 55 and 56 passed on the Pixel the same day, with test 56's
+    expected result corrected, as the home screen's first items were
+    the date and weather widget, with no usage hints. They found that
+    "°" from the phone was stored as "Â°", which suggests that adb's
+    UTF-8 output is decoded with Windows' code page (inferred, not yet
+    fixed).
 
 ### Slice 7: accessibility events and tree
 
