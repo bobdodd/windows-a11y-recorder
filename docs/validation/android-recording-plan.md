@@ -1296,3 +1296,130 @@ after test 34, if the 80% stays with the capture. Send the screenshot.
   seconds 36% of full scale". So the app heard TalkBack being turned on
   and checked again, and the 80% from test 34 was still the capture's.
   Step 4c is complete.
+
+## Part 4, step 4b: the phone's sound in the player and the MP4 export
+
+Step 4b names the phone's sound in the player and saves it in an MP4
+(see [the implementation plan](../architecture/android-implementation-plan.md),
+"Slice 4", "Built, step 4b"). A recording of a phone has no system
+sound, so the phone's sound takes its place: it is drawn on the system
+sound's lane, in the system sound's green, directly under the
+microphone's pink lane, where step 4a drew it in grey on the bottom
+lane. The system sound's slider and filter are labelled "Phone sound"
+while such a recording is open, and the list of lanes at the right of
+the status line at the bottom of the window ends "Mic | Phone sound".
+The MP4 export offers "Phone sound" where it offers the system sound,
+mixed at the slider's level.
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings and the tests pass, with 1 new
+test. It writes phone sound packet records, with the phone's time and
+the time they were read, to a recording file, reads them back as the
+export does, and gives them to the export's sound mixer. None of that
+shows the player's labels and lane, or an MP4 made from a phone
+recording. Tests 37 to 41 do. The player itself cannot be run in the
+Linux build environment.
+
+The tests use test 34's second recording,
+`20261110-010817-dcc254d7d611414a80dcf7858839add3`, which has the
+phone's sound with TalkBack at 80% and the PC's microphone. TalkBack is
+not needed.
+
+### Test 37: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Connect the Pixel by USB, unlocked. Start the recorder from the Start
+   menu, and in "Recording target" choose "Android device".
+4. If the panel offers "Install companion app", choose it, and wait
+   until the panel shows "Companion app: installed, on, and answering".
+5. Read the note under "Android device checks".
+
+**On screen:** the build ends with `INSTALLER BUILT`. In step 5 the
+note reads "A recording of the phone records the companion app's
+connection, the phone's clock, its display's rotation and size, and the
+phone's screen as a video stream and as a picture for each change, which
+the player shows and an MP4 export saves. It also records the phone's
+sound, shows its level while recording and plays it on this PC, and
+records this PC's microphone. When TalkBack is on, the companion app
+raises the phone's Accessibility volume to at least 80% as the recording
+starts and leaves it there. The player shows and plays the phone's sound
+as "Phone sound", in the system sound's place, and an MP4 export saves
+it. Touches and accessibility evidence come in later parts."
+
+### Test 38: the phone's sound lane and slider
+
+1. In the recorder, choose "Open recording...".
+2. Open `20261110-010817-dcc254d7d611414a80dcf7858839add3`.
+3. Take a screenshot of the whole recorder window.
+
+**On screen:** in the timeline, directly under the pink band of the
+microphone's marks, there is a green band of marks from a few seconds
+after the start to the end of the recording, and no grey band on the
+bottom lane. In the row of volume sliders under the picture, the second
+slider's label reads "Phone sound:" where a desktop recording reads
+"System audio:". At the right of the status line at the bottom of the
+window: "Keyboard | Mouse | UIA | Window | Frames | Mic | Phone sound".
+Send the screenshot.
+
+### Test 39: the "Phone sound" filter
+
+With the recording of test 38 open:
+
+1. In "Playback event filters", find the check box that reads "Phone
+   sound", where a desktop recording reads "System audio".
+2. Read the line under the filters, "events shown".
+3. Uncheck "Phone sound".
+4. Read the line again, and look at the timeline.
+5. Check "Phone sound" again.
+
+**On screen:** in step 2 the line reads the same number twice, "N of N
+events shown". In step 4 the first number is smaller, and the green band
+is gone from the timeline, while the pink band stays. Write down both
+lines.
+
+### Test 40: the slider's level in the export window
+
+With the recording of test 38 open:
+
+1. Drag the "Phone sound" slider until the text beside it reads "-12
+   dB".
+2. Choose "Save as MP4..." (Alt+4).
+3. Read the check boxes under "Sound".
+4. Close the window without saving.
+5. Drag the "Phone sound" slider back to "0 dB".
+
+**On screen:** in step 3 there are two check boxes, both checked:
+"Microphone, mixed at 0 dB" and "Phone sound, mixed at -12 dB". There
+is no "System sound" check box, and no sentence about a separate screen
+reader sound. Send a screenshot of the window.
+
+### Test 41: the MP4 with the phone's sound
+
+With the recording of test 38 open, and both sliders at "0 dB":
+
+1. Choose "Save as MP4..." (Alt+4).
+2. Choose "Save MP4", and wait for the status line to stop changing.
+3. Take a screenshot of the window.
+
+**On screen:** the status line begins "Saved
+C:\Users\User\Videos\20261110-010817-dcc254d7d611414a80dcf7858839add3.mp4:"
+and includes "3 sound tracks: mixed, then microphone, phone sound." and
+"Encoded with the Windows encoder". A line "Phone sound: no buffer
+records" means the export did not read the phone's packet records; a
+line beginning "The MP4 could not be saved" is a failure. A line
+"Phone sound:" about silences is not a failure. Send the screenshot.
+
+### Results of part 4, step 4b
+
+No results yet.

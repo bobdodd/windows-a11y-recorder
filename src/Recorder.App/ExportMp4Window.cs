@@ -29,6 +29,9 @@ internal sealed class ExportMp4Window : Window
     private static readonly (string Stream, string Name)[] Sounds =
     [
         ("microphone", "Microphone"),
+        // A recording of a phone has the phone's sound in the system
+        // sound's place (Android slice 4b).
+        (Recorder.Contracts.AndroidSoundRecords.StreamName, "Phone sound"),
         ("system", "System sound"),
         ("screen-reader", "Screen reader")
     ];

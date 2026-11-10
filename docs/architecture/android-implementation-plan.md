@@ -794,11 +794,7 @@ slice's full test goes into a validation plan,
     recording, the collector reports itself degraded with the reason,
     records an `audio-stream-error`, and the recording goes on without
     the sound.
-  - **Not yet.** The player already plays a recording's `audio.device`
-    track at the system sound's volume, but it is not labelled, has no
-    lane and has no slider of its own, its events are counted under the
-    timeline's "Other" filter, and the MP4 export does not offer it as
-    the system sound; that is step 4b.
+  - **Player and export.** Built in step 4b, below.
 - **Built, step 4c (2026-11-09).**
   - **Decision.** The owner decided on 2026-11-09 that the recorder sets
     the Accessibility volume itself, as check 1 found TalkBack usable at
@@ -858,6 +854,35 @@ slice's full test goes into a validation plan,
     capture was what the next capture found, which fits the volume
     staying with the capture; that the speaker's volume is kept apart is
     still inference. Step 4c is complete.
+- **Built, step 4b (2026-11-10).**
+  - **Which recordings.** A recording with no system sound track whose
+    picture is the phone's, or which has a phone sound track, is a
+    recording of a phone. A recording has the phone's sound or the
+    system sound, never both, as a recording of a phone records the PC's
+    microphone only.
+  - **Lane.** The `audio.device` events are drawn on the system sound's
+    lane, as the phone's frames are drawn on the desktop frames' lane.
+    The timeline's lanes have no names of their own; the list of lanes
+    at the right of the status line at the bottom of the window ends
+    "Mic | Phone sound" while a recording of a phone is open.
+  - **Filter.** The system sound's filter covers `audio.device` and is
+    labelled "Phone sound", so the phone's packets are no longer counted
+    under "Other".
+  - **Slider.** The system sound's slider is labelled "Phone sound:",
+    with Alt+H, and named "Phone sound playback gain" for screen
+    readers. It sets the phone sound's playback level, which it already
+    did unlabelled in step 4a. A recording of a phone has no system
+    sound, so the slider is the phone sound's own.
+  - **MP4 export.** The export window offers "Phone sound" in the system
+    sound's place, mixed at the slider's level, and its own track
+    follows the microphone's. The export reads the phone's packet
+    records from the recording file, as it reads the desktop's, and
+    places them from their session times (`AudioPlacement`), with no
+    change for the phone time and read time the records also keep.
+  - **Not changed.** The "Screen reader" slider and filter are still
+    shown for a recording of a phone, which has no screen reader track,
+    so they change nothing. TalkBack's speech is part of the phone's
+    sound.
 
 ### Slice 5: touches
 

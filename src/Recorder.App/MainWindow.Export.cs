@@ -23,6 +23,8 @@ public partial class MainWindow
         {
             ["microphone"] = MicrophoneVolumeSlider.Value,
             ["system"] = SystemAudioVolumeSlider.Value,
+            // A phone's sound takes the system sound's place and slider.
+            [Recorder.Contracts.AndroidSoundRecords.StreamName] = SystemAudioVolumeSlider.Value,
             ["screen-reader"] = ScreenReaderVolumeSlider.Value
         };
         new ExportMp4Window(this, archive, _showWholeScreen, gains).ShowDialog();

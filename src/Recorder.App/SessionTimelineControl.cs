@@ -898,8 +898,10 @@ public sealed class SessionTimelineControl : FrameworkElement
         // has one or the other (Android slice 3c).
         "graphics.desktop.frames" or Recorder.Contracts.AndroidFrameRecords.FramesChannel => 4,
         "audio.microphone" => 5,
-        // The screen reader's sound shares the system sound's lane.
-        "audio.system" or "audio.screen-reader" => 6,
+        // The screen reader's sound shares the system sound's lane, and so
+        // does the phone's sound: a recording of a phone has no system
+        // sound (Android slice 4b).
+        "audio.system" or "audio.screen-reader" or Recorder.Contracts.AndroidSoundRecords.Channel => 6,
         "system.preferences" => 7,
         "graphics.magnifier" => 8,
         "browser.preferences" => 9,

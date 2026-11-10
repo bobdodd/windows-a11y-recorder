@@ -364,7 +364,7 @@
                 <local:SelectableText Margin="0,8,0,0"
                            Foreground="{StaticResource MutedText}"
                            TextWrapping="Wrap"
-                           Text="A recording of the phone records the companion app's connection, the phone's clock, its display's rotation and size, and the phone's screen as a video stream and as a picture for each change, which the player shows and an MP4 export saves. It also records the phone's sound, shows its level while recording and plays it on this PC, and records this PC's microphone. When TalkBack is on, the companion app raises the phone's Accessibility volume to at least 80% as the recording starts and leaves it there. The phone's sound in the player and in an MP4 export, touches and accessibility evidence come in later parts." />
+                           Text="A recording of the phone records the companion app's connection, the phone's clock, its display's rotation and size, and the phone's screen as a video stream and as a picture for each change, which the player shows and an MP4 export saves. It also records the phone's sound, shows its level while recording and plays it on this PC, and records this PC's microphone. When TalkBack is on, the companion app raises the phone's Accessibility volume to at least 80% as the recording starts and leaves it there. The player shows and plays the phone's sound as "Phone sound", in the system sound's place, and an MP4 export saves it. Touches and accessibility evidence come in later parts." />
               </StackPanel>
             </GroupBox>
 
@@ -874,7 +874,10 @@
                      MinWidth="52"
                      VerticalAlignment="Center"
                      Text="0 dB" />
-          <Label Grid.Column="4"
+          <!-- Labelled "Phone sound" for a recording of a phone, whose
+               sound takes the system sound's place (Android slice 4b). -->
+          <Label x:Name="SystemAudioVolumeLabel"
+                 Grid.Column="4"
                  Padding="0,0,8,0"
                  VerticalContentAlignment="Center"
                  Target="{Binding ElementName=SystemAudioVolumeSlider}"
@@ -1600,7 +1603,8 @@
                    Foreground="{StaticResource MutedText}"
                    Text="No recording loaded."
                    AutomationProperties.LiveSetting="Polite" />
-        <local:SelectableText Grid.Column="2"
+        <local:SelectableText x:Name="TimelineLegendTextBlock"
+                   Grid.Column="2"
                    Foreground="{StaticResource MutedText}"
                    Text="Keyboard | Mouse | UIA | Window | Frames | Mic | System audio" />
         <!-- The latest analysis task to finish or fail, until the next. -->

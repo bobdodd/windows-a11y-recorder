@@ -57,6 +57,7 @@ public partial class MainWindow : Window
         "system.assistive-technology",
         "audio.microphone",
         "audio.system",
+        Recorder.Contracts.AndroidSoundRecords.Channel,
         "audio.screen-reader",
         "session.annotations",
         .. BrowserChannels
@@ -70,6 +71,8 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _playbackTimer;
     private readonly Stopwatch _playbackStopwatch = new();
     private readonly BusyIndicator _busy;
+    // "Phone sound" while a recording of a phone is open (Android slice 4b).
+    private string _systemSoundName = "System audio";
     private readonly HashSet<string> _announcedHealthReasons =
         new(StringComparer.Ordinal);
     private SessionCoordinator? _coordinator;
@@ -1358,7 +1361,25 @@ public partial class MainWindow : Window
     private void ConfigureAudio(SessionPlaybackArchive archive)
     {
         _audioPlayer = new SessionAudioPlayer(archive.AudioTracks);
+        NameSystemSound(IsPhoneSound(archive));
         ApplyAudioLevels();
+    }
+
+    // A recording of a phone has the phone's sound where a recording of the
+    // desktop has the system sound (Android slice 4b): its lane, filter and
+    // slider are the system sound's, named "Phone sound".
+    private static bool IsPhoneSound(SessionPlaybackArchive archive) =>
+        !archive.AudioTracks.Any(track => track.Stream == "system") &&
+        (archive.FrameSource == SessionFrameSource.Phone ||
+         archive.AudioTracks.Any(track => track.Stream == Recorder.Contracts.AndroidSoundRecords.StreamName));
+
+    private void NameSystemSound(bool phone)
+    {
+        _systemSoundName = phone ? "Phone sound" : "System audio";
+        SystemAudioVolumeLabel.Content = phone ? "P_hone sound:" : "S_ystem audio:";
+        AutomationProperties.SetName(SystemAudioVolumeSlider, $"{_systemSoundName} playback gain");
+        FilterSystemAudioCheckBox.Content = phone ? "Phone sound" : "System _audio";
+        TimelineLegendTextBlock.Text = $"Keyboard | Mouse | UIA | Window | Frames | Mic | {_systemSoundName}";
     }
 
     private void ApplyAudioLevels()
@@ -1375,7 +1396,7 @@ public partial class MainWindow : Window
             $"Microphone playback gain {FormatGain(microphoneGain)}");
         AutomationProperties.SetHelpText(
             SystemAudioVolumeSlider,
-            $"System audio playback gain {FormatGain(systemGain)}");
+            $"{_systemSoundName} playback gain {FormatGain(systemGain)}");
         AutomationProperties.SetHelpText(
             ScreenReaderVolumeSlider,
             $"Screen reader playback gain {FormatGain(screenReaderGain)}");
@@ -1447,6 +1468,11 @@ public partial class MainWindow : Window
             visibleChannels);
         AddVisibleChannel(FilterMicrophoneCheckBox, "audio.microphone", visibleChannels);
         AddVisibleChannel(FilterSystemAudioCheckBox, "audio.system", visibleChannels);
+        // A phone's sound takes the system sound's place and filter.
+        AddVisibleChannel(
+            FilterSystemAudioCheckBox,
+            Recorder.Contracts.AndroidSoundRecords.Channel,
+            visibleChannels);
         AddVisibleChannel(FilterScreenReaderAudioCheckBox, "audio.screen-reader", visibleChannels);
         AddVisibleChannel(
             FilterMarkersCheckBox,

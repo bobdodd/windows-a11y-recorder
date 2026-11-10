@@ -13,6 +13,8 @@ internal sealed class SessionAudioPlayer : IDisposable
         _tracks = tracks.Select(track => new TrackPlayer(track)).ToList();
     }
 
+    // The system sound's gain is also the phone's sound's, which takes its
+    // place in a recording of a phone (Android slice 4b).
     public void SetGains(double microphoneGainDb, double systemGainDb, double screenReaderGainDb)
     {
         foreach (var track in _tracks)

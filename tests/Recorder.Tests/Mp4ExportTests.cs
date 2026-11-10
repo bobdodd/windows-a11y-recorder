@@ -400,6 +400,54 @@ public sealed class Mp4ExportTests : IDisposable
     }
 
     [Fact]
+    public async Task ReadsThePhonesSoundBackFromARecordingFileAsTheSystemSoundsPlace()
+    {
+        // Android slice 4b: the export reads the phone's packets, which also
+        // keep the phone's time and the time they were read, as it reads a
+        // desktop stream's, and places them from their session times.
+        var collector = Collector("android-sound", Recorder.Contracts.AndroidSoundRecords.Channel);
+        var events = new List<RecorderEvent>();
+        for (ulong sequence = 1; sequence <= 10; sequence++)
+        {
+            var index = sequence - 1;
+            events.Add(Event("session-a", collector, sequence, (long)sequence * 100 * Millisecond,
+                Recorder.Contracts.AndroidSoundRecords.Channel, Recorder.Contracts.AndroidSoundRecords.BufferEventType,
+                Json($"{{\"stream\":\"device\",\"path\":\"audio/device.wav\",\"bufferSequence\":{index}," +
+                    $"\"dataByteOffset\":{index * 4_096},\"byteLength\":4096,\"sampleFrames\":1024," +
+                    $"\"durationNanoseconds\":21333333,\"estimatedFirstSampleMonotonicNanoseconds\":0," +
+                    $"\"callbackMonotonicNanoseconds\":{sequence * 100 * Millisecond}," +
+                    $"\"presentationMicroseconds\":{sequence * 100_000},\"receivedAtNanoseconds\":{sequence * 100 * Millisecond + 15 * Millisecond}}}")));
+        }
+
+        var path = Path.Combine(_directory, "phone.mcap");
+        using (var target = new RecordingFileBatchTarget(
+                   path,
+                   new Dictionary<string, string> { ["sessionKey"] = "session-a", ["clockFrequency"] = "10000000" },
+                   new RecordingFileWriterOptions { ChunkBytes = 1_024 }))
+        {
+            var batch = events.Select((record, index) => new BufferedEvent(index, record, record.Payload.GetRawText())).ToArray();
+            Assert.Empty(await target.WriteAsync(new EventBatch(batch, [], []), TestContext.Current.CancellationToken));
+            target.Finish();
+        }
+
+        using var timeline = new RecordingFileTimeline(
+            RecordingFileReader.Open(path),
+            new Dictionary<string, long>(StringComparer.Ordinal) { [Recorder.Contracts.AndroidSoundRecords.Channel] = 10 },
+            new TimelineOccupancy(1_000 * Millisecond, new Dictionary<string, int[]>(StringComparer.Ordinal)));
+        var read = timeline.ReadAudioBuffers(
+            Recorder.Contracts.AndroidSoundRecords.StreamName,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(Enumerable.Range(0, 10).Select(index => (long)index), read.Select(item => item.BufferSequence));
+        Assert.All(read, item => Assert.Equal((item.BufferSequence + 1) * 100 * Millisecond, item.CallbackMonotonicNanoseconds));
+
+        var wave = Wave("device.wav", new WaveFormat(Rate, 16, 2), 0.5f, 10 * 1_024);
+        using var mixer = new ExportAudioMixer(
+            [new ExportAudioSource(Recorder.Contracts.AndroidSoundRecords.StreamName, wave, 0, read, 0)]);
+        Assert.True(mixer.Plans.ContainsKey(Recorder.Contracts.AndroidSoundRecords.StreamName));
+    }
+
+    [Fact]
     public void AcceptsTheScreenReaderStreamsEvents()
     {
         foreach (var eventType in new[] { "audio-stream-started", "audio-stream-stopped", "audio-buffer", "audio-stream-error", "collector-omission" })

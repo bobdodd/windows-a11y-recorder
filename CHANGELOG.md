@@ -212,6 +212,16 @@ Changes on `main` since 1.1.0, not yet released.
 - The companion app's protocol is 2. A companion app of protocol 1 is
   refused, and the checks panel offers to install the recorder's own.
 
+### Android recording, part 4b: the phone's sound in the player and MP4
+
+- In a recording of a phone, the phone's sound takes the system sound's
+  place: it is drawn on the system sound's lane, and the system sound's
+  slider and filter are labelled "Phone sound" while it is open. Its
+  records are no longer counted under the "Other" filter.
+- The MP4 export offers "Phone sound" where it offers the system sound,
+  mixed at the slider's level, with a track of its own after the
+  microphone's.
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now

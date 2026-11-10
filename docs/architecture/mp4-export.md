@@ -89,6 +89,11 @@ reader cannot be separated and recordings behave as before.
   system sound sliders. The screen reader stream is drawn on the
   timeline's sound lane with the system sound, and has its own entry in
   the channel filter.
+- **A recording of a phone** (Android slice 4b) has no system sound; the
+  phone's sound takes its place. It is drawn on the same lane, and the
+  system sound's slider and filter are labelled "Phone sound" while the
+  recording is open, as is the last name in the list of lanes at the
+  right of the status line at the bottom of the window.
 - A "Save as MP4..." button, enabled when a recording with frames is
   open, opens the export window.
 
@@ -106,7 +111,8 @@ reader cannot be separated and recordings behave as before.
   by default and labelled with the level it is mixed at, taken from the
   player's sliders, which go from -36 to 0 dB. A recording
   with system sound but no screen reader track says that any speech is in
-  the system sound.
+  the system sound. A recording of a phone offers "Phone sound" in the
+  system sound's place, mixed at the "Phone sound" slider's level.
 - **File.** The default is the recording folder's name with `.mp4`, in
   the Windows Videos folder, with Browse to choose another.
 - **Saving.** Save starts the export on a thread of its own, with a
@@ -185,7 +191,8 @@ The records are read in bulk: from the recording file
   both sides, more than two folded down, and other rates resampled.
 - **Track 1:** the chosen sounds mixed at the player's levels.
 - **Then:** each chosen sound at its recorded level, in the order
-  microphone, system sound, screen reader.
+  microphone, phone sound, system sound, screen reader. A recording has
+  the phone's sound or the system sound, not both.
 - All are AAC at 192 kbit/s.
 - Windows' MP4 writer marks every track as enabled, and a player that
   plays every enabled track, as QuickTime does, would play the mix and
