@@ -1591,3 +1591,13 @@ screenshot.
   Pixel's touch screen ranges, 0 to 13439 and 0 to 29919, are the same
   as the ranges the tests chose to fit check 4. Each touch record was
   placed by the phone's clock, read 3 to 31 ms after its phone time.
+- 2026-11-10, test 44: passed. With two fingers held on the home screen,
+  21 seconds into the recording, the "android.touch" line read
+  "Running, Healthy. Touches: 2 touches, 1867 reports, last move at
+  x 301, y 1459 of 1080 by 2404 with 2 fingers, 0 hardware key presses,
+  median delay from phone to recorder 4.0 ms", so both fingers were
+  followed at once, each in its own slot. The panel kept sending
+  reports while the fingers were still: 1,867 reports in at most about
+  16 seconds, over 100 a second, each kept as a record. Step 5a is
+  complete.
+
