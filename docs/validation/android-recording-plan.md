@@ -2336,3 +2336,27 @@ are not. "none yet", "placed by the time each event arrived", Degraded,
 or no "android.accessibility" line is a failure; send the line as it is.
 "an item with no text" in place of the quoted words is not a failure,
 but say so. Send the screenshot.
+
+### Results of part 7, step 7a
+
+Run on the development PC with the Pixel on 2026-11-10.
+
+- **Test 59: passed.** The note under "Android device checks" ended
+  with the sentence about accessibility events, and the panel showed
+  the companion app installed and on. The recorder refuses a companion
+  app that speaks protocol 2, so the app answering means the new one
+  was installed.
+- **Test 60: passed.** At 37 seconds the line read
+  "android.accessibility: Running, Healthy. Accessibility events: 16,
+  including 0 content changes (at most 0 in one second), 4 accessibility
+  focus events and 1 window change, latest accessibility focus on
+  "Current weather", the app took a median 1.8 ms to read each, median
+  delay from phone to recorder 28.0 ms." The delay is within the range
+  that shows the events on the companion's clock. It is larger than the
+  touches' 9.2 ms and TalkBack's lines' 4.4 ms in the same recording;
+  where the time goes is not yet known. The swipes were on the home screen
+  rather than in Settings, as the owner turns TalkBack on with a
+  shortcut; "Current weather" is an item of its weather widget. That
+  does not change the result, which needed only three moves of
+  TalkBack's focus. With no content changes, the rate step 7b needs is
+  not yet measured.
