@@ -1015,8 +1015,9 @@ slice's full test goes into a validation plan,
   - **Fixture.** `tests/Recorder.Tests/TestData/android-touch-check4.txt`
     is check 4's file. The check did not save the axis ranges, so the
     tests use ranges that turn its three taps into the positions the
-    check reported, to within half a pixel; they are inference, not the
-    Pixel's ranges, which test 43 reads from the status line.
+    check reported, to within half a pixel. Test 43 read the Pixel's own
+    ranges on 2026-11-10, x 0 to 13439 and y 0 to 29919, the same as the
+    tests use.
 
 ### Slice 6: what TalkBack said
 

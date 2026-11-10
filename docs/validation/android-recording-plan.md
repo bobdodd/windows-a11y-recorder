@@ -1572,3 +1572,22 @@ screenshot.
 - 2026-11-10, test 42: passed. The installer built from `246d2ba`, and
   the note under "Android device checks" read as expected, copied from
   the panel.
+- 2026-11-10, test 43: passed, with one touch more than the test asked
+  for. The screenshot was taken just after "Stop recording" rather than
+  while recording, so the lines read Disposed instead of Running; the
+  numbers are the same. The "android.touch" line read "Healthy.
+  Touches: 4 touches, 338 reports, last up at x 736, y 2218 of 1080 by
+  2404, 1 hardware key press, median delay from phone to recorder 5.4
+  ms, touch screen /dev/input/event1 "synaptics_tcm_touch" with x 0 to
+  13439 and y 0 to 29919." The recording file
+  (`20261110-135423-765414caa56a49558eea381fd1bf393b`, copied from the
+  PC) shows the three taps 2.1 and 2.6 seconds apart, at 11.1, 13.2 and
+  15.8 s into the recording: x 608, y 303; x 685, y 1299; and x 713,
+  y 2230. The extra touch came first, at 6.3 s: a finger that moved
+  from x 845, y 737 to x 791, y 997 in half a second, before the taps.
+  That it was a touch by the tester, such as one to wake the screen, is
+  inference; it is a real touch, recorded as one. The volume key was
+  one press, a down and an up 0.16 s apart, from "gpio_keys". The
+  Pixel's touch screen ranges, 0 to 13439 and 0 to 29919, are the same
+  as the ranges the tests chose to fit check 4. Each touch record was
+  placed by the phone's clock, read 3 to 31 ms after its phone time.
