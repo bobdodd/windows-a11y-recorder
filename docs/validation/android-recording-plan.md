@@ -1566,3 +1566,9 @@ number, "of 1080 by 2404 with 2 fingers". "with 2 fingers" says the
 recorder followed both fingers at once, each in its own slot. A line
 without it, or with "1 touch", is a failure; send it as it is. Send the
 screenshot.
+
+### Results of part 5, step 5a
+
+- 2026-11-10, test 42: passed. The installer built from `246d2ba`, and
+  the note under "Android device checks" read as expected, copied from
+  the panel.
