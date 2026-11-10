@@ -1725,3 +1725,12 @@ button, the three dots at the top right. A circle anywhere else, such
 as at the bottom left or on the left edge, says the turn is wrong; send
 the screenshot either way. After the test, close the menu, turn the
 phone upright, and set Auto-rotate back as it was.
+
+### Results of part 5, step 5b
+
+- 2026-11-10, test 45: passed. The installer built from `291760d`, and
+  the note under "Android device checks" read as expected, copied from
+  the panel, up to "Accessibility evidence". The copied text stopped
+  there, without "comes in later parts."; that the copy was cut short,
+  rather than the note, is inference, as the words are in the same
+  sentence of the note's text.
