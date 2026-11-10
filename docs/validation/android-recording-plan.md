@@ -1422,4 +1422,10 @@ line beginning "The MP4 could not be saved" is a failure. A line
 
 ### Results of part 4, step 4b
 
-No results yet.
+- 2026-11-10, test 37: the first build, from `9f4fa9d`, failed with
+  MC3000 at `MainWindow.xaml` line 367: the note's text attribute had
+  bare double quotes around "Phone sound". The quotes were added after
+  the last build in the Linux build environment, which does report the
+  error, and committed without building again. After `2564bc8` wrote
+  them as `&quot;`, test 37 passed: the note read as expected, copied
+  from the panel.
