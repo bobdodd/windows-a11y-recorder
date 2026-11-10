@@ -53,14 +53,19 @@ import java.util.concurrent.RejectedExecutionException;
  * receives from then on, each as an "accessibility-event" message with an
  * "index" counting from 1 on that connection (see
  * {@link AccessibilityEventJson}); a connection that did not ask, such as
- * the recorder's checks, is sent none. See
+ * the recorder's checks, is sent none. From protocol 4 it answers an
+ * "accessibility-trees" request by sending that connection a snapshot of
+ * every window's accessibility tree at once, and more on each window or
+ * content change, each as an "accessibility-tree" message with its own
+ * "index" counting from 1 on that connection (see
+ * {@link AccessibilityTrees}). See
  * docs/architecture/android-implementation-plan.md, slices 2, 4 and 7, and
  * src/Recorder.Collectors.Android/CompanionProtocol.cs, which must agree
  * with this file.
  */
 final class RecorderLink {
     static final String SOCKET_NAME = "a11yrecorder_companion";
-    static final int PROTOCOL = 3;
+    static final int PROTOCOL = 4;
     private static final String TAG = "A11yRecorderCompanion";
 
     private final Context context;
@@ -71,6 +76,8 @@ final class RecorderLink {
     // service.
     private final ExecutorService sender = Executors.newSingleThreadExecutor();
     private volatile boolean stopping;
+    // Asks for a snapshot of every window; set before start().
+    private volatile Runnable treeRequests;
     private LocalServerSocket server;
     private Thread acceptThread;
     private DisplayManager displayManager;
@@ -193,6 +200,37 @@ final class RecorderLink {
             return peer.getUid() == Process.SHELL_UID || peer.getUid() == Process.ROOT_UID;
         } catch (IOException exception) {
             return false;
+        }
+    }
+
+    /** What to run when a connection asks for tree snapshots; set before start(). */
+    void setTreeRequests(Runnable requests) {
+        treeRequests = requests;
+    }
+
+    /** True when a connection has asked for tree snapshots. */
+    boolean wantsTrees() {
+        for (Client client : clients) {
+            if (client.treesWanted) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Sends a tree snapshot to each connection that asked for them. */
+    void sendTree(JSONObject message) {
+        if (stopping) {
+            return;
+        }
+        try {
+            sender.execute(() -> {
+                for (Client client : clients) {
+                    client.sendTree(message);
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            // The link stopped meanwhile.
         }
     }
 
@@ -335,6 +373,10 @@ final class RecorderLink {
         volatile boolean eventsWanted;
         // The events sent on this connection; used on the sender thread only.
         private long eventIndex;
+        // True once this connection has asked for tree snapshots.
+        volatile boolean treesWanted;
+        // The snapshots sent on this connection; used on the sender thread only.
+        private long treeIndex;
         // Written and used under writeLock only.
         private OutputStream output;
 
@@ -400,6 +442,12 @@ final class RecorderLink {
                 send(AccessibilityVolume.raise(context, minimum, "requested"));
             } else if ("accessibility-events".equals(type)) {
                 eventsWanted = true;
+            } else if ("accessibility-trees".equals(type)) {
+                treesWanted = true;
+                Runnable requests = treeRequests;
+                if (requests != null) {
+                    requests.run();
+                }
             } else {
                 sendError("unknown type: " + type);
             }
@@ -426,6 +474,20 @@ final class RecorderLink {
             try {
                 eventIndex++;
                 message.put("index", eventIndex);
+                send(message);
+            } catch (IOException | JSONException exception) {
+                close();
+            }
+        }
+
+        // On the sender thread, like sendEvent.
+        void sendTree(JSONObject message) {
+            if (!treesWanted) {
+                return;
+            }
+            try {
+                treeIndex++;
+                message.put("index", treeIndex);
                 send(message);
             } catch (IOException | JSONException exception) {
                 close();

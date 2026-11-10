@@ -16,9 +16,10 @@ public static class CompanionProtocol
 {
     /// <summary>
     /// 2 from slice 4, step 4c, which added the Accessibility volume
-    /// request; 3 from slice 7, step 7a, which added accessibility events.
+    /// request; 3 from slice 7, step 7a, which added accessibility events;
+    /// 4 from step 7b, which added snapshots of the accessibility tree.
     /// </summary>
-    public const int Version = 3;
+    public const int Version = 4;
 
     /// <summary>The companion app's socket, in Linux's abstract namespace.</summary>
     public const string SocketName = "a11yrecorder_companion";
@@ -50,6 +51,13 @@ public static class CompanionProtocol
     /// service receives from now on, each as an "accessibility-event" line.
     /// </summary>
     public const string AccessibilityEventsRequest = "{\"type\":\"accessibility-events\"}\n";
+
+    /// <summary>
+    /// Asks the app for a snapshot of every window's accessibility tree now,
+    /// and more on each window or content change, each as an
+    /// "accessibility-tree" line.
+    /// </summary>
+    public const string AccessibilityTreesRequest = "{\"type\":\"accessibility-trees\"}\n";
 
     // The app's names are the records' names (AccessibilityEventJson.java).
     private static readonly JsonSerializerOptions EventOptions = new(JsonSerializerDefaults.Web);
@@ -112,6 +120,10 @@ public static class CompanionProtocol
                     root.TryGetProperty("detail", out var detail) && detail.ValueKind == JsonValueKind.String ? detail.GetString() : null,
                     Long(root, "time")),
                 "accessibility-event" => AccessibilityEvent(root),
+                // Read later, off the connection's reading, by ReadTree:
+                // a snapshot can be large, and the clock replies behind it
+                // are timed as they are read.
+                "accessibility-tree" => new CompanionAccessibilityTreeLine(line),
                 "error" => new CompanionError(String(root, "message")),
                 _ => new CompanionUnknown(type)
             };
@@ -131,6 +143,25 @@ public static class CompanionProtocol
         catch (Exception ex) when (ex is JsonException or NotSupportedException or InvalidOperationException)
         {
             return new CompanionAccessibilityEvent(null, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Reads a snapshot's line. One that cannot be read is told, not
+    /// thrown, as for an event.
+    /// </summary>
+    public static (AndroidAccessibilityTree? Tree, string? Problem) ReadTree(string line)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+        try
+        {
+            return JsonSerializer.Deserialize<AndroidAccessibilityTree>(line, EventOptions) is { } read
+                ? (read with { MessageBytes = System.Text.Encoding.UTF8.GetByteCount(line) }, null)
+                : (null, "the snapshot is empty");
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException or InvalidOperationException)
+        {
+            return (null, ex.Message);
         }
     }
 
@@ -251,6 +282,13 @@ public sealed record CompanionAccessibilityVolume(
 /// is not yet set. Null, with the problem, for one the recorder could not read.
 /// </summary>
 public sealed record CompanionAccessibilityEvent(AndroidAccessibilityEvent? Event, string? Problem) : CompanionMessage;
+
+/// <summary>
+/// A snapshot of the accessibility tree, sent to a connection that asked
+/// for them (slice 7, step 7b), as the line the app sent; read it with
+/// <see cref="CompanionProtocol.ReadTree"/>.
+/// </summary>
+public sealed record CompanionAccessibilityTreeLine(string Line) : CompanionMessage;
 
 public sealed record CompanionError(string Message) : CompanionMessage;
 

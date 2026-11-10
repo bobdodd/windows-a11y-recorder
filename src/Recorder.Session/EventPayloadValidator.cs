@@ -49,7 +49,8 @@ internal static class EventPayloadValidator
         Recorder.Contracts.AndroidTouchRecords.KeyChannel,
         Recorder.Contracts.AndroidTalkBackRecords.LogChannel,
         Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel,
-        Recorder.Contracts.AndroidAccessibilityRecords.EventsChannel
+        Recorder.Contracts.AndroidAccessibilityRecords.EventsChannel,
+        Recorder.Contracts.AndroidAccessibilityRecords.TreeChannel
     ];
 
     /// <summary>Whether the recorder defines the channel.</summary>
@@ -202,6 +203,10 @@ internal static class EventPayloadValidator
             case (Recorder.Contracts.AndroidAccessibilityRecords.EventsChannel, Recorder.Contracts.AndroidAccessibilityRecords.EventType):
                 ValidateAndroidAccessibilityEvent(payload, issues);
                 break;
+            case (Recorder.Contracts.AndroidAccessibilityRecords.TreeChannel, Recorder.Contracts.AndroidAccessibilityRecords.TreeEventType):
+                ValidateAndroidAccessibilityTree(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidAccessibilityRecords.TreeChannel, Recorder.Contracts.AndroidAccessibilityRecords.UnavailableTreeEventType):
             case (Recorder.Contracts.AndroidAccessibilityRecords.EventsChannel, Recorder.Contracts.AndroidAccessibilityRecords.UnavailableEventType):
             case (Recorder.Contracts.AndroidTalkBackRecords.LogChannel, Recorder.Contracts.AndroidTalkBackRecords.UnavailableEventType):
                 ValidateAndroidCompanionUnavailable(payload, issues);
@@ -2310,16 +2315,187 @@ internal static class EventPayloadValidator
         }
     }
 
+    // A snapshot of the phone's accessibility tree (slice 7, step 7b): every
+    // window, with its items when they were taken, each item in its place.
+    private static void ValidateAndroidAccessibilityTree(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredInteger("index", positive: true),
+                RequiredStringArray("reasons"),
+                RequiredBoolean("everyWindow"),
+                RequiredInteger("changes", nonnegative: true),
+                NullableInteger("firstChangeEventTimeMilliseconds", nonnegative: true),
+                NullableInteger("lastChangeEventTimeMilliseconds", nonnegative: true),
+                RequiredInteger("startedPhoneNanoseconds", nonnegative: true),
+                RequiredInteger("finishedPhoneNanoseconds", nonnegative: true),
+                RequiredObjectArray("windows"),
+                NullableText("problem"),
+                RequiredInteger("messageBytes", nonnegative: true),
+                RequiredInteger("receivedAtNanoseconds")
+            ],
+            issues);
+        if (payload.TryGetProperty("finishedPhoneNanoseconds", out var finished) && IsInteger(finished) &&
+            payload.TryGetProperty("startedPhoneNanoseconds", out var started) && IsInteger(started) &&
+            finished.GetInt64() < started.GetInt64())
+        {
+            AddError(
+                issues,
+                "android-accessibility-tree-finished-early",
+                "#/payload/finishedPhoneNanoseconds",
+                "A snapshot is finished after it is started.");
+        }
+
+        if (payload.TryGetProperty("reasons", out var reasons) && reasons.ValueKind == JsonValueKind.Array &&
+            reasons.EnumerateArray().Any(reason =>
+                reason.ValueKind != JsonValueKind.String ||
+                !Recorder.Contracts.AndroidAccessibilityRecords.TreeReasons.Contains(reason.GetString()!)))
+        {
+            AddError(
+                issues,
+                "android-accessibility-tree-reason-unknown",
+                "#/payload/reasons",
+                "A snapshot's reasons are \"requested\", \"window-change\" or \"content-change\".");
+        }
+
+        if (!payload.TryGetProperty("windows", out var windows) || windows.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        var place = 0;
+        foreach (var window in windows.EnumerateArray())
+        {
+            var path = $"#/payload/windows/{place.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+            place++;
+            if (window.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            ValidateShape(
+                window,
+                [
+                    RequiredInteger("id"),
+                    RequiredInteger("type"),
+                    RequiredString("typeName"),
+                    RequiredInteger("layer"),
+                    NullableText("title"),
+                    RequiredObject("bounds"),
+                    RequiredBoolean("active"),
+                    RequiredBoolean("focused"),
+                    RequiredBoolean("accessibilityFocused"),
+                    RequiredBoolean("pictureInPicture"),
+                    RequiredInteger("displayId"),
+                    NullableInteger("parentId"),
+                    NullableInteger("transitionTimeMilliseconds", nonnegative: true),
+                    NullableObjectArray("items"),
+                    RequiredBoolean("truncated"),
+                    RequiredInteger("missingChildren", nonnegative: true)
+                ],
+                issues,
+                path);
+            if (window.TryGetProperty("bounds", out var bounds) && bounds.ValueKind == JsonValueKind.Object)
+            {
+                ValidateShape(
+                    bounds,
+                    [RequiredInteger("left"), RequiredInteger("top"), RequiredInteger("right"), RequiredInteger("bottom")],
+                    issues,
+                    path + "/bounds");
+            }
+
+            if (window.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
+            {
+                ValidateAndroidTreeItems(items, issues, path + "/items");
+            }
+        }
+    }
+
+    // A window's items, each in its place in depth-first order: its index
+    // is its place, its parent comes before it, and each link is a place
+    // in the list. Only the first item out of place is reported, so that a
+    // broken list of thousands is one error.
+    private static void ValidateAndroidTreeItems(
+        JsonElement items,
+        ICollection<EventValidationIssue> issues,
+        string path)
+    {
+        var count = items.GetArrayLength();
+        var place = 0;
+        var placeReported = false;
+        var linkReported = false;
+        foreach (var item in items.EnumerateArray())
+        {
+            var itemPath = $"{path}/{place.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+            if (item.ValueKind == JsonValueKind.Object)
+            {
+                ValidateAndroidAccessibilityNode(item, issues, itemPath, AndroidTreeItemFields);
+                var inPlace =
+                    item.TryGetProperty("index", out var index) && IsInteger(index) && index.GetInt64() == place &&
+                    item.TryGetProperty("parent", out var parent) &&
+                    (place == 0
+                        ? parent.ValueKind == JsonValueKind.Null
+                        : IsInteger(parent) && parent.GetInt64() >= 0 && parent.GetInt64() < place);
+                if (!inPlace && !placeReported)
+                {
+                    placeReported = true;
+                    AddError(
+                        issues,
+                        "android-accessibility-tree-item-out-of-place",
+                        itemPath,
+                        "An item's index is its place in the window's list, and its parent is an earlier item; only the root has none.");
+                }
+
+                bool InList(JsonElement value) =>
+                    value.ValueKind == JsonValueKind.Null ||
+                    (IsInteger(value) && value.GetInt64() >= 0 && value.GetInt64() < count);
+                var linked =
+                    (!item.TryGetProperty("traversalBefore", out var before) || InList(before)) &&
+                    (!item.TryGetProperty("traversalAfter", out var after) || InList(after)) &&
+                    (!item.TryGetProperty("labeledBy", out var labels) || labels.ValueKind != JsonValueKind.Array ||
+                        labels.EnumerateArray().All(label => label.ValueKind != JsonValueKind.Null && InList(label)));
+                if (!linked && !linkReported)
+                {
+                    linkReported = true;
+                    AddError(
+                        issues,
+                        "android-accessibility-tree-link-outside",
+                        itemPath,
+                        "An item's labels and traversal links are places in the window's list.");
+                }
+            }
+
+            place++;
+        }
+    }
+
+    // The fields a tree item has besides those of an event's source item.
+    private static readonly PropertyRule[] AndroidTreeItemFields =
+    [
+        RequiredInteger("index", nonnegative: true),
+        NullableInteger("parent", nonnegative: true),
+        RequiredInteger("depth", nonnegative: true),
+        RequiredIntegerArray("labeledBy"),
+        RequiredInteger("labeledByOutside", nonnegative: true),
+        NullableInteger("traversalBefore", nonnegative: true),
+        NullableInteger("traversalAfter", nonnegative: true)
+    ];
+
     // One item of a phone window's tree, without its place in the tree
-    // (slice 7).
+    // (slice 7); a tree item's place is in the extra fields.
     private static void ValidateAndroidAccessibilityNode(
         JsonElement node,
         ICollection<EventValidationIssue> issues,
-        string path)
+        string path,
+        PropertyRule[]? extra = null)
     {
         ValidateShape(
             node,
             [
+                .. extra ?? [],
                 RequiredInteger("windowId"),
                 NullableText("className"),
                 NullableText("packageName"),

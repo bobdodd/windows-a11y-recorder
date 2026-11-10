@@ -1422,6 +1422,98 @@ slice's full test goes into a validation plan,
     built on Linux with `javac -Werror` against Android 17's
     `android.jar`; that it sends the events on the Pixel is for tests 59
     and 60.
+- **Built, step 7b (2026-11-10).**
+  - **App.** The companion app speaks protocol 4. A connection that sends
+    `{"type":"accessibility-trees"}` is sent an `accessibility-tree`
+    message at once, and more as the phone changes, each with its own
+    `index` counting from 1 on that connection. With no connection
+    asking, the service takes none.
+  - **When.** A snapshot of every window when the connection asks
+    (reason `requested`) and on each `TYPE_WINDOWS_CHANGED` or
+    `TYPE_WINDOW_STATE_CHANGED` (`window-change`); and, on each
+    `TYPE_WINDOW_CONTENT_CHANGED` (`content-change`), a snapshot whose
+    window list is complete but which holds the items only of the window
+    that changed. This differs from the plan above, which named every
+    window's tree for content changes too: a content change names its
+    window (`getWindowId()`), so taking the others again would add size
+    without adding evidence. The latest items of a window are those of
+    the latest snapshot that holds them.
+  - **No change missed, no limit.** Snapshots are taken one at a time on
+    their own thread, so the service's events are not held up. A change
+    that arrives while one is being taken is covered by the next, which
+    starts as soon as that one ends. Each snapshot gives the number of
+    changes it covers and the event times of the first and last, so a
+    snapshot covering many is visible. This is not a limit: every change
+    is followed by a snapshot taken after it. No limit on the rate is
+    set; test 62 measures it.
+  - **Windows.** Every window `getWindows()` gives, with its id, type and
+    type name, layer, title, bounds, whether it is active, focused or
+    accessibility focused, picture-in-picture, display, parent window,
+    and from Android 14 (API 34) its transition time
+    ([Android, AccessibilityWindowInfo](https://developer.android.com/reference/android/view/accessibility/AccessibilityWindowInfo)).
+    A window whose items were not taken has `items` null.
+  - **Items.** Each window's items are listed depth first from its root,
+    children in their order, each with every field of an event's source
+    item (step 7a) and its `index` (its place in the list), `parent`
+    (its parent's place, null for the root) and `depth`, so the tree can
+    be built again. Labels (`getLabeledByList()` from Android 16, API
+    36, `getLabeledBy()` before) and traversal links
+    (`getTraversalBefore()`, `getTraversalAfter()`) are given as places
+    in the same list; a label in another window is counted in
+    `labeledByOutside`, and a traversal link outside the list is null.
+    Items are matched by `equals()`, which compares the item's source id
+    and window id
+    ([AOSP, AccessibilityNodeInfo.java](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/view/accessibility/AccessibilityNodeInfo.java)).
+    From Android 13 (API 33) the root and children are asked for with
+    `FLAG_PREFETCH_DESCENDANTS_DEPTH_FIRST`, so Android sends a batch of
+    the items below each one it is asked for (same file). A window with
+    more than 10,000 items is cut there and marked `truncated`; a child
+    Android lists but cannot give, as when it goes away during the
+    snapshot, is counted in `missingChildren`. If the windows change so
+    that the snapshot cannot go on, what was read is sent with the
+    reason in `problem`.
+  - **Times.** Each snapshot gives the phone times the app started and
+    finished taking it. It is placed halfway between, through the
+    companion collector's clock fit, flagged `phone-snapshot-time`, with
+    half the time it took as more uncertainty; with no clock fit, by when
+    the recorder read it, flagged `receipt-time-stamp`. A snapshot holds
+    the tree as it was while being taken, which can include changes
+    after the ones it covers.
+  - **Records.** `accessibility.android.tree` has an
+    `accessibility-tree` for every snapshot, with the fields above, the
+    size of the app's message in bytes, and the session time the
+    recorder read it; and an `accessibility-tree-unavailable` when a
+    snapshot could not be read or the snapshots are missing. The
+    recorder reads a snapshot's line apart from the connection's
+    reading, so a large one does not delay the clock replies behind it,
+    and one it cannot read does not end the connection. The validator
+    checks each window and item, that each item is in its place with an
+    earlier parent, and that each link is a place in the list, reporting
+    only the first item out of place in a window.
+  - **Status line.** A new line, `android.accessibility-tree`:
+    "Accessibility tree snapshots: none yet." until the first; then
+    "Accessibility tree snapshots: N (at most N in one second), N of
+    every window, the latest with N windows and N items, the largest N
+    items and N KB, the app took a median X ms to take each and at most
+    X ms, median delay from phone to recorder X ms." When they occur it
+    adds how many had a window cut short, stopped early, are missing
+    from the app's count, or could not be read.
+  - **Failures.** As for step 7a: "The phone's accessibility tree could
+    not be recorded: ..." or "... stopped being recorded during the
+    recording: ...", the collector degraded and the recording going on.
+  - **Tests.** `AndroidAccessibilityTreeTests` read a snapshot line with
+    two windows, one with three items linked by parent, label and
+    traversal; check that an unreadable one is a problem and not a
+    failure; and test the collector's placement, flags, uncertainty,
+    dropped early snapshot, count of missing ones, status line, no phone
+    clock, failures and the validator (12 cases), with a fake connection
+    and a fake phone clock. `AndroidCompanionTests` check that the
+    companion collector asks for the snapshots and passes their lines
+    on, and that an app with protocol 3 is refused. The full suite gave
+    2,142 passed; the 10 that fail on Linux need Windows, as before. The
+    companion app was built on Linux with `javac -Werror` against
+    Android 17's `android.jar`; that it takes the snapshots on the Pixel,
+    and their size, rate and time, is for tests 61 and 62.
 
 ### Slice 8: settings, the one-timeline check, and the whole recording
 

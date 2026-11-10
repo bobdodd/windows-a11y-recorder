@@ -2360,3 +2360,94 @@ Run on the development PC with the Pixel on 2026-11-10.
   does not change the result, which needed only three moves of
   TalkBack's focus. With no content changes, the rate step 7b needs is
   not yet measured.
+
+## Part 7, step 7b: snapshots of the phone's accessibility tree
+
+The companion app now takes snapshots of the phone's accessibility tree
+and the recorder stores them (see
+[the implementation plan](../architecture/android-implementation-plan.md),
+"Slice 7", "Built, step 7b"). A snapshot of every window is taken as the
+recording starts and on each window change, and a snapshot of a window
+when its content changes. While recording, a new line under "Collector
+status", starting "android.accessibility-tree", counts the snapshots and
+gives their size and the time each took. The player shows the records
+only in the inspector; the tree view is step 7c. The companion app now
+speaks protocol 4, so it has to be installed again.
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings, the companion app compiles with
+warnings as errors, and the tests pass, 2,142 in all, with 10 new tests
+(21 cases) and 1 changed. They read a snapshot as
+the companion app writes it, with two windows and items linked by
+parent, label and traversal, and cover a recording with a stand-in
+companion connection and phone clock: the snapshots' times, one from
+before the recording, a missing one, one that cannot be read, no phone
+clock, no companion connection, the connection ending, and the record's
+checks; and a stand-in companion app sent the request and passing the
+snapshots on. None of that shows the app taking snapshots on the Pixel,
+how large they are, how often they come or how long each takes. Tests
+61 and 62 do, and test 62 also gives the rate of content changes that
+step 7a could not measure.
+
+### Test 61: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Connect the Pixel by USB, unlocked. Start the recorder from the Start
+   menu, and in "Recording target" choose "Android device".
+4. The panel offers "Install companion app". Choose it, and wait until
+   the panel shows "Companion app: installed, on, and answering".
+5. Read the companion line and the note under "Android device checks".
+
+**On screen:** the build ends with `INSTALLER BUILT`. Before step 4 the
+companion line says the installed version code is older than the
+recorder's. In step 5 it reads "Companion app: installed, on, and
+answering (version 1.1.0, version code" with a number, and ends
+"protocol 4)." The note ends "It also records every accessibility event
+the phone sends to accessibility services, with the item each one came
+from, and snapshots of the phone's accessibility tree: every window's
+items as the recording starts and when a window changes, and a window's
+items again when its content changes. The player's view of the events
+and the tree comes in a later part."
+
+### Test 62: scrolling Settings with TalkBack on
+
+Before the test, on the phone, open Settings, scroll to the top, then
+turn TalkBack on. Leave the recorder open from test 61, with "Android
+device" chosen. After the test, turn TalkBack off.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. On the phone, swipe up with two fingers, three times, waiting 2
+   seconds after each swipe, so that the Settings list scrolls down.
+3. While it is still recording, take a screenshot of "Collector status"
+   under "Current session".
+4. Choose "Stop recording".
+
+**On screen:** in step 2 the Settings list moves up after each swipe.
+In step 3 "Collector status" has a line starting
+"android.accessibility-tree: Running, Healthy. Accessibility tree
+snapshots:", then a number of snapshots, at least 2, with "at most" a
+number "in one second"; a number "of every window", at least 1; "the
+latest with" a number of windows and a number of items, at least 1
+each; "the largest" a number of items and a number of KB; then "the app
+took a median" a number of milliseconds "to take each and at most" a
+number of milliseconds; and it ends "median delay from phone to
+recorder" with a number of milliseconds. The delay checks the
+snapshots' times: a few milliseconds to a few hundred says they are on
+the companion's clock; a number below zero, or of seconds or more, says
+they are not. The "android.accessibility" line above it gives a number
+of content changes, with "at most" a number "in one second". "none
+yet", "could not be read", "missing", "placed by the time each
+arrived", Degraded, or no "android.accessibility-tree" line is a
+failure; send the line as it is. "cut short" or "stopped early" is not
+a failure, but say so. Send the screenshot.

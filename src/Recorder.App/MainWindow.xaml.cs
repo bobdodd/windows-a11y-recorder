@@ -347,6 +347,7 @@ public partial class MainWindow : Window
             new AndroidTouchCollector(adb, serial, companion, companion),
             _talkBack,
             new AndroidAccessibilityCollector(serial, companion, companion),
+            new AndroidAccessibilityTreeCollector(serial, companion, companion),
             new Recorder.Collectors.Audio.AudioCollector(new Recorder.Collectors.Audio.AudioCaptureOptions(true, false))
         ];
     }

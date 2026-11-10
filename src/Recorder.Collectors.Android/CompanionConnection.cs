@@ -27,6 +27,9 @@ public sealed record ReceivedAccessibilityEvent(
     long ReceivedAt,
     string? Problem = null);
 
+/// <summary>A snapshot's line, still to be read, and the session time the recorder read it.</summary>
+public sealed record ReceivedAccessibilityTree(string Line, long ReceivedAt);
+
 /// <summary>
 /// One connection to the companion app. The app sends its greeting first;
 /// after that the recorder asks for clock samples and the app sends display
@@ -47,6 +50,8 @@ public sealed class CompanionConnection : IAsyncDisposable
     private readonly Channel<ReceivedAccessibilityVolume> _volumes = Channel.CreateUnbounded<ReceivedAccessibilityVolume>(
         new UnboundedChannelOptions { SingleReader = true });
     private readonly Channel<ReceivedAccessibilityEvent> _events = Channel.CreateUnbounded<ReceivedAccessibilityEvent>(
+        new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<ReceivedAccessibilityTree> _trees = Channel.CreateUnbounded<ReceivedAccessibilityTree>(
         new UnboundedChannelOptions { SingleReader = true });
     private readonly CancellationTokenSource _closing = new();
     private Task? _readLoop;
@@ -77,6 +82,12 @@ public sealed class CompanionConnection : IAsyncDisposable
     /// <see cref="RequestAccessibilityEventsAsync"/>; completes when the connection ends.
     /// </summary>
     public ChannelReader<ReceivedAccessibilityEvent> AccessibilityEvents => _events.Reader;
+
+    /// <summary>
+    /// Snapshots of the accessibility tree, in the order they arrived, once
+    /// asked for with <see cref="RequestAccessibilityTreesAsync"/>; completes when the connection ends.
+    /// </summary>
+    public ChannelReader<ReceivedAccessibilityTree> AccessibilityTrees => _trees.Reader;
 
     /// <summary>Completes when the connection ends, with the reason it ended.</summary>
     public Task<string> Closed => _closed.Task;
@@ -223,6 +234,13 @@ public sealed class CompanionConnection : IAsyncDisposable
     public Task RequestAccessibilityEventsAsync(CancellationToken cancellation) =>
         SendAsync(CompanionProtocol.AccessibilityEventsRequest, cancellation);
 
+    /// <summary>
+    /// Asks the app for a snapshot of every window's tree now and more on
+    /// each change; they come on <see cref="AccessibilityTrees"/>.
+    /// </summary>
+    public Task RequestAccessibilityTreesAsync(CancellationToken cancellation) =>
+        SendAsync(CompanionProtocol.AccessibilityTreesRequest, cancellation);
+
     private async Task SendAsync(string line, CancellationToken cancellation)
     {
         var bytes = Encoding.UTF8.GetBytes(line);
@@ -288,6 +306,9 @@ public sealed class CompanionConnection : IAsyncDisposable
                     case CompanionAccessibilityEvent accessibilityEvent:
                         _events.Writer.TryWrite(new ReceivedAccessibilityEvent(accessibilityEvent.Event, at, accessibilityEvent.Problem));
                         break;
+                    case CompanionAccessibilityTreeLine tree:
+                        _trees.Writer.TryWrite(new ReceivedAccessibilityTree(tree.Line, at));
+                        break;
                     case CompanionError error:
                         LastAppError = error.Message;
                         break;
@@ -307,6 +328,7 @@ public sealed class CompanionConnection : IAsyncDisposable
             _displays.Writer.TryComplete();
             _volumes.Writer.TryComplete();
             _events.Writer.TryComplete();
+            _trees.Writer.TryComplete();
             foreach (var waiting in _pending.Values)
             {
                 waiting.TrySetException(new CompanionUnavailableException(reason));
@@ -341,6 +363,7 @@ public sealed class CompanionConnection : IAsyncDisposable
         _displays.Writer.TryComplete();
         _volumes.Writer.TryComplete();
         _events.Writer.TryComplete();
+        _trees.Writer.TryComplete();
         _reader.Dispose();
         _closing.Dispose();
         if (_onDispose is not null)

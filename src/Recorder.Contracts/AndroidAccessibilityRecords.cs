@@ -16,6 +16,12 @@ namespace Recorder.Contracts;
 /// placed on the session clock through the companion collector's clock fit,
 /// with a millisecond more uncertainty, and otherwise at the time the
 /// recorder read it.
+///
+/// Step 7b adds snapshots of the phone's accessibility tree on
+/// <see cref="TreeChannel"/>: one of every window when the recording starts
+/// and on every window change, and one of each window whose content
+/// changed. Each is placed halfway between when the companion started and
+/// finished taking it, with half the time it took as more uncertainty.
 /// </summary>
 public static class AndroidAccessibilityRecords
 {
@@ -26,6 +32,23 @@ public static class AndroidAccessibilityRecords
 
     /// <summary>Why the events are missing from part or all of a recording.</summary>
     public const string UnavailableEventType = "accessibility-events-unavailable";
+
+    /// <summary>Snapshots of the phone's accessibility tree, and why they are missing from part or all of a recording (step 7b).</summary>
+    public const string TreeChannel = "accessibility.android.tree";
+
+    public const string TreeEventType = "accessibility-tree";
+
+    /// <summary>Why the tree snapshots are missing from part or all of a recording.</summary>
+    public const string UnavailableTreeEventType = "accessibility-tree-unavailable";
+
+    /// <summary>The record's time is halfway between when the companion started and finished taking the snapshot.</summary>
+    public const string PhoneSnapshotTimeFlag = "phone-snapshot-time";
+
+    /// <summary>The most items the companion lists for one window (AccessibilityTrees.MAX_ITEMS); more is marked truncated.</summary>
+    public const int MaxTreeItems = 10_000;
+
+    /// <summary>Why a snapshot was taken (AccessibilityTrees.java).</summary>
+    public static IReadOnlyList<string> TreeReasons { get; } = ["requested", "window-change", "content-change"];
 
     /// <summary>The record's time is the event's time, as Android set it.</summary>
     public const string PhoneEventTimeFlag = "phone-event-time";
@@ -265,7 +288,7 @@ public sealed record AndroidAccessibilityEventRecord
 /// <c>isShowingHintText()</c>. One the phone's Android version does not
 /// have is null.
 /// </summary>
-public sealed record AndroidAccessibilityNode
+public record AndroidAccessibilityNode
 {
     public int WindowId { get; init; }
 
@@ -392,3 +415,125 @@ public sealed record AndroidRangeInfo(int Type, double? Min, double? Max, double
 /// <summary>Why the accessibility events are missing from part or all of a recording.</summary>
 /// <param name="ConnectionLost">True when the events stopped during the recording.</param>
 public sealed record AndroidAccessibilityUnavailable(string Serial, string Reason, bool ConnectionLost);
+
+/// <summary>
+/// A snapshot of the phone's accessibility tree, as the companion app sent
+/// it (AccessibilityTrees.java), with the time the recorder read it and the
+/// size of the message (slice 7, step 7b).
+///
+/// <see cref="Windows"/> is every window <c>getWindows()</c> gave. When
+/// <see cref="EveryWindow"/> is true, as when the recording starts and on a
+/// window change, each holds its items; otherwise only the windows whose
+/// content changed do, and the others' <see cref="AndroidAccessibilityWindow.Items"/>
+/// is null. The latest items of a window are those of the latest snapshot
+/// that holds them.
+/// </summary>
+public sealed record AndroidAccessibilityTree
+{
+    /// <summary>Counts the snapshots sent on the connection, from 1, so a gap shows one missing.</summary>
+    public required long Index { get; init; }
+
+    /// <summary>Why it was taken; see <see cref="AndroidAccessibilityRecords.TreeReasons"/>.</summary>
+    public IReadOnlyList<string> Reasons { get; init; } = [];
+
+    /// <summary>True when every window's items were taken.</summary>
+    public bool EveryWindow { get; init; }
+
+    /// <summary>The window and content changes the snapshot covers, all those since the last snapshot began.</summary>
+    public int Changes { get; init; }
+
+    /// <summary>The <c>getEventTime()</c> of the first change it covers, or null for none.</summary>
+    public long? FirstChangeEventTimeMilliseconds { get; init; }
+
+    /// <summary>The <c>getEventTime()</c> of the last change it covers, or null for none.</summary>
+    public long? LastChangeEventTimeMilliseconds { get; init; }
+
+    /// <summary>The phone's CLOCK_MONOTONIC when the companion started taking it.</summary>
+    public required long StartedPhoneNanoseconds { get; init; }
+
+    /// <summary>The phone's CLOCK_MONOTONIC when the companion had taken it.</summary>
+    public required long FinishedPhoneNanoseconds { get; init; }
+
+    public IReadOnlyList<AndroidAccessibilityWindow> Windows { get; init; } = [];
+
+    /// <summary>Why the snapshot stopped early, such as a window closing while it was taken; null when it did not.</summary>
+    public string? Problem { get; init; }
+
+    /// <summary>The size of the companion's message, in bytes of UTF-8.</summary>
+    public long MessageBytes { get; init; }
+
+    /// <summary>The session time the recorder read it.</summary>
+    public long ReceivedAtNanoseconds { get; init; }
+}
+
+/// <summary>
+/// One window of a snapshot (Android, AccessibilityWindowInfo), with its
+/// items when they were taken. Each field is the getter of the same name;
+/// <see cref="ParentId"/> is the id of <c>getParent()</c>.
+/// </summary>
+public sealed record AndroidAccessibilityWindow
+{
+    public required int Id { get; init; }
+
+    public int Type { get; init; }
+
+    /// <summary>Such as TYPE_APPLICATION, or TYPE_ and the number for a type Android adds later.</summary>
+    public required string TypeName { get; init; }
+
+    public int Layer { get; init; }
+
+    public string? Title { get; init; }
+
+    public required AndroidNodeBounds Bounds { get; init; }
+
+    public bool Active { get; init; }
+
+    public bool Focused { get; init; }
+
+    public bool AccessibilityFocused { get; init; }
+
+    public bool PictureInPicture { get; init; }
+
+    public int DisplayId { get; init; }
+
+    public int? ParentId { get; init; }
+
+    /// <summary><c>getTransitionTimeMillis()</c>, Android 14 (API 34) and later; null before.</summary>
+    public long? TransitionTimeMilliseconds { get; init; }
+
+    /// <summary>The window's items in depth-first order, children in order; null when not taken in this snapshot.</summary>
+    public IReadOnlyList<AndroidTreeNode>? Items { get; init; }
+
+    /// <summary>True when the window had more than the companion's limit of 10,000 items, and the rest are missing.</summary>
+    public bool Truncated { get; init; }
+
+    /// <summary>Children Android listed but could not give, as when they went away while the snapshot was taken.</summary>
+    public int MissingChildren { get; init; }
+}
+
+/// <summary>
+/// One item of a window's tree with its place in it: its place in the
+/// window's list, its parent's, and its depth from the root at 0. Labels
+/// and traversal links are places in the same list.
+/// </summary>
+public sealed record AndroidTreeNode : AndroidAccessibilityNode
+{
+    public required int Index { get; init; }
+
+    /// <summary>The parent's place, or null for the root.</summary>
+    public int? Parent { get; init; }
+
+    public int Depth { get; init; }
+
+    /// <summary>The places of the items that label this one: <c>getLabeledByList()</c> from Android 16 (API 36), <c>getLabeledBy()</c> before.</summary>
+    public IReadOnlyList<int> LabeledBy { get; init; } = [];
+
+    /// <summary>Labels outside this window's list.</summary>
+    public int LabeledByOutside { get; init; }
+
+    /// <summary>The place of <c>getTraversalBefore()</c>, or null for none or one outside the list.</summary>
+    public int? TraversalBefore { get; init; }
+
+    /// <summary>The place of <c>getTraversalAfter()</c>, or null for none or one outside the list.</summary>
+    public int? TraversalAfter { get; init; }
+}

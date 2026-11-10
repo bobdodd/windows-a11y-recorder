@@ -14,7 +14,9 @@ import org.json.JSONObject;
  * docs/architecture/android-implementation-plan.md. From slice 7, step 7a,
  * it sends every accessibility event it receives to each connection that
  * asked for them (see {@link AccessibilityEventJson}); with none asking,
- * the events are not read.
+ * the events are not read. From step 7b, it takes snapshots of the
+ * accessibility tree for each connection that asked for them (see
+ * {@link AccessibilityTrees}).
  *
  * The service performs no actions, has no internet permission and stores
  * nothing on the phone.
@@ -23,12 +25,15 @@ public final class RecorderAccessibilityService extends AccessibilityService {
     private static final String TAG = "A11yRecorderCompanion";
 
     private RecorderLink link;
+    private AccessibilityTrees trees;
 
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
         if (link == null) {
             link = new RecorderLink(this);
+            trees = new AccessibilityTrees(this, link);
+            link.setTreeRequests(trees::requested);
             link.start();
         }
     }
@@ -38,7 +43,14 @@ public final class RecorderAccessibilityService extends AccessibilityService {
         // Read first, so the time is as close as possible to delivery.
         long received = System.nanoTime();
         RecorderLink current = link;
-        if (current == null || !current.wantsEvents()) {
+        if (current == null) {
+            return;
+        }
+        AccessibilityTrees currentTrees = trees;
+        if (currentTrees != null && current.wantsTrees()) {
+            currentTrees.eventArrived(event);
+        }
+        if (!current.wantsEvents()) {
             return;
         }
 
@@ -61,6 +73,10 @@ public final class RecorderAccessibilityService extends AccessibilityService {
 
     @Override
     public void onDestroy() {
+        if (trees != null) {
+            trees.stop();
+            trees = null;
+        }
         if (link != null) {
             link.stop();
             link = null;

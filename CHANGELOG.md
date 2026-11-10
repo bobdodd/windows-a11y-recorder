@@ -316,6 +316,28 @@ Changes on `main` since 1.1.0, not yet released.
   "Other" lane; the tree and the player's view of the events come in
   parts 7b and 7c.
 
+### Android recording, part 7b: the phone's accessibility tree
+
+- The companion app speaks protocol 4: a connection that asks is sent a
+  snapshot of every window's accessibility tree at once and on each
+  window change, and a snapshot of a window's tree when its content
+  changes. Each snapshot lists every window, and each item with its
+  place in the tree, its fields as in part 7a, and its labels and
+  traversal links. The companion app has to be installed again.
+- Snapshots are taken one at a time, off the service's thread; changes
+  that arrive while one is taken are covered by the next, which says how
+  many it covers. No limit on the rate is set.
+- The recorder stores the snapshots on `accessibility.android.tree`,
+  placed halfway through their taking through the companion app's clock
+  fit, with half the time taken as more uncertainty. One the recorder
+  cannot read is recorded as such without ending the connection.
+- A new android.accessibility-tree status line gives the number of
+  snapshots and the most in one second, how many were of every window,
+  the latest and largest in windows, items and kilobytes, the time the
+  app took to take them, and the delay from phone to recorder.
+- The player shows the snapshots only in the inspector and on the
+  timeline's "Other" lane; the tree view comes in part 7c.
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now

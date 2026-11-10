@@ -24,8 +24,10 @@ namespace Recorder.Collectors.Android;
 /// From slice 7, step 7a, it asks the app for accessibility events when
 /// the accessibility collector calls
 /// <see cref="RequestAccessibilityEventsAsync"/>; that collector records them.
+/// From step 7b, it asks for snapshots of the accessibility tree when the
+/// tree collector calls <see cref="RequestAccessibilityTreesAsync"/>.
 /// </summary>
-public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock, IPhoneDisplay, IPhoneAccessibilityEvents
+public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock, IPhoneDisplay, IPhoneAccessibilityEvents, IPhoneAccessibilityTrees
 {
     public const string Type = "android.companion";
 
@@ -465,6 +467,26 @@ public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock, 
         }
 
         return connection.AccessibilityEvents;
+    }
+
+    public async Task<ChannelReader<ReceivedAccessibilityTree>?> RequestAccessibilityTreesAsync(CancellationToken cancellation)
+    {
+        if (_connection is not { } connection || connection.Closed.IsCompleted || _stopping)
+        {
+            return null;
+        }
+
+        try
+        {
+            await connection.RequestAccessibilityTreesAsync(cancellation).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is CompanionUnavailableException or ObjectDisposedException)
+        {
+            // WatchAsync records the connection's end.
+            return null;
+        }
+
+        return connection.AccessibilityTrees;
     }
 
     private async Task VolumesAsync(CompanionConnection connection)

@@ -200,12 +200,12 @@ public sealed class AndroidCompanionTests
     [Fact]
     public async Task Connection_OtherProtocol_IsRefused()
     {
-        // The companion app from before slice 7, step 7a.
-        await using var app = new FakeApp(greeting: FakeApp.Hello(protocol: 2));
+        // The companion app from before slice 7, step 7b.
+        await using var app = new FakeApp(greeting: FakeApp.Hello(protocol: 3));
 
         var exception = await Assert.ThrowsAsync<CompanionUnavailableException>(() => app.ConnectAsync());
 
-        Assert.Contains("speaks protocol 2; this recorder speaks 3", exception.Message);
+        Assert.Contains("speaks protocol 3; this recorder speaks 4", exception.Message);
     }
 
     [Fact]
@@ -478,6 +478,45 @@ public sealed class AndroidCompanionTests
     }
 
     [Fact]
+    public async Task Collector_AsksForAccessibilityTrees_AndPassesThemOn()
+    {
+        await using var app = new FakeApp();
+        var sink = new ListSink();
+        var clock = new SessionClock();
+        await using var collector = new AndroidCompanionCollector(
+            new ScriptedAdb(_ => new AdbResult(1, "", "")),
+            Serial,
+            (now, cancellation) => app.ConnectAsync(now));
+        await collector.InitializeAsync(new CollectorInitializationContext("session-1", Path.GetTempPath(), clock, sink), CancellationToken.None);
+        Assert.Null(await collector.RequestAccessibilityTreesAsync(CancellationToken.None));
+
+        await collector.StartAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
+        await WaitUntilAsync(() => collector.Mapper.SampleCount >= 1);
+        var trees = await collector.RequestAccessibilityTreesAsync(CancellationToken.None);
+        Assert.NotNull(trees);
+        await app.TreesAsked.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await app.SendAsync(AndroidAccessibilityTreeTests.TreeLine(index: 1));
+        // Not read until the tree collector reads it, so a bad one does not
+        // end the connection either.
+        await app.SendAsync("{\"type\":\"accessibility-tree\",\"index\":\"two\"}");
+        await app.SendAsync(AndroidAccessibilityTreeTests.TreeLine(index: 3));
+        var first = await trees.ReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        var second = await trees.ReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        var third = await trees.ReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await collector.StopAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
+
+        Assert.Equal(1, CompanionProtocol.ReadTree(first.Line).Tree!.Index);
+        Assert.NotNull(CompanionProtocol.ReadTree(second.Line).Problem);
+        Assert.Equal(3, CompanionProtocol.ReadTree(third.Line).Tree!.Index);
+        Assert.True(third.ReceivedAt >= first.ReceivedAt);
+        Assert.Equal(CollectorHealthState.Healthy, collector.HealthState);
+
+        // The reader completes when the connection ends.
+        await trees.Completion.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.Null(await collector.RequestAccessibilityTreesAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Collector_AsksForAccessibilityVolume_AndRecordsEachAnswer()
     {
         await using var app = new FakeApp(volumeReply: percent =>
@@ -735,6 +774,7 @@ public sealed class AndroidCompanionTests
         private readonly TaskCompletionSource<NetworkStream> _client = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly SemaphoreSlim _write = new(1, 1);
         private readonly TaskCompletionSource _eventsAsked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _treesAsked = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private Task? _serving;
 
         public FakeApp(string? greeting = "default", Func<int, string>? volumeReply = null)
@@ -749,6 +789,9 @@ public sealed class AndroidCompanionTests
 
         /// <summary>Completes when the recorder asks for the accessibility events.</summary>
         public Task EventsAsked => _eventsAsked.Task;
+
+        /// <summary>Completes when the recorder asks for the tree snapshots.</summary>
+        public Task TreesAsked => _treesAsked.Task;
 
         /// <summary>The minimum percents the recorder asked for, in order.</summary>
         public IReadOnlyList<int> VolumeRequests
@@ -843,6 +886,12 @@ public sealed class AndroidCompanionTests
                     if (request.RootElement.GetProperty("type").GetString() == "accessibility-events")
                     {
                         _eventsAsked.TrySetResult();
+                        continue;
+                    }
+
+                    if (request.RootElement.GetProperty("type").GetString() == "accessibility-trees")
+                    {
+                        _treesAsked.TrySetResult();
                         continue;
                     }
 

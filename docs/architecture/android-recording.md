@@ -239,6 +239,19 @@ scrcpy source (`mic`), and could be added later.
 - It takes a tree snapshot at the start, on each window change and on
   content changes. How often content changes arrive is measured before
   any limit is set, so nothing small is missed by design.
+- Since step 7b (2026-11-10), the recorder asks the companion app for the
+  snapshots as the recording starts, and stores each on
+  `accessibility.android.tree`. A snapshot lists every window; one taken
+  at the start or on a window change holds every window's items, and one
+  taken on a content change holds the items of the window that changed.
+  Each item is listed in its place in the tree, with its parent, depth,
+  labels and traversal links, so the tree can be built again. The app
+  takes one snapshot at a time; changes that arrive while one is taken
+  are covered by the next, which says how many it covers, so every
+  change is followed by a snapshot and no limit is set. Each snapshot is
+  placed halfway through its taking, through the companion app's clock
+  fit. The status line gives the snapshots' rate, size and the time each
+  took. The details are in the implementation plan, slice 7.
 - It only observes. It performs no actions. It does not request explore
   by touch, the mode "in which touched items are spoken aloud"
   ([Android, AccessibilityServiceInfo](https://developer.android.com/reference/android/accessibilityservice/AccessibilityServiceInfo)),
