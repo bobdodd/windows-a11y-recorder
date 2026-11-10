@@ -2237,3 +2237,19 @@ step 4 the last teal block in the strip just above the timeline's
 bottom lane reads the same. "Â" before the degree sign in either is a
 failure. If the third item is not the weather, say what it was and
 send the screenshots anyway. Send the screenshots.
+
+### Results of part 6, step 6b fix
+
+Run on the development PC with the Pixel on 2026-11-10.
+
+- **Test 57: passed.** The installer `WindowsA11yRecorder-Setup-2419123.exe`
+  was built from `2419123` at 4:03 PM.
+- **Test 58: passed, by the owner's own run.** In the run following the
+  test's steps (recording
+  `20261110-214532-0754b6659aee44f4b0e4c6861a6dbd64`), the status line's
+  latest utterance at 32 seconds was a usage hint, "Actions available,
+  use Tap with 3 fingers to view", with 5 utterances, 3 interrupted and
+  21 words reached, so it did not show the weather. In a further run of
+  the owner's own, a block in the TalkBack said strip read "Mostly
+  clear. 9°", with the degree sign and no "Â". So text from the phone
+  outside ASCII is now read as it was written.

@@ -1294,7 +1294,8 @@ slice's full test goes into a validation plan,
   already stored keep the text as it was read. `AdbProcessTests` check
   the start info and that a line with "12°C" reads back unchanged; the
   tests run on Linux, where .NET reads UTF-8 anyway, so only test 58
-  shows the fix on Windows.
+  shows the fix on Windows. Tests 57 and 58 passed the same day: a
+  block of the strip read "Mostly clear. 9°".
 
 ### Slice 7: accessibility events and tree
 
