@@ -269,6 +269,13 @@ scrcpy source (`mic`), and could be added later.
   and fingers are followed by the multi-touch protocol B's slots
   ([Linux, multi-touch protocol](https://www.kernel.org/doc/html/latest/input/multi-touch-protocol.html)).
   The details are in the implementation plan, slice 5.
+- Since step 5b (2026-11-10), the player draws each finger on the
+  phone's picture while it is down: a yellow circle over a black one,
+  numbered from 1 in the order the fingers went down when there is more
+  than one, with its path over the last second. The touches and the
+  hardware keys have the mouse's and the keyboard's lanes and filters,
+  named "Touches" and "Phone keys". The frames are not changed, and an
+  MP4 export does not draw the touches.
 
 ### Settings
 

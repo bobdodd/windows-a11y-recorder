@@ -112,6 +112,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<InputRecordabilityRecord> _inputRecordability = [];
     private readonly List<KeyEvidenceRecord> _keyEvidence = [];
     private readonly List<KeyEvidenceRecord> _mouseEvidence = [];
+    private readonly List<(long Time, JsonElement Payload)> _phoneTouches = [];
     private readonly List<KeyEvidenceRecord> _accessibilityRequests = [];
     private readonly List<BrowserPageCommit> _pageCommits = [];
     private readonly List<(string EventId, long Time, JsonElement Payload)> _pageFocus = [];
@@ -284,6 +285,12 @@ public sealed class SessionPlaybackArchiveBuilder
             payload.ValueKind == JsonValueKind.Object)
         {
             AddFrame(_root, timestamp, payload, _phoneFrames);
+        }
+
+        if (PhoneTouchTimeline.IsTouchReport(timelineEvent.Channel, timelineEvent.EventType) &&
+            payload.ValueKind == JsonValueKind.Object)
+        {
+            _phoneTouches.Add((timestamp, payload.Clone()));
         }
 
         if (timelineEvent.Channel == WindowsPreferenceSettings.Channel &&
@@ -519,6 +526,9 @@ public sealed class SessionPlaybackArchiveBuilder
             browserNavigations)
         {
             FrameSource = source,
+            PhoneTouches = _phoneTouches.Count == 0
+                ? PhoneTouchTimeline.Empty
+                : new PhoneTouchTimeline(_phoneTouches),
             WindowsPreferences = _preferences.Count == 0
                 ? WindowsPreferenceTimeline.Empty
                 : new WindowsPreferenceTimeline(_preferences),

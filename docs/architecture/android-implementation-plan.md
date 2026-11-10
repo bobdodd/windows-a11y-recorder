@@ -1026,6 +1026,50 @@ slice's full test goes into a validation plan,
     also recorded a touch before the taps, a short drag, which is
     inference to have been the tester's. Held fingers send over 100
     reports a second, each kept. Step 5a is complete.
+- **Built, step 5b (2026-11-10).**
+  - **Kept for playback.** The playback index, version 21, keeps each
+    touch report in a compact form: the report's rotation and screen
+    size, and each finger's slot, tracking id, action and position on
+    the screen as shown (`PhoneTouchTimeline.Compact`). The positions in
+    the panel's units and on the upright screen, and the pressure and
+    sizes, stay in the recording file. An older index is derived again
+    when a recording opens, so recordings made with step 5a draw their
+    touches.
+  - **Fingers at a time.** `PhoneTouchTimeline` gives the fingers down
+    at a time: those down or moving in the last report at or before it.
+    A finger lifted in that report is not drawn. Fingers are numbered
+    from 1 in the order they went down, by tracking id, as the panel
+    gives each new finger a larger one; a finger's slot can be reused.
+    Each finger's path is its positions over the last second, oldest
+    first, starting no earlier than the report it went down in.
+  - **Drawn.** At every position of the playhead, as fingers move
+    between the phone's frames, the player draws each finger over the
+    frame: a circle about a fingertip across, 40 pixels on a screen
+    1,080 wide, with a yellow ring over a black one as the Magnifier
+    outline is drawn, so it shows on light and dark content, and a
+    dimmed middle. With more than one finger, each circle holds its
+    number in yellow. The path is a yellow line over a black one, drawn
+    under the circles. Positions are scaled from the screen size the
+    report gives to the frame's size; a report made sideways has a
+    sideways size, as does the frame. The touches are drawn by the
+    player; the frames are not changed, and an MP4 export does not draw
+    them. The picture's help text gains the fingers in words, for
+    example "2 fingers on the screen, 1 at x 301, y 1459, 2 at x 702,
+    y 1462".
+  - **Lanes and filters.** A recording of a phone has no keyboard or
+    mouse, so, as the phone's sound took the system sound's place in
+    step 4b, the touches (`input.android.touch`) take the mouse's lane
+    and filter, and the hardware keys (`input.android.key`) the
+    keyboard's, in their blue and teal. While a recording of a phone is
+    open, the filters read "Touches" and "Phone keys", and the list of
+    lanes at the right of the status line reads "Phone keys | Touches |
+    UIA | Window | Frames | Mic | Phone sound". "Phone keys" keeps the
+    keyboard filter's access key, Alt+K; "Touches" has none, as every
+    letter of it is taken in the window. The raw lines
+    (`input.android.raw`) stay on the "Other" lane.
+  - **Rotation.** The sideways test checks the turn step 5a took from
+    Android 11's input reader on the Pixel: a tap on a control of a
+    sideways app is drawn on that control.
 
 ### Slice 6: what TalkBack said
 

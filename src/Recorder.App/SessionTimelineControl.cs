@@ -888,10 +888,13 @@ public sealed class SessionTimelineControl : FrameworkElement
 
     private static int GetLane(string channel) => channel switch
     {
-        // The keyboard hook's keys share the keyboard lane with raw input's.
-        "input.keyboard" or "input.keyboard-hook" => 0,
-        // The mouse hook's events share the mouse lane with raw input's.
-        "input.mouse" or "input.mouse-hook" => 1,
+        // The keyboard hook's keys share the keyboard lane with raw input's,
+        // and so do a phone's hardware keys: a recording of a phone has no
+        // keyboard (Android slice 5b).
+        "input.keyboard" or "input.keyboard-hook" or Recorder.Contracts.AndroidTouchRecords.KeyChannel => 0,
+        // The mouse hook's events share the mouse lane with raw input's, and
+        // so do a phone's touches (Android slice 5b).
+        "input.mouse" or "input.mouse-hook" or Recorder.Contracts.AndroidTouchRecords.TouchChannel => 1,
         "accessibility.uia.events" => 2,
         "window.foreground" => 3,
         // The phone's frames share the desktop frames' lane: a recording

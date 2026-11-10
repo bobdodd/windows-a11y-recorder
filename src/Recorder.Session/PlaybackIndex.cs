@@ -67,7 +67,13 @@ public sealed record PlaybackIndex
     // device-frame, Android slice 3c), which the player shows in place of
     // the desktop's; an older index is derived again, so recordings made
     // with step 3b play their phone frames.
-    public const int CurrentVersion = 20;
+    // Version 21 keeps the phone's touch reports (input.android.touch,
+    // touch-report, Android slice 5b) in compact form, each finger's slot,
+    // tracking id, action and position with the report's rotation and
+    // screen size (PhoneTouchTimeline.Compact), for drawing the fingers on
+    // the phone's picture; an older index is derived again, so recordings
+    // made with step 5a draw their touches.
+    public const int CurrentVersion = 21;
 
     public required int Version { get; init; }
 
@@ -264,6 +270,12 @@ public sealed class PlaybackIndexBuilder
             return;
         }
 
+        if (PhoneTouchTimeline.IsTouchReport(channel, record.EventType))
+        {
+            Keep(eventKey, record);
+            return;
+        }
+
         if (channel.StartsWith("audio.", StringComparison.Ordinal) &&
             record.EventType == "audio-stream-started")
         {
@@ -437,7 +449,9 @@ public sealed class PlaybackIndexBuilder
                 ? record.Payload.Clone()
                 : WindowSnapshots.IsSnapshot(record.Channel, record.EventType)
                     ? WindowSnapshots.Compact(record.Payload)
-                    : PlaybackPayload(record.Payload)));
+                    : PhoneTouchTimeline.IsTouchReport(record.Channel, record.EventType)
+                        ? PhoneTouchTimeline.Compact(record.Payload)
+                        : PlaybackPayload(record.Payload)));
 
     private void AddBoundary(long time)
     {

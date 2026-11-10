@@ -1601,3 +1601,127 @@ screenshot.
   16 seconds, over 100 a second, each kept as a record. Step 5a is
   complete.
 
+## Part 5, step 5b: the phone's touches drawn in the player
+
+Step 5b draws the phone's touches on its picture in the player (see
+[the implementation plan](../architecture/android-implementation-plan.md),
+"Slice 5", "Built, step 5b"). While a finger is down, a yellow circle
+with a black edge is drawn where it is, with a yellow line behind it
+for where it went in the last second. With two or more fingers, each
+circle holds a number, 1 for the finger that went down first. A
+recording of a phone has no keyboard or mouse, so the touches are
+drawn on the mouse's lane of the timeline, the second from the top, in
+blue, and the hardware keys on the keyboard's, the top one. While such
+a recording is open, those filters read "Touches" and "Phone keys", and
+the list of lanes at the right of the status line at the bottom of the
+window begins "Phone keys | Touches".
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings, and the tests pass, 7 of them new.
+They keep touch reports in the playback index and read them back as the
+fingers on the screen at a time: three taps, each one finger at its
+place until it is lifted, a two-finger swipe with two numbered fingers
+moving together, the numbers in the order the fingers went down, the
+path over the last second, and positions scaled to a smaller picture
+and to a sideways one. None of that shows the circles drawn on the
+Pixel's picture, or a sideways touch drawn where it was made. Tests 45
+to 47 do. The player itself cannot be run in the Linux build
+environment.
+
+In tests 46 and 47 a touch is found on the timeline by selecting its
+marks: selecting a mark pauses the player and moves it to the mark's
+time, so the picture shows the fingers as they were then. A touch's
+marks are a short run of blue marks on the second lane. The last mark
+of each touch is the finger being lifted, which is drawn without a
+circle, so if the picture shows no circle after selecting a mark, press
+the Left arrow key once: with the timeline focused, it selects the
+lane's mark before.
+
+TalkBack is not needed, and is best left off.
+
+### Test 45: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Connect the Pixel by USB, unlocked. Start the recorder from the Start
+   menu, and in "Recording target" choose "Android device".
+4. If the panel offers "Install companion app", choose it, and wait
+   until the panel shows "Companion app: installed, on, and answering".
+5. Read the note under "Android device checks".
+
+**On screen:** the build ends with `INSTALLER BUILT`. In step 5 the note
+ends "It records every touch on the phone's screen and every hardware
+key, such as volume and power, with each finger's position in screen
+pixels. The player draws each finger on the phone's picture as a yellow
+circle, numbered when there is more than one, with its path, and shows
+the touches and keys as "Touches" and "Phone keys" in the mouse's and
+keyboard's places. Accessibility evidence comes in later parts."
+
+### Test 46: three taps and a two-finger swipe
+
+Before the test, go to the phone's home screen, held upright.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. On the phone, tap once on an empty part of the wallpaper near the
+   top of the screen. Wait 2 seconds, and do the same in the middle of
+   the screen, then just above the row of app icons at the bottom. Wait
+   2 seconds.
+3. Put two fingers side by side, about 3 cm apart, on the wallpaper
+   just above the app icons, and slide both slowly up together to the
+   middle of the screen, taking about 2 seconds, then lift them. If the
+   phone opens its list of apps, leave it.
+4. Choose "Stop recording", and wait until the recording has opened in
+   the player.
+5. In the timeline, select a mark of each touch in turn on the second
+   lane, as described above, and after each take a screenshot of the
+   whole recorder window: the first tap, the second, the third, and
+   then the middle of the longer run of marks that is the swipe.
+
+**On screen:** the second lane from the top of the timeline has four
+runs of blue marks: three short ones about 2 seconds apart, and a
+longer one. The filter that reads "Mouse" for a desktop recording reads
+"Touches", the one that reads "Keyboard" reads "Phone keys", and the
+status line ends "Phone keys | Touches | UIA | Window | Frames | Mic |
+Phone sound". In the first three screenshots the phone's picture has
+one yellow circle with a black edge, with no number, near the top, in
+the middle, and just above the app icons, where the taps were made. In
+the fourth it has two circles side by side, numbered 1 and 2, at the
+same height, each with a yellow line running down below it, the way the
+fingers came. A circle at a different place than the touch, or none,
+is a failure; send the screenshot. Send the screenshots.
+
+### Test 47: a tap with the phone sideways
+
+This test checks that a touch made with the phone turned is drawn where
+it was made on the turned picture. Before the test, turn on Auto-rotate
+in the phone's quick settings, and open Chrome on any page, with the
+phone upright.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. Turn the phone sideways, with its top to the left, and wait until
+   Chrome has turned to fill the wide screen, then 3 seconds more.
+3. Tap Chrome's menu button, the three dots at the top right of the
+   wide screen, once. Leave the menu open, and do not touch the screen
+   again.
+4. Choose "Stop recording", and wait until the recording has opened in
+   the player.
+5. In the timeline, select a mark of the last run of marks on the
+   second lane, the tap, as described before test 45, and take a
+   screenshot of the whole recorder window.
+
+**On screen:** the phone's picture is wide, showing Chrome sideways as
+it was on the phone, and one yellow circle is drawn on Chrome's menu
+button, the three dots at the top right. A circle anywhere else, such
+as at the bottom left or on the left edge, says the turn is wrong; send
+the screenshot either way. After the test, close the menu, turn the
+phone upright, and set Auto-rotate back as it was.

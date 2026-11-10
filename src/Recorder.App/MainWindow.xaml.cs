@@ -47,6 +47,8 @@ public partial class MainWindow : Window
         "input.keyboard-hook",
         "input.mouse",
         "input.mouse-hook",
+        Recorder.Contracts.AndroidTouchRecords.KeyChannel,
+        Recorder.Contracts.AndroidTouchRecords.TouchChannel,
         "accessibility.uia.events",
         "window.foreground",
         "system.preferences",
@@ -73,6 +75,10 @@ public partial class MainWindow : Window
     private readonly BusyIndicator _busy;
     // "Phone sound" while a recording of a phone is open (Android slice 4b).
     private string _systemSoundName = "System audio";
+    // "Phone keys" and "Touches" while a recording of a phone is open
+    // (Android slice 5b).
+    private string _keysName = "Keyboard";
+    private string _pointerName = "Mouse";
     private readonly HashSet<string> _announcedHealthReasons =
         new(StringComparer.Ordinal);
     private SessionCoordinator? _coordinator;
@@ -932,6 +938,7 @@ public partial class MainWindow : Window
             PlaybackSlider.Maximum =
                 _playbackArchive.DurationNanoseconds / 1_000_000_000d;
             ConfigureAudio(_playbackArchive);
+            NameInputLanes(IsPhoneInput(_playbackArchive));
             SetPlaybackEnabled(_playbackArchive.Frames.Count > 0);
             SessionFolderTextBox.Text = _playbackArchive.SessionDirectory;
             OpenFolderButton.IsEnabled = true;
@@ -971,6 +978,7 @@ public partial class MainWindow : Window
             BrowserCorrelationTextBox.Text =
                 "The recording could not be opened.";
             VideoImage.Source = null;
+            _frameSource = null;
             VideoPlaceholderTextBlock.Text = "The recording could not be opened.";
             VideoPlaceholderTextBlock.Visibility = Visibility.Visible;
             PlaybackStatusTextBlock.Text = "Recording load failed.";
@@ -1259,15 +1267,24 @@ public partial class MainWindow : Window
         var index = FindFrameAtOrBefore(
             _playbackArchive.Frames,
             positionNanoseconds);
-        if (index == _displayedFrameIndex && !_redrawFrame)
+        if (index != _displayedFrameIndex || _redrawFrame)
         {
-            return;
+            ShowFrame(index);
         }
 
+        // Fingers move between the phone's frames, which arrive only when
+        // its screen changes, so they are drawn at every position.
+        DisplayTouchesAt(positionNanoseconds);
+    }
+
+    private void ShowFrame(int index)
+    {
         _redrawFrame = false;
         _displayedFrameIndex = index;
-        if (index < 0)
+        if (index < 0 || _playbackArchive is null)
         {
+            _frameSource = null;
+            _frameHelpText = string.Empty;
             VideoImage.Source = null;
             return;
         }
@@ -1284,12 +1301,13 @@ public partial class MainWindow : Window
         bitmap.StreamSource = stream;
         bitmap.EndInit();
         bitmap.Freeze();
-        VideoImage.Source = FrameImage(frame, bitmap, out var view);
-        AutomationProperties.SetHelpText(
-            VideoImage,
+        _frameSource = FrameImage(frame, bitmap, out var view);
+        VideoImage.Source = _frameSource;
+        _frameHelpText =
             $"{(_playbackArchive.FrameSource == SessionFrameSource.Phone ? "Phone" : "Desktop")} frame " +
             $"{index + 1} of {_playbackArchive.Frames.Count}, " +
-            $"{FormatTime(frame.MonotonicNanoseconds)}{view}");
+            $"{FormatTime(frame.MonotonicNanoseconds)}{view}";
+        SetVideoHelpText(string.Empty);
     }
 
     private async void DisplayNearestEvent(long positionNanoseconds)
@@ -1382,8 +1400,29 @@ public partial class MainWindow : Window
         SystemAudioVolumeLabel.Content = phone ? "P_hone sound:" : "S_ystem audio:";
         AutomationProperties.SetName(SystemAudioVolumeSlider, $"{_systemSoundName} playback gain");
         FilterSystemAudioCheckBox.Content = phone ? "Phone sound" : "System _audio";
-        TimelineLegendTextBlock.Text = $"Keyboard | Mouse | UIA | Window | Frames | Mic | {_systemSoundName}";
+        ShowTimelineLegend();
     }
+
+    // A recording of a phone has the phone's hardware keys and touches
+    // where a recording of the desktop has the keyboard and the mouse
+    // (Android slice 5b): their lanes and filters are the keyboard's and
+    // the mouse's, named "Phone keys" and "Touches".
+    private static bool IsPhoneInput(SessionPlaybackArchive archive) =>
+        archive.FrameSource == SessionFrameSource.Phone ||
+        archive.PhoneTouches.Recorded ||
+        archive.Timeline.ChannelCounts.ContainsKey(Recorder.Contracts.AndroidTouchRecords.KeyChannel);
+
+    private void NameInputLanes(bool phone)
+    {
+        _keysName = phone ? "Phone keys" : "Keyboard";
+        _pointerName = phone ? "Touches" : "Mouse";
+        FilterKeyboardCheckBox.Content = phone ? "Phone _keys" : "_Keyboard";
+        FilterMouseCheckBox.Content = phone ? "Touches" : "_Mouse";
+        ShowTimelineLegend();
+    }
+
+    private void ShowTimelineLegend() =>
+        TimelineLegendTextBlock.Text = $"{_keysName} | {_pointerName} | UIA | Window | Frames | Mic | {_systemSoundName}";
 
     private void ApplyAudioLevels()
     {
@@ -1452,6 +1491,16 @@ public partial class MainWindow : Window
         AddVisibleChannel(FilterKeyboardCheckBox, "input.keyboard-hook", visibleChannels);
         AddVisibleChannel(FilterMouseCheckBox, "input.mouse", visibleChannels);
         AddVisibleChannel(FilterMouseCheckBox, "input.mouse-hook", visibleChannels);
+        // A phone's hardware keys and touches take the keyboard's and the
+        // mouse's places and filters (Android slice 5b).
+        AddVisibleChannel(
+            FilterKeyboardCheckBox,
+            Recorder.Contracts.AndroidTouchRecords.KeyChannel,
+            visibleChannels);
+        AddVisibleChannel(
+            FilterMouseCheckBox,
+            Recorder.Contracts.AndroidTouchRecords.TouchChannel,
+            visibleChannels);
         AddVisibleChannel(
             FilterAutomationCheckBox,
             "accessibility.uia.events",

@@ -114,6 +114,12 @@ public sealed record SessionPlaybackArchive(
     /// </summary>
     public SessionFrameSource FrameSource { get; init; } = SessionFrameSource.Desktop;
 
+    /// <summary>
+    /// The phone's touch reports, which the player draws on the phone's
+    /// picture (Android slice 5b); empty for a recording without them.
+    /// </summary>
+    public PhoneTouchTimeline PhoneTouches { get; init; } = PhoneTouchTimeline.Empty;
+
     private ISessionTimeline? _timeline;
 
     /// <summary>

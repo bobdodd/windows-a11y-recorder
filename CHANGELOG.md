@@ -238,6 +238,20 @@ Changes on `main` since 1.1.0, not yet released.
   the recording goes on without them.
 - The player does not draw the touches yet (part 5b).
 
+### Android recording, part 5b: the phone's touches in the player
+
+- The player draws each finger on the phone's picture while it is down:
+  a yellow circle over a black one, numbered in the order the fingers
+  went down when there is more than one, with its path over the last
+  second. The picture's help text gives the fingers' places in words.
+  The frames are not changed, and an MP4 export does not draw them.
+- In a recording of a phone, the touches take the mouse's lane and
+  filter, and the hardware keys the keyboard's, labelled "Touches" and
+  "Phone keys" while it is open. Their records are no longer counted
+  under the "Other" filter.
+- The playback index, version 21, keeps each touch report in compact
+  form; an older index is derived again when a recording opens.
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now
