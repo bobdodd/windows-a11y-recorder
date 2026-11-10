@@ -252,6 +252,18 @@ scrcpy source (`mic`), and could be added later.
   placed halfway through its taking, through the companion app's clock
   fit. The status line gives the snapshots' rate, size and the time each
   took. The details are in the implementation plan, slice 7.
+- Since step 7c (2026-11-10), the player shows the phone's accessibility
+  events and snapshots on the lane and filter UI Automation has for the
+  desktop, named "Accessibility" and "Accessibility events". The
+  Accessibility tree tab shows the phone's tree at the playhead: a row
+  for each window, with its items as the latest snapshot that took them
+  gave them, and the item with accessibility focus marked "accessibility
+  focus". The player draws a yellow outline around that item on the
+  phone's picture. The item is the one the latest accessibility focus
+  event came from, until a focus cleared event from it; the snapshots
+  are not taken on focus changes, so they give it only its newer bounds,
+  as after a scroll. The playback index keeps each snapshot without its
+  items, which the tree view reads from the recording.
 - It only observes. It performs no actions. It does not request explore
   by touch, the mode "in which touched items are spoken aloud"
   ([Android, AccessibilityServiceInfo](https://developer.android.com/reference/android/accessibilityservice/AccessibilityServiceInfo)),

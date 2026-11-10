@@ -1027,7 +1027,11 @@ public sealed class SessionTimelineControl : FrameworkElement
         // The mouse hook's events share the mouse lane with raw input's, and
         // so do a phone's touches (Android slice 5b).
         "input.mouse" or "input.mouse-hook" or Recorder.Contracts.AndroidTouchRecords.TouchChannel => 1,
-        "accessibility.uia.events" => 2,
+        // The phone's accessibility events and tree snapshots share the UI
+        // Automation lane: a recording of a phone has no UI Automation
+        // (Android slice 7, step 7c).
+        "accessibility.uia.events" or Recorder.Contracts.AndroidAccessibilityRecords.EventsChannel or
+            Recorder.Contracts.AndroidAccessibilityRecords.TreeChannel => 2,
         "window.foreground" => 3,
         // The phone's frames share the desktop frames' lane: a recording
         // has one or the other (Android slice 3c).

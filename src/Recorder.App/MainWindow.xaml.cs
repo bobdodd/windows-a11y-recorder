@@ -80,6 +80,7 @@ public partial class MainWindow : Window
     // (Android slice 5b).
     private string _keysName = "Keyboard";
     private string _pointerName = "Mouse";
+    private string _automationName = "UIA";
     // The TalkBack collector of the Android recording in progress, for its
     // reminder at Stop; null for a desktop recording.
     private AndroidTalkBackCollector? _talkBack;
@@ -1432,7 +1433,9 @@ public partial class MainWindow : Window
         archive.FrameSource == SessionFrameSource.Phone ||
         archive.PhoneTouches.Recorded ||
         archive.Timeline.ChannelCounts.ContainsKey(Recorder.Contracts.AndroidTouchRecords.KeyChannel) ||
-        archive.TalkBackSpeech.Recorded;
+        archive.TalkBackSpeech.Recorded ||
+        archive.PhoneAccessibility.TreesRecorded ||
+        archive.PhoneAccessibility.FocusRecorded;
 
     private void NameInputLanes(bool phone)
     {
@@ -1443,11 +1446,15 @@ public partial class MainWindow : Window
         // What TalkBack said takes the screen reader's filter (Android
         // slice 6, step 6b).
         FilterAssistiveTechnologyCheckBox.Content = phone ? "TalkBack said" : "Screen reader";
+        // The phone's accessibility events take UI Automation's filter
+        // (Android slice 7, step 7c).
+        _automationName = phone ? "Accessibility" : "UIA";
+        FilterAutomationCheckBox.Content = phone ? "Accessibility _events" : "_UI Automation";
         ShowTimelineLegend();
     }
 
     private void ShowTimelineLegend() =>
-        TimelineLegendTextBlock.Text = $"{_keysName} | {_pointerName} | UIA | Window | Frames | Mic | {_systemSoundName}";
+        TimelineLegendTextBlock.Text = $"{_keysName} | {_pointerName} | {_automationName} | Window | Frames | Mic | {_systemSoundName}";
 
     private void ApplyAudioLevels()
     {
@@ -1529,6 +1536,17 @@ public partial class MainWindow : Window
         AddVisibleChannel(
             FilterAutomationCheckBox,
             "accessibility.uia.events",
+            visibleChannels);
+        // The phone's accessibility events and tree snapshots take UI
+        // Automation's place and filter, named "Accessibility events"
+        // (Android slice 7, step 7c).
+        AddVisibleChannel(
+            FilterAutomationCheckBox,
+            Recorder.Contracts.AndroidAccessibilityRecords.EventsChannel,
+            visibleChannels);
+        AddVisibleChannel(
+            FilterAutomationCheckBox,
+            Recorder.Contracts.AndroidAccessibilityRecords.TreeChannel,
             visibleChannels);
         AddVisibleChannel(FilterWindowCheckBox, "window.foreground", visibleChannels);
         AddVisibleChannel(FilterPreferencesCheckBox, "system.preferences", visibleChannels);

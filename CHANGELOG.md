@@ -338,6 +338,25 @@ Changes on `main` since 1.1.0, not yet released.
 - The player shows the snapshots only in the inspector and on the
   timeline's "Other" lane; the tree view comes in part 7c.
 
+### Android recording, part 7c: the phone's accessibility tree in the player
+
+- The phone's accessibility events and tree snapshots are shown on the
+  UI Automation lane, named "Accessibility", with the filter
+  "Accessibility events". The event list names each event's type and the
+  item it came from, and each snapshot's windows and items.
+- The Accessibility tree tab shows the phone's tree at the playhead: each
+  window, with its items as the latest snapshot that took them gave
+  them. The item with accessibility focus, from the latest accessibility
+  focus event, is marked "accessibility focus", and "Show accessibility
+  focus" scrolls to it. Clicking an item shows its fields in Selected
+  event values.
+- The player draws a yellow outline around the item with accessibility
+  focus on the phone's picture, at its bounds in the latest snapshot
+  after the focus was given, as after a scroll.
+- The playback index is version 23 and keeps the snapshots without their
+  items, which the tree view reads from the recording. Recordings made
+  before are indexed again when opened.
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now

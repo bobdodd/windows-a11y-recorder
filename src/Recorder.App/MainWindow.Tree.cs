@@ -31,6 +31,9 @@ public partial class MainWindow
     private bool _allowTreeScroll;
     private string? _readingKey;
     private string? _pointerKey;
+    // "accessibility focus" for a recording of a phone, whose tree view marks
+    // the item with accessibility focus (Android slice 7, step 7c).
+    private string _readingWords = TreeRowView.ReadingPositionWords;
 
     private void BindAccessibilityTree()
     {
@@ -48,6 +51,20 @@ public partial class MainWindow
         _treeExpansionSet = false;
         _readingKey = null;
         _pointerKey = null;
+        var phone = _playbackArchive?.PhoneAccessibility.TreesRecorded == true;
+        _readingWords = phone ? TreeRowView.AccessibilityFocusWords : TreeRowView.ReadingPositionWords;
+        ShowReadingPositionButton.Content = phone ? "Show accessibility focus" : "Show reading position";
+        AutomationProperties.SetHelpText(
+            ShowReadingPositionButton,
+            phone
+                ? "Expands the tree down to the item with accessibility focus at the playhead, and scrolls to it."
+                : "Expands the tree down to the reading position at the playhead, and scrolls to it.");
+        ShowUnderPointerButton.Visibility = phone ? Visibility.Collapsed : Visibility.Visible;
+        AutomationProperties.SetHelpText(
+            AccessibilityTreeView,
+            phone
+                ? "Click an item, or press Enter on it, to show its fields as the snapshot holds them in Selected event values. Click a window to show the snapshot that took its items. The playhead does not move."
+                : "Click an object, or press Enter on it, to show its recorded version in Selected event values. The playhead does not move.");
         DisplayAccessibilityTreeAt(_playbackPositionNanoseconds);
     }
 
@@ -59,6 +76,12 @@ public partial class MainWindow
         }
 
         var archive = _playbackArchive;
+        if (archive?.PhoneAccessibility is { TreesRecorded: true } phone)
+        {
+            DisplayPhoneTreeAt(archive, phone, positionNanoseconds);
+            return;
+        }
+
         var tree = archive?.AccessibilityTree;
         if (archive is null || tree is not { Recorded: true })
         {
@@ -89,6 +112,59 @@ public partial class MainWindow
 
         var reading = ReadingObjectAt(archive, positionNanoseconds) is { } readingObject ? tree.KeyOf(readingObject) : null;
         var pointer = archive.AccessibilityRequests.PointerObjectAt(positionNanoseconds) is { } pointerObject ? tree.KeyOf(pointerObject) : null;
+        ShowTreeSnapshot(snapshot, reading, pointer);
+        AccessibilityTreeStatusTextBlock.Text =
+            $"{snapshot.ObjectCount:N0} objects. {AccessibilityTreeTimeline.Note}" +
+            (reading is null ? " The reading position is not in the tree." : string.Empty) +
+            (pointer is null ? " No object under the pointer is in the tree." : string.Empty);
+        ShowReadingPositionButton.IsEnabled = reading is not null && _treeRows.ContainsKey(reading);
+        ShowUnderPointerButton.IsEnabled = pointer is not null && _treeRows.ContainsKey(pointer);
+    }
+
+    // The phone's tree at the playhead (Android slice 7, step 7c): a row for
+    // each window, with its items as the snapshot that last took them gave
+    // them, and the item with accessibility focus marked in words.
+    private void DisplayPhoneTreeAt(SessionPlaybackArchive archive, PhoneAccessibilityTimeline phone, long positionNanoseconds)
+    {
+        var tree = phone.TreeAt(positionNanoseconds, archive.RecordSource);
+        ShowUnderPointerButton.IsEnabled = false;
+        if (tree is null)
+        {
+            if (_treeRoots.Count > 0)
+            {
+                _treeRoots.Clear();
+                _treeRows.Clear();
+            }
+
+            _treeSnapshot = null;
+            _treeVersion = -1;
+            _readingKey = null;
+            AccessibilityTreeStatusTextBlock.Text = "No snapshot of the phone's tree is recorded at the playhead.";
+            ShowReadingPositionButton.IsEnabled = false;
+            return;
+        }
+
+        ShowTreeSnapshot(tree.Snapshot, tree.FocusKey, null);
+        var focus = phone.FocusAt(positionNanoseconds);
+        var problems = tree.Problems.Count == 0
+            ? string.Empty
+            : " Items that could not be read: " + string.Join("; ", tree.Problems) + ".";
+        AccessibilityTreeStatusTextBlock.Text =
+            $"{tree.WindowCount:N0} {(tree.WindowCount == 1 ? "window" : "windows")}, {tree.ItemCount:N0} {(tree.ItemCount == 1 ? "item" : "items")}. " +
+            PhoneAccessibilityTimeline.Note +
+            (focus is null
+                ? " No item is known to have accessibility focus at the playhead."
+                : tree.FocusKey is null
+                    ? $" The item with accessibility focus, {focus.Item.Label}, is not in the tree."
+                    : string.Empty) +
+            problems;
+        ShowReadingPositionButton.IsEnabled = tree.FocusKey is not null && _treeRows.ContainsKey(tree.FocusKey);
+    }
+
+    // Shows a tree in the view, rebuilding the rows only when the tree has
+    // changed, and moves the marks.
+    private void ShowTreeSnapshot(AccessibilityTreeSnapshot snapshot, string? reading, string? pointer)
+    {
         if (snapshot.Version != _treeVersion)
         {
             Mark(_readingKey, _pointerKey, false);
@@ -126,13 +202,6 @@ public partial class MainWindow
                 }
             }
         }
-
-        AccessibilityTreeStatusTextBlock.Text =
-            $"{snapshot.ObjectCount:N0} objects. {AccessibilityTreeTimeline.Note}" +
-            (reading is null ? " The reading position is not in the tree." : string.Empty) +
-            (pointer is null ? " No object under the pointer is in the tree." : string.Empty);
-        ShowReadingPositionButton.IsEnabled = reading is not null && _treeRows.ContainsKey(reading);
-        ShowUnderPointerButton.IsEnabled = pointer is not null && _treeRows.ContainsKey(pointer);
     }
 
     private static TreeObject? ReadingObjectAt(SessionPlaybackArchive archive, long time)
@@ -176,7 +245,7 @@ public partial class MainWindow
             TreeRowView view;
             if (at < 0)
             {
-                view = _treeRows.TryGetValue(row.Key, out var known) && !views.Contains(known) ? known : new TreeRowView(row.Key);
+                view = _treeRows.TryGetValue(row.Key, out var known) && !views.Contains(known) ? known : new TreeRowView(row.Key, _readingWords);
                 views.Insert(index, view);
             }
             else
@@ -289,6 +358,12 @@ public partial class MainWindow
     // leaving the playhead where it is.
     private void ShowTreeRowRecord(TreeRowView view)
     {
+        if (view.Record is not null)
+        {
+            ShowPhoneItemRecord(view);
+            return;
+        }
+
         if (_playbackArchive is not { } archive || view.EventId is not { } eventId ||
             !archive.TimelineEvents.TryGetValue(eventId, out var item))
         {
@@ -318,20 +393,56 @@ public partial class MainWindow
                 $"Selected {FormatTime(item.MonotonicNanoseconds)} | {item.Channel} | {item.EventType} | {archive.Describe(item)}";
         }
     }
+
+    // A phone item's fields as the snapshot that took them holds them, in
+    // Selected event values, leaving the playhead where it is (Android
+    // slice 7, step 7c).
+    private void ShowPhoneItemRecord(TreeRowView view)
+    {
+        string fields;
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(view.Record!);
+            fields = System.Text.Json.JsonSerializer.Serialize(document.RootElement, InspectorJsonOptions);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            fields = view.Record!;
+        }
+
+        var taken = view.RecordedAt is { } at ? FormatTime(at) : "an unknown time";
+        EventDetailsTextBox.Text =
+            $"{view.Label}{Environment.NewLine}" +
+            $"An item of the snapshot of the phone's tree taken at {taken} (event {view.EventId}).{Environment.NewLine}{Environment.NewLine}" +
+            fields;
+        EventDetailsTextBox.CaretIndex = 0;
+        EventDetailsTextBox.ScrollToHome();
+        AutomationProperties.SetHelpText(EventDetailsTextBox, $"Selected phone item, {view.Label}");
+        if (!DetailsShown)
+        {
+            PlaybackStatusTextBlock.Text = $"Selected item {view.Label}, taken at {taken}";
+        }
+    }
 }
 
 /// <summary>A row of the tree view.</summary>
 public sealed class TreeRowView : INotifyPropertyChanged
 {
+    public const string ReadingPositionWords = "reading position";
+
+    public const string AccessibilityFocusWords = "accessibility focus";
+
+    private readonly string _readingWords;
     private string _label = string.Empty;
     private string _detail = string.Empty;
     private bool _isExpanded;
     private bool _isReading;
     private bool _isPointer;
 
-    public TreeRowView(string key)
+    public TreeRowView(string key, string readingWords = ReadingPositionWords)
     {
         Key = key;
+        _readingWords = readingWords;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -344,6 +455,9 @@ public sealed class TreeRowView : INotifyPropertyChanged
 
     public long? RecordedAt { get; private set; }
 
+    /// <summary>A phone item's fields as its snapshot holds them; null for other rows.</summary>
+    public string? Record { get; private set; }
+
     public string Label => _label;
 
     /// <summary>When the object's version was recorded; empty for a note.</summary>
@@ -352,7 +466,7 @@ public sealed class TreeRowView : INotifyPropertyChanged
     /// <summary>The words marking the reading position and the object under the pointer, so they do not rest on colour.</summary>
     public string Markers => string.Join(", ", new[]
     {
-        _isReading ? "reading position" : null,
+        _isReading ? _readingWords : null,
         _isPointer ? "under the pointer" : null
     }.OfType<string>());
 
@@ -407,11 +521,15 @@ public sealed class TreeRowView : INotifyPropertyChanged
 
     public void Update(AccessibilityTreeRow row)
     {
-        var detail = row.Kind == AccessibilityTreeRowKind.Object && row.RecordedAt is { } at
-            ? $"recorded at {WindowsPreferenceTimeline.ClockOf(at)}"
-            : string.Empty;
+        var detail = row.Kind switch
+        {
+            AccessibilityTreeRowKind.Object when row.RecordedAt is { } at => $"recorded at {WindowsPreferenceTimeline.ClockOf(at)}",
+            AccessibilityTreeRowKind.PhoneWindow when row.RecordedAt is { } at => $"items taken at {WindowsPreferenceTimeline.ClockOf(at)}",
+            _ => string.Empty
+        };
         EventId = row.EventId;
         RecordedAt = row.RecordedAt;
+        Record = row.Record;
         if (_label != row.Label || _detail != detail)
         {
             _label = row.Label;

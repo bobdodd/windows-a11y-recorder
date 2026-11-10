@@ -114,6 +114,9 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<KeyEvidenceRecord> _mouseEvidence = [];
     private readonly List<(long Time, JsonElement Payload)> _phoneTouches = [];
     private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _talkBackSpeech = [];
+    private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _phoneTrees = [];
+    private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _phoneFocus = [];
+    private readonly List<(long Time, JsonElement Payload)> _phoneDisplays = [];
     private readonly List<KeyEvidenceRecord> _accessibilityRequests = [];
     private readonly List<BrowserPageCommit> _pageCommits = [];
     private readonly List<(string EventId, long Time, JsonElement Payload)> _pageFocus = [];
@@ -298,6 +301,27 @@ public sealed class SessionPlaybackArchiveBuilder
             payload.ValueKind == JsonValueKind.Object)
         {
             _talkBackSpeech.Add((timelineEvent, payload.Clone()));
+        }
+
+        // The phone's tree snapshots, without their items, and its
+        // accessibility focus and display records (Android slice 7, step 7c).
+        if (PhoneAccessibilityTimeline.IsTreeRecord(timelineEvent.Channel, timelineEvent.EventType) &&
+            payload.ValueKind == JsonValueKind.Object)
+        {
+            _phoneTrees.Add((timelineEvent, PhoneAccessibilityTimeline.Compact(payload)));
+            // A window's row in the tree view selects the snapshot that took its items.
+            _stepEvents.TryAdd(timelineEvent.EventId, timelineEvent);
+        }
+
+        if (PhoneAccessibilityTimeline.IsFocusRecord(timelineEvent.Channel, timelineEvent.EventType, payload))
+        {
+            _phoneFocus.Add((timelineEvent, payload.Clone()));
+        }
+
+        if (PhoneAccessibilityTimeline.IsDisplayRecord(timelineEvent.Channel, timelineEvent.EventType) &&
+            payload.ValueKind == JsonValueKind.Object)
+        {
+            _phoneDisplays.Add((timestamp, payload.Clone()));
         }
 
         if (timelineEvent.Channel == WindowsPreferenceSettings.Channel &&
@@ -539,6 +563,9 @@ public sealed class SessionPlaybackArchiveBuilder
             TalkBackSpeech = _talkBackSpeech.Count == 0
                 ? TalkBackSpeechTimeline.Empty
                 : new TalkBackSpeechTimeline(_talkBackSpeech, duration),
+            PhoneAccessibility = _phoneTrees.Count == 0 && _phoneFocus.Count == 0
+                ? PhoneAccessibilityTimeline.Empty
+                : new PhoneAccessibilityTimeline(_phoneTrees, _phoneFocus, _phoneDisplays),
             WindowsPreferences = _preferences.Count == 0
                 ? WindowsPreferenceTimeline.Empty
                 : new WindowsPreferenceTimeline(_preferences),
@@ -888,6 +915,18 @@ public sealed class SessionPlaybackArchiveBuilder
             return eventType == AndroidTalkBackRecords.WordReachedEventType
                 ? JoinSummary(eventType, ReadString(payload, "word"))
                 : JoinSummary(eventType, ReadString(payload, "text"), ReadString(payload, "utteranceId"));
+        }
+
+        // The phone's accessibility events and tree snapshots (Android
+        // slice 7, step 7c).
+        if (channel == AndroidAccessibilityRecords.EventsChannel && eventType == AndroidAccessibilityRecords.EventType)
+        {
+            return JoinSummary(eventType, PhoneAccessibilityTimeline.EventSummary(payload));
+        }
+
+        if (PhoneAccessibilityTimeline.IsTreeRecord(channel, eventType))
+        {
+            return JoinSummary(eventType, PhoneAccessibilityTimeline.Summary(payload));
         }
 
         if (channel == "accessibility.uia.events")

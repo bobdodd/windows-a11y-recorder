@@ -21,7 +21,13 @@ public enum AccessibilityTreeRowKind
     FrameTree,
 
     /// <summary>A heading for objects no recorded version lists as a child.</summary>
-    Unplaced
+    Unplaced,
+
+    /// <summary>A window of the phone (Android slice 7, step 7c).</summary>
+    PhoneWindow,
+
+    /// <summary>An item of a phone window's tree, as a snapshot took it.</summary>
+    PhoneItem
 }
 
 /// <summary>
@@ -36,7 +42,11 @@ public sealed record AccessibilityTreeRow(
     string Label,
     long? RecordedAt,
     string? EventId,
-    IReadOnlyList<AccessibilityTreeRow> Children);
+    IReadOnlyList<AccessibilityTreeRow> Children)
+{
+    /// <summary>A phone item's fields as its snapshot holds them, for Selected event values; null for other rows.</summary>
+    public string? Record { get; init; }
+}
 
 /// <summary>The page's tree at a time: its rows, the number of objects, and what it rests on.</summary>
 public sealed class AccessibilityTreeSnapshot

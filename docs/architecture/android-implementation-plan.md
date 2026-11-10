@@ -1333,7 +1333,7 @@ slice's full test goes into a validation plan,
     counts them on the status line, including the most content changes
     in one second, which is the rate measured before step 7b sets any
     limit. The player shows the records only in the inspector and on the
-    timeline's "Other" lane.
+    timeline's "Other" lane, until step 7c.
   - **Step 7b: tree snapshots.** Snapshots of every window's tree on
     `accessibility.android.tree`, at the start, on each window change and
     on content changes, with their size and rate measured on the Pixel.
@@ -1514,6 +1514,78 @@ slice's full test goes into a validation plan,
     companion app was built on Linux with `javac -Werror` against
     Android 17's `android.jar`; that it takes the snapshots on the Pixel,
     and their size, rate and time, is for tests 61 and 62.
+
+- **Built, step 7c (2026-11-10).**
+  - **Lane and filter.** The phone's accessibility events and tree
+    snapshots are shown on the lane UI Automation has for a desktop
+    recording, which a recording of a phone does not have, as touches
+    and what TalkBack said took the mouse's and the screen reader's. For
+    a phone the legend names the lane "Accessibility" and its filter
+    "Accessibility events". The event list names each event's type and
+    the item it came from, and each snapshot's reasons, windows and
+    items. An item with no text or description of its own, such as a
+    row of Settings, is named by the text in it: for an event, the
+    event's text, which Android takes from the items in it; in the tree,
+    the first three texts of the items below it.
+  - **The item with accessibility focus.** It is the source item of the
+    latest `TYPE_VIEW_ACCESSIBILITY_FOCUSED` event, until a
+    `TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED` from the same item, which is
+    the one with the same unique id, or else the same window, class,
+    view id, text and description. Bounds are not compared, as they
+    change when a list scrolls between the focus and its clearing. The
+    focus events give the item, because no snapshot is taken on a focus
+    change.
+  - **Tree view.** The Accessibility tree tab shows the phone's tree at
+    the playhead: a row for each window of the latest snapshot, named by
+    its title, type, states and id, with "items taken at" the time of
+    the latest snapshot that took that window's items, and those items
+    under it, each under its parent. A window whose items no snapshot
+    has taken yet, or whose items were cut short or had children
+    missing, says so in a row of its own. The item with accessibility
+    focus is found in its window's items: in a snapshot taken after the
+    focus was given, by the snapshot's own `accessibilityFocused` flag;
+    otherwise, or when no item is flagged, by unique id; or else by
+    class, view id, text and description, the nearest to the event's
+    bounds. It is marked "accessibility focus" in words and with the
+    reading position's bar, and "Show accessibility focus" expands the
+    tree down to it and scrolls to it. "Show under the pointer" is
+    hidden for a phone. The status line gives the windows and items, and
+    says when no item is known to have accessibility focus, when the
+    item is not in the tree, and when a window's items could not be
+    read. Clicking an item, or pressing Enter on it, shows its fields as
+    the snapshot holds them in Selected event values; clicking a window
+    shows the snapshot that took its items. The playhead does not move.
+  - **Outline.** The player draws a yellow rectangle over a black one,
+    as the touches are drawn, around the item with accessibility focus
+    on the phone's picture. Its bounds are those of the latest snapshot
+    taken after the focus was given that holds it, as after a scroll, or
+    else the focus event's. They are in the pixels of the screen as it
+    was turned, from the latest `android.display` record (its mode size,
+    swapped when turned a quarter), and are scaled to the frame's size.
+    When the frame and the screen are turned differently, as for a
+    moment after the phone is turned, no outline is drawn. The
+    picture's help text adds "accessibility focus on" and the item.
+  - **Index.** The playback index is version 23. It keeps each snapshot
+    without its items: each window gains `itemsTaken` and `itemCount`.
+    The tree view reads a window's items from the recording when it
+    needs them, and keeps the last 8 snapshots it read. This keeps the
+    index, which is stored in the recording, from holding a second copy
+    of every snapshot; test 62's largest was 274 KB. The focus events
+    and display records are kept whole. An index of an older version is
+    made again when the recording is opened, so recordings made with
+    step 7b show the tree.
+  - **Tests.** `PhoneAccessibilityTimelineTests` (11 cases) check what
+    the index keeps, that a compact snapshot is not changed by compacting
+    it again, the tree before and at each snapshot, the focus found by
+    the snapshot's flag, by the item's fields from an older snapshot and
+    with newer bounds after a scroll, a window's items kept from an
+    earlier snapshot, the focus cleared by its item after it moved,
+    each snapshot read once as the playhead moves, the tree without the
+    recording, the screen's size as it was turned, and the summaries,
+    with records made from the step 7a and 7b lines. The full suite gave
+    2,155 passed; the 10 that fail on Linux need Windows, as before.
+    The companion app is unchanged. That the lane, the tree and the
+    outline show TalkBack's focus on the Pixel is for tests 63 to 67.
 
 ### Slice 8: settings, the one-timeline check, and the whole recording
 

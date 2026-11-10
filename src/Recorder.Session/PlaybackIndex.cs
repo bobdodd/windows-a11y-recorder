@@ -78,7 +78,15 @@ public sealed record PlaybackIndex
     // said" strip and the properties panel's TalkBack rows; an older index
     // is derived again, so recordings made with step 6a show what TalkBack
     // said.
-    public const int CurrentVersion = 22;
+    // Version 23 keeps the phone's accessibility tree snapshots
+    // (accessibility.android.tree, Android slice 7, step 7c) in compact
+    // form, each window without its items (PhoneAccessibilityTimeline.Compact),
+    // the items being read from the recording for the tree view; its
+    // accessibility focus events (accessibility.android.events,
+    // TYPE_VIEW_ACCESSIBILITY_FOCUSED and _FOCUS_CLEARED) and display
+    // records (android.display) whole, for the focus outline; an older
+    // index is derived again, so recordings made with step 7b show the tree.
+    public const int CurrentVersion = 23;
 
     public required int Version { get; init; }
 
@@ -276,7 +284,10 @@ public sealed class PlaybackIndexBuilder
         }
 
         if (PhoneTouchTimeline.IsTouchReport(channel, record.EventType) ||
-            TalkBackSpeechTimeline.IsSpeechRecord(channel, record.EventType))
+            TalkBackSpeechTimeline.IsSpeechRecord(channel, record.EventType) ||
+            PhoneAccessibilityTimeline.IsTreeRecord(channel, record.EventType) ||
+            PhoneAccessibilityTimeline.IsFocusRecord(channel, record.EventType, payload) ||
+            PhoneAccessibilityTimeline.IsDisplayRecord(channel, record.EventType))
         {
             Keep(eventKey, record);
             return;
@@ -451,10 +462,14 @@ public sealed class PlaybackIndexBuilder
              AccessibilityRequests.IsRequestEvidence(record.Channel, record.EventType) ||
              AccessibilityRequests.IsTreeEvidence(record.Channel, record.EventType) ||
              ReadingPositionTimeline.IsFocusEvidence(record.Channel, record.EventType) ||
-             TalkBackSpeechTimeline.IsSpeechRecord(record.Channel, record.EventType)) &&
+             TalkBackSpeechTimeline.IsSpeechRecord(record.Channel, record.EventType) ||
+             PhoneAccessibilityTimeline.IsFocusRecord(record.Channel, record.EventType, record.Payload) ||
+             PhoneAccessibilityTimeline.IsDisplayRecord(record.Channel, record.EventType)) &&
             record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()
-                : WindowSnapshots.IsSnapshot(record.Channel, record.EventType)
+                : PhoneAccessibilityTimeline.IsTreeRecord(record.Channel, record.EventType)
+                    ? PhoneAccessibilityTimeline.Compact(record.Payload)
+                    : WindowSnapshots.IsSnapshot(record.Channel, record.EventType)
                     ? WindowSnapshots.Compact(record.Payload)
                     : PhoneTouchTimeline.IsTouchReport(record.Channel, record.EventType)
                         ? PhoneTouchTimeline.Compact(record.Payload)

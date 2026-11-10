@@ -2489,3 +2489,153 @@ Run on the development PC with the Pixel on 2026-11-10.
     `accessibility.android.events` still record each change.
   - **Size.** The largest snapshot was 274 KB for 209 items, about 1.3 KB
     an item.
+
+## Part 7, step 7c: the phone's accessibility tree in the player
+
+The player now shows the phone's accessibility events and tree (see
+[the implementation plan](../architecture/android-implementation-plan.md),
+"Slice 7", "Built, step 7c"). In a recording of the phone, the events
+and snapshots are on the third lane from the top, the one UI Automation
+has for a desktop recording, named "Accessibility" in the legend under
+the timeline, and the filter that reads "UI Automation" for a desktop
+recording reads "Accessibility events". The "Accessibility tree" tab
+shows the phone's tree at the playhead: a row for each window, with its
+items under it, and the item with accessibility focus marked
+"accessibility focus" in bold, with a purple bar on its left. "Show
+accessibility focus" expands the tree down to that item and scrolls to
+it. Clicking an item shows its fields in "Selected event values". On
+the phone's picture, a yellow rectangle with a black edge is drawn
+around the item with accessibility focus. The companion app is
+unchanged, but the installer builds it with a new version code, so the
+panel offers to install it again.
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings, and the tests pass, 2,155 in all,
+with 11 new. They make records from the step 7a and 7b lines, with a
+Settings window whose row holds "Network & internet", and check what the
+playback index keeps, the tree before and at each snapshot, the item
+with accessibility focus found in the tree, its newer bounds after the
+list scrolled, a window's items kept from an earlier snapshot, the focus
+cleared, the tree read without the recording, the screen's size as it
+was turned, and the event list's text. None of that shows the lane, the
+tree or the outline drawn on Windows, or that they match what TalkBack
+spoke on the Pixel. Tests 63 to 67 do.
+
+### Test 63: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Connect the Pixel by USB, unlocked. Start the recorder from the Start
+   menu, and in "Recording target" choose "Android device".
+4. The panel offers "Install companion app". Choose it, and wait until
+   the panel shows "Companion app: installed, on, and answering".
+5. Read the companion line and the note under "Android device checks".
+
+**On screen:** the build ends with `INSTALLER BUILT`. In step 5 the
+companion line reads "Companion app: installed, on, and answering
+(version 1.1.0, version code" with a number, and ends "protocol 4)."
+The note ends "The player shows the events and the snapshots as
+"Accessibility events" in UI Automation's place, draws a yellow outline
+on the phone's picture around the item with accessibility focus, and
+shows the tree at the playhead in the Accessibility tree tab, with that
+item marked "accessibility focus"."
+
+### Test 64: three swipes through Settings and opening a page
+
+Before the test, on the phone, open Settings, scroll to the top, then
+turn TalkBack on. Leave the recorder open from test 63, with "Android
+device" chosen. After the test, turn TalkBack off. Tests 65 to 67 use
+the recording this test makes.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. On the phone, swipe right with one finger, three times, waiting 3
+   seconds after each swipe.
+3. On the phone, double-tap with one finger to open the item TalkBack
+   is on, and wait 5 seconds.
+4. Choose "Stop recording", wait until the recording has opened in the
+   player, and take a screenshot of the whole recorder window.
+
+**On screen:** in step 2 TalkBack moves to the next item of Settings
+after each swipe, and in step 3 that item's page opens. In step 4 the
+legend under the timeline reads "Phone keys | Touches | Accessibility |
+Window | Frames | Mic | Phone sound", and the timeline's filters include
+"Accessibility events" and no "UI Automation". The third lane from the
+top has marks, with marks at each of the four runs of blue touch marks
+on the second lane, the three swipes and the double-tap. No marks on
+the third lane, or "UIA" in the legend, is a failure. Send the
+screenshot.
+
+### Test 65: the item TalkBack spoke after the first swipe
+
+The recording from test 64 is open in the player.
+
+1. In the timeline, click the first teal block in the strip just above
+   the bottom lane, and take a screenshot of the whole recorder window.
+2. Click the "Accessibility tree" tab, choose "Show accessibility
+   focus", and take a screenshot of the whole recorder window.
+3. Click the row marked "accessibility focus", and take a screenshot of
+   the whole recorder window.
+
+**On screen:** in step 1 the properties panel, under "Screen reader",
+has "TalkBack said" with the name of the first item TalkBack moved to,
+and on the phone's picture a yellow rectangle with a black edge is
+drawn around that item. In step 2 the tab's line starts with a number
+of windows and a number of items, and the tree is open down to a row
+with "accessibility focus" in bold under it and a purple bar on its
+left. The row's first line names a kind of item, such as
+"LinearLayout", then the name TalkBack said in quotation marks, after
+"containing" when the item has no text of its own. In step 3 "Selected
+event values" starts with the row's first line, then "An item of the
+snapshot of the phone's tree taken at" and a time, then the item's
+fields, among them "index" and "bounds". No rectangle, a rectangle
+around another item, no row marked "accessibility focus", or the line
+"No item is known to have accessibility focus at the playhead." is a
+failure. Send the screenshots.
+
+### Test 66: the outline follows the third swipe
+
+The recording from test 64 is open in the player, with the
+"Accessibility tree" tab chosen.
+
+1. In the timeline, click the first block of the third group of teal
+   blocks in the strip just above the bottom lane, and take a screenshot
+   of the whole recorder window.
+2. Choose "Show accessibility focus", and take a screenshot of the
+   whole recorder window.
+
+**On screen:** in step 1 "TalkBack said" in the properties panel has
+the name of the third item TalkBack moved to, and on the phone's
+picture the yellow rectangle is around that item, lower on the screen
+than the item of test 65. In step 2 the row marked "accessibility
+focus" names that third item. A rectangle still around the first item,
+or a marked row that does not name the third item, is a failure. Send
+the screenshots.
+
+### Test 67: the page opened, in the tree
+
+The recording from test 64 is open in the player, with the
+"Accessibility tree" tab chosen.
+
+1. Drag the playback slider under the phone's picture all the way to
+   the right, and take a screenshot of the whole recorder window.
+2. In the tree, click the expand button of the first row whose first
+   line starts "Window" and reads "active", and take a screenshot of the
+   whole recorder window.
+
+**On screen:** in step 1 the phone's picture shows the page opened in
+test 64. The tree has a row for each window, each starting "Window",
+one of them with "TYPE_APPLICATION, active, focused, window" and a
+number in brackets, each with "items taken at" and a time under it. In step 2 the
+rows under that window include the page's title or its first items, as
+the picture shows them. A tree still showing only the Settings list
+from before the double-tap is a failure. Send the screenshots.

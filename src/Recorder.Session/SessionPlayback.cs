@@ -127,6 +127,13 @@ public sealed record SessionPlaybackArchive(
     /// </summary>
     public TalkBackSpeechTimeline TalkBackSpeech { get; init; } = TalkBackSpeechTimeline.Empty;
 
+    /// <summary>
+    /// The phone's accessibility tree snapshots and accessibility focus, for
+    /// the tree view and the focus outline on the phone's picture (Android
+    /// slice 7, step 7c); empty for a recording without them.
+    /// </summary>
+    public PhoneAccessibilityTimeline PhoneAccessibility { get; init; } = PhoneAccessibilityTimeline.Empty;
+
     private ISessionTimeline? _timeline;
 
     /// <summary>
