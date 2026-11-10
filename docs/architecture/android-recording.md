@@ -258,6 +258,17 @@ scrcpy source (`mic`), and could be added later.
 - The same stream gives the hardware keys, such as volume and power. Text
   typed on the on-screen keyboard is not in it. Text changes come from the
   accessibility events.
+- Since step 5a of the implementation plan (2026-11-10), the recorder
+  keeps every line on `input.android.raw`, each report of the touch
+  screen on `input.android.touch` with each finger's position in screen
+  pixels, turned by the display's rotation, and each hardware key on
+  `input.android.key`. The touch screen is the device with both position
+  axes and `INPUT_PROP_DIRECT`, which marks a device whose positions are
+  on the screen
+  ([Linux, input event codes](https://www.kernel.org/doc/html/latest/input/event-codes.html)),
+  and fingers are followed by the multi-touch protocol B's slots
+  ([Linux, multi-touch protocol](https://www.kernel.org/doc/html/latest/input/multi-touch-protocol.html)).
+  The details are in the implementation plan, slice 5.
 
 ### Settings
 

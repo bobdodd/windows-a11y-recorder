@@ -7,3 +7,5 @@ ffmpeg -f lavfi -i "color=c=0xC03020:s=1080x2404:r=30:d=0.2" -f lavfi -i "color=
 ```
 
 `android-screen-sample.lengths` gives each access unit's length in bytes, one a line, from `ffprobe -show_packets -show_entries packet=size -of csv=p=0`. The first holds the parameter sets with the key frame.
+
+`android-touch-check4.txt` is what `getevent -lt` printed for the Pixel 10 Pro XL's touch screen in feasibility check 4, on 2026-11-07: three taps, near the top, in the middle and near the bottom of the screen, with TalkBack on (docs/validation/android-feasibility-plan.md). It holds only the touch screen's events and their times. The file the check's script saved begins with a byte order mark, from PowerShell's `Set-Content -Encoding UTF8`, and has a blank line after each line and Windows line ends; those are removed here, and nothing else is changed. The check did not save the axis ranges `getevent -lp` gave, so the tests use x 0 to 13439 and y 0 to 29919, ranges that turn the three taps, rounded to the nearest pixel as the script rounded them, into the positions the check reported (x 603, y 171; x 654, y 1188; x 613, y 2155). They are not the phone's own ranges.

@@ -20,7 +20,7 @@ namespace Recorder.Collectors.Android;
 /// <see cref="AccessibilityVolumePercent"/>, and records what the app found
 /// and did. The volume is left where it is when the recording ends.
 /// </summary>
-public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock
+public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock, IPhoneDisplay
 {
     public const string Type = "android.companion";
 
@@ -40,6 +40,7 @@ public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock
     private readonly Func<Func<long>, CancellationToken, Task<CompanionConnection>> _open;
     private readonly int? _volumePercent;
     private readonly PhoneClockMapper _mapper = new();
+    private readonly PhoneDisplayHistory _displayHistory = new();
     private readonly object _gate = new();
     private readonly TaskCompletionSource<bool> _firstSample = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -149,6 +150,8 @@ public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock
     public Task<bool> FirstSample => _firstSample.Task;
 
     public PhoneTimeMapping? Map(long phoneNanoseconds) => _mapper.Map(phoneNanoseconds);
+
+    public AndroidDisplayState? DisplayAt(long phoneNanoseconds) => _displayHistory.DisplayAt(phoneNanoseconds);
 
     public ValueTask<CapabilityResult> InitializeAsync(
         CollectorInitializationContext context,
@@ -358,6 +361,12 @@ public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock
         // as the recording stops, so this reads until the connection ends.
         await foreach (var received in connection.Displays.ReadAllAsync(CancellationToken.None).ConfigureAwait(false))
         {
+            // Kept at once for the touch collector, which turns positions by
+            // the rotation at each touch's phone time (slice 5).
+            _displayHistory.Add(
+                received.Display.Time,
+                new AndroidDisplayState(received.Display.Reason, received.Display.Rotation, received.Display.ModeWidth, received.Display.ModeHeight));
+
             // The first display arrives with the greeting, before the first
             // clock sample, so it waits for one.
             var mapped = await _firstSample.Task.ConfigureAwait(false) ? _mapper.Map(received.Display.Time) : null;

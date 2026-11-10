@@ -907,8 +907,8 @@ slice's full test goes into a validation plan,
   display's rotation from the companion app, keeping the last known x and
   y when a report gives only one, as the feasibility script does.
   Hardware keys (volume, power) come from the same lines.
-- **Fixtures.** Check 4's file holds only touch positions and times, and
-  can be used as a test fixture.
+- **Fixtures.** Check 4's file holds only the touch screen's events and
+  their times, and can be used as a test fixture.
 - **Player.** Touches are drawn on the phone's picture as the pointer is
   drawn now: a circle for each finger while it is down, numbered when
   there is more than one, with its recent path.
@@ -916,6 +916,107 @@ slice's full test goes into a validation plan,
   screen, then a two-finger swipe. In the player a circle appears at each
   tap's place on the phone's picture, and two numbered circles move
   together during the swipe.
+- **Steps (planned 2026-11-10).** As for slice 4, the slice is built in
+  two steps, each with its own tests.
+  - **Step 5a: read and store.** The touch collector, its three channels
+    and their records, the touch screen chosen at the start, and the
+    status line, with every line `getevent` printed kept. The player
+    shows the records only in the inspector and on the timeline's
+    "Other" lane.
+  - **Step 5b: show.** The player draws the touches on the phone's
+    picture, the touch channels get their own lane and filter, and the
+    target test above is run. A test with the phone turned sideways
+    checks the rotation.
+- **Built, step 5a (2026-11-10).**
+  - **Collector.** `AndroidTouchCollector`, `android.touch`, starts after
+    the sound collector. At the start it runs
+    `adb -s <serial> shell getevent -lp` and `adb -s <serial> shell wm size`,
+    then `adb -s <serial> shell -tt getevent -lt` for the whole
+    recording. Given no device, getevent reads every input device and
+    begins each line with the device's path
+    ([AOSP, getevent.c](https://android.googlesource.com/platform/system/core/+/refs/heads/main/toolbox/getevent.c)),
+    so one command gives both the touches and the keys.
+  - **Touch screen.** The touch screen is the first device with
+    `ABS_MT_POSITION_X`, `ABS_MT_POSITION_Y` and `INPUT_PROP_DIRECT`, the
+    property of a device whose positions are on the screen itself
+    ([Linux, input event codes](https://www.kernel.org/doc/html/latest/input/event-codes.html));
+    failing that, the first with both axes, as the feasibility script
+    chose it. With none, the keys are still read and the collector is
+    degraded: "The phone's touches could not be recorded: no touch screen
+    was found in what "getevent -lp" listed. The recording goes on
+    without them."
+  - **Three channels.** `input.android.raw` keeps what `getevent -lp`
+    printed (`input-devices`, with the touch screen, its ranges and the
+    upright screen size), every later line (`getevent-lines`, one record
+    for each device's report up to and including its `SYN_REPORT`, or one
+    for a line that is not an event, such as a device added), and why
+    input is missing (`input-unavailable`). `input.android.touch` has a
+    `touch-report` for each report of the touch screen with a finger on
+    it, or a finger lifted. `input.android.key` has a `hardware-key` for
+    each `KEY_` press, release or repeat of any device, with the
+    device's name from `getevent -lp`. The plan named two channels; the
+    keys have a third so that the player can show and filter them apart
+    from the touches.
+  - **Fingers.** Only the multi-touch protocol B is read: `ABS_MT_SLOT`
+    chooses a slot, a tracking id puts a finger in it and -1 takes it
+    out, and each axis keeps its value until the panel sends a new one
+    ([Linux, multi-touch protocol](https://www.kernel.org/doc/html/latest/input/multi-touch-protocol.html)).
+    Each finger in a report has its slot, tracking id, action (down when
+    its tracking id was set in the report, up when cleared, otherwise
+    move), position in the panel's units, position on the upright
+    screen, position on the screen as shown, and pressure and touch size
+    when the panel sends them. A phone without protocol B has its lines
+    kept and no touch reports; the collector says so in its
+    capabilities (`multi-touch-protocol-b-only`).
+  - **Pixels.** A position is scaled from its axis range,
+    (value - min) x size / (max - min + 1), to the size `wm size` gives,
+    or, without it, the display mode's size from the companion app; it
+    is kept to a tenth of a pixel. It is then turned by the display's
+    rotation from the companion app at the report's phone time: at 90
+    degrees x and y swap and y is reversed, at 180 both are reversed,
+    and at 270 they swap and x is reversed, as Android's input reader
+    turns them (`rotateAndScale`,
+    [AOSP, TouchInputMapper.cpp, Android 11](https://android.googlesource.com/platform/frameworks/native/+/refs/heads/android11-release/services/inputflinger/reader/mapper/TouchInputMapper.cpp)).
+    That Android 17 still turns them this way, and that the input
+    reader scales to the size `wm size` reports, are inference; step 5b
+    tests the rotation on the Pixel. With no display state, the position
+    is given upright and flagged `rotation-unknown`.
+  - **Times.** getevent sets each device to CLOCK_MONOTONIC (getevent.c,
+    `EVIOCSCLOCKID`;
+    [Android, getevent](https://source.android.com/docs/core/interaction/input/getevent)),
+    the clock the companion app samples, so each record is placed
+    through the companion's clock fit, flagged `phone-input-time`, and
+    keeps the phone time and the time the recorder read it. With no
+    clock sample within 3 seconds of starting, records are placed at the
+    time they were read, flagged `receipt-time-stamp`. Each channel's
+    times are held so they never go backward (`clock-fit-held`).
+  - **Terminal.** getevent unbuffers its output (getevent.c,
+    `setbuf(stdout, NULL)`), yet check 4 found its lines held back when
+    read through a pipe, so the terminal is kept. Stopping the recording
+    stops adb; that this ends getevent on the phone, as its terminal
+    closes, is inference: adb leaves a terminal's input open until the
+    shell ends
+    ([AOSP, shell_service.cpp](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/daemon/shell_service.cpp)).
+  - **Status.** The status line reads, for example, "Touches: 3 touches,
+    25 reports, last up at x 613, y 2155 of 1080 by 2404, 1 hardware key
+    press, median delay from phone to recorder 12.0 ms, touch screen
+    /dev/input/event3 "fts_ts" with x 0 to 13439 and y 0 to 29919." A
+    press is counted when a key goes down. The delay is measured for
+    touch reports only. The ranges are given so that test 43 reads the
+    Pixel's own from the screen; the numbers here are made up.
+  - **Failures.** If the devices cannot be listed or getevent cannot
+    start, the collector is degraded with "The phone's touches could not
+    be recorded: ..."; if getevent ends during the recording, with "The
+    phone's touches stopped being recorded during the recording. ...".
+    The recording goes on in both.
+  - **Not stored as evidence.** As in step 4a, nothing is added to the
+    evidence tables, as those are not written for a recording with a
+    recording file (session-database.md), so there is no migration.
+  - **Fixture.** `tests/Recorder.Tests/TestData/android-touch-check4.txt`
+    is check 4's file. The check did not save the axis ranges, so the
+    tests use ranges that turn its three taps into the positions the
+    check reported, to within half a pixel; they are inference, not the
+    Pixel's ranges, which test 43 reads from the status line.
 
 ### Slice 6: what TalkBack said
 

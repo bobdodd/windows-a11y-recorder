@@ -47,6 +47,12 @@ public interface IAdbRunning : IAsyncDisposable
 {
     /// <summary>Completes with adb's exit code when it ends.</summary>
     Task<int> Exited { get; }
+
+    /// <summary>
+    /// Stops adb at once, for a program on the phone that never ends by
+    /// itself, such as <c>getevent</c>, then disposes it.
+    /// </summary>
+    ValueTask StopAsync() => DisposeAsync();
 }
 
 /// <summary>Runs the recorder's own adb.exe as a process.</summary>
@@ -114,6 +120,20 @@ public sealed class AdbProcess(string path) : IAdb
     private sealed class Running(Process process, Task<int> exited) : IAdbRunning
     {
         public Task<int> Exited { get; } = exited;
+
+        public ValueTask StopAsync()
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException)
+            {
+                // It had ended.
+            }
+
+            return DisposeAsync();
+        }
 
         public async ValueTask DisposeAsync()
         {

@@ -1464,3 +1464,105 @@ line beginning "The MP4 could not be saved" is a failure. A line
   screenshot, and it had no sentence about a separate screen reader
   sound, which completes test 40's check. Step 4b is complete, and with
   it slice 4.
+
+## Part 5, step 5a: the phone's touches and hardware keys recorded
+
+Part 5 is built in two steps (see
+[the implementation plan](../architecture/android-implementation-plan.md),
+"Slice 5"). Step 5a records the phone's raw input events from
+`getevent` for the whole recording: every line it prints, each report
+of the touch screen with each finger's position in screen pixels, and
+each press of a hardware key, such as volume or power. While recording,
+a new line under "Collector status", starting "android.touch", counts
+the touches and key presses and gives the last touch's place. The
+player does not draw the touches yet; that is step 5b.
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings, and the tests pass, 16 of them
+new. They read check 4's touches on the Pixel, saved as a test file,
+and give its three taps within half a pixel of the positions check 4
+reported, using axis ranges chosen to fit, as check 4 did not save the
+Pixel's own. They also cover the device list as `getevent -lp` prints
+it, two fingers at once, the four rotations, a recording with a stand-in
+adb and phone clock, no phone clock, no touch screen, the devices not
+listed, and getevent ending. None of that shows the Pixel's own device
+list and ranges, its lines arriving through adb while recording, or
+their times on the companion's clock. Tests 42 to 44 do.
+
+TalkBack is not needed, and is best left off: with TalkBack on, a tap
+selects rather than opens, but the tests' taps are on empty parts of
+the home screen either way.
+
+### Test 42: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Connect the Pixel by USB, unlocked. Start the recorder from the Start
+   menu, and in "Recording target" choose "Android device".
+4. If the panel offers "Install companion app", choose it, and wait
+   until the panel shows "Companion app: installed, on, and answering".
+5. Read the note under "Android device checks".
+
+**On screen:** the build ends with `INSTALLER BUILT`. In step 5 the note
+ends "The player shows and plays the phone's sound as "Phone sound", in
+the system sound's place, and an MP4 export saves it. It records every
+touch on the phone's screen and every hardware key, such as volume and
+power, with each finger's position in screen pixels. The player does
+not yet draw the touches. Accessibility evidence comes in later parts."
+
+### Test 43: three taps and a volume key while recording
+
+Before the test, go to the phone's home screen.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. On the phone, tap once on an empty part of the wallpaper, away from
+   icons and widgets, near the top of the screen. Wait 2 seconds, and
+   do the same in the middle of the screen, then just above the row of
+   app icons at the bottom.
+3. Press the phone's volume-down key once, briefly.
+4. While it is still recording, take a screenshot of "Collector status"
+   under "Current session".
+5. Choose "Stop recording", and set the volume back if the key changed
+   it.
+
+**On screen:** "Collector status" has a line starting "android.touch:
+Running, Healthy. Touches: 3 touches,", then a number of reports, then
+"last up at x", a number, "y", a number, "of 1080 by 2404", then "1
+hardware key press", "median delay from phone to recorder" with a number
+of milliseconds, and it ends "touch screen", a device such as
+`/dev/input/event3`, the device's name in quotes, and "with x 0 to" a
+number "and y 0 to" a number. The last place is that of the bottom tap:
+its y is near the bottom, about 2000 or more. The delay checks the
+touches' times: a few milliseconds to a few tens says they are on the
+companion's clock; a number below zero, or of seconds or more, says
+they are not. "placed by the time each line arrived", Degraded, or more
+or fewer than 3 touches is a failure; send the line as it is. Send the
+screenshot.
+
+### Test 44: two fingers at once
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. On the phone's home screen, put two fingers on empty parts of the
+   wallpaper, about 3 cm apart side by side, and keep them there, still.
+3. While both fingers are still on the screen and it is still
+   recording, take a screenshot of "Collector status". (If the phone
+   shows a menu for the home screen, leave it; it does not matter.)
+4. Lift both fingers.
+5. Choose "Stop recording", and close the phone's menu if it opened.
+
+**On screen:** in step 3 the "android.touch" line reads "Touches: 2
+touches," and "last", either "down" or "move", "at x", a number, "y", a
+number, "of 1080 by 2404 with 2 fingers". "with 2 fingers" says the
+recorder followed both fingers at once, each in its own slot. A line
+without it, or with "1 touch", is a failure; send it as it is. Send the
+screenshot.

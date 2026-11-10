@@ -222,6 +222,22 @@ Changes on `main` since 1.1.0, not yet released.
   mixed at the slider's level, with a track of its own after the
   microphone's.
 
+### Android recording, part 5a: the phone's touches and hardware keys
+
+- A recording of the phone runs `getevent -lt` on the phone through adb
+  for the whole recording, after listing its input devices with
+  `getevent -lp` and choosing the touch screen.
+- Every line is kept on `input.android.raw`, each report of the touch
+  screen on `input.android.touch` with each finger's position in screen
+  pixels, turned by the display's rotation, and each hardware key press,
+  release or repeat on `input.android.key`. Each record is placed by the
+  phone's clock through the companion app's clock fit.
+- While recording, the status line counts the touches and key presses
+  and gives the last touch's place and the touch screen's ranges.
+- If the touches cannot be recorded, or stop, the collector says why and
+  the recording goes on without them.
+- The player does not draw the touches yet (part 5b).
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now

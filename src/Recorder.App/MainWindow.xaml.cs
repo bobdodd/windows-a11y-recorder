@@ -308,7 +308,9 @@ public partial class MainWindow : Window
     // recorded with the phone, as the design decided ("phone plus PC's mic").
     // When the first sound packet arrives, the companion raises the phone's
     // Accessibility volume to at least 80% and leaves it there (slice 4,
-    // step 4c).
+    // step 4c). The touch collector reads the phone's raw input events with
+    // getevent, placing them by the companion's clock fit and turning each
+    // position by the companion's display rotation (slice 5).
     private static Recorder.Contracts.ICaptureCollector[] AndroidCollectors(string serial)
     {
         var adb = new AdbProcess(AndroidTools.Adb(AndroidTools.DataFolder));
@@ -323,6 +325,7 @@ public partial class MainWindow : Window
             companion,
             screen,
             new AndroidSoundCollector(serial, screen, companion, companion.RaiseAccessibilityVolume),
+            new AndroidTouchCollector(adb, serial, companion, companion),
             new Recorder.Collectors.Audio.AudioCollector(new Recorder.Collectors.Audio.AudioCaptureOptions(true, false))
         ];
     }

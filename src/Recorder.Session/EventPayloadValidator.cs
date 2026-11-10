@@ -43,7 +43,10 @@ internal static class EventPayloadValidator
         Recorder.Contracts.AndroidCompanionRecords.DisplayChannel,
         Recorder.Contracts.AndroidScreenRecords.VideoChannel,
         Recorder.Contracts.AndroidFrameRecords.FramesChannel,
-        Recorder.Contracts.AndroidSoundRecords.Channel
+        Recorder.Contracts.AndroidSoundRecords.Channel,
+        Recorder.Contracts.AndroidTouchRecords.RawChannel,
+        Recorder.Contracts.AndroidTouchRecords.TouchChannel,
+        Recorder.Contracts.AndroidTouchRecords.KeyChannel
     ];
 
     /// <summary>Whether the recorder defines the channel.</summary>
@@ -177,6 +180,31 @@ internal static class EventPayloadValidator
                 break;
             case (Recorder.Contracts.AndroidFrameRecords.FramesChannel, Recorder.Contracts.AndroidFrameRecords.UnavailableEventType):
                 ValidateShape(payload, [RequiredString("reason")], issues);
+                break;
+            case (Recorder.Contracts.AndroidTouchRecords.RawChannel, Recorder.Contracts.AndroidTouchRecords.DevicesEventType):
+                ValidateAndroidInputDevices(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidTouchRecords.RawChannel, Recorder.Contracts.AndroidTouchRecords.LinesEventType):
+                ValidateAndroidGeteventLines(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidTouchRecords.RawChannel, Recorder.Contracts.AndroidTouchRecords.UnavailableEventType):
+                ValidateAndroidCompanionUnavailable(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidTouchRecords.TouchChannel, Recorder.Contracts.AndroidTouchRecords.TouchEventType):
+                ValidateAndroidTouchReport(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidTouchRecords.KeyChannel, Recorder.Contracts.AndroidTouchRecords.KeyEventType):
+                ValidateShape(
+                    payload,
+                    [
+                        RequiredString("device"),
+                        NullableText("deviceName"),
+                        RequiredString("key"),
+                        RequiredEnum("action", [.. Recorder.Contracts.AndroidTouchRecords.KeyActions]),
+                        RequiredInteger("phoneMicroseconds", nonnegative: true),
+                        RequiredInteger("receivedAtNanoseconds")
+                    ],
+                    issues);
                 break;
             case ("system.assistive-technology", "assistive-technology-watch"):
                 ValidateAssistiveTechnologyWatch(payload, issues);
@@ -2051,6 +2079,145 @@ internal static class EventPayloadValidator
     // A phone frame (android-implementation-plan.md, slice 3, step 3b): a
     // PNG under frames/android, the session's size, made from a picture
     // packet, which always has a presentation time.
+    // The Android touch collector's records (android-implementation-plan.md,
+    // slice 5): the input devices at the start, getevent's lines a report at
+    // a time, each touch report in screen pixels, and each hardware key. The
+    // unavailable record has the companion's shape, so it shares its check.
+    private static void ValidateAndroidInputDevices(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredString("serial"),
+                RequiredTextArray("lines"),
+                NullableString("touchDevice"),
+                NullableText("touchName"),
+                NullableObject("x"),
+                NullableObject("y"),
+                NullableInteger("screenWidth", positive: true),
+                NullableInteger("screenHeight", positive: true)
+            ],
+            issues);
+        foreach (var axis in new[] { "x", "y" })
+        {
+            if (payload.TryGetProperty(axis, out var range) && range.ValueKind == JsonValueKind.Object)
+            {
+                ValidateShape(range, [RequiredInteger("minimum"), RequiredInteger("maximum")], issues, $"#/payload/{axis}");
+                if (range.TryGetProperty("minimum", out var minimum) && minimum.TryGetInt64(out var min) &&
+                    range.TryGetProperty("maximum", out var maximum) && maximum.TryGetInt64(out var max) &&
+                    max <= min)
+                {
+                    AddError(
+                        issues,
+                        "android-axis-range",
+                        $"#/payload/{axis}",
+                        "An axis's maximum must be above its minimum.");
+                }
+            }
+        }
+
+        var touch = payload.TryGetProperty("touchDevice", out var device) && device.ValueKind == JsonValueKind.String;
+        foreach (var axis in new[] { "x", "y" })
+        {
+            var present = payload.TryGetProperty(axis, out var range) && range.ValueKind == JsonValueKind.Object;
+            if (present != touch)
+            {
+                AddError(
+                    issues,
+                    "android-touch-axes",
+                    $"#/payload/{axis}",
+                    "A touch screen has both axis ranges, and no touch screen has neither.");
+            }
+        }
+    }
+
+    private static void ValidateAndroidGeteventLines(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                NullableString("device"),
+                RequiredTextArray("lines"),
+                NullableInteger("phoneMicroseconds", nonnegative: true),
+                RequiredInteger("receivedAtNanoseconds")
+            ],
+            issues);
+        if (payload.TryGetProperty("lines", out var lines) && lines.ValueKind == JsonValueKind.Array &&
+            lines.GetArrayLength() == 0)
+        {
+            AddError(issues, "android-getevent-lines-empty", "#/payload/lines", "A record of getevent's lines has at least one.");
+        }
+    }
+
+    private static void ValidateAndroidTouchReport(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredString("device"),
+                RequiredInteger("phoneMicroseconds", nonnegative: true),
+                RequiredInteger("receivedAtNanoseconds"),
+                RequiredInteger("rotation", nonnegative: true),
+                RequiredInteger("screenWidth", positive: true),
+                RequiredInteger("screenHeight", positive: true),
+                RequiredObjectArray("pointers")
+            ],
+            issues);
+        if (payload.TryGetProperty("rotation", out var rotation) && IsInteger(rotation) &&
+            !Recorder.Contracts.AndroidCompanionRecords.Rotations.Contains((int)rotation.GetInt64()))
+        {
+            AddError(
+                issues,
+                "android-display-rotation",
+                "#/payload/rotation",
+                "rotation must be 0, 90, 180 or 270.");
+        }
+
+        if (!payload.TryGetProperty("pointers", out var pointers) || pointers.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        if (pointers.GetArrayLength() == 0)
+        {
+            AddError(issues, "android-touch-pointers-empty", "#/payload/pointers", "A touch report has at least one finger.");
+        }
+
+        var index = 0;
+        foreach (var pointer in pointers.EnumerateArray())
+        {
+            if (pointer.ValueKind == JsonValueKind.Object)
+            {
+                ValidateShape(
+                    pointer,
+                    [
+                        RequiredInteger("slot", nonnegative: true),
+                        RequiredInteger("trackingId", nonnegative: true),
+                        RequiredEnum("action", [.. Recorder.Contracts.AndroidTouchRecords.Actions]),
+                        RequiredInteger("rawX"),
+                        RequiredInteger("rawY"),
+                        RequiredNumber("naturalX"),
+                        RequiredNumber("naturalY"),
+                        RequiredNumber("x"),
+                        RequiredNumber("y"),
+                        NullableInteger("pressure"),
+                        NullableInteger("touchMajor"),
+                        NullableInteger("touchMinor")
+                    ],
+                    issues,
+                    $"#/payload/pointers/{index.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            }
+
+            index++;
+        }
+    }
+
     private static void ValidateAndroidDeviceFrame(
         JsonElement payload,
         ICollection<EventValidationIssue> issues)
