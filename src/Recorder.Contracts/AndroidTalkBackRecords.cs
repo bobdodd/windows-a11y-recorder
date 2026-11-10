@@ -2,8 +2,9 @@ namespace Recorder.Contracts;
 
 /// <summary>
 /// The records of the TalkBack collector, slice 6 of
-/// docs/architecture/android-implementation-plan.md: every line TalkBack
-/// wrote to the phone's log while recording, as <c>logcat -v monotonic</c>
+/// docs/architecture/android-implementation-plan.md: every line with
+/// TalkBack's tag written to the phone's log while recording, and every
+/// line logcat printed that is not a log entry, as <c>logcat -v monotonic</c>
 /// printed it, and what TalkBack said, read from those lines by a versioned
 /// reader.
 ///

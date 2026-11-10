@@ -184,7 +184,9 @@ scrcpy source (`mic`), and could be added later.
 - Since step 6a of the implementation plan (2026-11-10), the recorder
   runs `logcat` for the whole recording, keeping only lines with the tag
   `talkback`, which check 3 found on 1,189 of the 1,196 lines of
-  TalkBack's process. Every line is kept on
+  TalkBack's process. The tag is matched by the recorder, because on the
+  Pixel with Android 17 logcat's own tag filter printed none of those
+  lines (test 52, 2026-11-10). Every line is kept on
   `screen-reader.talkback.log`, and a versioned reader makes
   `screen-reader.talkback.speech` from them: each utterance started,
   each later fragment, each word reached and each utterance

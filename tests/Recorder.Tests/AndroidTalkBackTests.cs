@@ -121,11 +121,14 @@ public sealed class AndroidTalkBackTests
 
         await collector.StartAsync(new SessionBoundary(0, DateTimeOffset.UtcNow), CancellationToken.None);
         var logcat = await adb.Started.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
-        Assert.Equal(["-s", Serial, "logcat", "-v", "monotonic", "-v", "usec", "-T", "1", "-s", "talkback:V"], logcat.Arguments);
+        Assert.Equal(["-s", Serial, "logcat", "-v", "monotonic", "-v", "usec", "-T", "1"], logcat.Arguments);
 
         // The newest line from before the recording, as -T 1 gives it.
         logcat.Line("145976.900000 20192 20192 D talkback: from before the recording");
         logcat.Line("--------- beginning of main");
+
+        // Another app's line, read but not kept.
+        logcat.Line("145977.100000 1234 1250 D CCodec: allocate(c2.android.aac.decoder)");
         var check3 = File.ReadLines(Check3Path()).ToList();
         foreach (var line in check3)
         {
@@ -135,7 +138,7 @@ public sealed class AndroidTalkBackTests
         logcat.Line("");
         await WaitUntilAsync(() => sink.Records.Count(record => record.Channel == AndroidTalkBackRecords.LogChannel) == check3.Count + 1);
         Assert.Matches(
-            "^TalkBack: 6 utterances, 3 interrupted, 42 words reached, latest \"Double-tap to activate\\. Double-tap and hold to long press\\.\\.\\.\", 1190 TalkBack log lines, median delay from phone to recorder -?[\\d.]+ ms\\.$",
+            "^TalkBack: 6 utterances, 3 interrupted, 42 words reached, latest \"Double-tap to activate\\. Double-tap and hold to long press\\.\\.\\.\", 1190 TalkBack log lines out of 1192 read from the phone's log, median delay from phone to recorder -?[\\d.]+ ms\\.$",
             collector.Summary);
         Assert.NotNull(collector.StopReminder);
         await collector.StopAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
@@ -163,6 +166,7 @@ public sealed class AndroidTalkBackTests
         Assert.Equal(FakePhoneClock.Uncertainty, first.TimestampUncertaintyNanoseconds);
         Assert.Contains(AndroidTalkBackRecords.PhoneLogTimeFlag, first.QualityFlags);
         Assert.DoesNotContain(lines, record => record.Payload.GetProperty("line").GetString()!.Contains("from before", StringComparison.Ordinal));
+        Assert.DoesNotContain(lines, record => record.Payload.GetProperty("line").GetString()!.Contains("CCodec", StringComparison.Ordinal));
 
         // What TalkBack said, at the times of its lines.
         var speech = sink.Records.Where(record => record.Channel == AndroidTalkBackRecords.SpeechChannel).ToList();
@@ -193,12 +197,13 @@ public sealed class AndroidTalkBackTests
 
         await WaitUntilAsync(() => collector.Summary is not null);
         Assert.Equal(
-            "TalkBack: no speech lines yet, 0 TalkBack log lines. If TalkBack is on, set \"Log output level\" to \"Verbose\" in TalkBack's settings, Advanced settings, Developer settings.",
+            "TalkBack: no speech lines yet, 0 TalkBack log lines out of 0 read from the phone's log. If TalkBack is on, set \"Log output level\" to \"Verbose\" in TalkBack's settings, Advanced settings, Developer settings.",
             collector.Summary);
+        logcat.Line("145977.900000 1234 1250 D CCodec: allocate(c2.android.aac.decoder)");
         logcat.Line("145978.000000 20192 20192 D talkback: SpeechControllerImpl: clearCurrentAndQueuedUtterancesThatDontIgnoreInterrupts: interrupting current item: {utteranceId:\"talkback_2\"}");
         await WaitUntilAsync(() => sink.Records.Any(record => record.Channel == AndroidTalkBackRecords.SpeechChannel));
 
-        Assert.StartsWith("TalkBack: no speech lines yet, 1 TalkBack log line. ", collector.Summary);
+        Assert.StartsWith("TalkBack: no speech lines yet, 1 TalkBack log line out of 2 read from the phone's log. ", collector.Summary);
         Assert.Null(collector.StopReminder);
         var cut = sink.Records.Single(record => record.Channel == AndroidTalkBackRecords.SpeechChannel);
         Assert.Equal(System.Text.Json.JsonValueKind.Null, cut.Payload.GetProperty("text").ValueKind);

@@ -258,7 +258,9 @@ Changes on `main` since 1.1.0, not yet released.
 ### Android recording, part 6a: what TalkBack said, stored
 
 - A recording of the phone runs `logcat` on the phone through adb for
-  the whole recording, keeping only lines with TalkBack's tag.
+  the whole recording, keeping only lines with TalkBack's tag. The
+  recorder matches the tag itself, as logcat's own tag filter printed
+  none of TalkBack's lines on the Pixel with Android 17.
 - Every line is kept on `screen-reader.talkback.log`, and what TalkBack
   said is read from them onto `screen-reader.talkback.speech`: each
   utterance started, with its text and the event that caused it, each
@@ -266,7 +268,8 @@ Changes on `main` since 1.1.0, not yet released.
   utterance cut off. Each record is placed by the phone's clock through
   the companion app's clock fit.
 - While recording, the status line counts the utterances, the cut-off
-  utterances, the words and the lines, and gives the latest utterance;
+  utterances, the words, TalkBack's lines and all the lines read, and
+  gives the latest utterance;
   until the first utterance it says to set TalkBack's log output level
   to Verbose. At Stop, the status reminds the tester that the level is
   still Verbose.

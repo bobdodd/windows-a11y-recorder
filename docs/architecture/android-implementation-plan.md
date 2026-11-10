@@ -1136,18 +1136,18 @@ slice's full test goes into a validation plan,
 - **Built, step 6a (2026-11-10).**
   - **Collector.** `AndroidTalkBackCollector`, `android.talkback`, starts
     after the touch collector. It runs
-    `adb -s <serial> logcat -v monotonic -v usec -T 1 -s talkback:V` for
-    the whole recording. `-s` silences every tag but those named, and
-    `-T 1` starts at the newest line rather than printing the whole log
-    first
+    `adb -s <serial> logcat -v monotonic -v usec -T 1` for the whole
+    recording, and keeps the lines with the tag `talkback`. `-T 1` starts
+    at the newest line rather than printing the whole log first
     ([AOSP, logcat.cpp](https://android.googlesource.com/platform/system/logging/+/refs/heads/main/logcat/logcat.cpp)).
+    As first built, it asked logcat to keep only that tag with
+    `-s talkback:V`; see the fix below.
   - **By tag, not by process (decided 2026-11-10).** The plan above
     kept TalkBack's lines by its process. Check 3 found 1,189 of the
     1,196 lines of TalkBack's process had the tag `talkback`; the others
     were a media buffer pool's and a logging library's lines, and two
     lines logcat printed itself. Keeping lines by tag needs no process
-    id, follows TalkBack to a new process with no work, and does not read
-    other apps' lines from the phone at all.
+    id, and follows TalkBack to a new process with no work.
   - **Phone times.** `-v monotonic` prints each line's time as seconds
     since boot, and `-v usec` with six decimals. The log stamps lines
     with the wall clock, and logcat converts that to CLOCK_MONOTONIC. It
@@ -1186,11 +1186,12 @@ slice's full test goes into a validation plan,
     none when that one was cut off. Each speech record has the reader's
     version, so a later reader can be run again on the raw lines.
   - **Status line.** "TalkBack: no speech lines yet, N TalkBack log
-    lines. If TalkBack is on, set "Log output level" to "Verbose" in
+    lines out of N read from the phone's log. If TalkBack is on, set "Log output level" to "Verbose" in
     TalkBack's settings, Advanced settings, Developer settings." until
     the first utterance; then "TalkBack: N utterances, N interrupted, N
-    words reached, latest "...", N TalkBack log lines, median delay from
-    phone to recorder X ms.", the latest utterance cut to 60 characters,
+    words reached, latest "...", N TalkBack log lines out of N read from
+    the phone's log, median delay from phone to recorder X ms." (the
+    count of lines read added by the fix below), the latest utterance cut to 60 characters,
     and the delay measured for speech lines only.
   - **Reminder at Stop.** When a line at level Verbose arrived, the
     status at Stop ends: "TalkBack's log output level is still Verbose,
@@ -1212,6 +1213,27 @@ slice's full test goes into a validation plan,
     and 14, and 42 words; the collector's arguments, records, times,
     status line, reminder and failures are tested with a fake adb and
     a fake phone clock.
+- **Fix, step 6a: the tag matched on the PC (2026-11-10).** Test 52
+  failed: with TalkBack on at log output level Verbose, the recorder
+  received no lines. Two diagnostics on the Pixel the same day found
+  why. In the first, after three more swipes, the phone's log held 1,905
+  lines of TalkBack's process, read with `--pid`, 1,600 of them printed
+  with the tag `talkback`, while `logcat -d -s talkback:V` found none.
+  (The count the recorder's command received when run on its own was
+  not in the part of the output sent.) In the second, run on
+  the phone itself, `grep` counted 1,179 lines containing " talkback: ",
+  while `-s talkback:V`, `talkback:V *:S` and `-s talkback` each printed
+  0; the bytes of such a line showed the tag as the 8 letters of
+  `talkback`, with nothing hidden. In AOSP's code, logcat compares the
+  filter's tag with each line's tag exactly, the same tag it prints
+  (logcat.cpp, `ProcessBuffer`; logprint.cpp, `filterPriForTag`), so
+  why the filter misses on Android 17 is not known. The collector now
+  runs logcat with no filter and keeps the lines whose tag is
+  `talkback`, as well as lines that are not log entries, such as an
+  error from adb. Other apps' lines are read from the phone but not
+  kept. The status line gives the count of lines read as well, "N
+  TalkBack log lines out of N read from the phone's log", so that lines
+  arriving but not kept can be told from no lines arriving.
 
 ### Slice 7: accessibility events and tree
 

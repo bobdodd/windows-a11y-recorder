@@ -1927,3 +1927,102 @@ level is still Verbose, which writes what is on the phone's screen to
 the phone's log. If you prefer, set it back in TalkBack's settings,
 Advanced settings, Developer settings, "Log output level"." Send the
 screenshots.
+
+### Results of part 6, step 6a
+
+Run on the development PC with the Pixel on 2026-11-10.
+
+- **Test 50: passed.** The note under "Android device checks" ended
+  with the sentence about TalkBack's log lines and "Accessibility
+  evidence comes in later parts."
+- **Test 51: passed.** With TalkBack off, the line read
+  "android.talkback: Running, Healthy. TalkBack: no speech lines yet, 0
+  TalkBack log lines.", then the request to set "Log output level" to
+  "Verbose".
+- **Test 52: failed.** With TalkBack on (the companion's line gave
+  Accessibility volume "already 12 of 15 steps (80%)") and three swipes
+  recorded as 3 touches, the line still read "no speech lines yet, 0
+  TalkBack log lines", during the recording and after Stop, and Stop
+  gave no reminder.
+- **Diagnostics.** A first diagnostic ran the recorder's logcat command
+  on its own during three more swipes, then read the phone's log: it
+  held 1,905 lines of TalkBack's process, read with `--pid`, 1,600 of
+  them printed with the tag `talkback`, but `logcat -d -s talkback:V`
+  found none. A second, run on the phone itself, counted 1,179 lines
+  containing " talkback: " with `grep`, and 0 with each of
+  `-s talkback:V`, `talkback:V *:S` and `-s talkback`; the bytes of
+  such a line showed a plain tag, the 8 letters of `talkback`. So
+  TalkBack wrote at Verbose, and logcat's own tag filter, which the
+  recorder's command used, printed none of its lines. Why it misses is
+  not known (see
+  [the implementation plan](../architecture/android-implementation-plan.md),
+  "Slice 6", "Fix, step 6a").
+
+## Part 6, step 6a: TalkBack's lines matched on the PC
+
+The recorder now runs logcat with no filter and keeps the lines with
+the tag `talkback` itself; other apps' lines are read but not kept. The
+status line also counts every line read: "N TalkBack log lines out of N
+read from the phone's log".
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings, and the 9 TalkBack tests pass,
+now with another app's line that is read and not kept. They do not show
+logcat's whole log arriving through adb from the Pixel; tests 53 and 54
+do.
+
+### Test 53: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the installer
+runs to its last page.
+
+### Test 54: three swipes with TalkBack on, again
+
+Before the test, on the phone, check that TalkBack's "Log output level"
+is still "Verbose" (Settings, Accessibility, TalkBack, Settings,
+Advanced settings, Developer settings). Then turn TalkBack on, and go
+to the home screen. Connect the Pixel by USB, unlocked, start the
+recorder from the Start menu, and in "Recording target" choose "Android
+device".
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. On the phone, swipe right with one finger, three times, waiting 2
+   seconds after each swipe.
+3. While it is still recording, take a screenshot of "Collector status"
+   under "Current session".
+4. Choose "Stop recording", and take a screenshot of the line under
+   "Current session".
+5. Turn TalkBack off. If you prefer, set its "Log output level" back as
+   well.
+
+**On screen:** in step 3 "Collector status" has a line starting
+"android.talkback: Running, Healthy. TalkBack:", then a number of
+utterances, at least 3, a number "interrupted", a number of "words
+reached", at least 1, then "latest" and in quotes the name of an item
+TalkBack moved to, or the start of its usage hint, such as "Double-tap
+to activate.", then a number of TalkBack log lines "out of" a larger
+number "read from the phone's log", and it ends "median delay from
+phone to recorder" with a number of milliseconds. A few milliseconds to
+a few hundred says the lines are on the companion's clock; a number
+below zero, or of seconds or more, says they are not. "no speech lines
+yet" is a failure: then the two counts say whether lines arrived but
+were not TalkBack's, or no lines arrived. "placed by the time each line
+arrived", or Degraded, is also a failure. Send the line as it is in
+either case. In step 4 the line reads "Recording completed and stored.
+TalkBack's log output level is still Verbose, which writes what is on
+the phone's screen to the phone's log. If you prefer, set it back in
+TalkBack's settings, Advanced settings, Developer settings, "Log output
+level"." Send the screenshots.

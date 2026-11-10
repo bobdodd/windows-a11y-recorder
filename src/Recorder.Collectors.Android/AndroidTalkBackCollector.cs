@@ -8,14 +8,18 @@ namespace Recorder.Collectors.Android;
 /// Records what TalkBack said from its own log lines
 /// (android-implementation-plan.md, slice 6).
 ///
-/// <c>adb logcat -v monotonic -v usec -T 1 -s talkback:V</c> runs for the
-/// whole recording. <c>-s talkback:V</c> keeps only lines with TalkBack's
-/// tag, which feasibility check 3 found on 1,189 of the 1,196 lines of
-/// TalkBack's process, so the lines follow TalkBack if it restarts as a new
-/// process, and other apps' lines are not read from the phone. <c>-T 1</c>
-/// starts at the newest line rather than the whole log. Every line is kept
-/// on <see cref="AndroidTalkBackRecords.LogChannel"/>, and what TalkBack
-/// said is read from them by <see cref="TalkBackSpeechReader"/> onto
+/// <c>adb logcat -v monotonic -v usec -T 1</c> runs for the whole
+/// recording, and the recorder keeps only the lines with TalkBack's tag,
+/// <c>talkback</c>, which feasibility check 3 found on 1,189 of the 1,196
+/// lines of TalkBack's process; so the lines follow TalkBack if it
+/// restarts as a new process. The tag is matched here, not by logcat's own
+/// filter: on the Pixel with Android 17, <c>-s talkback:V</c> printed none
+/// of the lines that print with that tag (test 52 and its diagnostics,
+/// 2026-11-10). Other apps' lines are read from the phone but not kept.
+/// <c>-T 1</c> starts at the newest line rather than the whole log. Every
+/// line kept, and every line that is not a log entry, is stored on
+/// <see cref="AndroidTalkBackRecords.LogChannel"/>, and what TalkBack said
+/// is read from them by <see cref="TalkBackSpeechReader"/> onto
 /// <see cref="AndroidTalkBackRecords.SpeechChannel"/>.
 ///
 /// The times are CLOCK_MONOTONIC (logprint.cpp, convertMonotonic), the
@@ -33,6 +37,9 @@ namespace Recorder.Collectors.Android;
 public sealed class AndroidTalkBackCollector : ICaptureCollector
 {
     public const string Type = "android.talkback";
+
+    /// <summary>The tag TalkBack writes its lines with.</summary>
+    public const string Tag = "talkback";
 
     /// <summary>How long the lines wait for the companion collector's first clock sample before placing them by their receipt.</summary>
     public static readonly TimeSpan ClockWait = TimeSpan.FromSeconds(3);
@@ -62,6 +69,7 @@ public sealed class AndroidTalkBackCollector : ICaptureCollector
     private ulong _speechSequence;
     private ulong _lifecycleSequence;
     private long _lineCount;
+    private long _readCount;
     private long _earlier;
     private long _utterances;
     private long _interrupted;
@@ -112,8 +120,11 @@ public sealed class AndroidTalkBackCollector : ICaptureCollector
             }
 
             var lines = Interlocked.Read(ref _lineCount);
+            var read = Interlocked.Read(ref _readCount);
             var utterances = Interlocked.Read(ref _utterances);
-            var lineText = string.Create(CultureInfo.InvariantCulture, $"{lines} TalkBack log {(lines == 1 ? "line" : "lines")}");
+            var lineText = string.Create(
+                CultureInfo.InvariantCulture,
+                $"{lines} TalkBack log {(lines == 1 ? "line" : "lines")} out of {read} read from the phone's log");
             string text;
             if (utterances == 0)
             {
@@ -283,7 +294,7 @@ public sealed class AndroidTalkBackCollector : ICaptureCollector
             try
             {
                 logcat = _adb.Start(
-                    ["-s", _serial, "logcat", "-v", "monotonic", "-v", "usec", "-T", "1", "-s", "talkback:V"],
+                    ["-s", _serial, "logcat", "-v", "monotonic", "-v", "usec", "-T", "1"],
                     line => _lines.Writer.TryWrite((line, context.Clock.GetElapsedNanoseconds())));
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
@@ -335,7 +346,14 @@ public sealed class AndroidTalkBackCollector : ICaptureCollector
             return;
         }
 
+        Interlocked.Increment(ref _readCount);
         var entry = TalkBackLogLine.TryParse(text);
+        if (entry is not null && !string.Equals(entry.Tag, Tag, StringComparison.Ordinal))
+        {
+            // Another app's line.
+            return;
+        }
+
         var (time, mapping, placed) = Place(entry?.PhoneMicroseconds, receivedAt, ready);
         if (entry is not null && mapping is not null && time < _start)
         {
