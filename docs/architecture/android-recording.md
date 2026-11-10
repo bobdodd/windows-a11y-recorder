@@ -275,7 +275,10 @@ scrcpy source (`mic`), and could be added later.
   than one, with its path over the last second. The touches and the
   hardware keys have the mouse's and the keyboard's lanes and filters,
   named "Touches" and "Phone keys". The frames are not changed, and an
-  MP4 export does not draw the touches.
+  MP4 export does not draw the touches. A circle is about a fingertip
+  across on the phone's picture, and no smaller than 24
+  device-independent pixels across on the PC's screen, so it stays
+  visible when the picture is shown small.
 
 ### Settings
 

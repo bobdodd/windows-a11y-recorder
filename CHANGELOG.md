@@ -251,6 +251,9 @@ Changes on `main` since 1.1.0, not yet released.
   under the "Other" filter.
 - The playback index, version 21, keeps each touch report in compact
   form; an older index is derived again when a recording opens.
+- A circle is no smaller than 24 device-independent pixels across on
+  the PC's screen, with its rings and paths at least 2 thick, however
+  small the phone's picture is shown.
 
 ## 1.1.0 - 2026-10-13
 

@@ -1044,9 +1044,10 @@ slice's full test goes into a validation plan,
     first, starting no earlier than the report it went down in.
   - **Drawn.** At every position of the playhead, as fingers move
     between the phone's frames, the player draws each finger over the
-    frame: a circle about a fingertip across, 40 pixels on a screen
-    1,080 wide, with a yellow ring over a black one as the Magnifier
-    outline is drawn, so it shows on light and dark content, and a
+    frame: a circle about a fingertip across, 80 pixels on a screen
+    1,080 wide (with a least size on the PC's screen, see "Built, step
+    5b, larger circles"), with a yellow ring over a black one as the
+    Magnifier outline is drawn, so it shows on light and dark content, and a
     dimmed middle. With more than one finger, each circle holds its
     number in yellow. The path is a yellow line over a black one, drawn
     under the circles. Positions are scaled from the screen size the
@@ -1070,6 +1071,25 @@ slice's full test goes into a validation plan,
   - **Rotation.** The sideways test checks the turn step 5a took from
     Android 11's input reader on the Pixel: a tap on a control of a
     sideways app is drawn on that control.
+- **Tested, step 5b (2026-11-10).** On the Pixel, tests 45 to 47 of the
+  validation plan passed. Three taps were drawn where they were made,
+  and a two-finger swipe as two numbered circles with their paths. The
+  two fingers were not level, as the index and middle fingers seldom
+  go down level, so test 46's check no longer asks for that. A tap on
+  Chrome's menu button with the phone turned top to the left was drawn
+  on the button, so the turn from Android 11's input reader holds on
+  Android 17 for that turn; the other two turns were not tested. With
+  the picture shown about 157 pixels wide, the circles were about 12
+  pixels across on the PC's screen, and hard to see.
+- **Built, step 5b, larger circles (2026-11-10).** A circle is still
+  about a fingertip across on the phone's picture, but no smaller than
+  24 device-independent pixels across on the PC's screen, with its
+  rings and the paths at least 2 thick, however small the picture is
+  shown. The player works out how large one of the frame's pixels is
+  shown from the picture's width on the screen, and draws the touches
+  again when that width changes. Only the drawing changed: the playback
+  index stays at version 21, and recordings already made show the new
+  size.
 
 ### Slice 6: what TalkBack said
 

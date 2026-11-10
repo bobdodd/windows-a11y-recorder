@@ -1695,9 +1695,10 @@ status line ends "Phone keys | Touches | UIA | Window | Frames | Mic |
 Phone sound". In the first three screenshots the phone's picture has
 one yellow circle with a black edge, with no number, near the top, in
 the middle, and just above the app icons, where the taps were made. In
-the fourth it has two circles side by side, numbered 1 and 2, at the
-same height, each with a yellow line running down below it, the way the
-fingers came. A circle at a different place than the touch, or none,
+the fourth it has two circles side by side, numbered 1 and 2, each with
+a yellow line running down below it, the way the fingers came. The two
+need not be at the same height: fingers seldom go down level, and
+finger 1 is the one that went down first, wherever it is. A circle at a different place than the touch, or none,
 is a failure; send the screenshot. Send the screenshots.
 
 ### Test 47: a tap with the phone sideways
@@ -1749,7 +1750,80 @@ phone upright, and set Auto-rotate back as it was.
   the bottom row of icons. Selecting the middle of the swipe, at
   40.85 s, drew two circles numbered 1 and 2, each with a yellow line
   below it. They were not at the same height, as the test's check said:
-  finger 1, on the right, was higher than finger 2, which is how the
-  fingers were placed, not a fault. The picture was shown about 157
-  pixels wide, so each circle, 80 of the phone's 1,080 pixels across,
-  was about 12 pixels across on the PC's screen, and hard to see.
+  finger 1, on the right, was higher than finger 2. The tester
+  confirmed that this is how the fingers were placed: swiping with the
+  index and middle fingers, they seldom go down level, so the check was
+  wrong, not the drawing, and it no longer asks for the same height.
+  The picture was shown about 157 pixels wide, so each circle, 80 of
+  the phone's 1,080 pixels across, was about 12 pixels across on the
+  PC's screen, and hard to see. The circles were made larger after this
+  test (tests 48 and 49).
+- 2026-11-10, test 47: passed. The recording opened, 0:19.832 long, and
+  the tap's marks were at about 9.88 s. Selecting the tap, at
+  00:00:09.883, showed the picture wide, with Chrome sideways as it was
+  on the phone, its buttons along the left edge of the picture and the
+  phone's top to the left, and Chrome's menu open. One yellow circle
+  was drawn on the menu button, the three dots at the top right. With
+  only the "Touches" filter checked, the list showed 64 of the
+  recording's 2,819 events, in one run of marks. This shows that the
+  turn the player applies, taken from Android 11's `TouchInputMapper`,
+  holds on the Pixel's Android 17 for this turn, top to the left. The
+  other two turns were not tested.
+
+## Part 5, step 5b: larger circles
+
+Test 46 showed the circles small when the phone's picture is shown
+small: about 12 pixels across on the PC's screen with the picture about
+157 pixels wide. The circles are still about a fingertip across on the
+phone's picture, but now no smaller than 24 of the PC's
+device-independent pixels across, with their rings and the paths at
+least 2 thick, however small the picture is shown (see
+[the implementation plan](../architecture/android-implementation-plan.md),
+"Slice 5", "Built, step 5b, larger circles"). They are drawn again at
+the right size when the picture's size changes. At 100% display
+scaling, a device-independent pixel is one pixel of the screen. The
+recordings are not changed: the player draws the circles as it shows a
+picture, so test 46's recording shows the new size without being
+recorded again.
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings, and step 5b's touch tests still
+pass. Neither shows the circles' size on the PC's screen; test 49 does.
+
+### Test 48: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the installer
+runs to its last page.
+
+### Test 49: test 46's recording with the larger circles
+
+The phone is not needed.
+
+1. Start the recorder from the Start menu, with its window the same
+   size as in test 46.
+2. Choose "Open recording...", and open the recording of test 46,
+   `20261110-143257-1fdbc6c5536b401aaf61426e21d9641a`.
+3. In the timeline, select a mark of the first of the three taps, at
+   about 20.6 s on the second lane, as described before test 45, and
+   take a screenshot of the whole recorder window.
+4. Select a mark in the middle of the swipe, at about 40.85 s, and take
+   a screenshot of the whole recorder window.
+
+**On screen:** in step 3 the circle is in the same place as in test 46's
+first screenshot, and about twice as wide as it was there. In step 4
+the two circles are about twice as wide as in test 46's swipe
+screenshot, and the numbers 1 and 2 inside them can be read. Send the
+screenshots.

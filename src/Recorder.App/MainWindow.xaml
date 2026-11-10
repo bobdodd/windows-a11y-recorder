@@ -580,6 +580,7 @@
           <Image x:Name="VideoImage"
                  Stretch="Uniform"
                  SnapsToDevicePixels="True"
+                 SizeChanged="VideoImage_SizeChanged"
                  AutomationProperties.Name="Recorded desktop video frame" />
           <local:SelectableText x:Name="VideoPlaceholderTextBlock"
                      HorizontalAlignment="Center"
