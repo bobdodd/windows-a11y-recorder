@@ -1442,3 +1442,11 @@ line beginning "The MP4 could not be saved" is a failure. A line
   corrected. The recording's `device.wav` holds 173.3 s and its
   `microphone.wav` 173.1 s. The picture was black at 00:00:00.000,
   before the first frame; this was not looked into.
+- 2026-11-10, test 39: passed. With every filter checked the line read
+  "15,324 of 15,324 events shown"; with "Phone sound" unchecked,
+  "7,200 of 15,324 events shown", 8,124 fewer. `device.wav` holds
+  33,267,714 bytes after a 44-byte header, which is 8,122 packets of
+  4,096 bytes, and with the stream's start and stop records that is
+  8,124. That every packet was a full 4,096 bytes and the header 44
+  bytes is inference from the file's size, but the match says the
+  filter covers the phone's sound records and nothing else.
