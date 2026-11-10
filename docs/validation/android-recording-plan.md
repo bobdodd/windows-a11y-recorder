@@ -1269,3 +1269,17 @@ after test 34, if the 80% stays with the capture. Send the screenshot.
   version code 713, protocol 1, and the old note. Not a failure of step
   4c. After the push of `9bff6bc`, test 33 was run again: the note read
   as expected, copied from the panel.
+- 2026-11-10, test 34: passed. The first recording
+  (`20261110-010325-cb14d6c0308f463880b65eebffdc6a1a`) found the volume
+  "already 12 of 15 steps (80%)", the level test 30 had left during its
+  capture. Its `device.wav` peaks at 31.7% of full scale at 6 seconds and
+  26.6% at 28 seconds, then 0.8% to 5.6% from 30 to 38 seconds, after the
+  owner lowered the volume to about 30%. The second recording
+  (`20261110-010817-dcc254d7d611414a80dcf7858839add3`), at 20 seconds:
+  "android.companion: Running, Healthy." ending "Accessibility volume
+  raised from 5 of 15 steps (33%) to 12 of 15 steps (80%)." The slider
+  read 80% during it. So Android accepted the companion's change, and a
+  volume set during one capture was what the next capture found, which
+  fits the volume staying with the capture. That it is kept apart from
+  the phone's speaker volume is still inference. The phone has 15 steps,
+  not the 25 of the examples.
