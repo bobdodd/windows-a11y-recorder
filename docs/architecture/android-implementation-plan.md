@@ -1233,7 +1233,11 @@ slice's full test goes into a validation plan,
   error from adb. Other apps' lines are read from the phone but not
   kept. The status line gives the count of lines read as well, "N
   TalkBack log lines out of N read from the phone's log", so that lines
-  arriving but not kept can be told from no lines arriving.
+  arriving but not kept can be told from no lines arriving. Tests 53
+  and 54 passed the same day: with three swipes, the line gave 5
+  utterances, 2 interrupted and 15 words reached, 1,006 TalkBack lines
+  out of 3,300 read, and a median delay from phone to recorder of
+  6.8 ms, and Stop gave the reminder.
 
 ### Slice 7: accessibility events and tree
 

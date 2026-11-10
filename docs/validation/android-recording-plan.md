@@ -2026,3 +2026,25 @@ TalkBack's log output level is still Verbose, which writes what is on
 the phone's screen to the phone's log. If you prefer, set it back in
 TalkBack's settings, Advanced settings, Developer settings, "Log output
 level"." Send the screenshots.
+
+### Results of part 6, step 6a fix
+
+Run on the development PC with the Pixel on 2026-11-10.
+
+- **Test 53: passed.** The new version was built and installed, and the
+  recorder started from the Start menu for test 54.
+- **Test 54: passed.** In step 3, 20 seconds into the recording, the
+  line read "android.talkback: Running, Healthy. TalkBack: 5
+  utterances, 2 interrupted, 15 words reached, latest "Double-tap to
+  activate", 1006 TalkBack log lines out of 3300 read from the phone's
+  log, median delay from phone to recorder 6.8 ms." The same recording
+  had 3 touches. After Stop, at 1 minute 9 seconds, the line read
+  "android.talkback: Disposed, Healthy." with the same utterance, cut-off
+  and word counts, 1074 TalkBack log lines out of 4363 read, and the
+  same median delay, and the status began "Recording completed and
+  stored. TalkBack's log output level is still Verbose, ...". So
+  logcat's whole log arrives through adb from the Pixel, the recorder
+  keeps TalkBack's lines from it, and they are placed on the
+  companion's clock with a median delay of 6.8 ms. Whether the 5
+  utterances are the three items swiped to and their usage hints is for
+  step 6b's lane to show.
