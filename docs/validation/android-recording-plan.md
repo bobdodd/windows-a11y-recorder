@@ -1264,4 +1264,8 @@ after test 34, if the 80% stays with the capture. Send the screenshot.
 
 ### Results of part 4, step 4c
 
-None yet.
+- 2026-11-09, test 33 was first run on an installer built from
+  `70795cc`, as the step 4c commits had not been pushed: the panel showed
+  version code 713, protocol 1, and the old note. Not a failure of step
+  4c. After the push of `9bff6bc`, test 33 was run again: the note read
+  as expected, copied from the panel.
