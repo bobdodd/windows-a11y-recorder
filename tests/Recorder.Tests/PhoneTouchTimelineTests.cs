@@ -87,7 +87,7 @@ public sealed class PhoneTouchTimelineTests : IDisposable
     {
         FromIndex(TapsAndSwipe(), out var index);
 
-        Assert.Equal(24, index.Version);
+        Assert.Equal(25, index.Version);
         var kept = index.Events.Where(item => item.Channel == AndroidTouchRecords.TouchChannel).ToArray();
         Assert.Equal(16, kept.Length);
         var payload = kept[0].Payload;

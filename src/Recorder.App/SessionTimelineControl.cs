@@ -106,6 +106,16 @@ public sealed class SessionTimelineControl : FrameworkElement
     private static readonly Brush TalkBackBrush = Freeze("#2B787C");
     private static readonly Brush TalkBackInterruptedBrush = CreateStripeBrush("#2B787C", new Point(0, 0), new Point(8, 8), 1.5);
 
+    // The phone's screen visits (android-checks.md, step 1), in a fifth
+    // strip under the TalkBack said strip: each visit solid brown from its
+    // start to the next visit's, with its screen's name where it fits, cut
+    // short with an ellipsis where it does not. Each ends a pixel short, so
+    // visits that follow one another show as two. White on #99601A is
+    // 5.2:1, and the brown against the timeline's #201F1D 3.2:1. Clicking
+    // it moves the playhead there, as the other strips do.
+    private const double VisitStripHeight = 16;
+    private static readonly Brush VisitBrush = Freeze("#99601A");
+
     private readonly DrawingVisual _eventLayer = new();
     private readonly DrawingVisual _overlayLayer = new();
     private readonly VisualCollection _layers;
@@ -133,6 +143,7 @@ public sealed class SessionTimelineControl : FrameworkElement
     private IReadOnlyList<Recorder.Session.ScreenReaderWindowSpan> _windowSpans = [];
     private IReadOnlyList<Recorder.Session.ReadingPositionSpan> _readingSpans = [];
     private IReadOnlyList<Recorder.Session.TalkBackSpeechSpan> _talkBackSpans = [];
+    private IReadOnlyList<Recorder.Session.PhoneVisit> _visits = [];
     private List<SessionTimelineEvent> _windowEvents = [];
 
     // Whether the keys step through the window strip's events rather than a
@@ -171,7 +182,9 @@ public sealed class SessionTimelineControl : FrameworkElement
 
     private double TalkBackHeight => _talkBackSpans.Count > 0 ? TalkBackStripHeight : 0;
 
-    private double StripHeight => ModeHeight + WindowHeight + ReadingHeight + TalkBackHeight;
+    private double VisitHeight => _visits.Count > 0 ? VisitStripHeight : 0;
+
+    private double StripHeight => ModeHeight + WindowHeight + ReadingHeight + TalkBackHeight + VisitHeight;
 
     private double LaneHeight => Math.Max(3, (ActualHeight - StripHeight) / LaneCount);
 
@@ -219,6 +232,7 @@ public sealed class SessionTimelineControl : FrameworkElement
         _modeSpans = [];
         _readingSpans = [];
         _talkBackSpans = [];
+        _visits = [];
         RebuildShownChannels();
         SelectEvent(null);
         RedrawAll();
@@ -269,6 +283,17 @@ public sealed class SessionTimelineControl : FrameworkElement
     {
         ArgumentNullException.ThrowIfNull(spans);
         _talkBackSpans = spans;
+        RedrawAll();
+    }
+
+    /// <summary>
+    /// The phone's screen visits, drawn as a strip under the TalkBack said
+    /// strip, each with its screen's name. The Checks tab lists them.
+    /// </summary>
+    public void SetPhoneVisits(IReadOnlyList<Recorder.Session.PhoneVisit> visits)
+    {
+        ArgumentNullException.ThrowIfNull(visits);
+        _visits = visits;
         RedrawAll();
     }
 
@@ -839,6 +864,24 @@ public sealed class SessionTimelineControl : FrameworkElement
             }
         }
 
+        var visitTop = talkBackTop + TalkBackHeight;
+        foreach (var visit in _visits)
+        {
+            if (visit.End < _viewportStartNanoseconds || visit.Start > viewportEnd)
+            {
+                continue;
+            }
+
+            var left = Math.Max(0, ToX(Math.Max(visit.Start, _viewportStartNanoseconds)));
+            var right = Math.Min(width, ToX(Math.Min(visit.End, viewportEnd)));
+            var band = new Rect(left, visitTop + 1, Math.Max(2, right - left - 1), VisitStripHeight - 2);
+            drawingContext.DrawRectangle(VisitBrush, null, band);
+            if (FittedLabel(visit.Screen.Name, band.Width - 8, pixelsPerDip) is { } text)
+            {
+                drawingContext.DrawText(text, new Point(band.Left + 4, band.Top + (band.Height - text.Height) / 2));
+            }
+        }
+
         foreach (var series in SeriesDrawOrder)
         {
             var lane = LaneOfSeries(series);
@@ -893,6 +936,48 @@ public sealed class SessionTimelineControl : FrameworkElement
                 new Point(playheadX, 0),
                 new Point(playheadX, ActualHeight));
         }
+    }
+
+    // A label for a span: the whole text, or as much as fits with an
+    // ellipsis, at least three characters; null where nothing fits.
+    private static FormattedText? FittedLabel(string words, double room, double pixelsPerDip)
+    {
+        if (room <= 0)
+        {
+            return null;
+        }
+
+        FormattedText Format(string text) => new(
+            text,
+            System.Globalization.CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight,
+            new Typeface("Segoe UI"),
+            11,
+            ModeLightTextBrush,
+            pixelsPerDip);
+
+        var whole = Format(words);
+        if (whole.Width <= room)
+        {
+            return whole;
+        }
+
+        int low = 3, high = words.Length - 1, best = -1;
+        while (low <= high)
+        {
+            var middle = (low + high) / 2;
+            if (Format(words[..middle].TrimEnd() + "…").Width <= room)
+            {
+                best = middle;
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle - 1;
+            }
+        }
+
+        return best < 0 ? null : Format(words[..best].TrimEnd() + "…");
     }
 
     // An utterance's words for its span: the whole text, or as much as fits

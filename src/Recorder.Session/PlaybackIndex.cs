@@ -88,7 +88,13 @@ public sealed record PlaybackIndex
     // index is derived again, so recordings made with step 7b show the tree.
     // Version 24 keeps the phone's settings records (preferences.android,
     // Android slice 8, step 8a) whole, for the panel's phone settings rows.
-    public const int CurrentVersion = 24;
+    // Version 25 keeps the phone's window-state events
+    // (accessibility.android.events, TYPE_WINDOW_STATE_CHANGED) whole, and
+    // each compact tree snapshot's windows with what their items say about
+    // the screen (PhoneScreenEvidence: package, first heading, pane titles,
+    // view IDs), for the apps, screens and visits of android-checks.md
+    // step 1 (PhoneScreenTimeline); an older index is derived again.
+    public const int CurrentVersion = 25;
 
     public required int Version { get; init; }
 
@@ -289,6 +295,7 @@ public sealed class PlaybackIndexBuilder
             TalkBackSpeechTimeline.IsSpeechRecord(channel, record.EventType) ||
             PhoneAccessibilityTimeline.IsTreeRecord(channel, record.EventType) ||
             PhoneAccessibilityTimeline.IsFocusRecord(channel, record.EventType, payload) ||
+            PhoneScreenTimeline.IsWindowStateRecord(channel, record.EventType, payload) ||
             PhoneAccessibilityTimeline.IsDisplayRecord(channel, record.EventType))
         {
             Keep(eventKey, record);
@@ -468,6 +475,7 @@ public sealed class PlaybackIndexBuilder
              ReadingPositionTimeline.IsFocusEvidence(record.Channel, record.EventType) ||
              TalkBackSpeechTimeline.IsSpeechRecord(record.Channel, record.EventType) ||
              PhoneAccessibilityTimeline.IsFocusRecord(record.Channel, record.EventType, record.Payload) ||
+             PhoneScreenTimeline.IsWindowStateRecord(record.Channel, record.EventType, record.Payload) ||
              PhoneAccessibilityTimeline.IsDisplayRecord(record.Channel, record.EventType)) &&
             record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()

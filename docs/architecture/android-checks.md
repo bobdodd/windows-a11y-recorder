@@ -2,11 +2,12 @@
 
 ## Status
 
-Proposed 2026-11-11. Nothing is built. The owner's decisions of
-2026-11-11 are in "Decisions (2026-11-11)" and "Decisions on the open
-questions (2026-11-11)". Before any check is assigned a result, the
-recording has to say which app and which screen each moment belongs to,
-so that comes first in "Build order".
+Proposed 2026-11-11. Step 1 of "Build order", screens and visits, is
+built (see "As built: step 1"); no check is built yet. The owner's
+decisions of 2026-11-11 are in "Decisions (2026-11-11)" and "Decisions
+on the open questions (2026-11-11)". Before any check is assigned a
+result, the recording has to say which app and which screen each moment
+belongs to, so that comes first in "Build order".
 
 Statements below are marked as measured in a recording (with its
 session), checked in this repository's source, checked in a cited
@@ -160,9 +161,12 @@ A new visit starts when, in the app on screen:
    the active, full-size `TYPE_APPLICATION` window (measured above: a
    new activity gave a new window).
 2. **The window's state changes.** A `TYPE_WINDOW_STATE_CHANGED` event
-   from the app whose class name or text differs from the visit's,
-   including a pane appearing or its title changing. This covers apps
-   that change screens inside one window.
+   from the app's window whose class name or text differs from the
+   visit's, or the window's title changing. This covers apps that change
+   screens inside one window. An event for a pane (its content change
+   types include `CONTENT_CHANGE_TYPE_PANE_TITLE`, `_PANE_APPEARED` or
+   `_PANE_DISAPPEARED`) does not start a visit: a pane is a state of the
+   screen (decision 6, and "States" below).
 3. **Another app comes to the front,** as above.
 
 Scrolling, focus moving, text typed, items changing, and content changes
@@ -178,8 +182,10 @@ Within a recording, two visits are to the same screen when they share a
 - the class name from the window-state event that started the visit
   (the activity, for an activity window),
 - the **screen title**: the window title when the app's window has one;
-  otherwise the latest pane title; otherwise the text of the first
-  heading, in the tree's order, in the app's window.
+  otherwise the text of the window-state event that started the visit;
+  otherwise the text of the first heading, in the tree's order, in the
+  app's window. A pane's title names a state, not the screen, as a pane
+  is a state.
 
 The player names each screen by its title and app, such as "Safety and
 emergency (Settings)", and shows which of the three gave the title.
@@ -216,8 +222,9 @@ The keyboard (`TYPE_INPUT_METHOD`) is not a state and is not checked.
 ### Settled snapshots
 
 The checks run only on **settled** snapshots: those in which the app's
-window has the same bounds and transition time as in the next snapshot
-of that window, or as at the end of the visit. A snapshot taken while a
+window has the same bounds and transition time as in every later
+snapshot of that window in the visit (the last snapshot of a visit is
+settled). A snapshot taken while a
 window slides in, as at 16.57 s above, is shown in the tree view as
 now, but no check uses it.
 
@@ -324,6 +331,81 @@ some hundreds of snapshots).
    findings list.
 4. **The approximate contrast checks** from the video, measured first
    against screenshots taken on the phone at the same moments.
+
+## As built: step 1
+
+Built 2026-11-11 in `src/Recorder.Session/PhoneScreens.cs`
+(`PhoneScreenTimeline`), with tests in
+`tests/Recorder.Tests/PhoneScreenTimelineTests.cs`. The rules above are
+applied as follows; where this section is more exact than the sections
+above, it is what the code does.
+
+- **What it reads.** The playback index (version 25) keeps every
+  `TYPE_WINDOW_STATE_CHANGED` event whole, and each compact tree
+  snapshot keeps, for every window whose items were taken, what the
+  items say about the screen (`PhoneScreenEvidence`): the root item's
+  package, the first visible heading's text (or the first text inside
+  it, as the Settings toolbar's heading had none of its own), the pane
+  titles, and the number and a hash of the sorted distinct view IDs.
+  A window whose items were not taken in a snapshot keeps the evidence
+  from the last snapshot that took them. An index from an older version
+  is derived again, so earlier recordings get their screens.
+- **The app's window** in a snapshot is, of its `TYPE_APPLICATION`
+  windows that are not dialogs, bottom sheets or popups by the class
+  name of their latest window-state event, the topmost of those covering
+  at least half the screen; else the current visit's window while it is
+  listed; else the largest. Half, not all, so a window sliding in counts
+  (at 16.57 s in test 64 it covered 82% of the screen). A snapshot with
+  no application window, as between two activities (16.40 to 16.41 s in
+  test 64), changes nothing.
+- **When a visit starts.** A visit to a new window starts at that
+  window's window-state event when the event came after the current
+  visit began, as the event comes before the first snapshot listing the
+  window (16.51 s against 16.57 s in test 64); otherwise at the
+  snapshot. A new window from the same app is "a new window"; from
+  another package, "another app". A visit whose window, app, activity,
+  title and window-state text are all unchanged goes on.
+- **Screens.** Visits are matched to screens once the recording is
+  read, in order: same package, same title, and the same activity or an
+  activity unknown on either side, as for the window a recording begins
+  in, which has had no window-state event. An untitled screen is also
+  matched by its view-ID hash. The heading and the view-ID hash of a
+  visit are taken from its settled snapshots first.
+- **States.** Application windows above the app's window, and windows
+  that are dialogs, bottom sheets or popups by their class name, are
+  states, named by their window title, window-state text or first
+  heading, and labelled with their package when it is not the app's.
+  Each pane title in the app's window is a state. A state runs from the
+  first snapshot it is in to the first it is not in, or to the end of the
+  visit.
+- **Apps** are named by package; the app's own name is not recorded.
+- **The player** has a "Checks" tab listing each app, its screens with
+  how each was named and its activity, each screen's visits with their
+  times, what started them, whether they are a return and how many of
+  their snapshots are settled, and each visit's states. A row moves the
+  playhead to the start of its visit or state, or of the first visit for
+  a screen or an app. The visit at the playhead is marked; "Show current
+  visit" scrolls to it. The timeline has a fifth strip, under the
+  TalkBack said strip, with each visit in brown and its screen's name
+  where it fits (white on `#99601A` is 5.2 to 1; the brown against the
+  timeline's `#201F1D` 3.2 to 1); clicking it moves the playhead there.
+
+Measured against test 64's recording with a throwaway program on the
+development machine: one app, two screens, "Settings" (named by its
+window title, activity unknown) from 1.209 s and "Safety and emergency"
+(named by its window title, activity `SubSettings`) from 16.511 s, with
+two of its five snapshots settled (17.00 and 17.02 s).
+
+Not yet known, to be measured with the client's app:
+
+- whether an app that changes screens inside one window, such as one
+  written with Jetpack Compose, raises window-state events or changes
+  its window title; if it does neither, its screens are one visit (a
+  known limit until measured);
+- whether dialogs, menus and bottom sheets are their own windows, and
+  what class names their window-state events carry;
+- whether turning the phone gives the app's window a new ID, which
+  would start a new visit to the same screen.
 
 ## Decisions on the open questions (2026-11-11)
 

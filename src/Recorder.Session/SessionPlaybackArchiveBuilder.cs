@@ -116,6 +116,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _talkBackSpeech = [];
     private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _phoneTrees = [];
     private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _phoneFocus = [];
+    private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _phoneWindowStates = [];
     private readonly List<(long Time, JsonElement Payload)> _phoneDisplays = [];
     private readonly List<(long Time, string EventType, JsonElement Payload)> _phoneSettings = [];
     private readonly List<KeyEvidenceRecord> _accessibilityRequests = [];
@@ -317,6 +318,13 @@ public sealed class SessionPlaybackArchiveBuilder
         if (PhoneAccessibilityTimeline.IsFocusRecord(timelineEvent.Channel, timelineEvent.EventType, payload))
         {
             _phoneFocus.Add((timelineEvent, payload.Clone()));
+        }
+
+        // The phone's window-state events, for its apps, screens and visits
+        // (android-checks.md, step 1).
+        if (PhoneScreenTimeline.IsWindowStateRecord(timelineEvent.Channel, timelineEvent.EventType, payload))
+        {
+            _phoneWindowStates.Add((timelineEvent, payload.Clone()));
         }
 
         if (PhoneAccessibilityTimeline.IsDisplayRecord(timelineEvent.Channel, timelineEvent.EventType) &&
@@ -553,6 +561,9 @@ public sealed class SessionPlaybackArchiveBuilder
             ? AccessibilityTreeTimeline.Empty
             : new AccessibilityTreeTimeline(accessibilityRequests, _treeDocuments);
 
+        var phoneAccessibility = _phoneTrees.Count == 0 && _phoneFocus.Count == 0
+            ? PhoneAccessibilityTimeline.Empty
+            : new PhoneAccessibilityTimeline(_phoneTrees, _phoneFocus, _phoneDisplays);
         return new SessionPlaybackArchive(
             _root,
             manifest,
@@ -571,9 +582,10 @@ public sealed class SessionPlaybackArchiveBuilder
             TalkBackSpeech = _talkBackSpeech.Count == 0
                 ? TalkBackSpeechTimeline.Empty
                 : new TalkBackSpeechTimeline(_talkBackSpeech, duration),
-            PhoneAccessibility = _phoneTrees.Count == 0 && _phoneFocus.Count == 0
-                ? PhoneAccessibilityTimeline.Empty
-                : new PhoneAccessibilityTimeline(_phoneTrees, _phoneFocus, _phoneDisplays),
+            PhoneAccessibility = phoneAccessibility,
+            PhoneScreens = _phoneTrees.Count == 0
+                ? PhoneScreenTimeline.Empty
+                : new PhoneScreenTimeline(_phoneTrees, _phoneWindowStates, phoneAccessibility.ScreenAt, duration),
             PhoneSettings = _phoneSettings.Count == 0
                 ? PhoneSettingsTimeline.Empty
                 : new PhoneSettingsTimeline(_phoneSettings),

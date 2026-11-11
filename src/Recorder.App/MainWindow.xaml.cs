@@ -950,6 +950,7 @@ public partial class MainWindow : Window
             BindReadingSteps();
             BindAnnouncements();
             BindAccessibilityTree();
+            BindPhoneScreens();
             BindAnalysis();
             ApplyBrowserNavigationFilter();
             BrowserCorrelationTextBox.Text =
@@ -1013,6 +1014,7 @@ public partial class MainWindow : Window
             BindReadingSteps();
             BindAnnouncements();
             BindAccessibilityTree();
+            BindPhoneScreens();
             BindAnalysis();
             busy.Dispose();
             MessageBox.Show(
@@ -1180,6 +1182,7 @@ public partial class MainWindow : Window
         DisplayReadingStepAt(positionNanoseconds);
         DisplayAnnouncementAt(positionNanoseconds);
         DisplayAccessibilityTreeAt(positionNanoseconds);
+        DisplayPhoneVisitAt(positionNanoseconds);
         DisplayNearestEvent(positionNanoseconds);
         DisplayBrowserCorrelationAt(positionNanoseconds);
     }

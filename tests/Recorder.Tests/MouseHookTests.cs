@@ -393,7 +393,7 @@ public sealed class MouseHookTests
         }
 
         var index = builder.Build();
-        Assert.Equal(24, index.Version);
+        Assert.Equal(25, index.Version);
         var kept = Assert.Single(index.Events, item => item.EventType == MouseHookRecords.EventType);
         Assert.True(kept.Payload.TryGetProperty("extraInformation", out _));
 

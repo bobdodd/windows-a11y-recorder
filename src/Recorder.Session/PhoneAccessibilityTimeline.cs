@@ -230,8 +230,10 @@ public sealed class PhoneAccessibilityTimeline
 
     /// <summary>
     /// A snapshot without its items, as the playback index keeps it: each
-    /// window with whether its items were taken and how many. A compact
-    /// snapshot is returned as it is.
+    /// window with whether its items were taken and how many, and, when
+    /// they were, what they say about the screen
+    /// (<see cref="PhoneScreenEvidence"/>). A compact snapshot is returned
+    /// as it is.
     /// </summary>
     public static JsonElement Compact(JsonElement payload)
     {
@@ -266,6 +268,14 @@ public sealed class PhoneAccessibilityTimeline
                     {
                         taken = field.Value.ValueKind == JsonValueKind.Array;
                         count = taken ? field.Value.GetArrayLength() : 0;
+                        if (taken)
+                        {
+                            // What the items say about the screen, for
+                            // its apps, screens and visits (PhoneScreens.cs),
+                            // as the items are not kept.
+                            entry[PhoneScreenEvidence.Field] = PhoneScreenEvidence.Of(field.Value).ToJson();
+                        }
+
                         continue;
                     }
 
