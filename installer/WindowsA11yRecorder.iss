@@ -129,7 +129,8 @@ begin
     Space + 'The recorder, the player and the analysis worker' + NewLine +
     Space + 'PostgreSQL, for the catalog of recordings' + NewLine +
     Space + 'The instrumented Chromium browser' + NewLine +
-    Space + 'The llama.cpp server with the NVIDIA CUDA 12.4 run time' + NewLine + NewLine +
+    Space + 'The llama.cpp server with the NVIDIA CUDA 12.4 run time' + NewLine +
+    Space + 'The scrcpy server and the companion app, for recording an Android phone' + NewLine + NewLine +
     'Model files are chosen and downloaded after the installation.';
   if not VcRuntimeInstalled then
     Result := Result + NewLine + NewLine +

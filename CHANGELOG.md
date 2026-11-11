@@ -94,6 +94,9 @@ Changes on `main` since 1.1.0, not yet released.
   `android\`. The companion app, so far a skeleton with its accessibility
   service declared, is built from Google's SDK tools by
   `scripts\Build-CompanionApp.ps1`, which `Build-Installer.ps1` runs.
+  The installer's "Ready to Install" page lists them as a fifth included
+  part, "The scrcpy server and the companion app, for recording an Android
+  phone".
 - See [the Android implementation plan](docs/architecture/android-implementation-plan.md)
   and [its validation plan](docs/validation/android-recording-plan.md).
   Tests 1 to 4 passed on the development PC and the Pixel 10 Pro XL on

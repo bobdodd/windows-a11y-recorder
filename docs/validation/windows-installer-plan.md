@@ -91,7 +91,7 @@ whole output.
    models" checked, and choose Finish.
 
 **On screen:** in step 2, the two hashes are the same. In step 4, the Ready
-page lists the four included parts, and has no warning that no NVIDIA
+page lists the five included parts, and has no warning that no NVIDIA
 driver was found; if the Visual C++ run time was missing, it says its
 installer runs next, and Windows asks permission during the install. After
 step 5, the recorder opens and the "Set up analysis models" window opens

@@ -3064,7 +3064,7 @@ development PC. It is checked for:
 - the MP4: its length, picture size, frame rate and sound tracks.
 
 Nothing new is built, so these tests use the version installed for
-test 68. The second half of step 8c, the installer, follows.
+test 68. The second half of step 8c, the installer, follows, in "Part 8, step 8c: the installer".
 
 ### Test 73: five minutes with every source
 
@@ -3175,3 +3175,216 @@ Not as planned:
   was not run again.
 - **Not checked.** The mixed track was not compared, and the MP4 was not
   watched.
+
+## Part 8, step 8c: the installer
+
+The second half of step 8c checks that the installer alone gives a PC
+everything a phone recording needs (see
+[the implementation plan](../architecture/android-implementation-plan.md),
+"Slice 8", "Installer"): first a fresh install on the development PC,
+then the Alienware, which has never had the recorder or Android's tools.
+
+What the installer already does, from `scripts/Build-Installer.ps1`
+and `installer/WindowsA11yRecorder.iss`:
+
+- It puts the scrcpy server 5.0.1, checked against its size and
+  SHA-256, its licence as `LICENSE-scrcpy.txt`, the companion app and
+  its description `companion-app.txt` in the install folder's
+  `android` folder. The recorder looks for them there.
+- The companion app is built from the repository and signed with the
+  key in the development PC's `Windows A11y Recorder
+  Build\companion-signing` folder, outside the repository. The phone
+  accepts an update only with the same key, so every installer is
+  built on the development PC. Its version code is the number of
+  commits in `main`.
+- Platform-Tools, which holds adb, is not in the installer: Google's
+  licence must be accepted first, in the recorder's "Set up Android
+  recording" window, which downloads it to
+  `AppData\Local\Windows A11y Recorder\android\platform-tools`. That
+  folder is with the person's data, so uninstalling the recorder keeps
+  it, as it keeps the recordings, the catalog and the models.
+
+Changed for this step: the installer's "Ready to Install" page listed
+four included parts and not the Android files. It now lists a fifth,
+"The scrcpy server and the companion app, for recording an Android
+phone". The script compiles with Inno Setup 7.
+
+The development PC tests are 75 to 79. On the Alienware, run tests 2 to
+7 of [the Windows installer plan](windows-installer-plan.md) first,
+which install the recorder and check the models on the RTX 3090, then
+tests 80 to 82 here, then test 8 of that plan, which uninstalls it.
+
+### Test 75: build the installer (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Read the end of the output.
+
+**On screen:** under `== Android files`, the line `Bundled scrcpy server
+5.0.1.`, then `COMPANION APP BUILT` with `1.1.0, version code 759`. The
+script finishes with `INSTALLER BUILT`, followed by the installer's path,
+ending `WindowsA11yRecorder-Setup-` and the revision `.exe`, and its
+SHA-256. Any red error text means it failed; send the whole output.
+
+### Test 76: uninstall on the development PC
+
+1. Open Windows Settings, then Apps, then "Apps & features".
+2. Find "Windows A11y Recorder", choose it, then Uninstall, and confirm.
+3. Read the message at the end, then choose OK.
+4. In PowerShell, run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $app = Join-Path $env:LOCALAPPDATA "Programs\Windows A11y Recorder"
+   $adb = Join-Path $env:LOCALAPPDATA "Windows A11y Recorder\android\platform-tools\adb.exe"
+   $docs = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "Windows A11y Recorder"
+   "Install folder there: $(Test-Path -LiteralPath $app)"
+   if (Test-Path -LiteralPath $app) { Get-ChildItem -LiteralPath $app -Recurse | Select-Object -First 20 -ExpandProperty FullName }
+   "Platform-Tools there: $(Test-Path -LiteralPath $adb)"
+   "Recordings there: $(Test-Path -LiteralPath $docs)"
+   ```
+
+**On screen:** in step 3 the message begins "The recorder was removed.
+Your recordings, the catalog, the model settings and the downloaded
+models were kept, in:" and names
+`C:\Users\User\AppData\Local\Windows A11y Recorder` and
+`C:\Users\User\Documents\Windows A11y Recorder`. In step 4:
+"Install folder there: False", "Platform-Tools there: True" and
+"Recordings there: True". If the install folder is still there, the
+files listed under it are what the uninstaller left; send the output.
+
+### Test 77: install again on the development PC
+
+1. Run the newest installer in `artifacts\installer\output`, and go
+   through its pages to "Ready to Install".
+2. Read the "Ready to Install" page, then choose Install.
+3. On the last page, uncheck "Start the recorder and set up the analysis
+   models", then choose Finish.
+4. Start the recorder from the Start menu. Open the "Android" menu (Alt,
+   then the arrow keys to it), and choose "Set up Android recording...".
+5. Read the window, then close it.
+
+**On screen:** in step 2, under "Destination location",
+`C:\Users\User\AppData\Local\Programs\Windows A11y Recorder`, and under
+"Included:" five lines, the last "The scrcpy server and the companion
+app, for recording an Android phone". In step 5, under "Android SDK
+Platform-Tools": "Platform-Tools 37.0.1 installed in
+C:\Users\User\AppData\Local\Windows A11y Recorder\android\platform-tools."
+Under "Included with the recorder": "The scrcpy server 5.0.1, for the
+phone's screen and sound, is in place and checked:" and "The companion
+app 1.1.0, version code 759, for the phone's accessibility evidence, is
+in place and checked:", each with a path in
+`C:\Users\User\AppData\Local\Programs\Windows A11y Recorder\android\`.
+Send a screenshot of the window.
+
+### Test 78: the companion app updated from the new install
+
+1. Connect the Pixel by USB, unlocked. In the recorder, in "Recording
+   target", choose "Android device".
+2. Read the companion line under "Android device checks".
+3. Choose "Install companion app", and wait until the companion line
+   begins "Companion app: installed, on, and answering".
+4. Read the companion line.
+
+**On screen:** in step 2, "Companion app: version code 753 is installed,
+older than the recorder's 759. Choose "Install companion app" to update
+it." In step 4, "Companion app: installed, on, and answering (version
+1.1.0, version code 759, protocol 5)." Send a screenshot of the panel.
+
+### Test 79: a short recording from the new install
+
+Before the test, on the phone, turn TalkBack on and go to the home
+screen. TalkBack stays on until step 5, so each tap is TalkBack's:
+touch the item, then double tap.
+
+1. In the recorder, with "Android device" chosen, choose "Start
+   recording", and wait 5 seconds.
+2. On the phone, open Chrome, open any web page, and swipe up with two
+   fingers through it for about 20 seconds. Go back to the home screen.
+3. Take a screenshot of "Current session".
+4. Choose "Stop recording", and wait until the recording has opened in
+   the player. Take a screenshot of the window.
+5. On the phone, turn TalkBack off.
+
+**On screen:** in step 3, the "Events" line reads "0 dropped" and has
+no "rejected"; every line under "Collector status" reads "Running,
+Healthy"; the "android.talkback" line counts utterances and the
+"android.touch" line counts touches. In step 4, the first line under
+"Current session" reads "Recording completed and stored.", and the
+player shows the phone's screen. A first line beginning "Recording
+stopped with errors" is a failure; send it. Send both screenshots.
+
+### Test 80: Platform-Tools on the Alienware
+
+After tests 2 to 7 of the Windows installer plan, with the recorder
+open on the Alienware:
+
+1. Open the "Android" menu (Alt, then the arrow keys to it), and choose
+   "Set up Android recording...". Read the window.
+2. Choose "Open the licence in the browser", and read it.
+3. Check "I have read and accept the Android Software Development Kit
+   License Agreement".
+4. Choose "Download and install Platform-Tools 37.0.1", and wait for the
+   status line to stop changing.
+5. Read the window, then close it.
+
+**On screen:** in step 1, under "Android SDK Platform-Tools":
+"Platform-Tools is not installed. It will be installed in", the
+Alienware's `AppData\Local\Windows A11y Recorder\android\platform-tools`
+folder; the two lines under "Included with the recorder" are as in test
+77, with version code 759, in the Alienware's
+`AppData\Local\Programs\Windows A11y Recorder\android\` folder. In step
+2 the browser opens developer.android.com/studio/terms. In step 5 the
+status line and the Platform-Tools line both read "Platform-Tools 37.0.1
+installed in" that folder, and the line under it begins "adb runs on
+this PC and reports: Android Debug Bridge version". Any other status
+line is a failure; send it. Send a screenshot of the window.
+
+### Test 81: the Pixel on the Alienware
+
+1. Connect the Pixel by USB to a port on the Alienware itself, not a
+   hub, and unlock it.
+2. In the recorder, in "Recording target", choose "Android device".
+3. On the Pixel, in "Allow USB debugging?", tick "Always allow from
+   this computer" and choose Allow.
+4. Wait 5 seconds, then read "Android device checks".
+
+**On screen:** before step 3, the "Phone" line may read "found" and the
+phone's serial "but it has not allowed this PC yet". In step 4, the
+companion line reads "Companion app: installed, on, and answering
+(version 1.1.0, version code 759, protocol 5).", with no "Install
+companion app" button, as the phone has the same app from test 78. If
+the panel lists steps "Step 1" to "Step 4" instead, the Alienware does
+not see the phone: on the phone, pull down the notifications, tap the
+USB notification, and under "Use USB for" choose "File transfer", then
+read the panel again. Send a screenshot of the panel.
+
+### Test 82: a short recording on the Alienware
+
+As test 79, on the Alienware: before the test, on the phone, turn
+TalkBack on and go to the home screen. TalkBack stays on until step 5,
+so each tap is TalkBack's: touch the item, then double tap.
+
+1. In the recorder, with "Android device" chosen, choose "Start
+   recording", and wait 5 seconds.
+2. On the phone, open Chrome, open any web page, and swipe up with two
+   fingers through it for about 20 seconds. Go back to the home screen.
+3. Take a screenshot of "Current session".
+4. Choose "Stop recording", and wait until the recording has opened in
+   the player. Take a screenshot of the window.
+5. On the phone, turn TalkBack off.
+
+**On screen:** as test 79. In step 3, the "Events" line reads "0
+dropped" and has no "rejected"; every line under "Collector status"
+reads "Running, Healthy"; the "android.talkback" line counts utterances
+and the "android.touch" line counts touches. In step 4, the first line
+under "Current session" reads "Recording completed and stored.", and
+the player shows the phone's screen. Send both screenshots. Then run
+test 8 of the Windows installer plan.
