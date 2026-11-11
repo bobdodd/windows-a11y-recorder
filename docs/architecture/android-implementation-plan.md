@@ -1738,6 +1738,14 @@ slice's full test goes into a validation plan,
   it. The results, with each time, are in the validation plan, "Results
   of part 8, step 8b". Step 8c, the whole recording and the installer,
   is next.
+- **Done, step 8c, the whole recording (2026-11-11).** A recording of
+  5:31 with every phone source (tests 73 and 74) finished "completed",
+  with no events dropped or refused. Its clock samples' largest error
+  bound was 29.7 ms, its 9,881 pictures matched its packets and decoded
+  again, its sound files held all their packets with no bytes missing,
+  and its MP4 had the expected length, frames, picture size and three
+  sound tracks. The results are in the validation plan, "Results of part
+  8, step 8c: the whole recording". The installer is next.
 
 ## Risks, and where each is settled
 

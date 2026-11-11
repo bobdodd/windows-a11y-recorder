@@ -3112,3 +3112,66 @@ and includes "3 sound tracks: mixed, then microphone, phone sound." and
 be saved" is a failure. A line "Phone sound:" about silences is not a
 failure. Send the screenshot. The MP4 is then read from the development
 PC with the recording.
+
+## Results of part 8, step 8c: the whole recording
+
+Run on the development PC and the Pixel on 2026-11-11 with the version
+installed for test 68 (companion version code 753). The recording is
+`20261111-164954-bf34fb1da60e4213a8bab5df3ba5e877`, 5:31 long. Its
+folder, apart from its 9,881 pictures (8,216 MB), and its MP4 were
+read from the development PC.
+
+- **Test 73 passed.** At 00:05:05 the "Events" line read "97,855
+  accepted, 0 dropped", and every collector was Running and Healthy:
+  73 utterances, 117 touches, 1,512 accessibility events, 361 tree
+  snapshots, and "2 changes, latest Color inversion off". After the
+  stop every collector was Disposed and Healthy.
+- **Test 74 passed.** The MP4 was saved; the window was closed before a
+  screenshot, so the MP4 itself was read instead.
+
+What the recording shows:
+
+- **Writer.** The manifest's status is "completed", with 99,389 events
+  accepted, none dropped, and no failure. An event that failed its
+  check would have made the status "failed".
+- **Phone clock.** 1,322 clock samples, at most 306 ms apart, in one
+  segment with no break. Their error bounds had a median of 2.1 ms, 95%
+  were within 6.3 ms, and the largest was 29.7 ms, at 2:08.
+- **Pictures.** 9,882 video packets: one setup packet and 9,881
+  pictures, each with its picture record, at the same phone times.
+  Decoding `android/screen.h264` again gave 9,881 pictures, 1080 by
+  2404, High profile. Pictures came from 1.03 s to 304.99 s. The gaps of
+  up to 43 s are times the screen did not change, as the phone sends a
+  picture only on a change.
+- **Phone sound.** 15,309 packets of 1,024 samples, with no bytes
+  missing: `audio/device.wav` holds 326.592 s, from 0.898 s to 327.460 s
+  of the recording. The packets' times lie within 31 ms of a straight
+  line, whose slope is 35 parts per million below the nominal rate:
+  the samples last 31 ms longer than the time from the first packet to
+  the last. The phone's sound stops when the collectors stop, 3.6 s
+  before the recording ends.
+- **Microphone.** 5,830 packets, with no bytes missing:
+  `audio/microphone.wav` holds 325.990 s, from 0.951 s, 24 ms longer
+  than its packets' times.
+- **MP4.** 331.083 s long, against the recording's 331.067 s: 19,865
+  frames at 60 a second, the number the export's schedule gives. The
+  picture is 1034 by 2304, the phone's 1080 by 2404 made 2304 high.
+  Three AAC tracks, 48 kHz stereo, each 331.072 s long. In the phone
+  sound track, the sound at 10 s, 100 s, 200 s and 287 s of
+  `audio/device.wav` is at 0.898 s later, where its first packet was
+  recorded; in the microphone track, the microphone's sound is 0.951 s
+  later. At 20.000 s, 40.000 s and 60.500 s, while the phone's screen was
+  moving, the MP4's frame matched best the last picture recorded
+  before the middle of that frame (pictures 645, 2518 and 4277), which
+  is the export's rule.
+
+Not as planned:
+
+- **The phone did not turn.** The recording has one display record, at
+  the start, and one video session, so the turn in step 4 was not
+  recorded. It was most likely made on the home screen, which on a
+  Pixel does not turn unless "Allow home screen rotation" is on (an
+  inference, not checked). Turning was checked by test 23, so test 73
+  was not run again.
+- **Not checked.** The mixed track was not compared, and the MP4 was not
+  watched.
