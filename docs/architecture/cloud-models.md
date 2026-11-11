@@ -363,4 +363,4 @@ checked only on Windows, in [the validation plan](../validation/cloud-models-pla
   one did.
 - The Batch API and prompt caching, until the costs of real reports are
   known.
-- The Android checks; their plan follows this work.
+- The Android checks; see [their plan](android-checks.md).
