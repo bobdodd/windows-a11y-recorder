@@ -125,3 +125,16 @@ The recording from test 1 is open in the player.
 - Pale grey text on white is a failure.
 
 Send the screenshots.
+
+## Results
+
+- 2026-11-11, development PC, commit 75398b9: the owner checked the
+  updated window and accepted it: "I'm happy with the result for now.
+  Mark this as complete and move on". The results of tests 1 to 5 were
+  not reported one by one, and no screenshots were sent, so the ratios
+  on screen were not measured; the ratios in
+  [colours and contrast](../architecture/player-contrast.md) are
+  computed from the colours.
+- The contrast pass is complete. What it does not cover, the other
+  windows and Windows' contrast themes, is listed there under "Not
+  covered".

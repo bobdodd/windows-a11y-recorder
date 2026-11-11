@@ -107,5 +107,6 @@ same fixes apply there.
 
 The solution builds with no warnings. The colours can only be seen on
 Windows, so the [contrast validation plan](../validation/player-contrast-plan.md)
-has the tests on the development PC, and the ratios on screen are
-measured from the owner's screenshots.
+has the tests on the development PC. The owner checked the updated
+window on 2026-11-11 and accepted it; no screenshots were sent, so the
+ratios on screen were not measured.
