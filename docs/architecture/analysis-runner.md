@@ -144,6 +144,8 @@ images in the same request
   endpoint that is not a loopback address or a private network address.
   Recordings hold client test accounts, URLs, and page content, so sending
   them to an outside service is a separate decision, not a setting.
+  That decision was made on 2026-11-11 for one service, Claude through
+  the Anthropic API; see [cloud models](cloud-models.md).
 
 ### 5. Pipelines group work by model
 
