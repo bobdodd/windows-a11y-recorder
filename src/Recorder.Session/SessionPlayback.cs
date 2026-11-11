@@ -134,6 +134,13 @@ public sealed record SessionPlaybackArchive(
     /// </summary>
     public PhoneAccessibilityTimeline PhoneAccessibility { get; init; } = PhoneAccessibilityTimeline.Empty;
 
+    /// <summary>
+    /// The phone's settings in effect at each time, for the properties panel's
+    /// phone settings rows (Android slice 8, step 8a); empty for a recording
+    /// without them.
+    /// </summary>
+    public PhoneSettingsTimeline PhoneSettings { get; init; } = PhoneSettingsTimeline.Empty;
+
     private ISessionTimeline? _timeline;
 
     /// <summary>

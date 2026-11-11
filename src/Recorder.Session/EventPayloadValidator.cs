@@ -50,7 +50,8 @@ internal static class EventPayloadValidator
         Recorder.Contracts.AndroidTalkBackRecords.LogChannel,
         Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel,
         Recorder.Contracts.AndroidAccessibilityRecords.EventsChannel,
-        Recorder.Contracts.AndroidAccessibilityRecords.TreeChannel
+        Recorder.Contracts.AndroidAccessibilityRecords.TreeChannel,
+        Recorder.Contracts.AndroidSettingsRecords.Channel
     ];
 
     /// <summary>Whether the recorder defines the channel.</summary>
@@ -209,6 +210,50 @@ internal static class EventPayloadValidator
             case (Recorder.Contracts.AndroidAccessibilityRecords.TreeChannel, Recorder.Contracts.AndroidAccessibilityRecords.UnavailableTreeEventType):
             case (Recorder.Contracts.AndroidAccessibilityRecords.EventsChannel, Recorder.Contracts.AndroidAccessibilityRecords.UnavailableEventType):
             case (Recorder.Contracts.AndroidTalkBackRecords.LogChannel, Recorder.Contracts.AndroidTalkBackRecords.UnavailableEventType):
+                ValidateAndroidCompanionUnavailable(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidSettingsRecords.Channel, Recorder.Contracts.AndroidSettingsRecords.SnapshotEventType):
+                ValidateShape(
+                    payload,
+                    [
+                        RequiredString("serial"),
+                        RequiredEnum(
+                            "reason",
+                            Recorder.Contracts.AndroidSettingsRecords.StartReason,
+                            Recorder.Contracts.AndroidSettingsRecords.StopReason),
+                        new PropertyRule(
+                            "settings",
+                            true,
+                            false,
+                            value => value.ValueKind == JsonValueKind.Object &&
+                                value.EnumerateObject().All(setting =>
+                                    setting.Value.ValueKind is JsonValueKind.String or JsonValueKind.Null),
+                            "must be an object whose values are strings or null"),
+                        RequiredTextArray("problems"),
+                        RequiredInteger("readStartedAtNanoseconds"),
+                        RequiredInteger("readEndedAtNanoseconds")
+                    ],
+                    issues);
+                break;
+            case (Recorder.Contracts.AndroidSettingsRecords.Channel, Recorder.Contracts.AndroidSettingsRecords.ChangeEventType):
+                ValidateShape(
+                    payload,
+                    [
+                        RequiredString("serial"),
+                        RequiredString("setting"),
+                        NullableText("value"),
+                        NullableText("previous"),
+                        RequiredEnum(
+                            "source",
+                            Recorder.Contracts.AndroidSettingsRecords.NoticeSource,
+                            Recorder.Contracts.AndroidSettingsRecords.StopSource),
+                        NullableInteger("noticePhoneNanoseconds", nonnegative: true),
+                        NullableInteger("noticeReceivedAtNanoseconds"),
+                        RequiredInteger("readAtNanoseconds")
+                    ],
+                    issues);
+                break;
+            case (Recorder.Contracts.AndroidSettingsRecords.Channel, Recorder.Contracts.AndroidSettingsRecords.UnavailableEventType):
                 ValidateAndroidCompanionUnavailable(payload, issues);
                 break;
             case (Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel, Recorder.Contracts.AndroidTalkBackRecords.UtteranceStartedEventType):

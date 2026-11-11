@@ -30,6 +30,9 @@ public sealed record ReceivedAccessibilityEvent(
 /// <summary>A snapshot's line, still to be read, and the session time the recorder read it.</summary>
 public sealed record ReceivedAccessibilityTree(string Line, long ReceivedAt);
 
+/// <summary>A notice that a setting was written, and the session time the recorder read it.</summary>
+public sealed record ReceivedSettingChange(CompanionSettingChanged Change, long ReceivedAt);
+
 /// <summary>
 /// One connection to the companion app. The app sends its greeting first;
 /// after that the recorder asks for clock samples and the app sends display
@@ -52,6 +55,8 @@ public sealed class CompanionConnection : IAsyncDisposable
     private readonly Channel<ReceivedAccessibilityEvent> _events = Channel.CreateUnbounded<ReceivedAccessibilityEvent>(
         new UnboundedChannelOptions { SingleReader = true });
     private readonly Channel<ReceivedAccessibilityTree> _trees = Channel.CreateUnbounded<ReceivedAccessibilityTree>(
+        new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<ReceivedSettingChange> _settings = Channel.CreateUnbounded<ReceivedSettingChange>(
         new UnboundedChannelOptions { SingleReader = true });
     private readonly CancellationTokenSource _closing = new();
     private Task? _readLoop;
@@ -88,6 +93,12 @@ public sealed class CompanionConnection : IAsyncDisposable
     /// asked for with <see cref="RequestAccessibilityTreesAsync"/>; completes when the connection ends.
     /// </summary>
     public ChannelReader<ReceivedAccessibilityTree> AccessibilityTrees => _trees.Reader;
+
+    /// <summary>
+    /// Notices that a setting was written, in the order they arrived, once
+    /// asked for with <see cref="RequestSettingChangesAsync"/>; completes when the connection ends.
+    /// </summary>
+    public ChannelReader<ReceivedSettingChange> SettingChanges => _settings.Reader;
 
     /// <summary>Completes when the connection ends, with the reason it ended.</summary>
     public Task<string> Closed => _closed.Task;
@@ -241,6 +252,13 @@ public sealed class CompanionConnection : IAsyncDisposable
     public Task RequestAccessibilityTreesAsync(CancellationToken cancellation) =>
         SendAsync(CompanionProtocol.AccessibilityTreesRequest, cancellation);
 
+    /// <summary>
+    /// Asks the app to say each time one of the settings is written; the
+    /// notices come on <see cref="SettingChanges"/>.
+    /// </summary>
+    public Task RequestSettingChangesAsync(IEnumerable<Recorder.Contracts.AndroidSetting> settings, CancellationToken cancellation) =>
+        SendAsync(CompanionProtocol.SettingsRequest(settings), cancellation);
+
     private async Task SendAsync(string line, CancellationToken cancellation)
     {
         var bytes = Encoding.UTF8.GetBytes(line);
@@ -309,6 +327,9 @@ public sealed class CompanionConnection : IAsyncDisposable
                     case CompanionAccessibilityTreeLine tree:
                         _trees.Writer.TryWrite(new ReceivedAccessibilityTree(tree.Line, at));
                         break;
+                    case CompanionSettingChanged setting:
+                        _settings.Writer.TryWrite(new ReceivedSettingChange(setting, at));
+                        break;
                     case CompanionError error:
                         LastAppError = error.Message;
                         break;
@@ -329,6 +350,7 @@ public sealed class CompanionConnection : IAsyncDisposable
             _volumes.Writer.TryComplete();
             _events.Writer.TryComplete();
             _trees.Writer.TryComplete();
+            _settings.Writer.TryComplete();
             foreach (var waiting in _pending.Values)
             {
                 waiting.TrySetException(new CompanionUnavailableException(reason));
@@ -364,6 +386,7 @@ public sealed class CompanionConnection : IAsyncDisposable
         _volumes.Writer.TryComplete();
         _events.Writer.TryComplete();
         _trees.Writer.TryComplete();
+        _settings.Writer.TryComplete();
         _reader.Dispose();
         _closing.Dispose();
         if (_onDispose is not null)

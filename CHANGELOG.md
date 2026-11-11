@@ -370,6 +370,28 @@ Changes on `main` since 1.1.0, not yet released.
   items, which the tree view reads from the recording. Recordings made
   before are indexed again when opened.
 
+### Android recording, part 8a: the phone's settings
+
+- The recording holds 34 of the phone's accessibility settings, such as
+  the accessibility services on, explore by touch, magnification, color
+  inversion, color correction, font size, display size, animation
+  scales, captions and text-to-speech, read over adb as the recording
+  starts and stops, and again each time the companion app says one was
+  written.
+- The companion app speaks protocol 5: it watches each setting the
+  recorder asks for and tells the recorder when one is written. It has
+  to be installed again.
+- A new android.settings status line gives the number of settings read
+  at the start, the number of changes and the latest, and any notices
+  with no change, reads that failed and changes found at the stop.
+- The properties panel shows the phone's settings at the playhead, in
+  groups whose names start "Phone", in place of the Magnifier and
+  Windows groups, with previous and next change buttons. The filter that
+  reads "Windows settings" for a desktop recording reads "Phone
+  settings".
+- The playback index is version 24. Recordings made before are indexed
+  again when opened.
+
 ## 1.1.0 - 2026-10-13
 
 The recording work planned after 1.0.0 is complete. The recorder now

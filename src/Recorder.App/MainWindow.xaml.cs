@@ -329,7 +329,9 @@ public partial class MainWindow : Window
     // TalkBack's log level is still Verbose. The accessibility collector
     // asks the companion app for every accessibility event and places each
     // by the same clock fit (slice 7, step 7a); it comes after the companion
-    // collector and so stops before it.
+    // collector and so stops before it. The settings collector reads the
+    // phone's settings with adb at the start and the stop, and again each
+    // time the companion app reports one changed (slice 8, step 8a).
     private Recorder.Contracts.ICaptureCollector[] AndroidCollectors(string serial)
     {
         var adb = new AdbProcess(AndroidTools.Adb(AndroidTools.DataFolder));
@@ -349,6 +351,7 @@ public partial class MainWindow : Window
             _talkBack,
             new AndroidAccessibilityCollector(serial, companion, companion),
             new AndroidAccessibilityTreeCollector(serial, companion, companion),
+            new AndroidSettingsCollector(adb, serial, companion, companion),
             new Recorder.Collectors.Audio.AudioCollector(new Recorder.Collectors.Audio.AudioCaptureOptions(true, false))
         ];
     }
@@ -1435,7 +1438,8 @@ public partial class MainWindow : Window
         archive.Timeline.ChannelCounts.ContainsKey(Recorder.Contracts.AndroidTouchRecords.KeyChannel) ||
         archive.TalkBackSpeech.Recorded ||
         archive.PhoneAccessibility.TreesRecorded ||
-        archive.PhoneAccessibility.FocusRecorded;
+        archive.PhoneAccessibility.FocusRecorded ||
+        archive.PhoneSettings.Recorded;
 
     private void NameInputLanes(bool phone)
     {
@@ -1450,6 +1454,9 @@ public partial class MainWindow : Window
         // (Android slice 7, step 7c).
         _automationName = phone ? "Accessibility" : "UIA";
         FilterAutomationCheckBox.Content = phone ? "Accessibility _events" : "_UI Automation";
+        // The phone's settings take the Windows settings filter (Android
+        // slice 8, step 8a).
+        FilterPreferencesCheckBox.Content = phone ? "Phone settings" : "Windows settings";
         ShowTimelineLegend();
     }
 
@@ -1550,6 +1557,7 @@ public partial class MainWindow : Window
             visibleChannels);
         AddVisibleChannel(FilterWindowCheckBox, "window.foreground", visibleChannels);
         AddVisibleChannel(FilterPreferencesCheckBox, "system.preferences", visibleChannels);
+        AddVisibleChannel(FilterPreferencesCheckBox, Recorder.Contracts.AndroidSettingsRecords.Channel, visibleChannels);
         AddVisibleChannel(FilterMagnifierCheckBox, "graphics.magnifier", visibleChannels);
         AddVisibleChannel(FilterBrowserSettingsCheckBox, "browser.preferences", visibleChannels);
         AddVisibleChannel(FilterAssistiveTechnologyCheckBox, "system.assistive-technology", visibleChannels);

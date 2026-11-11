@@ -17,9 +17,10 @@ public static class CompanionProtocol
     /// <summary>
     /// 2 from slice 4, step 4c, which added the Accessibility volume
     /// request; 3 from slice 7, step 7a, which added accessibility events;
-    /// 4 from step 7b, which added snapshots of the accessibility tree.
+    /// 4 from step 7b, which added snapshots of the accessibility tree; 5
+    /// from slice 8, step 8a, which added notices of settings changes.
     /// </summary>
-    public const int Version = 4;
+    public const int Version = 5;
 
     /// <summary>The companion app's socket, in Linux's abstract namespace.</summary>
     public const string SocketName = "a11yrecorder_companion";
@@ -58,6 +59,22 @@ public static class CompanionProtocol
     /// "accessibility-tree" line.
     /// </summary>
     public const string AccessibilityTreesRequest = "{\"type\":\"accessibility-trees\"}\n";
+
+    /// <summary>
+    /// Asks the app to tell this connection, from now on, each time one of
+    /// these settings is written, each as a "setting-changed" line. The app
+    /// says only which setting and when; the recorder reads the value.
+    /// </summary>
+    public static string SettingsRequest(IEnumerable<AndroidSetting> settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        var request = new
+        {
+            type = "settings",
+            settings = settings.Select(setting => new { @namespace = setting.Namespace, name = setting.Name }).ToArray()
+        };
+        return JsonSerializer.Serialize(request) + "\n";
+    }
 
     // The app's names are the records' names (AccessibilityEventJson.java).
     private static readonly JsonSerializerOptions EventOptions = new(JsonSerializerDefaults.Web);
@@ -124,6 +141,10 @@ public static class CompanionProtocol
                 // a snapshot can be large, and the clock replies behind it
                 // are timed as they are read.
                 "accessibility-tree" => new CompanionAccessibilityTreeLine(line),
+                "setting-changed" => new CompanionSettingChanged(
+                    String(root, "namespace"),
+                    String(root, "name"),
+                    Long(root, "time")),
                 "error" => new CompanionError(String(root, "message")),
                 _ => new CompanionUnknown(type)
             };
@@ -289,6 +310,14 @@ public sealed record CompanionAccessibilityEvent(AndroidAccessibilityEvent? Even
 /// <see cref="CompanionProtocol.ReadTree"/>.
 /// </summary>
 public sealed record CompanionAccessibilityTreeLine(string Line) : CompanionMessage;
+
+/// <summary>
+/// A setting the connection asked about was written (slice 8, step 8a),
+/// which may or may not have changed its value.
+/// </summary>
+/// <param name="Namespace">secure, system or global.</param>
+/// <param name="Time">The phone's CLOCK_MONOTONIC when the app was told, in nanoseconds.</param>
+public sealed record CompanionSettingChanged(string Namespace, string Name, long Time) : CompanionMessage;
 
 public sealed record CompanionError(string Message) : CompanionMessage;
 

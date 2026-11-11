@@ -349,6 +349,22 @@ setting through a content observer
 ([Android, Settings.Secure](https://developer.android.com/reference/android/provider/Settings.Secure)),
 and the recorder reads the full list over adb at the start.
 
+As built in step 8a (2026-11-11), the recorder reads 34 settings from
+the secure, system and global tables with `adb shell settings list`, as
+the recording starts and stops. It sends the companion app the list it
+wants watched (protocol 5), and the app registers a content observer
+for each one and sends a `setting-changed` notice, with the phone's
+clock, when one is written. The recorder then reads that setting with
+`adb shell settings get` and records it when its value differs from the
+last one recorded, at the notice's time; a notice with no difference is
+counted, not recorded. A change with no
+notice, for example with no companion app, is found by the read at the
+stop and marked as found there. The player's properties panel shows the
+settings at the playhead in groups whose names start "Phone", in place
+of the Magnifier and Windows groups. The details are in
+[the implementation plan](android-implementation-plan.md), "Built, step
+8a".
+
 ### Websites
 
 - Chrome on Android exposes the Chrome DevTools Protocol over USB. adb

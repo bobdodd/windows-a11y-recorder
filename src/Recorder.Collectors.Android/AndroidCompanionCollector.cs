@@ -26,8 +26,11 @@ namespace Recorder.Collectors.Android;
 /// <see cref="RequestAccessibilityEventsAsync"/>; that collector records them.
 /// From step 7b, it asks for snapshots of the accessibility tree when the
 /// tree collector calls <see cref="RequestAccessibilityTreesAsync"/>.
+/// From slice 8, step 8a, it asks for notices of settings changes when the
+/// settings collector calls <see cref="RequestSettingChangesAsync"/>.
 /// </summary>
-public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock, IPhoneDisplay, IPhoneAccessibilityEvents, IPhoneAccessibilityTrees
+public sealed class AndroidCompanionCollector :
+    ICaptureCollector, IPhoneClock, IPhoneDisplay, IPhoneAccessibilityEvents, IPhoneAccessibilityTrees, IPhoneSettingChanges
 {
     public const string Type = "android.companion";
 
@@ -487,6 +490,29 @@ public sealed class AndroidCompanionCollector : ICaptureCollector, IPhoneClock, 
         }
 
         return connection.AccessibilityTrees;
+    }
+
+    public async Task<ChannelReader<ReceivedSettingChange>?> RequestSettingChangesAsync(
+        IReadOnlyList<AndroidSetting> settings,
+        CancellationToken cancellation)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (_connection is not { } connection || connection.Closed.IsCompleted || _stopping)
+        {
+            return null;
+        }
+
+        try
+        {
+            await connection.RequestSettingChangesAsync(settings, cancellation).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is CompanionUnavailableException or ObjectDisposedException)
+        {
+            // WatchAsync records the connection's end.
+            return null;
+        }
+
+        return connection.SettingChanges;
     }
 
     private async Task VolumesAsync(CompanionConnection connection)

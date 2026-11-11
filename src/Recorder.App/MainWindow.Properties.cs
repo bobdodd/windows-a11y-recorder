@@ -82,10 +82,14 @@ public partial class MainWindow
 
     // Every row of the panel at a time: the Magnifier and Windows groups,
     // then the Browser and Sent to the page groups, then the Screen reader
-    // group, then the Keyboard and mouse group.
+    // group, then the Keyboard and mouse group. A recording of a phone with
+    // its settings (Android slice 8, step 8a) shows the phone's settings
+    // groups in place of the Magnifier and Windows groups.
     private static IReadOnlyList<PropertyRow> RowsAt(SessionPlaybackArchive archive, long time, SessionVideoFrame? frame) =>
     [
-        .. archive.WindowsPreferences.RowsAt(time, frame, archive.MagnifierChanges),
+        .. archive.PhoneSettings.Recorded
+            ? archive.PhoneSettings.RowsAt(time)
+            : archive.WindowsPreferences.RowsAt(time, frame, archive.MagnifierChanges),
         .. archive.BrowserPreferences.RowsAt(time),
         .. archive.AssistiveTechnology.RowsAt(time),
         .. archive.ScreenReaderMode.RowsAt(time),
@@ -119,7 +123,7 @@ public partial class MainWindow
                 row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences,
                 archive.AssistiveTechnology, archive.InputRecordability, archive.ScreenReaderMode,
                 archive.ScreenReaderWindows, archive.Mouse, archive.AccessibilityRequests, archive.ReadingPosition,
-                archive.TalkBackSpeech);
+                archive.TalkBackSpeech, archive.PhoneSettings);
             _propertyChangeTimes[row.Key] = times;
         }
 
@@ -305,10 +309,13 @@ public partial class MainWindow
         if (PropertyChangeSteps.TimesOf(
                 row.Row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences,
                 archive.AssistiveTechnology, archive.InputRecordability, archive.ScreenReaderMode,
-                archive.ScreenReaderWindows, archive.Mouse, archive.AccessibilityRequests, archive.ReadingPosition) is not { } times)
+                archive.ScreenReaderWindows, archive.Mouse, archive.AccessibilityRequests, archive.ReadingPosition,
+                archive.TalkBackSpeech, archive.PhoneSettings) is not { } times)
         {
             _busy.AnnounceLayout(row.Group switch
             {
+                _ when row.Row.Key.StartsWith(PhoneSettingsTimeline.KeyPrefix, StringComparison.Ordinal) =>
+                    "This recording has no phone settings records.",
                 WindowsPreferenceTimeline.MagnifierGroup => "This recording has no Magnifier change records.",
                 BrowserPreferenceTimeline.BrowserGroup => "This recording has no browser preference records.",
                 BrowserPreferenceTimeline.PageGroup => "The values sent to the page have no change steps.",

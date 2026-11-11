@@ -1620,6 +1620,106 @@ slice's full test goes into a validation plan,
 - **Target test (settings).** Start a recording, turn color inversion on
   and off on the phone, stop. The settings panel shows color inversion
   on, then off, at the two times.
+- **Steps (planned 2026-11-11).** As for slices 5 to 7, the slice is
+  built in steps, each with its own tests.
+  - **Step 8a: settings.** The phone's settings, read at the start and
+    the stop and on each change, stored on `preferences.android` and
+    shown in the properties panel, and the target test above.
+  - **Step 8b: the one-timeline check.** The recording and comparison
+    above.
+  - **Step 8c: the whole recording and the installer.** The five-minute
+    recording, then the installer on the development PC and on the
+    Alienware.
+- **Built, step 8a (2026-11-11).**
+  - **Which settings.** 34, listed in `AndroidSettingsRecords.All`
+    (src/Recorder.Contracts/AndroidSettingsRecords.cs) with the group
+    and label the panel shows: the accessibility services on, explore by
+    touch, the accessibility button, shortcut and Quick Settings tiles;
+    magnification, its area, scale and follow typing; color inversion,
+    color correction and its mode, high contrast text, extra dim and its
+    level, and dark theme; font size, bold text and display size; the
+    three animation scales; the timeouts for controls and messages, the
+    touch and hold delay, autoclick and the large pointer; captions, mono
+    audio and audio balance; and the text-to-speech engine, rate and
+    pitch. Each name was checked against Android's `Settings.java` on
+    its main branch
+    ([AOSP, Settings.java](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/provider/Settings.java)),
+    which also gives the numbers behind the named values, such as
+    magnification area 1 for full screen and 2 for part of the screen,
+    and color correction 11, 12 and 13. TalkBack's own preferences, such
+    as verbosity, are not settings of these tables and are not recorded.
+  - **Read with adb, not by the app.** Several of the settings, such as
+    extra dim, the Quick Settings tiles and follow typing, are not
+    marked `@Readable` in `Settings.java`, so an app that targets a
+    recent Android cannot read them, but adb's shell can. The recorder
+    therefore reads every value with `adb shell settings list secure`,
+    `system` and `global` at the start and the stop, and `settings get`
+    for one setting when it is told that setting changed.
+  - **App.** The companion app speaks protocol 5. A connection that sends
+    `{"type":"settings","settings":[{"namespace":"secure","name":...}]}`
+    has a `ContentObserver` registered for each of those settings, and
+    is sent `{"type":"setting-changed","namespace":...,"name":...,
+    "time":...}` each time one is written, with the phone's
+    `System.nanoTime()` when the notice came. It sends no value. The
+    observers are removed when the connection closes. Whether Android
+    sends an app notices for settings it is not allowed to read is not
+    known; color inversion, the target test's setting, can be read, so
+    the target test does not depend on it. If notices do not come, the
+    change is still recorded when the settings are read again at the
+    stop.
+  - **Recorder.** `AndroidSettingsCollector` asks for the notices, then
+    reads the three tables and records a `android-settings` snapshot of
+    all 34 (a setting not in its table is null, "not set"). On each
+    notice it reads that setting, and records an
+    `android-setting-changed` record, with the value before, only when
+    the value differs; the record is placed at the notice's phone time
+    through the companion's clock fit, flagged `phone-notice-time`, or at
+    the time the recorder read the notice when there is no clock fit. A
+    setting written twice before it is read, as when it is turned on and
+    quickly off again, is read once and is not recorded as changed. At
+    the stop, the notices waiting are read, then the tables again: a
+    setting that differs is recorded as changed at the stop, flagged
+    `found-at-stop`, with no time of its own, then a second snapshot. A
+    phone whose tables cannot be read, or a companion app that is not
+    connected, is recorded in an `android-settings-unavailable` record
+    and makes the collector Degraded; the recording goes on. A value
+    of the text "null" cannot be told from a setting that is not set,
+    as `settings` prints both the same way. The status line reads, for
+    example, "Phone settings: 34 read at the start, 2 changes, latest
+    Color inversion off."
+  - **Player.** In a recording with the phone's settings, the properties
+    panel shows them in eight groups, "Phone accessibility" to "Phone
+    text-to-speech", in place of the Magnifier and Windows groups, which
+    were all "not recorded" for a phone; the TalkBack rows therefore
+    come much nearer the top. Each row gives the value in words, such as
+    "on", "full screen (1)" or "115 percent", when it was set ("at
+    start", a time, or a time with "found at the stop"), and the
+    change buttons and count, as the Windows rows do. The records are on
+    the Windows settings lane, and the "Windows settings" filter reads
+    "Phone settings" for a phone. The playback index is version 24,
+    which keeps the records whole; an older index is made again when a
+    recording is opened.
+  - **Fixed on the way.** The change buttons of the "TalkBack said" and
+    "Words reached" rows used to say "This recording has no Windows
+    settings records": the step from a button left out what TalkBack
+    said, though the count was right. They now step through what
+    TalkBack said.
+  - **Tests.** `AndroidSettingsTests` (11 tests, 27 cases) check the
+    request and the notice, the list of settings, what `settings list`
+    prints (with "null" and a value over two lines), the values in
+    words, and a recording with a stand-in adb, companion connection and
+    phone clock: color inversion on, then off, at the notices' times,
+    with the panel's row before, at and after each; a notice with no
+    change; no companion, with the change found at the stop; no clock
+    fit; and tables that cannot be read; and that a value that is not
+    text is refused. `AndroidCompanionTests` check that the companion
+    collector asks for the notices and passes them on, and that an app
+    with protocol 4 is refused. The full suite gave 2,179 passed; the 10
+    that fail on Linux need Windows, as before. The companion app was
+    built on Linux with `javac -Werror` against Android 17's
+    `android.jar`, and converted with `d8`. That the notices come on the
+    Pixel, and that the panel shows the change at its time, is for
+    tests 68 to 71.
 
 ## Risks, and where each is settled
 

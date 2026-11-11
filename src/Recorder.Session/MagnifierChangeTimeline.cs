@@ -73,6 +73,7 @@ public static class PropertyChangeSteps
     /// The Pointer and NVDA mouse tracking rows' are those of <see cref="MouseActivity.ChangeTimesOf"/>.
     /// The Under the pointer (Chromium) row's are those of <see cref="AccessibilityRequests.ChangeTimesOf"/>.
     /// The TalkBack said row's are those of <see cref="TalkBackSpeechTimeline.ChangeTimesOf"/>.
+    /// A phone setting's row's are those of <see cref="PhoneSettingsTimeline.ChangeTimesOf"/>.
     /// </summary>
     public static IReadOnlyList<long>? TimesOf(
         PropertyRow row,
@@ -86,11 +87,17 @@ public static class PropertyChangeSteps
         MouseActivity? mouse = null,
         AccessibilityRequests? accessibilityRequests = null,
         ReadingPositionTimeline? readingPosition = null,
-        TalkBackSpeechTimeline? talkBackSpeech = null)
+        TalkBackSpeechTimeline? talkBackSpeech = null,
+        PhoneSettingsTimeline? phoneSettings = null)
     {
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(magnifier);
+        if (row.Key.StartsWith(PhoneSettingsTimeline.KeyPrefix, StringComparison.Ordinal))
+        {
+            return (phoneSettings ?? PhoneSettingsTimeline.Empty).ChangeTimesOf(row.Key);
+        }
+
         if (row.Key.StartsWith(BrowserPreferenceTimeline.BrowserKeyPrefix, StringComparison.Ordinal) ||
             row.Key.StartsWith(BrowserPreferenceTimeline.PageKeyPrefix, StringComparison.Ordinal))
         {

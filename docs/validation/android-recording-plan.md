@@ -2715,3 +2715,131 @@ of tests 65 to 67 was made exact where it was unclear.
     it. This is not new in step 7c and is the same for desktop
     recordings. The owner noted that it is throughout the interface; it
     is left for a contrast pass over the whole interface.
+
+## Part 8, step 8a: the phone's settings
+
+The recorder now records the phone's accessibility settings (see
+[the implementation plan](../architecture/android-implementation-plan.md),
+"Slice 8", "Built, step 8a"): 34 of them, such as color inversion,
+magnification, font size and the accessibility services on. It reads
+them as the recording starts and stops, and again each time the
+companion app says one was written. While recording, a new line under
+"Collector status", starting "android.settings", counts the changes. In
+the player, the properties panel shows the phone's settings in groups
+whose names start "Phone", in place of the Magnifier and Windows rows,
+and the filter that reads "Windows settings" for a desktop recording
+reads "Phone settings". The companion app now speaks protocol 5, so it
+has to be installed again.
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings, the companion app compiles with
+warnings as errors, and the tests pass, 2,179 of them, with the 10 that
+need Windows failing as before. The new tests cover the request and the
+notices, what `adb shell settings list` prints, each setting's value in
+words, and a recording with a stand-in adb, companion connection and
+phone clock: color inversion turned on and then off, with the panel's
+row before, at and after each change; a notice with no change; no
+companion, with the change found at the stop; and settings that cannot
+be read. None of that shows the companion app's notices arriving on the
+Pixel, or the panel drawn on Windows. Tests 68 to 71 do.
+
+### Test 68: build and install the new version (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Connect the Pixel by USB, unlocked. Start the recorder from the Start
+   menu, and in "Recording target" choose "Android device".
+4. The panel offers "Install companion app". Choose it, and wait until
+   the panel shows "Companion app: installed, on, and answering".
+5. Read the companion line and the note under "Android device checks".
+
+**On screen:** the build ends with `INSTALLER BUILT`. In step 5 the
+companion line reads "Companion app: installed, on, and answering
+(version 1.1.0, version code" with a number, and ends "protocol 5)."
+The note ends "It records the phone's accessibility settings, such as
+color inversion, magnification, font size and the services on, as the
+recording starts and stops and each time one changes, and the
+properties panel shows them at the playhead, in the Windows settings'
+place, with "Phone settings" as their filter." "protocol 4" is a
+failure. Send a screenshot of the panel.
+
+### Test 69: color inversion on and off while recording
+
+Before the test, check that TalkBack is off. On the phone, open
+Settings, then Accessibility, then "Color and motion", then "Color
+inversion", so that the "Use color inversion" switch is on the screen,
+and off. Leave the recorder open from test 68, with "Android device"
+chosen. Tests 70 and 71 use the recording this test makes.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. On the phone, tap "Use color inversion" to turn it on, and wait 5
+   seconds.
+3. Tap "Use color inversion" again to turn it off, and wait 5 seconds.
+4. While it is still recording, take a screenshot of "Collector status"
+   under "Current session".
+5. Choose "Stop recording", and wait until the recording has opened in
+   the player.
+
+**On screen:** in step 2 the phone's own screen turns to inverted
+colors, and in step 3 it turns back. In step 4 "Collector status" has a
+line starting "android.settings: Running, Healthy. Phone settings: 34
+read at the start, 2 changes, latest Color inversion off". It may go on
+with a number of "notices with no change". No "android.settings" line,
+Degraded, "0 changes", or "1 change" is a failure; send the line as it
+is. More than 2 changes, or a latest change that is not color
+inversion, is not a failure, but say so. Send the screenshot.
+
+### Test 70: the Color inversion row at the two times
+
+The recording from test 69 is open in the player, at its start.
+
+1. In the "Properties" panel to the right of the phone's picture,
+   scroll down until you can see the group "Phone color and contrast",
+   and take a screenshot of the whole recorder window.
+2. On the "Color inversion" row, click the right-pointing triangle
+   button ("Next color inversion change"), and take a screenshot of the
+   whole recorder window.
+3. Click the same button again, and take a screenshot of the whole
+   recorder window.
+
+**On screen:** in step 1 the "Color inversion" row reads "off" and, in
+"When set", "at start", and it has two triangle buttons at its end. In
+step 2 the playhead moves to about 5 seconds after the start, and the
+row, in bold, reads "on", with a time of about 00:00:05 in "When set",
+followed by ", changed". The phone's picture shows the "Use color
+inversion" switch on, or a frame before it moves. In step 3 the row
+reads "off", with a time about 5 seconds later than step 2's, followed
+by ", changed". "not set", "not read", "found at the stop", no triangle
+buttons, or a second time no later than the first, is a failure. The
+change count to the right of the buttons may be cut off at the panel's
+edge; that is a known fault, not part of this test. Send the
+screenshots.
+
+### Test 71: the phone's groups and filter
+
+The recording from test 69 is open in the player.
+
+1. In the "Properties" panel, scroll to the top, and take a screenshot
+   of the whole recorder window.
+2. In the recorder's left panel, scroll down until you can see the
+   "Playback event filters" box, and take a screenshot of the whole
+   recorder window.
+
+**On screen:** in step 1 the first group is "Phone accessibility", and
+its rows include "Accessibility in use" reading "on" and "Services on"
+reading "RecorderAccessibilityService". Below come the groups "Phone
+magnification" and "Phone color and contrast". There is no "Magnifier"
+or "Display" group. Groups further down, which are not the phone's
+settings, may have rows that read "not recorded"; they are not part of
+this test. In step 2 the filters include "Phone settings" and no
+"Windows settings". Send the screenshots.

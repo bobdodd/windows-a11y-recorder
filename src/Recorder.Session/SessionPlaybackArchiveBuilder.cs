@@ -117,6 +117,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _phoneTrees = [];
     private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _phoneFocus = [];
     private readonly List<(long Time, JsonElement Payload)> _phoneDisplays = [];
+    private readonly List<(long Time, string EventType, JsonElement Payload)> _phoneSettings = [];
     private readonly List<KeyEvidenceRecord> _accessibilityRequests = [];
     private readonly List<BrowserPageCommit> _pageCommits = [];
     private readonly List<(string EventId, long Time, JsonElement Payload)> _pageFocus = [];
@@ -322,6 +323,13 @@ public sealed class SessionPlaybackArchiveBuilder
             payload.ValueKind == JsonValueKind.Object)
         {
             _phoneDisplays.Add((timestamp, payload.Clone()));
+        }
+
+        // The phone's settings (Android slice 8, step 8a).
+        if (timelineEvent.Channel == AndroidSettingsRecords.Channel &&
+            payload.ValueKind == JsonValueKind.Object)
+        {
+            _phoneSettings.Add((timestamp, timelineEvent.EventType, payload.Clone()));
         }
 
         if (timelineEvent.Channel == WindowsPreferenceSettings.Channel &&
@@ -566,6 +574,9 @@ public sealed class SessionPlaybackArchiveBuilder
             PhoneAccessibility = _phoneTrees.Count == 0 && _phoneFocus.Count == 0
                 ? PhoneAccessibilityTimeline.Empty
                 : new PhoneAccessibilityTimeline(_phoneTrees, _phoneFocus, _phoneDisplays),
+            PhoneSettings = _phoneSettings.Count == 0
+                ? PhoneSettingsTimeline.Empty
+                : new PhoneSettingsTimeline(_phoneSettings),
             WindowsPreferences = _preferences.Count == 0
                 ? WindowsPreferenceTimeline.Empty
                 : new WindowsPreferenceTimeline(_preferences),
@@ -694,6 +705,31 @@ public sealed class SessionPlaybackArchiveBuilder
         }
 
         return new FullscreenColorEffect(values);
+    }
+
+    // A phone setting's change with its label and new value, and a snapshot
+    // with why it was read (Android slice 8, step 8a).
+    private static string PhoneSettingSummary(string eventType, JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            return eventType;
+        }
+
+        if (eventType == AndroidSettingsRecords.ChangeEventType &&
+            ReadString(payload, "setting") is { } id &&
+            AndroidSettingsRecords.Find(id) is { } setting)
+        {
+            var value = ReadString(payload, "value");
+            var foundAtStop = ReadString(payload, "source") == AndroidSettingsRecords.StopSource;
+            return JoinSummary(
+                eventType,
+                setting.Label,
+                AndroidSettingValues.Describe(setting, value),
+                foundAtStop ? "found at the stop" : null);
+        }
+
+        return JoinSummary(eventType, ReadString(payload, "setting"), ReadString(payload, "reason"));
     }
 
     // A browser preference change with its new value, a zoom change with its
@@ -841,6 +877,11 @@ public sealed class SessionPlaybackArchiveBuilder
             }
 
             return JoinSummary(eventType, setting ?? ReadString(payload, "reason"));
+        }
+
+        if (channel == AndroidSettingsRecords.Channel)
+        {
+            return PhoneSettingSummary(eventType, payload);
         }
 
         if (channel == BrowserPreferenceSettings.Channel)

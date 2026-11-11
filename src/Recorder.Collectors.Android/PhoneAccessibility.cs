@@ -30,3 +30,20 @@ public interface IPhoneAccessibilityTrees
     /// </summary>
     Task<ChannelReader<ReceivedAccessibilityTree>?> RequestAccessibilityTreesAsync(CancellationToken cancellation);
 }
+
+/// <summary>
+/// Notices that a phone setting was written, through the companion app's
+/// connection (android-implementation-plan.md, slice 8, step 8a).
+/// </summary>
+public interface IPhoneSettingChanges
+{
+    /// <summary>
+    /// Asks the companion app to say each time one of the settings is
+    /// written from now on. The notices come in the order they arrived, and
+    /// the reader completes when the connection ends. Null when there is no
+    /// connection to ask.
+    /// </summary>
+    Task<ChannelReader<ReceivedSettingChange>?> RequestSettingChangesAsync(
+        IReadOnlyList<Recorder.Contracts.AndroidSetting> settings,
+        CancellationToken cancellation);
+}

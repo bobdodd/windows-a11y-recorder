@@ -200,12 +200,12 @@ public sealed class AndroidCompanionTests
     [Fact]
     public async Task Connection_OtherProtocol_IsRefused()
     {
-        // The companion app from before slice 7, step 7b.
-        await using var app = new FakeApp(greeting: FakeApp.Hello(protocol: 3));
+        // The companion app from before slice 8, step 8a.
+        await using var app = new FakeApp(greeting: FakeApp.Hello(protocol: 4));
 
         var exception = await Assert.ThrowsAsync<CompanionUnavailableException>(() => app.ConnectAsync());
 
-        Assert.Contains("speaks protocol 3; this recorder speaks 4", exception.Message);
+        Assert.Contains("speaks protocol 4; this recorder speaks 5", exception.Message);
     }
 
     [Fact]
@@ -517,6 +517,43 @@ public sealed class AndroidCompanionTests
     }
 
     [Fact]
+    public async Task Collector_AsksForSettingChanges_AndPassesThemOn()
+    {
+        await using var app = new FakeApp();
+        var sink = new ListSink();
+        var clock = new SessionClock();
+        await using var collector = new AndroidCompanionCollector(
+            new ScriptedAdb(_ => new AdbResult(1, "", "")),
+            Serial,
+            (now, cancellation) => app.ConnectAsync(now));
+        await collector.InitializeAsync(new CollectorInitializationContext("session-1", Path.GetTempPath(), clock, sink), CancellationToken.None);
+        Assert.Null(await collector.RequestSettingChangesAsync(AndroidSettingsRecords.All, CancellationToken.None));
+
+        await collector.StartAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
+        await WaitUntilAsync(() => collector.Mapper.SampleCount >= 1);
+        var changes = await collector.RequestSettingChangesAsync(AndroidSettingsRecords.All, CancellationToken.None);
+        Assert.NotNull(changes);
+        var request = await app.SettingsAsked.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        using (var asked = JsonDocument.Parse(request))
+        {
+            var settings = asked.RootElement.GetProperty("settings").EnumerateArray().ToList();
+            Assert.Equal(AndroidSettingsRecords.All.Count, settings.Count);
+            Assert.Contains(settings, setting =>
+                setting.GetProperty("namespace").GetString() == "secure" &&
+                setting.GetProperty("name").GetString() == "accessibility_display_inversion_enabled");
+        }
+
+        await app.SendAsync("{\"type\":\"setting-changed\",\"namespace\":\"secure\",\"name\":\"accessibility_display_inversion_enabled\",\"time\":42}");
+        var first = await changes.ReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await collector.StopAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
+
+        Assert.Equal(new CompanionSettingChanged("secure", "accessibility_display_inversion_enabled", 42), first.Change);
+        Assert.Equal(CollectorHealthState.Healthy, collector.HealthState);
+        await changes.Completion.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.Null(await collector.RequestSettingChangesAsync(AndroidSettingsRecords.All, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Collector_AsksForAccessibilityVolume_AndRecordsEachAnswer()
     {
         await using var app = new FakeApp(volumeReply: percent =>
@@ -775,6 +812,7 @@ public sealed class AndroidCompanionTests
         private readonly SemaphoreSlim _write = new(1, 1);
         private readonly TaskCompletionSource _eventsAsked = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _treesAsked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<string> _settingsAsked = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private Task? _serving;
 
         public FakeApp(string? greeting = "default", Func<int, string>? volumeReply = null)
@@ -792,6 +830,9 @@ public sealed class AndroidCompanionTests
 
         /// <summary>Completes when the recorder asks for the tree snapshots.</summary>
         public Task TreesAsked => _treesAsked.Task;
+
+        /// <summary>Completes with the request when the recorder asks for notices of settings changes.</summary>
+        public Task<string> SettingsAsked => _settingsAsked.Task;
 
         /// <summary>The minimum percents the recorder asked for, in order.</summary>
         public IReadOnlyList<int> VolumeRequests
@@ -892,6 +933,12 @@ public sealed class AndroidCompanionTests
                     if (request.RootElement.GetProperty("type").GetString() == "accessibility-trees")
                     {
                         _treesAsked.TrySetResult();
+                        continue;
+                    }
+
+                    if (request.RootElement.GetProperty("type").GetString() == "settings")
+                    {
+                        _settingsAsked.TrySetResult(request.RootElement.GetRawText());
                         continue;
                     }
 

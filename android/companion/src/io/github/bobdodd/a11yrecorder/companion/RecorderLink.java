@@ -1,9 +1,12 @@
 package io.github.bobdodd.a11yrecorder.companion;
 
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.database.ContentObserver;
 import android.hardware.display.DisplayManager;
+import android.net.Uri;
 import android.net.Credentials;
 import android.net.LocalServerSocket;
 import android.net.LocalSocket;
@@ -12,11 +15,13 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.Display;
 import android.view.Surface;
 import android.view.accessibility.AccessibilityManager;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -25,6 +30,8 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -58,14 +65,20 @@ import java.util.concurrent.RejectedExecutionException;
  * every window's accessibility tree at once, and more on each window or
  * content change, each as an "accessibility-tree" message with its own
  * "index" counting from 1 on that connection (see
- * {@link AccessibilityTrees}). See
- * docs/architecture/android-implementation-plan.md, slices 2, 4 and 7, and
+ * {@link AccessibilityTrees}). From protocol 5 it answers a "settings"
+ * request, which lists settings by namespace ("secure", "system" or
+ * "global") and name, by watching each with a ContentObserver and sending
+ * that connection a "setting-changed" message, with the namespace, the
+ * name and its System.nanoTime() when the notice came, each time one is
+ * written. It sends no value: some of the settings cannot be read by an
+ * app, so the recorder reads them with adb. See
+ * docs/architecture/android-implementation-plan.md, slices 2, 4, 7 and 8, and
  * src/Recorder.Collectors.Android/CompanionProtocol.cs, which must agree
  * with this file.
  */
 final class RecorderLink {
     static final String SOCKET_NAME = "a11yrecorder_companion";
-    static final int PROTOCOL = 4;
+    static final int PROTOCOL = 5;
     private static final String TAG = "A11yRecorderCompanion";
 
     private final Context context;
@@ -362,6 +375,24 @@ final class RecorderLink {
         }
     }
 
+    // A setting's notice address, or null for a namespace other than
+    // Settings.Secure's, Settings.System's or Settings.Global's.
+    private static Uri settingUri(String namespace, String name) {
+        if (name == null || name.isEmpty()) {
+            return null;
+        }
+        switch (namespace) {
+            case "secure":
+                return Settings.Secure.getUriFor(name);
+            case "system":
+                return Settings.System.getUriFor(name);
+            case "global":
+                return Settings.Global.getUriFor(name);
+            default:
+                return null;
+        }
+    }
+
     /** One connection from the recorder. */
     private final class Client {
         private final LocalSocket socket;
@@ -377,6 +408,10 @@ final class RecorderLink {
         volatile boolean treesWanted;
         // The snapshots sent on this connection; used on the sender thread only.
         private long treeIndex;
+        // The settings this connection asked to be told of; used under
+        // itself only.
+        private final List<ContentObserver> settingObservers = new ArrayList<>();
+        private boolean closed;
         // Written and used under writeLock only.
         private OutputStream output;
 
@@ -448,8 +483,88 @@ final class RecorderLink {
                 if (requests != null) {
                     requests.run();
                 }
+            } else if ("settings".equals(type)) {
+                watchSettings(request.optJSONArray("settings"));
             } else {
                 sendError("unknown type: " + type);
+            }
+        }
+
+        // Replaces the settings watched for this connection with those of
+        // the request. A notice is sent from the sender thread, with the
+        // time it reached the companion; Android may combine several writes
+        // in quick succession into one notice.
+        private void watchSettings(JSONArray settings) throws IOException, JSONException {
+            if (settings == null) {
+                sendError("settings must be an array");
+                return;
+            }
+            List<Uri> uris = new ArrayList<>();
+            List<String> namespaces = new ArrayList<>();
+            List<String> names = new ArrayList<>();
+            for (int i = 0; i < settings.length(); i++) {
+                JSONObject setting = settings.optJSONObject(i);
+                String namespace = setting == null ? "" : setting.optString("namespace");
+                String name = setting == null ? "" : setting.optString("name");
+                Uri uri = settingUri(namespace, name);
+                if (uri == null) {
+                    sendError("unknown setting: " + namespace + "/" + name);
+                    return;
+                }
+                uris.add(uri);
+                namespaces.add(namespace);
+                names.add(name);
+            }
+
+            ContentResolver resolver = context.getContentResolver();
+            synchronized (settingObservers) {
+                if (closed) {
+                    return;
+                }
+                unwatchSettings(resolver);
+                for (int i = 0; i < uris.size(); i++) {
+                    String namespace = namespaces.get(i);
+                    String name = names.get(i);
+                    ContentObserver observer = new ContentObserver(mainHandler) {
+                        @Override
+                        public void onChange(boolean selfChange) {
+                            settingChanged(namespace, name, System.nanoTime());
+                        }
+                    };
+                    resolver.registerContentObserver(uris.get(i), false, observer);
+                    settingObservers.add(observer);
+                }
+            }
+        }
+
+        // Under settingObservers.
+        private void unwatchSettings(ContentResolver resolver) {
+            for (ContentObserver observer : settingObservers) {
+                resolver.unregisterContentObserver(observer);
+            }
+            settingObservers.clear();
+        }
+
+        // On the main thread; the notice is sent from the sender thread.
+        private void settingChanged(String namespace, String name, long time) {
+            if (stopping) {
+                return;
+            }
+            try {
+                sender.execute(() -> {
+                    try {
+                        JSONObject message = new JSONObject();
+                        message.put("type", "setting-changed");
+                        message.put("namespace", namespace);
+                        message.put("name", name);
+                        message.put("time", time);
+                        send(message);
+                    } catch (IOException | JSONException exception) {
+                        close();
+                    }
+                });
+            } catch (RejectedExecutionException ignored) {
+                // The link stopped meanwhile.
             }
         }
 
@@ -527,6 +642,12 @@ final class RecorderLink {
         }
 
         void close() {
+            synchronized (settingObservers) {
+                if (!closed) {
+                    closed = true;
+                    unwatchSettings(context.getContentResolver());
+                }
+            }
             closeQuietly(socket);
         }
     }

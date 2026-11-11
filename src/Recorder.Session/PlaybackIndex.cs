@@ -86,7 +86,9 @@ public sealed record PlaybackIndex
     // TYPE_VIEW_ACCESSIBILITY_FOCUSED and _FOCUS_CLEARED) and display
     // records (android.display) whole, for the focus outline; an older
     // index is derived again, so recordings made with step 7b show the tree.
-    public const int CurrentVersion = 23;
+    // Version 24 keeps the phone's settings records (preferences.android,
+    // Android slice 8, step 8a) whole, for the panel's phone settings rows.
+    public const int CurrentVersion = 24;
 
     public required int Version { get; init; }
 
@@ -313,6 +315,7 @@ public sealed class PlaybackIndexBuilder
             channel == Recorder.Contracts.MagnifierChanges.Channel ||
             channel == Recorder.Contracts.BrowserPreferenceSettings.Channel ||
             channel == Recorder.Contracts.AssistiveTechnologyRecords.Channel ||
+            channel == Recorder.Contracts.AndroidSettingsRecords.Channel ||
             IsInputRecordabilityRecord(channel, record.EventType) ||
             (channel == "window.foreground" && record.EventType == "foreground-window") ||
             (channel == "accessibility.uia.events" && record.EventType == "focus-changed") ||
@@ -454,6 +457,7 @@ public sealed class PlaybackIndexBuilder
              record.Channel == Recorder.Contracts.MagnifierChanges.Channel ||
              record.Channel == Recorder.Contracts.BrowserPreferenceSettings.Channel ||
              record.Channel == Recorder.Contracts.AssistiveTechnologyRecords.Channel ||
+             record.Channel == Recorder.Contracts.AndroidSettingsRecords.Channel ||
              IsInputRecordabilityRecord(record.Channel, record.EventType) ||
              (record.Channel == "window.foreground" && record.EventType == "foreground-window") ||
              (record.Channel == "accessibility.uia.events" && record.EventType == "focus-changed") ||
