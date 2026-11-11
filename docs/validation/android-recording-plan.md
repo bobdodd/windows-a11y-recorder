@@ -2564,18 +2564,23 @@ the recording this test makes.
    is on, and wait 5 seconds.
 4. Choose "Stop recording", wait until the recording has opened in the
    player, and take a screenshot of the whole recorder window.
+5. In the recorder's left panel, scroll down until you can see the
+   "Playback event filters" box, and take a screenshot of the whole
+   recorder window.
 
 **On screen:** in step 2 TalkBack moves to the next item of Settings
 after each swipe, and in step 3 that item's page opens. In step 4 the
 legend under the timeline reads "Phone keys | Touches | Accessibility |
-Window | Frames | Mic | Phone sound", and the timeline's filters include
-"Accessibility events" and no "UI Automation". The third lane from the
-top has marks, with marks at each of the four runs of blue touch marks
-on the second lane, the three swipes and the double-tap. No marks on
-the third lane, or "UIA" in the legend, is a failure. Send the
-screenshot.
+Window | Frames | Mic | Phone sound". The touches are the larger blue
+squares in the top row of the timeline, one for each swipe and two for
+the double-tap; a touch to wake the screen adds one more before them.
+The third lane from the top has orange marks at each of them. The thin
+light-blue ticks just above the teal strip are TalkBack's log lines, not
+touches. In step 5 the filters include "Accessibility events" and no
+"UI Automation". No marks on the third lane, or "UIA" in the legend, is
+a failure. Send the screenshots.
 
-### Test 65: the item TalkBack spoke after the first swipe
+### Test 65: the first item TalkBack spoke
 
 The recording from test 64 is open in the player.
 
@@ -2583,11 +2588,13 @@ The recording from test 64 is open in the player.
    the bottom lane, and take a screenshot of the whole recorder window.
 2. Click the "Accessibility tree" tab, choose "Show accessibility
    focus", and take a screenshot of the whole recorder window.
-3. Click the row marked "accessibility focus", and take a screenshot of
-   the whole recorder window.
+3. Click once on the words of the row marked "accessibility focus", not
+   on the arrow button to their left, and take a screenshot of the whole
+   recorder window.
 
 **On screen:** in step 1 the properties panel, under "Screen reader",
-has "TalkBack said" with the name of the first item TalkBack moved to,
+has "TalkBack said" with the name of the first item TalkBack moved to
+(the item under the finger, if a touch woke the screen),
 and on the phone's picture a yellow rectangle with a black edge is
 drawn around that item. In step 2 the tab's line starts with a number
 of windows and a number of items, and the tree is open down to a row
@@ -2607,19 +2614,21 @@ failure. Send the screenshots.
 The recording from test 64 is open in the player, with the
 "Accessibility tree" tab chosen.
 
-1. In the timeline, click the first block of the third group of teal
-   blocks in the strip just above the bottom lane, and take a screenshot
-   of the whole recorder window.
+1. In the top row of the timeline, find the blue square of the third
+   swipe: the third square, or the fourth if a touch woke the screen.
+   Click the first teal block in the strip just above the bottom lane
+   that starts to the right of it, and take a screenshot of the whole
+   recorder window.
 2. Choose "Show accessibility focus", and take a screenshot of the
    whole recorder window.
 
-**On screen:** in step 1 "TalkBack said" in the properties panel has
-the name of the third item TalkBack moved to, and on the phone's
-picture the yellow rectangle is around that item, lower on the screen
-than the item of test 65. In step 2 the row marked "accessibility
-focus" names that third item. A rectangle still around the first item,
-or a marked row that does not name the third item, is a failure. Send
-the screenshots.
+**On screen:** in step 1 "TalkBack said" in the properties panel, or the
+status line at the bottom of the window, has the name of the item TalkBack moved
+to after the third swipe, and on the phone's picture the yellow
+rectangle is around that item. In step 2 the row marked "accessibility
+focus" names that item. A rectangle still around the item of test 65,
+or a marked row that names a different item, is a failure. Send the
+screenshots.
 
 ### Test 67: the page opened, in the tree
 
@@ -2628,14 +2637,81 @@ The recording from test 64 is open in the player, with the
 
 1. Drag the playback slider under the phone's picture all the way to
    the right, and take a screenshot of the whole recorder window.
-2. In the tree, click the expand button of the first row whose first
-   line starts "Window" and reads "active", and take a screenshot of the
+2. In the tree, click the arrow button of the row for the page you
+   opened, the one starting "Window" with the page's name in quotation
+   marks and "TYPE_APPLICATION, active", and take a screenshot of the
    whole recorder window.
 
 **On screen:** in step 1 the phone's picture shows the page opened in
 test 64. The tree has a row for each window, each starting "Window",
-one of them with "TYPE_APPLICATION, active, focused, window" and a
-number in brackets, each with "items taken at" and a time under it. In step 2 the
-rows under that window include the page's title or its first items, as
-the picture shows them. A tree still showing only the Settings list
-from before the double-tap is a failure. Send the screenshots.
+each with "items taken at" and a time under it. One of them names the
+page, with "TYPE_APPLICATION, active, focused, has accessibility focus,
+window" and a number in brackets. In step 2 the rows under that window
+include the page's title or its first items, as the picture shows them.
+A tree still showing only the Settings list from before the double-tap
+is a failure. Send the screenshots.
+
+### Results of part 7, step 7c
+
+Run on the development PC with the Pixel on 2026-11-10. The tests above
+are as corrected after the run: test 64 gained step 5, and the wording
+of tests 65 to 67 was made exact where it was unclear.
+
+- **Test 63: passed.** The panel showed "Companion app: installed, on,
+  and answering (version 1.1.0, version code 749, protocol 4)", and the
+  note ended with the sentence about "Accessibility events", the yellow
+  outline and the Accessibility tree tab.
+- **Test 64: passed.** The legend read "Phone keys | Touches |
+  Accessibility | Window | Frames | Mic | Phone sound", and the filters
+  showed "Phone keys", "Touches" and "Accessibility events", with no "UI
+  Automation", 6,596 of 6,596 events shown. The third lane had orange
+  marks at every touch, and others between them for content changes.
+  There were five touches, not four: the owner touched the screen to wake
+  it before the swipes, and TalkBack put accessibility focus on the item
+  under the finger, "Digital Wellbeing". The recording was 33.85 seconds.
+  The plan as first written left the filter check unreachable (the
+  filters are in the left panel, below the note), and called the touches
+  "groups"; both are corrected above.
+- **Test 65: passed.** At the first utterance, 00:00:02.727, "Digital
+  Wellbeing. Screen time, app timers, bedtime schedules. 23 of 29", the
+  yellow rectangle was around "Digital Wellbeing", and "Show
+  accessibility focus" opened the tree ("4 windows, 209 items") down to
+  "LinearLayout containing "Digital Wellbeing", "Screen time, app timers,
+  bedtime schedules"", marked "accessibility focus" with the purple bar.
+  Clicking its words showed the label, "An item of the snapshot of the
+  phone's tree taken at 00:00:02.573", and the item's fields, with
+  `"accessibilityFocused": true`, bounds from 1177 to 1356 pixels down
+  the 2404-pixel screen (where the rectangle was drawn), and
+  `"rowIndex": 22`, the 23rd row, as TalkBack said "23 of 29". The first
+  click landed off the words and showed nothing new; step 3 now says
+  where to click.
+- **Test 66: passed.** After the third swipe, at 00:00:13.306, the
+  status line read "utterance-started: Safety and emergency. Emergency
+  SOS, medical info, alerts. 26 of 29", the rectangle was around "Safety
+  and emergency", and the marked row was "LinearLayout containing
+  "Safety and emergency", "Emergency SOS, medical info, alerts"". The
+  utterance's record gives its cause as
+  `TYPE_VIEW_ACCESSIBILITY_FOCUSED` on the phone 29 ms before it
+  started. The phone's own speech caption at the bottom of the picture
+  still showed the previous item, "Magic Cue", at that moment; the phone
+  seems to redraw it a little after the speech starts (an inference, not
+  measured).
+- **Test 67: passed.** At the end, 00:00:33.769, the picture showed the
+  "Safety and emergency" page with the rectangle around "Navigate up",
+  and the tree read "4 windows, 134 items", each window with "items
+  taken at 00:00:17.020", the snapshot of the window change. The page's
+  window read "Window "Safety and emergency" (TYPE_APPLICATION, active,
+  focused, has accessibility focus, window 1343)", and its rows held
+  "FrameLayout containing "Safety and emergency", "Navigate up", "Safety
+  and emergency"" and the layouts under it. The first window row is a
+  system window holding "FrameLayout containing "Tap a feature to start
+  using it:", "TalkBack"", which the first wording of step 2 led to.
+  - **Found, not fixed: text contrast.** The tree's row text, and the
+    properties panel's text, are drawn in the player's light text colour
+    (#CDCCCA, measured as 205, 204, 202) on those controls' white
+    background, a contrast of about 1.6:1 against WCAG's 4.5:1. The
+    window's styles give all text that colour since commit 208af19
+    (2026-10-14); controls that keep Windows' white background inherit
+    it. This is not new in step 7c and is the same for desktop
+    recordings. The owner noted that it is throughout the interface; it
+    is left for a contrast pass over the whole interface.
