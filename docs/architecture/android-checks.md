@@ -3,8 +3,8 @@
 ## Status
 
 Proposed 2026-11-11. Nothing is built. The owner's decisions of
-2026-11-11 are in "Decisions (2026-11-11)"; the questions still open are
-in "Open questions". Before any check is assigned a result, the
+2026-11-11 are in "Decisions (2026-11-11)" and "Decisions on the open
+questions (2026-11-11)". Before any check is assigned a result, the
 recording has to say which app and which screen each moment belongs to,
 so that comes first in "Build order".
 
@@ -190,7 +190,7 @@ untitled screen 2", and the key adds the sorted set of view IDs in the
 app's window, so different untitled screens are kept apart. Where there
 are no view IDs either, visits with the same activity and no title are
 treated as one screen; the player says so. This is a known limit for
-apps that expose neither titles nor IDs (see "Open questions", 1).
+apps that expose neither titles nor IDs.
 
 ### States: dialogs, menus and sheets
 
@@ -325,17 +325,16 @@ some hundreds of snapshots).
 4. **The approximate contrast checks** from the video, measured first
    against screenshots taken on the phone at the same moments.
 
-## Open questions
+## Decisions on the open questions (2026-11-11)
 
-1. **Screens whose title changes with their content.** A conversation
-   titled with a person's name, or an inbox titled "Inbox (3)", gives a
-   new title, and so a new screen, for each name or count. Proposed:
-   keep that for the first version and look at what the client's app
-   does; matching such screens by structure belongs with matching
-   across recordings.
-2. **Which apps are checked.** Proposed: every app seen, grouped by
-   app, so the client's app and anything it opens (a browser, a share
-   sheet, a permission dialog) are each visible as what they are.
+8. **Screens titled by their content are separate for now.** A
+   conversation titled with a person's name, or an inbox titled
+   "Inbox (3)", is a new screen for each title (owner). This is to be
+   looked at again with the client's app and with matching across
+   recordings.
+9. **Every app seen is checked, grouped by app** (owner), so the
+   client's app and anything it opens (a browser, a share sheet, a
+   permission dialog) are each shown as what they are.
 
 [atf-touch]: https://github.com/google/Accessibility-Test-Framework-for-Android/blob/c65cab02b2a845c29c3da100d6adefd345a144e3/src/main/java/com/google/android/apps/common/testing/accessibility/framework/checks/TouchTargetSizeCheck.java
 [atf-speakable]: https://github.com/google/Accessibility-Test-Framework-for-Android/blob/c65cab02b2a845c29c3da100d6adefd345a144e3/src/main/java/com/google/android/apps/common/testing/accessibility/framework/checks/SpeakableTextPresentCheck.java
