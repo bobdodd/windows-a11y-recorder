@@ -65,6 +65,18 @@ public sealed record AnalysisTaskSummary(
     string? Failure,
     DateTime? ReadUtc);
 
+/// <summary>
+/// What a task's requests to a service such as Anthropic used, for the
+/// player's estimate of its cost (cloud-models.md, "6. The player"): the
+/// attempts sent, not those reused from an earlier task, which cost
+/// nothing again; their input and output tokens; and the estimated cost in
+/// US dollars at the prices each attempt's profile held, where every
+/// attempt sent has prices and token counts. <see cref="Uncounted"/> is
+/// the number of attempts without them, such as one cut off before
+/// Anthropic gave its counts.
+/// </summary>
+public sealed record ServiceUsage(int Attempts, long InputTokens, long OutputTokens, double? Cost, int Uncounted);
+
 /// <summary>What an attempt was made with, recorded when it starts.</summary>
 public sealed record AttemptStart(
     Guid TaskId,
@@ -294,6 +306,48 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
 
             return tasks;
         }, cancellationToken);
+
+    /// <summary>
+    /// What each of a recording's tasks sent to a service used, by task;
+    /// tasks that sent nothing to one are not listed.
+    /// </summary>
+    public Task<IReadOnlyDictionary<Guid, ServiceUsage>> ServiceUsageAsync(Guid recordingId, CancellationToken cancellationToken) =>
+        UseAsync<IReadOnlyDictionary<Guid, ServiceUsage>>(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT a.task_id, a.prompt_tokens, a.completion_tokens, (a.profile -> 'prices')::text " +
+                "FROM analysis_attempts a JOIN analysis_tasks t ON t.task_id = a.task_id " +
+                "WHERE t.recording_id = $1 AND a.model_sha256_basis = 'service' AND a.reused_from_attempt_id IS NULL " +
+                "AND a.outcome <> 'running'",
+                connection);
+            command.Parameters.AddWithValue(recordingId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            var attempts = new List<(Guid Task, int? Input, int? Output, ServicePrices? Prices)>();
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                attempts.Add((
+                    reader.GetGuid(0),
+                    reader.IsDBNull(1) ? null : reader.GetInt32(1),
+                    reader.IsDBNull(2) ? null : reader.GetInt32(2),
+                    reader.IsDBNull(3) ? null : ServicePrices.FromJson(JsonNode.Parse(reader.GetString(3)))));
+            }
+
+            return attempts.GroupBy(attempt => attempt.Task).ToDictionary(group => group.Key, group => Usage([.. group]));
+        }, cancellationToken);
+
+    private static ServiceUsage Usage(IReadOnlyList<(Guid Task, int? Input, int? Output, ServicePrices? Prices)> attempts)
+    {
+        var uncounted = attempts.Count(attempt => attempt.Input is null || attempt.Output is null);
+        var cost = attempts.All(attempt => attempt.Prices is not null && attempt.Input is not null && attempt.Output is not null)
+            ? attempts.Sum(attempt => attempt.Prices!.Cost(attempt.Input!.Value, attempt.Output!.Value))
+            : (double?)null;
+        return new ServiceUsage(
+            attempts.Count,
+            attempts.Sum(attempt => (long)(attempt.Input ?? 0)),
+            attempts.Sum(attempt => (long)(attempt.Output ?? 0)),
+            cost,
+            uncounted);
+    }
 
     public Task MarkRunningAsync(Guid taskId, CancellationToken cancellationToken) =>
         ExecuteAsync(

@@ -371,6 +371,11 @@ Notepad" and "Read the file again" for anything it does not cover:
 Each change is read with the app's own settings reader before it is
 written, and refused if the profile it changed could not be read back.
 
+A Claude profile, which sends to Anthropic, has its own settings in
+place of the server arguments, temperature, seed and thinking, and the
+window has "Add a Claude profile..." and "Check the profile"; see
+[cloud models](cloud-models.md), "As built: step 2".
+
 ## Deferred
 
 - **Try the profile**: loading the model with a profile's settings and

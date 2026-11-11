@@ -29,6 +29,7 @@ public partial class MainWindow
     private Guid? _analysisRecordingId;
     private string? _analysisSessionDirectory;
     private IReadOnlyList<AnalysisTaskSummary>? _analysisTasks;
+    private IReadOnlyDictionary<Guid, ServiceUsage> _analysisUsage = new Dictionary<Guid, ServiceUsage>();
     private string _analysisTasksShown = "";
     private bool _analysisReading;
 
@@ -68,8 +69,9 @@ public partial class MainWindow
         ProfileComboBox.Items.Clear();
         foreach (var profile in _analysisSettings.Profiles.Where(profile => profile.Supports(ModelCapabilities.Text)))
         {
-            var item = new ComboBoxItem { Content = profile.Name, Tag = profile.Name, MinHeight = 44, VerticalContentAlignment = VerticalAlignment.Center };
-            AutomationProperties.SetName(item, profile.Name);
+            var label = AnalysisPlayer.ProfileLabel(profile);
+            var item = new ComboBoxItem { Content = label, Tag = profile.Name, MinHeight = 44, VerticalContentAlignment = VerticalAlignment.Center };
+            AutomationProperties.SetName(item, label);
             ProfileComboBox.Items.Add(item);
         }
 
@@ -141,6 +143,7 @@ public partial class MainWindow
             }
 
             var tasks = await catalog.TasksAsync(recording, CancellationToken.None);
+            _analysisUsage = await catalog.ServiceUsageAsync(recording, CancellationToken.None);
             foreach (var message in AnalysisPlayer.Changes(_analysisTasks, tasks))
             {
                 ShowAnalysisStatus(message);
@@ -174,7 +177,10 @@ public partial class MainWindow
         var header = unread == 0 ? "Analysis" : $"Analysis ({unread.ToString(CultureInfo.CurrentCulture)} unread)";
         AnalysisTabHeaderText.Text = header;
         AutomationProperties.SetName(AnalysisTab, header);
-        var shown = string.Join(";", tasks.Select(task => $"{task.TaskId}:{task.State}:{task.ReadUtc}:{task.FinishedUtc}")) + "|" + empty;
+        // A task's usage is part of what is shown, so that its tokens and
+        // cost are kept up to date while it runs.
+        var shown = string.Join(";", tasks.Select(task => $"{task.TaskId}:{task.State}:{task.ReadUtc}:{task.FinishedUtc}:" +
+            (_analysisUsage.TryGetValue(task.TaskId, out var usage) ? AnalysisPlayer.UsageLine(usage) : ""))) + "|" + empty;
         if (shown == _analysisTasksShown)
         {
             return;
@@ -237,6 +243,11 @@ public partial class MainWindow
         lines.Children.Add(new SelectableText { Text = $"{name}: {state}", FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
         var times = $"{profileWord} {profiles}. Queued {queued}" + (task.FinishedUtc is { } finished ? $", ended {Local(finished)}." : ".");
         lines.Children.Add(new SelectableText { Text = times, TextWrapping = TextWrapping.Wrap });
+        if (_analysisUsage.TryGetValue(task.TaskId, out var usage))
+        {
+            lines.Children.Add(new SelectableText { Text = AnalysisPlayer.UsageLine(usage), TextWrapping = TextWrapping.Wrap });
+        }
+
         if (task.Failure is { Length: > 0 } failure)
         {
             lines.Children.Add(new SelectableText { Text = "Why: " + failure, TextWrapping = TextWrapping.Wrap });
@@ -295,7 +306,8 @@ public partial class MainWindow
         try
         {
             await catalog.QueueTaskAsync(recording, kind, KindVersion(kind), profiles, afterTaskId: afterTaskId, sessionDirectory: _analysisSessionDirectory, rerunOfTaskId: rerunOfTaskId, cancellationToken: CancellationToken.None);
-            ShowAnalysisStatus($"{AnalysisPlayer.KindName(kind)} queued with {string.Join(", ", profiles.Values.Distinct())}.");
+            ShowAnalysisStatus($"{AnalysisPlayer.KindName(kind)} queued with " +
+                string.Join(", ", profiles.Values.Distinct().Select(name => _analysisSettings.Profile(name) is { } profile ? AnalysisPlayer.ProfileLabel(profile) : name)) + ".");
             _busy.AnnounceCompleted(AnalysisStatusTextBlock.Text);
             StartWorker();
             await ReadAnalysisAsync();
@@ -370,8 +382,8 @@ public partial class MainWindow
             var (_, _, summaryQueued) = await AnalysisPlayer.QueueVisionAsync(
                 catalog, recording, session, text, profile.Name, rerunOfTaskId, CancellationToken.None);
             ShowAnalysisStatus(summaryQueued
-                ? $"Recording summary queued, and Summary with vision after it, with {profile.Name}."
-                : $"Summary with vision queued with {profile.Name}, after the summary already queued.");
+                ? $"Recording summary queued, and Summary with vision after it, with {AnalysisPlayer.ProfileLabel(profile)}."
+                : $"Summary with vision queued with {AnalysisPlayer.ProfileLabel(profile)}, after the summary already queued.");
             _busy.AnnounceCompleted(AnalysisStatusTextBlock.Text);
             StartWorker();
             await ReadAnalysisAsync();

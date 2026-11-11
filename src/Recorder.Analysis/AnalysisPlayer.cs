@@ -263,7 +263,10 @@ public static class AnalysisPlayer
 
     /// <summary>
     /// The profile to offer first for a capability: the default where it
-    /// names a profile that can do it, else the first that can.
+    /// names a profile that can do it, else the first that can and does not
+    /// send to Anthropic. A profile that sends to Anthropic is used only
+    /// where it was chosen, as a default or for the task, since choosing it
+    /// is the permission to send the recording (cloud-models.md, decision 2).
     /// </summary>
     public static ModelProfile? DefaultProfile(AnalysisSettings settings, string capability)
     {
@@ -273,6 +276,65 @@ public static class AnalysisPlayer
             return named;
         }
 
-        return settings.Profiles.FirstOrDefault(profile => profile.Supports(capability));
+        return settings.Profiles.FirstOrDefault(profile => profile.Supports(capability) && !profile.SendsToAnthropic);
+    }
+
+    /// <summary>
+    /// A profile's name as the player lists it wherever a profile is
+    /// chosen: with "(sends to Anthropic)" after it for a profile that does
+    /// (cloud-models.md, "6. The player").
+    /// </summary>
+    public static string ProfileLabel(ModelProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        return profile.SendsToAnthropic ? $"{profile.Name} (sends to Anthropic)" : profile.Name;
+    }
+
+    /// <summary>
+    /// What "Check the profile" shows when Anthropic answered: the model it
+    /// names, the tokens used, the estimated cost where the profile has
+    /// prices, why it stopped, the request ID, and the answer, shortened.
+    /// </summary>
+    public static string CheckLine(ModelProfile profile, ModelResponse response)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(response);
+        var culture = CultureInfo.CurrentCulture;
+        var tokens = response.PromptTokens is { } input && response.CompletionTokens is { } output
+            ? $"{input.ToString("N0", culture)} input and {output.ToString("N0", culture)} output tokens" +
+              (profile.Prices is { } prices ? $", about US${prices.Cost(input, output).ToString("0.0000", culture)}" : "")
+            : "no token counts";
+        var answer = (response.Content ?? "").Trim();
+        if (answer.Length > 200)
+        {
+            answer = answer[..200] + "...";
+        }
+
+        return $"Anthropic answered with model {response.ResponseModel ?? "(not named)"}, {tokens}, stop reason " +
+            $"{response.FinishReason ?? "(none)"}" + (response.RequestId is { } id ? $", request {id}" : "") + ". " +
+            (answer.Length == 0 ? "The answer has no text." : $"The answer: {answer}");
+    }
+
+    /// <summary>
+    /// A task's line on the Analysis tab for what it sent to Anthropic: the
+    /// attempts, the tokens, and the estimated cost at the prices its
+    /// profiles held, or why there is no estimate.
+    /// </summary>
+    public static string UsageLine(ServiceUsage usage)
+    {
+        ArgumentNullException.ThrowIfNull(usage);
+        var culture = CultureInfo.CurrentCulture;
+        var attempts = usage.Attempts == 1 ? "1 attempt" : $"{usage.Attempts.ToString("N0", culture)} attempts";
+        var line = $"Sent to Anthropic: {attempts}, {usage.InputTokens.ToString("N0", culture)} input and " +
+            $"{usage.OutputTokens.ToString("N0", culture)} output tokens";
+        if (usage.Cost is { } cost)
+        {
+            return line + $", about US${cost.ToString(cost < 0.01 && cost > 0 ? "0.0000" : "0.00", culture)} at the profile's prices. " +
+                "Anthropic's bill is the record of what was charged.";
+        }
+
+        return line + (usage.Uncounted > 0
+            ? $". No cost estimate: {(usage.Uncounted == 1 ? "1 attempt has" : $"{usage.Uncounted.ToString("N0", culture)} attempts have")} no token counts."
+            : ". No cost estimate: the profile has no prices.");
     }
 }

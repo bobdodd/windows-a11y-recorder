@@ -26,8 +26,14 @@ Changes on `main` since 1.1.0, not yet released.
   "anthropic"`): requests in the form of Anthropic's Messages API, sent
   only to `https://api.anthropic.com`, streamed and watched for loops,
   waited out and tried again when the service is busy, and recorded with
-  Anthropic's request ID and model. Not yet in the player and not yet
-  sent to Anthropic; see [cloud models](docs/architecture/cloud-models.md).
+  Anthropic's request ID and model; see
+  [cloud models](docs/architecture/cloud-models.md).
+- In the player: "Add a Claude profile..." and "Check the profile" in the
+  Model profiles window, with the key in a password box, the effort and
+  the prices; "(sends to Anthropic)" after such a profile's name wherever
+  a profile is chosen; and each task's tokens and estimated cost on the
+  Analysis tab. Not yet run with Anthropic; see
+  [its validation plan](docs/validation/cloud-models-plan.md).
 - Database migration 0041 adds the `service` basis and the request ID and
   model columns to the analysis attempts.
 

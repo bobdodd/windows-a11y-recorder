@@ -253,6 +253,11 @@ public static class ModelSetup
         }
 
         var profile = list[index]!.AsObject();
+        if (profile["provider"]?.GetValueKind() == JsonValueKind.String && profile["provider"]!.GetValue<string>() == ModelProviders.Anthropic)
+        {
+            throw new InvalidDataException($"Profile \"{name}\" sends to Anthropic, so it has no temperature, seed or thinking setting.");
+        }
+
         if (profile["local"] is JsonObject local)
         {
             local["arguments"] = arguments;
@@ -272,6 +277,118 @@ public static class ModelSetup
         generation["temperature"] = temperature;
         generation["seed"] = seed;
         generation["thinking"] = thinking;
+        return Checked(document, [name]);
+    }
+
+    /// <summary>
+    /// A profile that sends to Anthropic (cloud-models.md, "6. The
+    /// player"): the model ID, text and images, the output limit, the
+    /// effort or none for the model's own, the prices or none for no
+    /// estimate, and the key, already protected for this Windows user.
+    /// </summary>
+    public static JsonObject ClaudeProfile(string name, string model, string? effort, int maxTokens, ServicePrices? prices, string protectedApiKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(model);
+        ArgumentException.ThrowIfNullOrWhiteSpace(protectedApiKey);
+        var profile = new JsonObject
+        {
+            ["name"] = name.Trim(),
+            ["provider"] = ModelProviders.Anthropic,
+            ["endpoint"] = EndpointPolicy.AnthropicEndpoint.ToString(),
+            ["model"] = model.Trim(),
+            ["capabilities"] = new JsonArray(ModelCapabilities.Text, ModelCapabilities.Image),
+            ["generation"] = new JsonObject { ["maxTokens"] = maxTokens }
+        };
+        if (effort is not null)
+        {
+            profile["effort"] = effort;
+        }
+
+        if (prices is not null)
+        {
+            profile["prices"] = prices.ToJson();
+        }
+
+        profile["protectedApiKey"] = protectedApiKey;
+        return profile;
+    }
+
+    /// <summary>
+    /// The settings with a new Claude profile added. Unlike
+    /// <see cref="WithProfiles"/>, a profile of the same name is not
+    /// replaced, and the profile is not made a default, so that choosing
+    /// to send to Anthropic stays a choice made when a task is queued.
+    /// </summary>
+    public static string WithClaudeProfile(string? text, JsonObject profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        var document = Document(text) ?? throw new InvalidDataException("The analysis settings file does not hold a JSON object, so no profile was added.");
+        if (document["profiles"] is not JsonArray list)
+        {
+            list = [];
+            document["profiles"] = list;
+        }
+
+        var name = profile["name"]!.GetValue<string>();
+        if (IndexOf(list, name) >= 0)
+        {
+            throw new InvalidDataException($"There is already a profile named \"{name}\".");
+        }
+
+        list.Add(profile.DeepClone());
+        return Checked(document, [name]);
+    }
+
+    /// <summary>
+    /// The settings with a Claude profile's output limit, effort (null for
+    /// the model's own), and prices (null for no estimate) changed, and its
+    /// key replaced where a new one, already protected, is given.
+    /// </summary>
+    public static string WithClaudeSettings(string? text, string name, int maxTokens, string? effort, ServicePrices? prices, string? protectedApiKey)
+    {
+        var document = Document(text) ?? throw new InvalidDataException("The analysis settings file does not hold a JSON object.");
+        if (document["profiles"] is not JsonArray list || IndexOf(list, name) is var index && index < 0)
+        {
+            throw new InvalidDataException($"There is no profile named \"{name}\".");
+        }
+
+        var profile = list[index]!.AsObject();
+        if (profile["provider"]?.GetValueKind() != JsonValueKind.String || profile["provider"]!.GetValue<string>() != ModelProviders.Anthropic)
+        {
+            throw new InvalidDataException($"Profile \"{name}\" does not send to Anthropic.");
+        }
+
+        if (profile["generation"] is not JsonObject generation)
+        {
+            generation = [];
+            profile["generation"] = generation;
+        }
+
+        generation["maxTokens"] = maxTokens;
+        if (effort is null)
+        {
+            profile.Remove("effort");
+        }
+        else
+        {
+            profile["effort"] = effort;
+        }
+
+        if (prices is null)
+        {
+            profile.Remove("prices");
+        }
+        else
+        {
+            profile["prices"] = prices.ToJson();
+        }
+
+        if (!string.IsNullOrWhiteSpace(protectedApiKey))
+        {
+            profile["protectedApiKey"] = protectedApiKey;
+        }
+
         return Checked(document, [name]);
     }
 

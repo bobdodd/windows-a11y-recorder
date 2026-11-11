@@ -1602,6 +1602,49 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
     }
 
     [Fact]
+    public async Task A_Claude_tasks_tokens_and_cost_count_the_attempts_sent_not_those_reused()
+    {
+        var catalog = await CatalogAsync();
+        var recording = await RecordingAsync();
+        var priced = Claude() with { Prices = new ServicePrices(4, 20) };
+        var calls = 0;
+        var endpoint = new StandInEndpoint
+        {
+            Build = AnthropicMessages.ServerBuild,
+            Answer = (_, _, _) => Task.FromResult(++calls == 1 ? ClaudeAnswer("E7") : ClaudeAnswer("E1"))
+        };
+        var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text("Claude"), cancellationToken: Token);
+        await new AnalysisWorker(catalog, SettingsWith(3, priced), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+        var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text("Claude"), rerunOfTaskId: first, cancellationToken: Token);
+        await new AnalysisWorker(catalog, SettingsWith(3, priced), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        var usage = await catalog.ServiceUsageAsync(recording, Token);
+
+        // Two attempts of 120 input and 40 output tokens each, at $4 and
+        // $20 per million; the task run again reused its step and sent
+        // nothing, so it is not listed.
+        var sent = Assert.Single(usage).Value;
+        Assert.Equal(first, Assert.Single(usage.Keys));
+        Assert.Equal(new ServiceUsage(2, 240, 80, sent.Cost, 0), sent);
+        Assert.Equal(((240 * 4) + (80 * 20)) / 1_000_000.0, sent.Cost!.Value, 12);
+        Assert.False(usage.ContainsKey(again));
+    }
+
+    [Fact]
+    public async Task A_Claude_task_without_prices_has_tokens_and_no_cost()
+    {
+        var catalog = await CatalogAsync();
+        var recording = await RecordingAsync();
+        var task = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text("Claude"), cancellationToken: Token);
+        var endpoint = new StandInEndpoint { Build = AnthropicMessages.ServerBuild, Answer = (_, _, _) => Task.FromResult(ClaudeAnswer("E1")) };
+        await new AnalysisWorker(catalog, SettingsWith(3, Claude()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        var usage = (await catalog.ServiceUsageAsync(recording, Token))[task];
+
+        Assert.Equal(new ServiceUsage(1, 120, 40, null, 0), usage);
+    }
+
+    [Fact]
     public async Task A_Claude_step_does_not_unload_the_model_this_PC_serves()
     {
         var catalog = await CatalogAsync();

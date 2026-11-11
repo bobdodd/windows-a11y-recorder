@@ -336,7 +336,7 @@ public sealed class HttpModelEndpoint(
         ArgumentNullException.ThrowIfNull(profile);
         if (profile.SendsToAnthropic)
         {
-            return await AnthropicAsync(profile, body, watch, cancellationToken).ConfigureAwait(false);
+            return await AnthropicAsync(profile, body, watch, BusyRetries, cancellationToken).ConfigureAwait(false);
         }
 
         using var response = await SendAsync(profile, HttpMethod.Post, "v1/chat/completions", body, cancellationToken)
@@ -405,6 +405,7 @@ public sealed class HttpModelEndpoint(
         ModelProfile profile,
         string body,
         Func<string, string?>? watch,
+        int retries,
         CancellationToken cancellationToken)
     {
         var told = new List<string>();
@@ -416,7 +417,7 @@ public sealed class HttpModelEndpoint(
             {
                 response = await SendAsync(profile, HttpMethod.Post, AnthropicMessages.Path, body, cancellationToken).ConfigureAwait(false);
             }
-            catch (ModelEndpointException exception) when (exception.InnerException is HttpRequestException && attempt < BusyRetries)
+            catch (ModelEndpointException exception) when (exception.InnerException is HttpRequestException && attempt < retries)
             {
                 told.Add(exception.Message);
                 await Task.Delay(_busyWait, cancellationToken).ConfigureAwait(false);
@@ -449,7 +450,7 @@ public sealed class HttpModelEndpoint(
                 }
 
                 told.Add(error);
-                if (attempt >= BusyRetries)
+                if (attempt >= retries)
                 {
                     throw new ModelEndpointException(Tries(told));
                 }
@@ -458,8 +459,27 @@ public sealed class HttpModelEndpoint(
             }
         }
 
-        static string Tries(List<string> told) =>
-            $"Anthropic did not answer after {told.Count.ToString(CultureInfo.InvariantCulture)} tries: " + string.Join(" Then: ", told);
+        static string Tries(List<string> told) => told.Count == 1
+            ? told[0]
+            : $"Anthropic did not answer after {told.Count.ToString(CultureInfo.InvariantCulture)} tries: " + string.Join(" Then: ", told);
+    }
+
+    /// <summary>
+    /// "Check the profile": sends a profile that sends to Anthropic one
+    /// short question, without a recording, and returns the answer, with the
+    /// model Anthropic names, the tokens used and the request ID. It is
+    /// asked once, not again when Anthropic is busy, so that the player is
+    /// not kept waiting; the error says what Anthropic answered.
+    /// </summary>
+    public Task<ModelResponse> CheckAsync(ModelProfile profile, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        if (!profile.SendsToAnthropic)
+        {
+            throw new ArgumentException($"Profile \"{profile.Name}\" does not send to Anthropic.", nameof(profile));
+        }
+
+        return AnthropicAsync(profile, AnthropicMessages.CheckBody(profile), null, 0, cancellationToken);
     }
 
     // A streamed answer: server-sent events, each "data: " and a chunk,

@@ -2,11 +2,12 @@
 
 ## Status
 
-Proposed 2026-11-11. Step 1 of "Build order", the provider and the
-request in `Recorder.Analysis`, is built and tested against a fake server
-in the unit tests; where it differs from the design, "As built: step 1"
-says so. Steps 2 and 3, the player and the run on the development PC, are
-not built. The owner's decisions of 2026-11-11 are in
+Proposed 2026-11-11. Steps 1 and 2 of "Build order", the provider and
+the request in `Recorder.Analysis` and the player, are built and tested
+in the Linux build environment, the request against a fake server; where
+they differ from the design, "As built: step 1" and "As built: step 2"
+say so. Step 3, the run on the development PC with the owner's key, is
+[the validation plan](../validation/cloud-models-plan.md), not yet run. The owner's decisions of 2026-11-11 are in
 "Decisions (2026-11-11)". The Android checks, which follow this work,
 are planned separately; their one decision so far is recorded here
 because it limits what is sent.
@@ -296,6 +297,62 @@ real service is step 3's check.
 - **Not yet checked.** Whether Anthropic's structured outputs accept the
   larger schemas, such as long `enum` lists of references (inference
   that they may hit its schema limits; to check in step 3).
+
+## As built: step 2 (2026-11-11)
+
+Checked in source and in the unit tests; the windows themselves are
+checked only on Windows, in [the validation plan](../validation/cloud-models-plan.md).
+
+- **"Add a Claude profile..."**, a button in the Model profiles window,
+  opens a window of its own: the model (Claude Opus 5.5, Sonnet 5.5 or
+  Haiku 5.5, with their IDs `claude-opus-5-5`, `claude-sonnet-5-5` and
+  `claude-haiku-5-5`, checked in
+  [Anthropic's models overview](https://platform.claude.com/docs/en/models/overview),
+  or another model ID typed in), the profile's name, the effort (the
+  model's default or one of the five), the output limit (32,000), and
+  the key in a password box. The profile takes text and images, as
+  every current Claude model takes images (same page). The key is
+  protected for the Windows user before it is written and is not shown
+  again. A profile of the same name is not replaced.
+- **Not made a default.** Unlike a model set up on this PC, a new Claude
+  profile is not made the default for anything, and where no default is
+  set the player offers first a profile that does not send to Anthropic.
+  A Claude profile is used only where it was chosen: in the Analysis
+  tab's profile list for a task, or as a default in the Model profiles
+  window. "Add vision to the summary" uses the default for images, so a
+  Claude profile made that default is the choice for vision.
+- **Prices.** A Claude profile holds `"prices"`:
+  `inputPerMillion` and `outputPerMillion` in US dollars, and, for Haiku
+  5.5, `longPrompt` with `overTokens` (100,000) and its higher prices,
+  filled in from
+  [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing)
+  of 2026-11-11: Opus 5.5 $4 and $20, Sonnet 5.5 $2 and $10, Haiku 5.5
+  $0.10 and $0.50, or $0.50 and $2.50 for a prompt over 100,000 tokens.
+  A model ID typed in has no prices until they are entered. Prices are
+  recorded with each attempt, so a later change of price does not
+  change an earlier task's estimate.
+- **The Model profiles window**, for a Claude profile, shows the model
+  and whether a key is saved, and in place of the local settings: the
+  output limit, the effort, the two prices, and "New API key, only to
+  replace the saved one". "Check the profile" sends the saved profile
+  one question ("Answer with the one word: ready.", with an output limit
+  of 1,024 so that the model's thinking fits), without a recording, and
+  shows the model Anthropic names, the tokens, the estimated cost, the
+  stop reason, the request ID and the answer, or Anthropic's error. It is
+  asked once, not again when Anthropic is busy, so the window is not
+  kept waiting.
+- **"(sends to Anthropic)"** follows a Claude profile's name in the
+  Analysis tab's profile list, the Model profiles window's list and its
+  two default lists, and the status line when a task is queued.
+- **Tokens and cost.** A task's row on the Analysis tab gains a line
+  such as "Sent to Anthropic: 3 attempts, 123,456 input and 7,890 output
+  tokens, about US$0.65 at the profile's prices. Anthropic's bill is the
+  record of what was charged." It counts the attempts sent, failed ones
+  included, and not those reused from an earlier task, which cost
+  nothing again; it is updated while the task runs. Where an attempt has
+  no token counts, such as one cut off before Anthropic gave them, or
+  the profile has no prices, the line says there is no cost estimate and
+  why.
 
 ## Not covered here
 

@@ -92,7 +92,112 @@ public static class AnthropicSettings
     /// "7. Defaults").
     /// </summary>
     public const int DefaultMaxTokens = 32000;
+
+    /// <summary>
+    /// The Claude models the player offers, with Anthropic's base prices in
+    /// US dollars per million tokens as its pricing page gave them on
+    /// 2026-11-11 (https://platform.claude.com/docs/en/about-claude/pricing),
+    /// and the model IDs of its models overview that day
+    /// (https://platform.claude.com/docs/en/models/overview). Haiku 5.5
+    /// costs more for a prompt over 100,000 tokens. Prices change; each
+    /// profile holds its own, which can be edited.
+    /// </summary>
+    public static IReadOnlyList<ClaudeModel> Models { get; } =
+    [
+        new("Claude Opus 5.5", "claude-opus-5-5", new ServicePrices(4, 20)),
+        new("Claude Sonnet 5.5", "claude-sonnet-5-5", new ServicePrices(2, 10)),
+        new("Claude Haiku 5.5", "claude-haiku-5-5", new ServicePrices(0.10, 0.50) { LongPrompt = new LongPromptPrices(100_000, 0.50, 2.50) })
+    ];
+
+    /// <summary>The model the player offers with this ID, or null for another.</summary>
+    public static ClaudeModel? Model(string id) =>
+        Models.FirstOrDefault(model => string.Equals(model.Id, id, StringComparison.Ordinal));
 }
+
+/// <summary>A Claude model the player offers: its name, its API model ID, and its prices.</summary>
+public sealed record ClaudeModel(string Name, string Id, ServicePrices Prices);
+
+/// <summary>
+/// What a service charges, in US dollars per million tokens, as a profile
+/// holds it, for the player's estimate of a task's cost. It is an estimate:
+/// the service's bill is the record of what was charged.
+/// </summary>
+public sealed record ServicePrices(double InputPerMillion, double OutputPerMillion)
+{
+    /// <summary>Other prices for a request whose prompt is over a number of tokens, or null.</summary>
+    public LongPromptPrices? LongPrompt { get; init; }
+
+    /// <summary>The estimated cost of one request, in US dollars.</summary>
+    public double Cost(int inputTokens, int outputTokens)
+    {
+        var (input, output) = LongPrompt is { } longPrompt && inputTokens > longPrompt.OverTokens
+            ? (longPrompt.InputPerMillion, longPrompt.OutputPerMillion)
+            : (InputPerMillion, OutputPerMillion);
+        return ((inputTokens * input) + (outputTokens * output)) / 1_000_000;
+    }
+
+    /// <summary>The prices as the settings file and an attempt's record hold them.</summary>
+    public JsonObject ToJson()
+    {
+        var prices = new JsonObject
+        {
+            ["inputPerMillion"] = InputPerMillion,
+            ["outputPerMillion"] = OutputPerMillion
+        };
+        if (LongPrompt is { } longPrompt)
+        {
+            prices["longPrompt"] = new JsonObject
+            {
+                ["overTokens"] = longPrompt.OverTokens,
+                ["inputPerMillion"] = longPrompt.InputPerMillion,
+                ["outputPerMillion"] = longPrompt.OutputPerMillion
+            };
+        }
+
+        return prices;
+    }
+
+    /// <summary>The prices from the settings file or an attempt's record, or null where they are not prices.</summary>
+    public static ServicePrices? FromJson(JsonNode? node)
+    {
+        if (node is not JsonObject prices ||
+            Price(prices, "inputPerMillion") is not { } input ||
+            Price(prices, "outputPerMillion") is not { } output)
+        {
+            return null;
+        }
+
+        if (prices["longPrompt"] is null)
+        {
+            return new ServicePrices(input, output);
+        }
+
+        if (prices["longPrompt"] is not JsonObject longPrompt ||
+            Number(longPrompt, "overTokens") is not { } overTokens ||
+            overTokens < 1 || overTokens > int.MaxValue || overTokens != Math.Floor(overTokens) ||
+            Price(longPrompt, "inputPerMillion") is not { } longInput ||
+            Price(longPrompt, "outputPerMillion") is not { } longOutput)
+        {
+            return null;
+        }
+
+        return new ServicePrices(input, output) { LongPrompt = new LongPromptPrices((int)overTokens, longInput, longOutput) };
+    }
+
+    // A number however the node holds it, read from its JSON text, so that
+    // a value built in code and one read from a file are read alike.
+    private static double? Number(JsonObject node, string name) =>
+        node[name]?.GetValueKind() == JsonValueKind.Number &&
+        double.TryParse(node[name]!.ToJsonString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value)
+            ? value
+            : null;
+
+    private static double? Price(JsonObject node, string name) =>
+        Number(node, name) is { } value && value >= 0 ? value : null;
+}
+
+/// <summary>The prices of a request whose prompt is over <paramref name="OverTokens"/> tokens.</summary>
+public sealed record LongPromptPrices(int OverTokens, double InputPerMillion, double OutputPerMillion);
 
 /// <summary>
 /// One model at one endpoint. A profile with <see cref="Local"/> is served
@@ -121,6 +226,13 @@ public sealed record ModelProfile(
     /// own default; null for every other profile.
     /// </summary>
     public string? Effort { get; init; }
+
+    /// <summary>
+    /// For a profile that sends to Anthropic, the prices the player
+    /// estimates a task's cost with, or null for no estimate; null for
+    /// every other profile.
+    /// </summary>
+    public ServicePrices? Prices { get; init; }
 
     /// <summary>Whether the profile sends to Anthropic, outside the local network.</summary>
     public bool SendsToAnthropic => Provider == ModelProviders.Anthropic;
@@ -417,6 +529,24 @@ public static class AnalysisSettingsFile
             }
         }
 
+        ServicePrices? prices = null;
+        if (profile["prices"] is { } pricesNode)
+        {
+            if (provider != ModelProviders.Anthropic)
+            {
+                problems.Add($"Profile \"{name}\" gives prices, which only a profile that sends to Anthropic has.");
+                return null;
+            }
+
+            prices = ServicePrices.FromJson(pricesNode);
+            if (prices is null)
+            {
+                problems.Add($"Profile \"{name}\" gives prices that are not inputPerMillion and outputPerMillion of at least 0, " +
+                    "with longPrompt, where given, also having overTokens of at least 1.");
+                return null;
+            }
+        }
+
         var capabilities = new List<string>();
         if (profile["capabilities"] is JsonArray capabilityArray)
         {
@@ -553,7 +683,8 @@ public static class AnalysisSettingsFile
             String(profile, "protectedApiKey"))
         {
             Provider = provider,
-            Effort = effort
+            Effort = effort,
+            Prices = prices
         };
     }
 
@@ -645,6 +776,7 @@ public static class AnalysisSettingsFile
             described.Remove("file");
             described["generation"] = new JsonObject { ["maxTokens"] = profile.Generation.MaxTokens };
             described["effort"] = profile.Effort;
+            described["prices"] = profile.Prices?.ToJson();
         }
 
         if (profile.Local is { } local)

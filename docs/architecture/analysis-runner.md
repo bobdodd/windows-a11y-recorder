@@ -364,7 +364,7 @@ player's controls are step 3, below.
   (`maxTokens`, default 2048; `temperature`, default 0; `seed`, default 1;
   `thinking`, default false), `protectedApiKey`, `provider`
   (`openai-compatible`, the default, or `anthropic`) and, for an
-  Anthropic profile, `effort`; and `defaults`, the profile for each
+  Anthropic profile, `effort` and `prices`; and `defaults`, the profile for each
   capability. An Anthropic profile's rules are in
   [cloud models](cloud-models.md), "As built: step 1". A profile that breaks a rule is left out
   and its problem listed; the others are still used. There is no full

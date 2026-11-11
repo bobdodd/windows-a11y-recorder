@@ -82,6 +82,39 @@ public static class AnthropicMessages
         }.ToJsonString();
     }
 
+    /// <summary>What "Check the profile" asks: one short question, without a recording.</summary>
+    public const string CheckQuestion = "Answer with the one word: ready.";
+
+    /// <summary>
+    /// The output limit of "Check the profile": enough for the model's
+    /// thinking, which is on for Claude 5 models (Anthropic's thinking
+    /// documentation, checked 2026-11-11), and a one-word answer.
+    /// </summary>
+    public const int CheckMaxTokens = 1024;
+
+    /// <summary>
+    /// The body of "Check the profile" (cloud-models.md, "6. The player"):
+    /// the profile's model and effort, the one short question, and an
+    /// answer given whole, so that the key, the model ID and the effort
+    /// are checked without sending a recording.
+    /// </summary>
+    public static string CheckBody(ModelProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        var body = new JsonObject
+        {
+            ["model"] = profile.Model,
+            ["max_tokens"] = CheckMaxTokens,
+            ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = CheckQuestion })
+        };
+        if (profile.Effort is { } effort)
+        {
+            body["output_config"] = new JsonObject { ["effort"] = effort };
+        }
+
+        return body.ToJsonString();
+    }
+
     /// <summary>The settings of a Messages request as recorded with an attempt.</summary>
     public static JsonObject Parameters(ModelProfile profile, ModelRequest request)
     {
