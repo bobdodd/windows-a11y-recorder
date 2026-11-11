@@ -2889,3 +2889,40 @@ Run on the development PC and the Pixel on 2026-11-11, from commit
   middle of the word, as it has no spaces. The owner may later choose
   whether a switch with no value reads "off (not set)" in place of "not
   set".
+
+## Part 8, step 8b: the one-timeline check
+
+Step 8b checks that the phone's sources fall on one timeline (see
+[the implementation plan](../architecture/android-implementation-plan.md),
+"Slice 8", "One-timeline check"). In one recording a double tap with
+TalkBack opens an app, and five times are compared on the session
+clock: the finger's touch-down, the accessibility event for the new
+window, the first picture that changes, the start of what TalkBack said,
+and the start of the phone's sound. The owner chose (2026-11-11) that
+the comparison is not built into the recorder: the owner makes the
+recording, and the recording's folder is read from the development PC
+and compared outside the recorder. Nothing new is built, so this test
+uses the version installed for test 68.
+
+### Test 72: a double tap opens an app
+
+Before the test, on the phone, turn TalkBack on, and check that its "Log
+output level" is "Verbose" (TalkBack's settings, then "Advanced
+settings", then "Developer settings"). Go to the home screen, so that an
+app's icon, such as Chrome's, is on the screen. In the recorder, keep
+"Android device" chosen.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. On the phone, tap the app's icon once, and wait 3 seconds.
+3. Double tap the app's icon, and wait 5 seconds.
+4. While it is still recording, take a screenshot of "Collector status"
+   under "Current session".
+5. Choose "Stop recording", and wait until the recording has opened in
+   the player.
+
+**On screen:** in step 2 TalkBack's focus outline goes around the icon.
+In step 3 the app opens. In step 4 every line reads "Running, Healthy";
+the "android.talkback" line reads "TalkBack:" with at least 2
+utterances, not "no speech lines yet"; and the "android.touch" line
+counts at least 3 touches. Send the screenshot, and say which app was
+opened. The comparison is then made from the recording's folder.
