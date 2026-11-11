@@ -3043,3 +3043,72 @@ What this shows:
   would suggest the sound is placed up to one packet early. Which
   sound is which was not established, so this is not used as evidence.
 - **Not checked.** One recording, on one phone, with one app.
+
+## Part 8, step 8c: the whole recording
+
+The first half of step 8c checks one recording of five minutes with
+every phone source (see
+[the implementation plan](../architecture/android-implementation-plan.md),
+"Slice 8", "Whole recording"). As for step 8b, the owner makes the
+recording and its MP4, and the recording's folder is read from the
+development PC. It is checked for:
+
+- nothing refused or dropped by the writer: the manifest's status is
+  "completed", with no failure and no dropped events;
+- the phone's clock: every clock sample's error bound, and the largest;
+- the pictures: the number of pictures against the number of video
+  packets, and the stored stream decoded again;
+- the sound: the length of `audio/device.wav` and
+  `audio/microphone.wav` against the recording's length, and any gaps
+  between sound packets;
+- the MP4: its length, picture size, frame rate and sound tracks.
+
+Nothing new is built, so these tests use the version installed for
+test 68. The second half of step 8c, the installer, follows.
+
+### Test 73: five minutes with every source
+
+Before the test, on the phone, turn TalkBack on, check that auto-rotate
+is on, and go to the home screen. In the recorder, keep "Android
+device" chosen. TalkBack stays on for the whole test, so each tap below
+is TalkBack's: touch the item, then double tap.
+
+1. In the recorder, choose "Start recording", and wait 10 seconds.
+2. On the phone, open Chrome, open any web page, and swipe up with two
+   fingers through it for about a minute. Go back to the home screen.
+3. Open Gmail, open any message, and go back to the home screen. Open
+   Settings, then Accessibility, then "Color and motion", then "Color
+   inversion"; double tap "Use color inversion" to turn it on, wait 5
+   seconds, and double tap it again to turn it off. Go back to the home
+   screen.
+4. Turn the phone sideways, wait 10 seconds, and turn it upright. When
+   "Duration" under "Current session" reads 00:05:00 or more, take a
+   screenshot of "Current session".
+5. Choose "Stop recording", and wait until the recording has opened in
+   the player. Take a screenshot of "Current session".
+
+**On screen:** in step 3 the phone's screen turns to inverted colors,
+then back. In step 4 the "Events" line reads "0 dropped" and has no
+"rejected"; every line under "Collector status" reads "Running,
+Healthy"; the "android.talkback" line counts utterances; the
+"android.touch" line counts touches; and the "android.settings" line
+reads "2 changes, latest Color inversion off" or counts more changes.
+In step 5 the first line reads "Recording completed and stored." A
+first line beginning "Recording stopped with errors" is a failure; send
+it. Send both screenshots.
+
+### Test 74: the MP4 of the five minutes
+
+With the recording of test 73 open, and both sound sliders at "0 dB":
+
+1. Choose "Save as MP4..." (Alt+4).
+2. Choose "Save MP4", and wait for the status line to stop changing.
+3. Take a screenshot of the window.
+
+**On screen:** the status line begins "Saved
+C:\Users\User\Videos\" and the recording's folder name, then ".mp4:",
+and includes "3 sound tracks: mixed, then microphone, phone sound." and
+"Encoded with the Windows encoder". A line beginning "The MP4 could not
+be saved" is a failure. A line "Phone sound:" about silences is not a
+failure. Send the screenshot. The MP4 is then read from the development
+PC with the recording.
