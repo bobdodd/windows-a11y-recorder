@@ -6,8 +6,10 @@ Proposed 2026-11-11. Steps 1 and 2 of "Build order", the provider and
 the request in `Recorder.Analysis` and the player, are built and tested
 in the Linux build environment, the request against a fake server; where
 they differ from the design, "As built: step 1" and "As built: step 2"
-say so. Step 3, the run on the development PC with the owner's key, is
-[the validation plan](../validation/cloud-models-plan.md), not yet run. The owner's decisions of 2026-11-11 are in
+say so. Step 3, the run on the development PC with the owner's key,
+passed on 2026-11-11 for the check, the summary and the summary with
+vision with Opus 5.5; Sonnet 5.5 was not run. See
+[the validation plan](../validation/cloud-models-plan.md), "Results". The owner's decisions of 2026-11-11 are in
 "Decisions (2026-11-11)". The Android checks, which follow this work,
 are planned separately; their one decision so far is recorded here
 because it limits what is sent.
@@ -294,9 +296,10 @@ real service is step 3's check.
 - **The report.** Its model lines say the step was sent to Anthropic,
   name the model Anthropic served, and say the model has no SHA-256
   here and its answers cannot be repeated on request.
-- **Not yet checked.** Whether Anthropic's structured outputs accept the
-  larger schemas, such as long `enum` lists of references (inference
-  that they may hit its schema limits; to check in step 3).
+- **Checked in step 3.** Anthropic's structured outputs accepted the
+  larger schemas, with their long `enum` lists of references, in every
+  step of a summary with vision of a 34-second cnib.ca recording; see
+  [the validation plan](../validation/cloud-models-plan.md), "Results".
 
 ## As built: step 2 (2026-11-11)
 

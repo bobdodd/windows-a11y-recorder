@@ -3,7 +3,34 @@
 These tests are step 3 of [cloud models](../architecture/cloud-models.md):
 adding a Claude profile with your Anthropic API key, checking it, and
 summarising a recording with Claude Opus 5.5 and then Claude Sonnet 5.5,
-on the development PC. Not yet run.
+on the development PC.
+
+## Results (2026-11-11)
+
+Run by the owner with build bb92d38.
+
+- **Tests 1 to 3 passed.** The profile was added with the key, effort
+  "high" and both defaults set to Claude Opus 5.5 by the owner. The
+  check answered: "Anthropic answered with model claude-opus-5-5, 19
+  input and 5 output tokens, about US$0.0002, stop reason end_turn,
+  request req_011Cgwo9jfBQFsUFidkCXxgU. The answer: Ready" (19 tokens at
+  US$4 and 5 at US$20 per million is US$0.000176).
+- **Tests 4 to 8 were replaced.** The owner could not tell which earlier
+  recordings had been summarised with Qwen3.6, and made a new desktop
+  recording of cnib.ca instead, the site of the earlier local runs:
+  `20261111-210744-a207ff5e67e8477097df9f0b813b4114`, 34 seconds, four
+  page visits.
+- **Recording summary with Opus 5.5: passed.** The owner: "With opus 5.5
+  I got the report I expected."
+- **Summary with vision with Opus 5.5: finished.** Its report names
+  "Inferred by claude-opus-5-5, profile "Claude Opus 5.5"", and its
+  Appendix G.2 the model lines of test 5 with "Server build:
+  anthropic-version 2026-10-21". The estimate on its row, by the owner:
+  US$5.33. Every vision step's answer, with its long lists of
+  references, was accepted by Anthropic's structured outputs, so the
+  larger schemas are not a limit for this recording.
+- **Not run:** test 6 (run again with reuse), tests 7 and 8 (Sonnet 5.5),
+  and whether a workspace-scoped key works.
 
 What was checked before these tests, in the Linux build environment: the
 solution builds with no warnings, and 2,250 tests pass, with 1 skipped
