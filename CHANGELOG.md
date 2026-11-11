@@ -69,6 +69,19 @@ Changes on `main` since 1.1.0, not yet released.
   [its validation plan](docs/validation/mp4-export-plan.md). Not yet run
   in the app on Windows.
 
+### Colours and contrast in the player
+
+- Text in the player's white lists, tree and properties grid is in
+  Windows' dark text colour again, not the dark panels' light grey,
+  which had been 1.6 to 1 on white since 2026-10-14.
+- Panel edges and splitters are #75736F, 3.6 to 1 against the panels,
+  and the splitter beside Selected event values is drawn.
+- The menu bar is lighter than the window, with an edge under it, and
+  each menu's title is semibold in a box with an edge.
+- The timeline's TalkBack, reading position and NVDA window spans reach
+  3 to 1 against the timeline. See
+  [colours and contrast](docs/architecture/player-contrast.md).
+
 ### Android recording, part 0: the tools
 
 - The player's new Android menu opens "Set up Android recording...",

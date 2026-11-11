@@ -66,9 +66,12 @@ public sealed class SessionTimelineControl : FrameworkElement
     // NVDA's own windows in front, such as the Elements List, in a second
     // strip under the mode strip, as a mode span can cover them: solid green
     // with the window's name where it fits; where none is in front, empty.
-    // White on #3F6B3A is about 6:1. Agreed with the owner on 2026-10-11.
+    // Agreed with the owner on 2026-10-11. White on #467A40 is 5.1:1, and
+    // the green against the timeline's #201F1D 3.2:1, so a span's extent
+    // meets WCAG 1.4.11 (docs/architecture/player-contrast.md; the first
+    // green, #3F6B3A, was 2.6:1).
     private const double WindowStripHeight = 16;
-    private static readonly Brush NvdaWindowBrush = Freeze("#3F6B3A");
+    private static readonly Brush NvdaWindowBrush = Freeze("#467A40");
 
     // A mark at the foot of the window strip for each of its events: the
     // window coming to the front, each element focused in it, and the
@@ -83,10 +86,12 @@ public sealed class SessionTimelineControl : FrameworkElement
     // a known object solid purple with its role and name where they fit, an
     // uncertain one purple stripes with "uncertain", and where it is unknown,
     // empty. Each step starts a span a pixel after the last, so moves show.
-    // White on #6A4C93 is about 7:1. Agreed with the owner on 2026-10-12.
+    // Agreed with the owner on 2026-10-12. White on #7A5CAB is 5.3:1, and
+    // the purple against the timeline's #201F1D 3.1:1 (the first purple,
+    // #6A4C93, was 2.4:1; docs/architecture/player-contrast.md).
     private const double ReadingStripHeight = 16;
-    private static readonly Brush ReadingKnownBrush = Freeze("#6A4C93");
-    private static readonly Brush ReadingUncertainBrush = CreateStripeBrush("#6A4C93", new Point(0, 0), new Point(8, 8), 1.5);
+    private static readonly Brush ReadingKnownBrush = Freeze("#7A5CAB");
+    private static readonly Brush ReadingUncertainBrush = CreateStripeBrush("#7A5CAB", new Point(0, 0), new Point(8, 8), 1.5);
 
     // What TalkBack said (Android slice 6, step 6b), in a fourth strip under
     // the reading position strip, as a recording of a phone has none of
@@ -94,10 +99,12 @@ public sealed class SessionTimelineControl : FrameworkElement
     // utterance's, or to its interruption, with its text where it fits,
     // cut short with an ellipsis where it does not. An interrupted one is
     // teal stripes with ", interrupted" after its text, so it does not rely
-    // on colour. White on #2F6F73 is about 5.8:1.
+    // on colour. White on #2B787C is 5.2:1, and the teal against the
+    // timeline's #201F1D 3.2:1 (the first teal, #2F6F73, was 2.9:1;
+    // docs/architecture/player-contrast.md).
     private const double TalkBackStripHeight = 16;
-    private static readonly Brush TalkBackBrush = Freeze("#2F6F73");
-    private static readonly Brush TalkBackInterruptedBrush = CreateStripeBrush("#2F6F73", new Point(0, 0), new Point(8, 8), 1.5);
+    private static readonly Brush TalkBackBrush = Freeze("#2B787C");
+    private static readonly Brush TalkBackInterruptedBrush = CreateStripeBrush("#2B787C", new Point(0, 0), new Point(8, 8), 1.5);
 
     private readonly DrawingVisual _eventLayer = new();
     private readonly DrawingVisual _overlayLayer = new();

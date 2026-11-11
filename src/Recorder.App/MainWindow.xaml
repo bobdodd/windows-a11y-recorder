@@ -13,17 +13,32 @@
         Foreground="#CDCCCA">
   <Window.Resources>
     <SolidColorBrush x:Key="PanelBackground" Color="#1C1B19" />
-    <SolidColorBrush x:Key="PanelBorder" Color="#393836" />
+    <!-- Colours and contrast: docs/architecture/player-contrast.md. Edges
+         are #75736F, 3.6 to 1 or more against the window's and panels'
+         backgrounds, as WCAG 1.4.11 asks of a control's edges. -->
+    <SolidColorBrush x:Key="PanelBorder" Color="#75736F" />
     <SolidColorBrush x:Key="MutedText" Color="#A09F9B" />
     <Style TargetType="GroupBox">
       <Setter Property="BorderBrush" Value="{StaticResource PanelBorder}" />
       <Setter Property="Foreground" Value="#CDCCCA" />
     </Style>
-    <Style TargetType="TextBlock">
-      <Setter Property="Foreground" Value="#CDCCCA" />
+    <!-- No text colour for TextBlock or SelectableText: text takes the
+         colour of what it is in, the window's #CDCCCA on the dark panels,
+         and Windows' own text colour in the white lists, tree, and text
+         boxes, which set it. A light colour here made their text 1.6 to 1
+         on white (docs/architecture/player-contrast.md). Labels and check
+         boxes keep one, as Windows' styles for them set a dark one. -->
+    <!-- The white lists and tree in Windows' own text colour, so their text
+         is dark whatever is around them: Windows' styles set it, and these
+         say so here. -->
+    <Style TargetType="ListBox">
+      <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
     </Style>
-    <Style TargetType="local:SelectableText">
-      <Setter Property="Foreground" Value="#CDCCCA" />
+    <Style TargetType="ListView">
+      <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+    </Style>
+    <Style TargetType="TreeView">
+      <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
     </Style>
     <Style TargetType="Label">
       <Setter Property="Foreground" Value="#CDCCCA" />
@@ -71,7 +86,7 @@
     <Style x:Key="ColumnSplitter" TargetType="GridSplitter">
       <Setter Property="Width" Value="5" />
       <Setter Property="HorizontalAlignment" Value="Stretch" />
-      <Setter Property="Background" Value="#393836" />
+      <Setter Property="Background" Value="{StaticResource PanelBorder}" />
       <Setter Property="ResizeDirection" Value="Columns" />
       <Setter Property="ResizeBehavior" Value="PreviousAndNext" />
       <Setter Property="FocusVisualStyle" Value="{x:Null}" />
@@ -90,7 +105,7 @@
       <Setter Property="Height" Value="8" />
       <Setter Property="Margin" Value="0,4,0,0" />
       <Setter Property="HorizontalAlignment" Value="Stretch" />
-      <Setter Property="Background" Value="#393836" />
+      <Setter Property="Background" Value="{StaticResource PanelBorder}" />
       <Setter Property="ResizeDirection" Value="Rows" />
       <Setter Property="ResizeBehavior" Value="PreviousAndNext" />
       <Setter Property="FocusVisualStyle" Value="{x:Null}" />
@@ -121,6 +136,7 @@
       <Setter Property="Padding" Value="8,0" />
       <Setter Property="VerticalContentAlignment" Value="Center" />
       <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.MenuTextBrushKey}}" />
+      <Setter Property="FontWeight" Value="Normal" />
     </Style>
   </Window.Resources>
 
@@ -128,15 +144,27 @@
   <!-- The menu bar, with two menus: Analysis (analysis-runner.md, "The
        player") and Android (android-implementation-plan.md). Each item
        opens with a single click; none has a submenu. -->
+  <!-- The menu bar stands out from the window: a lighter bar, #2A2926,
+       with an edge under it, and each menu drawn as a button with an edge,
+       #75736F, 3.1 to 1 or more against both (owner, 2026-11-10: "make
+       that top menu bar much more visible"). -->
   <Menu x:Name="MainMenu"
         DockPanel.Dock="Top"
-        Background="{StaticResource PanelBackground}"
+        Background="#2A2926"
+        BorderBrush="{StaticResource PanelBorder}"
+        BorderThickness="0,0,0,1"
+        Padding="4"
         AutomationProperties.Name="Menu bar">
     <MenuItem x:Name="AnalysisMenu"
               Header="_Analysis"
               MinHeight="44"
-              Padding="12,0"
+              Margin="0,0,6,0"
+              Padding="14,0"
               VerticalContentAlignment="Center"
+              Background="#2A2926"
+              BorderBrush="{StaticResource PanelBorder}"
+              BorderThickness="1"
+              FontWeight="SemiBold"
               Foreground="#CDCCCA"
               SubmenuOpened="AnalysisMenu_SubmenuOpened">
       <MenuItem x:Name="SummariseMenuItem"
@@ -175,8 +203,13 @@
     <MenuItem x:Name="AndroidMenu"
               Header="An_droid"
               MinHeight="44"
-              Padding="12,0"
+              Margin="0,0,6,0"
+              Padding="14,0"
               VerticalContentAlignment="Center"
+              Background="#2A2926"
+              BorderBrush="{StaticResource PanelBorder}"
+              BorderThickness="1"
+              FontWeight="SemiBold"
               Foreground="#CDCCCA">
       <MenuItem x:Name="AndroidSetupMenuItem"
                 Style="{StaticResource AnalysisMenuItem}"
@@ -1550,12 +1583,10 @@
             </Grid>
           </TabItem>
         </TabControl>
+        <!-- Drawn as the other splitters are, so it can be seen: it was
+             transparent (docs/architecture/player-contrast.md). -->
         <GridSplitter Grid.Column="1"
-                      Width="8"
-                      HorizontalAlignment="Stretch"
-                      Background="Transparent"
-                      ResizeDirection="Columns"
-                      ResizeBehavior="PreviousAndNext"
+                      Style="{StaticResource ColumnSplitter}"
                       AutomationProperties.Name="Resize browser correlation and event values" />
         <GroupBox Grid.Column="2"
                   Padding="8"
