@@ -2843,3 +2843,49 @@ or "Display" group. Groups further down, which are not the phone's
 settings, may have rows that read "not recorded"; they are not part of
 this test. In step 2 the filters include "Phone settings" and no
 "Windows settings". Send the screenshots.
+
+## Results of part 8, step 8a
+
+Run on the development PC and the Pixel on 2026-11-11, from commit
+2340ed8. All four tests passed, and step 8a is complete.
+
+- **Test 68 passed.** "The companion app is installed and on.", then
+  "Companion app: installed, on, and answering (version 1.1.0, version
+  code 753, protocol 5)." The note ends with the new sentence.
+- **Test 69 passed.** While recording: "android.settings: Running,
+  Healthy. Phone settings: 34 read at the start, 2 changes, latest Color
+  inversion off.", with no notices with no change and no failed reads.
+  Every other collector was Running and Healthy. The touch line counted
+  3 touches for the two taps; touches are not part of this test.
+- **Test 70 passed, with one wrong expectation in the test.** At the
+  start the "Color inversion" row read "not set", not "off", with "at
+  start" and the two buttons. "not set" means the phone's secure table
+  had no value for the setting, most likely because the switch had never
+  been used on this phone; the test was wrong to list it as a failure.
+  Android reading a missing value as off is understood, not checked in
+  its source here. Settings that were probably never used, such as
+  "Color correction", "High contrast text" and "Bold text", read "not
+  set" the same way. The first step went to "on", "00:00:12.609,
+  changed", "1/2", in bold, with the playback clock at 00:00:12.609; the
+  second to "off", "00:00:22.395, changed", "2/2", with the next button
+  greyed out. The times are later than the test's "about 5 seconds"
+  because the recording starts a few seconds after "Start recording" is
+  chosen; the row's time and the clock agree.
+- **Observed in test 70.** At each change the phone's picture still
+  showed the switch in its old position, so the setting was written
+  before the switch was redrawn (an inference from two screenshots, not
+  a measurement). The picture was not drawn in inverted colours, though
+  the phone's screen was, which fits color inversion being applied at
+  the display's output, after the screen is captured (an inference). The
+  black picture at 00:00:00.000 is the fault noted before.
+- **Test 71 passed.** The panel starts with "Phone accessibility":
+  "Accessibility in use" on, "Services on"
+  "RecorderAccessibilityService", "Explore by touch" off, "Accessibility
+  button" "TalkBackService" (the owner's TalkBack shortcut), then "Phone
+  magnification" and "Phone color and contrast", with no Magnifier or
+  Display group. The filters show "Phone settings" and "Magnifier
+  changes", and no "Windows settings".
+- **Noted, not changed.** "RecorderAccessibilityService" breaks in the
+  middle of the word, as it has no spaces. The owner may later choose
+  whether a switch with no value reads "off (not set)" in place of "not
+  set".

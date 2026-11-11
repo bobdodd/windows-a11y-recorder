@@ -1720,6 +1720,12 @@ slice's full test goes into a validation plan,
     `android.jar`, and converted with `d8`. That the notices come on the
     Pixel, and that the panel shows the change at its time, is for
     tests 68 to 71.
+  - **Tested (2026-11-11).** Tests 68 to 71 passed on the Pixel: two
+    changes of color inversion, recorded at 00:00:12.609 and
+    00:00:22.395 and shown at those times in the panel. A setting the
+    phone had never written reads "not set" at the start; the results
+    are in the validation plan, "Results of part 8, step 8a". Step 8a is
+    complete; step 8b, the one-timeline check, is next.
 
 ## Risks, and where each is settled
 
