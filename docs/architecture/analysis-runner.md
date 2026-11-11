@@ -145,7 +145,8 @@ images in the same request
   Recordings hold client test accounts, URLs, and page content, so sending
   them to an outside service is a separate decision, not a setting.
   That decision was made on 2026-11-11 for one service, Claude through
-  the Anthropic API; see [cloud models](cloud-models.md).
+  the Anthropic API; see [cloud models](cloud-models.md). A profile with
+  `"provider": "anthropic"` may send only to `https://api.anthropic.com`.
 
 ### 5. Pipelines group work by model
 
@@ -361,8 +362,11 @@ player's controls are step 3, below.
   `quantization`, `sha256`, `path`), `local` for a model this PC serves
   (`modelPath`, `imageAddOnPath`, `arguments`), `generation`
   (`maxTokens`, default 2048; `temperature`, default 0; `seed`, default 1;
-  `thinking`, default false), and `protectedApiKey`; and `defaults`, the
-  profile for each capability. A profile that breaks a rule is left out
+  `thinking`, default false), `protectedApiKey`, `provider`
+  (`openai-compatible`, the default, or `anthropic`) and, for an
+  Anthropic profile, `effort`; and `defaults`, the profile for each
+  capability. An Anthropic profile's rules are in
+  [cloud models](cloud-models.md), "As built: step 1". A profile that breaks a rule is left out
   and its problem listed; the others are still used. There is no full
   editor; the player's Model profiles window, from step 3, sets the
   defaults and opens the file in Notepad.

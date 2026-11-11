@@ -265,10 +265,7 @@ public static class SummaryReport
             return;
         }
 
-        builder.Append(CultureInfo.InvariantCulture, $"- Model profile: \"{accepted.ProfileName}\", model {accepted.Model}.\n");
-        builder.Append(CultureInfo.InvariantCulture, $"- Model file: {accepted.ModelFileName ?? "unknown"}, quantization {accepted.ModelQuantization ?? "unknown"}.\n");
-        builder.Append(CultureInfo.InvariantCulture, $"- Model SHA-256: {accepted.ModelSha256 ?? "unknown"} ({BasisText(accepted.ModelSha256Basis)}).\n");
-        builder.Append(CultureInfo.InvariantCulture, $"- Server build: {accepted.ServerBuild ?? "unknown"}.\n");
+        AppendModelLines(builder, accepted, [accepted]);
         builder.Append(CultureInfo.InvariantCulture, $"- Generation settings: `{accepted.Parameters}`.\n");
     }
 
@@ -301,10 +298,7 @@ public static class SummaryReport
                 builder.Append(CultureInfo.InvariantCulture, $"- For steps {string.Join(", ", model.Select(attempt => attempt.StepKey).Distinct(StringComparer.Ordinal))}:\n");
             }
 
-            builder.Append(CultureInfo.InvariantCulture, $"- Model profile: \"{first.ProfileName}\", model {first.Model}.\n");
-            builder.Append(CultureInfo.InvariantCulture, $"- Model file: {first.ModelFileName ?? "unknown"}, quantization {first.ModelQuantization ?? "unknown"}.\n");
-            builder.Append(CultureInfo.InvariantCulture, $"- Model SHA-256: {first.ModelSha256 ?? "unknown"} ({BasisText(first.ModelSha256Basis)}).\n");
-            builder.Append(CultureInfo.InvariantCulture, $"- Server build: {first.ServerBuild ?? "unknown"}.\n");
+            AppendModelLines(builder, first, [.. model]);
         }
 
         // The number of images and the answer's sections belong to the
@@ -387,6 +381,29 @@ public static class SummaryReport
                     $"{Milliseconds(attempt.PromptMilliseconds)} | {Milliseconds(attempt.CompletionMilliseconds)} |\n");
             }
         }
+    }
+
+    // The model of a set of accepted answers. A model a service names, such
+    // as Claude, has no file or SHA-256; the report says so, names the
+    // models the service says wrote the answers, and that the answers
+    // cannot be repeated on request (cloud-models.md, "5. Repeatability").
+    private static void AppendModelLines(StringBuilder builder, AttemptRecord first, IReadOnlyList<AttemptRecord> answers)
+    {
+        if (first.ModelSha256Basis == AnalysisWorker.ServiceBasis)
+        {
+            var named = answers.Select(attempt => attempt.ServiceModel).OfType<string>().Distinct(StringComparer.Ordinal).ToList();
+            builder.Append(CultureInfo.InvariantCulture, $"- Model profile: \"{first.ProfileName}\", model {first.Model}, sent to Anthropic.\n");
+            builder.Append(CultureInfo.InvariantCulture,
+                $"- Model as Anthropic named it in its answers: {(named.Count == 0 ? "not given" : string.Join(", ", named))}.\n");
+            builder.Append("- Model file: none; the model is served by Anthropic, so it has no SHA-256 here, and its answers cannot be repeated on request.\n");
+            builder.Append(CultureInfo.InvariantCulture, $"- Server build: {first.ServerBuild ?? "unknown"}.\n");
+            return;
+        }
+
+        builder.Append(CultureInfo.InvariantCulture, $"- Model profile: \"{first.ProfileName}\", model {first.Model}.\n");
+        builder.Append(CultureInfo.InvariantCulture, $"- Model file: {first.ModelFileName ?? "unknown"}, quantization {first.ModelQuantization ?? "unknown"}.\n");
+        builder.Append(CultureInfo.InvariantCulture, $"- Model SHA-256: {first.ModelSha256 ?? "unknown"} ({BasisText(first.ModelSha256Basis)}).\n");
+        builder.Append(CultureInfo.InvariantCulture, $"- Server build: {first.ServerBuild ?? "unknown"}.\n");
     }
 
     private static string BasisText(string basis) => basis switch

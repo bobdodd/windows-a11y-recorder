@@ -97,6 +97,12 @@ public sealed record ModelResponse(
     /// the answer and is not checked.
     /// </summary>
     public string? Reasoning { get; init; }
+
+    /// <summary>The ID the service gave the response, where it gives one (Anthropic's <c>request-id</c>).</summary>
+    public string? RequestId { get; init; }
+
+    /// <summary>The model the service says wrote the answer, where it says (Anthropic's <c>model</c>).</summary>
+    public string? ResponseModel { get; init; }
 }
 
 /// <summary>A failure reported by, or in reaching, a model server.</summary>
@@ -187,6 +193,13 @@ public static class ChatRequest
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(request);
+        if (profile.SendsToAnthropic)
+        {
+            return oneLine
+                ? throw new ArgumentException("The one-line grammar is llama.cpp's; a profile that sends to Anthropic cannot use it.", nameof(oneLine))
+                : AnthropicMessages.Build(profile, request);
+        }
+
         var content = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = request.Input });
         foreach (var image in request.Images)
         {
@@ -218,8 +231,7 @@ public static class ChatRequest
             ["response_format"] = new JsonObject
             {
                 ["type"] = "json_object",
-                ["schema"] = ClaimCheck.Schema(request.Sections, request.Forms, request.AboutSections,
-                    request.AboutSections is null ? null : [.. request.InputReferences.Where(reference => IsAbout(reference, request.AboutPrefix)).OrderBy(Number)])
+                ["schema"] = StepSchema(request)
             }
         };
         if (oneLine)
@@ -241,11 +253,24 @@ public static class ChatRequest
         return body.ToJsonString();
     }
 
+    /// <summary>The JSON schema a step's answer is held to.</summary>
+    public static JsonObject StepSchema(ModelRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return ClaimCheck.Schema(request.Sections, request.Forms, request.AboutSections,
+            request.AboutSections is null ? null : [.. request.InputReferences.Where(reference => IsAbout(reference, request.AboutPrefix)).OrderBy(Number)]);
+    }
+
     /// <summary>The generation settings as recorded with an attempt.</summary>
     public static JsonObject Parameters(ModelProfile profile, ModelRequest request)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(request);
+        if (profile.SendsToAnthropic)
+        {
+            return AnthropicMessages.Parameters(profile, request);
+        }
+
         return new JsonObject
         {
             ["temperature"] = profile.Generation.Temperature,
@@ -272,21 +297,32 @@ public static class ChatRequest
 
 /// <summary>
 /// The model endpoint over HTTP. Before each request, the endpoint's host is
-/// resolved and refused if any address is outside the local network.
+/// resolved and refused if any address is outside the local network; a
+/// profile that sends to Anthropic is sent only to Anthropic's fixed
+/// address (EndpointPolicy).
 /// </summary>
 /// <param name="loadTimeout">How long a locally served model may take to load; 15 minutes when null.</param>
 /// <param name="loadPoll">How often its state is read while it loads; 2 seconds when null.</param>
+/// <param name="busyWait">
+/// How long to wait before asking Anthropic again when it is busy and does
+/// not say how long; 30 seconds when null.
+/// </param>
 public sealed class HttpModelEndpoint(
     HttpClient client,
     IApiKeyProtector? keys,
     TimeSpan? loadTimeout = null,
-    TimeSpan? loadPoll = null) : IModelEndpoint
+    TimeSpan? loadPoll = null,
+    TimeSpan? busyWait = null) : IModelEndpoint
 {
     /// <summary>How long a locally served model may take to load, unless set.</summary>
     public static readonly TimeSpan DefaultLoadTimeout = TimeSpan.FromMinutes(15);
 
+    /// <summary>How many times a request Anthropic was too busy to answer is asked for again.</summary>
+    public const int BusyRetries = 3;
+
     private readonly TimeSpan _loadTimeout = loadTimeout ?? DefaultLoadTimeout;
     private readonly TimeSpan _loadPoll = loadPoll ?? TimeSpan.FromSeconds(2);
+    private readonly TimeSpan _busyWait = busyWait ?? TimeSpan.FromSeconds(30);
 
     public Task<ModelResponse> CompleteAsync(ModelProfile profile, string body, CancellationToken cancellationToken) =>
         CompleteAsync(profile, body, null, cancellationToken);
@@ -298,6 +334,11 @@ public sealed class HttpModelEndpoint(
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(profile);
+        if (profile.SendsToAnthropic)
+        {
+            return await AnthropicAsync(profile, body, watch, cancellationToken).ConfigureAwait(false);
+        }
+
         using var response = await SendAsync(profile, HttpMethod.Post, "v1/chat/completions", body, cancellationToken)
             .ConfigureAwait(false);
         if (response.IsSuccessStatusCode && response.Content.Headers.ContentType?.MediaType == "text/event-stream")
@@ -351,6 +392,74 @@ public sealed class HttpModelEndpoint(
         {
             throw new ModelEndpointException($"The model server's answer is not a chat completion: {Shorten(text)}", exception);
         }
+    }
+
+    // A request to Anthropic's Messages API. A 429, a 529 or a 5xx answer,
+    // or a connection that could not be made, is Anthropic being busy or
+    // failing, not the model's answer: it is asked for again after the
+    // wait the answer's retry-after gives, or the busy wait, three times,
+    // and then fails saying what it was told. Any other error answer, such
+    // as a refused request (400) or key (401), would be the same again, so
+    // it is refused. See cloud-models.md, "4. The answer".
+    private async Task<ModelResponse> AnthropicAsync(
+        ModelProfile profile,
+        string body,
+        Func<string, string?>? watch,
+        CancellationToken cancellationToken)
+    {
+        var told = new List<string>();
+        for (var attempt = 0; ; attempt++)
+        {
+            var sent = System.Diagnostics.Stopwatch.StartNew();
+            HttpResponseMessage response;
+            try
+            {
+                response = await SendAsync(profile, HttpMethod.Post, AnthropicMessages.Path, body, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ModelEndpointException exception) when (exception.InnerException is HttpRequestException && attempt < BusyRetries)
+            {
+                told.Add(exception.Message);
+                await Task.Delay(_busyWait, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+            catch (ModelEndpointException exception) when (exception.InnerException is HttpRequestException)
+            {
+                told.Add(exception.Message);
+                throw new ModelEndpointException(Tries(told), exception);
+            }
+
+            using (response)
+            {
+                if (response.IsSuccessStatusCode)
+                {
+                    if (response.Content.Headers.ContentType?.MediaType == "text/event-stream")
+                    {
+                        return await AnthropicMessages.ReadStreamAsync(response, watch, sent, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    var whole = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                    return AnthropicMessages.ReadWhole(response, whole, sent.Elapsed.TotalMilliseconds);
+                }
+
+                var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                var error = AnthropicMessages.ErrorText(response, text);
+                if (!AnthropicMessages.Busy(response.StatusCode))
+                {
+                    throw new ModelEndpointException(error, refused: true);
+                }
+
+                told.Add(error);
+                if (attempt >= BusyRetries)
+                {
+                    throw new ModelEndpointException(Tries(told));
+                }
+
+                await Task.Delay(AnthropicMessages.Wait(response, _busyWait), cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        static string Tries(List<string> told) =>
+            $"Anthropic did not answer after {told.Count.ToString(CultureInfo.InvariantCulture)} tries: " + string.Join(" Then: ", told);
     }
 
     // A streamed answer: server-sent events, each "data: " and a chunk,
@@ -454,6 +563,12 @@ public sealed class HttpModelEndpoint(
     public async Task<JsonObject?> ServerSamplingAsync(ModelProfile profile, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(profile);
+        if (profile.SendsToAnthropic)
+        {
+            // Anthropic has no sampling settings to report.
+            return null;
+        }
+
         try
         {
             using var response = await SendAsync(
@@ -480,6 +595,13 @@ public sealed class HttpModelEndpoint(
     public async Task<string?> ServerBuildAsync(ModelProfile profile, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(profile);
+        if (profile.SendsToAnthropic)
+        {
+            // Anthropic gives no build; what the recorder asks of it is
+            // fixed by the version it sends.
+            return AnthropicMessages.ServerBuild;
+        }
+
         try
         {
             using var response = await SendAsync(
@@ -509,7 +631,7 @@ public sealed class HttpModelEndpoint(
     public async Task LoadAsync(ModelProfile profile, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(profile);
-        if (profile.Local is null)
+        if (profile.Local is null || profile.SendsToAnthropic)
         {
             return;
         }
@@ -602,7 +724,7 @@ public sealed class HttpModelEndpoint(
     public async Task UnloadAsync(ModelProfile profile, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(profile);
-        if (profile.Local is null)
+        if (profile.Local is null || profile.SendsToAnthropic)
         {
             return;
         }
@@ -654,7 +776,7 @@ public sealed class HttpModelEndpoint(
         string? body,
         CancellationToken cancellationToken)
     {
-        if (await EndpointPolicy.RefusalAfterResolvingAsync(profile.Endpoint, cancellationToken).ConfigureAwait(false) is { } refusal)
+        if (await EndpointPolicy.RefusalAfterResolvingAsync(profile.Endpoint, profile.Provider, cancellationToken).ConfigureAwait(false) is { } refusal)
         {
             throw new ModelEndpointException(refusal);
         }
@@ -676,6 +798,11 @@ public sealed class HttpModelEndpoint(
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", keys.Unprotect(protectedKey));
         }
 
+        if (profile.SendsToAnthropic)
+        {
+            request.Headers.Add("anthropic-version", AnthropicMessages.Version);
+        }
+
         try
         {
             // Headers first, so that a streamed answer is read as it arrives.
@@ -683,7 +810,8 @@ public sealed class HttpModelEndpoint(
         }
         catch (HttpRequestException exception)
         {
-            throw new ModelEndpointException($"The model server at {profile.Endpoint} could not be reached: {exception.Message}", exception);
+            throw new ModelEndpointException(
+                $"{(profile.SendsToAnthropic ? "Anthropic" : "The model server")} at {profile.Endpoint} could not be reached: {exception.Message}", exception);
         }
     }
 

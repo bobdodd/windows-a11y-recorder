@@ -59,6 +59,42 @@ public sealed record GenerationSettings(
 }
 
 /// <summary>
+/// The kinds of server a profile sends to: an OpenAI-compatible chat
+/// completions server on this PC or the local network, as every profile
+/// was before 2026-11-11 and the default when a profile does not say, or
+/// Anthropic's Messages API. See docs/architecture/cloud-models.md.
+/// </summary>
+public static class ModelProviders
+{
+    public const string OpenAiCompatible = "openai-compatible";
+    public const string Anthropic = "anthropic";
+
+    public static IReadOnlyList<string> All { get; } = [OpenAiCompatible, Anthropic];
+}
+
+/// <summary>
+/// The settings of a profile that sends to Anthropic which other profiles
+/// do not have: the efforts Claude takes, and the output limit of a
+/// profile that does not give one.
+/// </summary>
+public static class AnthropicSettings
+{
+    /// <summary>
+    /// The efforts of <c>output_config.effort</c> (Anthropic's effort
+    /// documentation, checked 2026-11-11). A profile with none takes the
+    /// model's own default.
+    /// </summary>
+    public static IReadOnlyList<string> Efforts { get; } = ["low", "medium", "high", "xhigh", "max"];
+
+    /// <summary>
+    /// The output limit of a Claude profile that gives none: thinking counts
+    /// toward it, so it is larger than a local profile's (cloud-models.md,
+    /// "7. Defaults").
+    /// </summary>
+    public const int DefaultMaxTokens = 32000;
+}
+
+/// <summary>
 /// One model at one endpoint. A profile with <see cref="Local"/> is served
 /// by the llama.cpp server the worker starts; any other is a server the
 /// worker only sends requests to.
@@ -75,6 +111,19 @@ public sealed record ModelProfile(
 {
     public bool Supports(string capability) =>
         Capabilities.Contains(capability, StringComparer.Ordinal);
+
+    /// <summary>The kind of server the profile sends to, one of <see cref="ModelProviders"/>.</summary>
+    public string Provider { get; init; } = ModelProviders.OpenAiCompatible;
+
+    /// <summary>
+    /// For a profile that sends to Anthropic, the effort asked for, one of
+    /// <see cref="AnthropicSettings.Efforts"/>, or null for the model's
+    /// own default; null for every other profile.
+    /// </summary>
+    public string? Effort { get; init; }
+
+    /// <summary>Whether the profile sends to Anthropic, outside the local network.</summary>
+    public bool SendsToAnthropic => Provider == ModelProviders.Anthropic;
 }
 
 /// <summary>The llama.cpp server the worker starts on this PC.</summary>
@@ -321,6 +370,17 @@ public static class AnalysisSettingsFile
             return null;
         }
 
+        var provider = ModelProviders.OpenAiCompatible;
+        if (profile["provider"] is { } providerNode)
+        {
+            provider = providerNode.GetValueKind() == JsonValueKind.String ? providerNode.GetValue<string>() : "";
+            if (!ModelProviders.All.Contains(provider, StringComparer.Ordinal))
+            {
+                problems.Add($"Profile \"{name}\" names a provider that is not {string.Join(" or ", ModelProviders.All)}.");
+                return null;
+            }
+        }
+
         if (!Uri.TryCreate(String(profile, "endpoint"), UriKind.Absolute, out var endpoint) ||
             (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))
         {
@@ -328,10 +388,33 @@ public static class AnalysisSettingsFile
             return null;
         }
 
-        if (EndpointPolicy.Refusal(endpoint) is { } refusal)
+        if (EndpointPolicy.Refusal(endpoint, provider) is { } refusal)
         {
             problems.Add($"Profile \"{name}\": {refusal}");
             return null;
+        }
+
+        if (provider == ModelProviders.Anthropic && AnthropicProblem(profile, name) is { } anthropicProblem)
+        {
+            problems.Add(anthropicProblem);
+            return null;
+        }
+
+        string? effort = null;
+        if (profile["effort"] is { } effortNode)
+        {
+            effort = effortNode.GetValueKind() == JsonValueKind.String ? effortNode.GetValue<string>() : null;
+            if (provider != ModelProviders.Anthropic)
+            {
+                problems.Add($"Profile \"{name}\" gives an effort, which only a profile that sends to Anthropic has.");
+                return null;
+            }
+
+            if (effort is null || !AnthropicSettings.Efforts.Contains(effort, StringComparer.Ordinal))
+            {
+                problems.Add($"Profile \"{name}\" gives an effort that is not {string.Join(", ", AnthropicSettings.Efforts)}.");
+                return null;
+            }
         }
 
         var capabilities = new List<string>();
@@ -404,7 +487,9 @@ public static class AnalysisSettingsFile
             }
         }
 
-        var generation = GenerationSettings.Default;
+        var generation = provider == ModelProviders.Anthropic
+            ? GenerationSettings.Default with { MaxTokens = AnthropicSettings.DefaultMaxTokens }
+            : GenerationSettings.Default;
         if (profile["generation"] is JsonObject generationObject)
         {
             try
@@ -465,7 +550,45 @@ public static class AnalysisSettingsFile
             modelFile,
             local,
             generation,
-            String(profile, "protectedApiKey"));
+            String(profile, "protectedApiKey"))
+        {
+            Provider = provider,
+            Effort = effort
+        };
+    }
+
+    // What a profile that sends to Anthropic may not have, or null: no
+    // model file and no local server, as the model is Anthropic's; no
+    // temperature, seed, thinking switch or sampling options, which the
+    // API refuses or does not have (cloud-models.md, "What the Anthropic
+    // API requires"); and an API key. Each is reported rather than
+    // dropped, so that a task never runs with a setting silently ignored.
+    private static string? AnthropicProblem(JsonObject profile, string name)
+    {
+        if (profile["local"] is not null)
+        {
+            return $"Profile \"{name}\" sends to Anthropic, so it cannot be served by this PC.";
+        }
+
+        if (profile["file"] is not null)
+        {
+            return $"Profile \"{name}\" sends to Anthropic, so it has no model file.";
+        }
+
+        if (profile["generation"] is JsonObject generation &&
+            new[] { "temperature", "seed", "thinking", "sampling" }.FirstOrDefault(setting => generation[setting] is not null) is { } given)
+        {
+            return $"Profile \"{name}\" sends to Anthropic, which takes no {given} setting; only maxTokens may be given.";
+        }
+
+        if (profile["generation"] is { } generationNode && generationNode is not JsonObject)
+        {
+            return $"Profile \"{name}\" has a generation setting of the wrong type.";
+        }
+
+        return string.IsNullOrEmpty(String(profile, "protectedApiKey"))
+            ? $"Profile \"{name}\" sends to Anthropic, so it needs an API key."
+            : null;
     }
 
     /// <summary>A profile's sampling options, as sent and recorded.</summary>
@@ -494,6 +617,7 @@ public static class AnalysisSettingsFile
         var described = new JsonObject
         {
             ["name"] = profile.Name,
+            ["provider"] = profile.Provider,
             ["endpoint"] = profile.Endpoint.ToString(),
             ["model"] = profile.Model,
             ["capabilities"] = new JsonArray([.. profile.Capabilities.Select(item => JsonValue.Create(item))]),
@@ -514,6 +638,15 @@ public static class AnalysisSettingsFile
             },
             ["hasApiKey"] = profile.ProtectedApiKey is not null
         };
+        if (profile.SendsToAnthropic)
+        {
+            // What Anthropic is sent: no file, temperature, seed, thinking
+            // switch or sampling options, so none is described.
+            described.Remove("file");
+            described["generation"] = new JsonObject { ["maxTokens"] = profile.Generation.MaxTokens };
+            described["effort"] = profile.Effort;
+        }
+
         if (profile.Local is { } local)
         {
             described["local"] = new JsonObject

@@ -2,7 +2,11 @@
 
 ## Status
 
-Proposed 2026-11-11, not built. The owner's decisions of that day are in
+Proposed 2026-11-11. Step 1 of "Build order", the provider and the
+request in `Recorder.Analysis`, is built and tested against a fake server
+in the unit tests; where it differs from the design, "As built: step 1"
+says so. Steps 2 and 3, the player and the run on the development PC, are
+not built. The owner's decisions of 2026-11-11 are in
 "Decisions (2026-11-11)". The Android checks, which follow this work,
 are planned separately; their one decision so far is recorded here
 because it limits what is sent.
@@ -227,6 +231,71 @@ reported with Qwen3.6.
    profile, then runs "Summarise this recording" on a recording already
    summarised with Qwen3.6, with Opus 5.5 and then Sonnet 5.5, and
    compares the reports and their costs.
+
+## As built: step 1 (2026-11-11)
+
+Checked in source, and in the unit tests against a fake server; nothing
+here has been sent to Anthropic yet, so the request's acceptance by the
+real service is step 3's check.
+
+- **Profiles.** `"provider"` is read as designed; an unknown provider is
+  a problem in the settings file. A Claude profile with a local server
+  (`local`), a model file, a temperature, a seed, thinking or sampling
+  options, or no key is reported and not used; its only generation
+  setting is `maxTokens`, 32,000 when absent. `"effort"` is `low`,
+  `medium`, `high`, `xhigh` or `max`, only on a Claude profile; absent,
+  the model's own default is used and no effort is sent.
+- **The address.** `EndpointPolicy` allows a Claude profile only
+  `https://api.anthropic.com` on port 443, with no path, query or user
+  name, and does not look the name up to check for a local address, as
+  it does for other profiles. The key goes in an `Authorization: Bearer`
+  header with `anthropic-version: 2026-10-21`. `anthropic-workspace-id`
+  is not sent, so the key must belong to a workspace (inference from
+  Anthropic's API overview; to check in step 3).
+- **The request.** Built by `AnthropicMessages.Build` as designed, hashed
+  and sent as hashed. A step that needs the one-line grammar cannot be
+  sent to Claude and is refused when built.
+- **Retries, in two places.** The endpoint retries only before the answer
+  starts: a 429, a 5xx (529 included) or a failed connection is waited
+  out for the `retry-after` time (at most 5 minutes) or 30 seconds, up to
+  3 more tries, then the step's attempt fails saying what each try was
+  told. Any other error status is a refused request and is not sent
+  again. Once the answer has started, an `error` event or a stream cut
+  off before `message_stop` fails that attempt.
+- **Attempts.** A failed attempt (a loop, a failed check, `max_tokens`,
+  an error part way through, or a busy service after its retries) is
+  followed by the same request again, until the step has failed
+  `maxAttempts` times (3 by default, the first included), as seeds are
+  now. `refusal` fails the step at once, as designed.
+- **What an attempt records.** As for a local model, plus the response's
+  `request-id` and the `model` it names, in two new columns (migration
+  0041). The attempt's basis is `service`, with no model SHA-256; its
+  request SHA-256 covers the model ID, the version and the parameters
+  (`provider`, `anthropic_version`, `max_tokens`, `effort`,
+  `output_format`, sections and pictures). Input and output tokens are
+  recorded as now; thinking tokens "are billed as output tokens, even
+  when the thinking text isn't returned" (checked in
+  [Anthropic's thinking documentation](https://platform.claude.com/docs/en/build-with-claude/thinking)),
+  so there is no separate thinking count. The times are measured by the worker:
+  from sending to the first content block, then to the end.
+- **Thinking.** On Claude 5 models thinking is on, and its text is
+  omitted unless `display` asks for it (checked in the same page). The
+  request does not ask for it, so design 4's "thinking blocks, kept with
+  the attempt" does not apply: where an answer does stream thinking, its
+  text is read but, as for a local model, kept only in a trial's files,
+  not in the catalog.
+- **Reuse.** An unchanged step reuses its accepted answer, as designed;
+  the catalog's match on the model SHA-256 treats two missing values as
+  equal, so a Claude step can be matched.
+- **Local models.** A Claude step neither unloads nor waits for the local
+  model, which stays loaded for the next local step.
+- **Trials.** A trial with a Claude profile may set only `max_tokens`.
+- **The report.** Its model lines say the step was sent to Anthropic,
+  name the model Anthropic served, and say the model has no SHA-256
+  here and its answers cannot be repeated on request.
+- **Not yet checked.** Whether Anthropic's structured outputs accept the
+  larger schemas, such as long `enum` lists of references (inference
+  that they may hit its schema limits; to check in step 3).
 
 ## Not covered here
 

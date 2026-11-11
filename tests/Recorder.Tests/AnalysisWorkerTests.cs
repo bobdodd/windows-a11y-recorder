@@ -1463,6 +1463,160 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
             }
         }
     }
+
+    // A profile that sends to Anthropic, as the settings file gives one.
+    private static ModelProfile Claude() =>
+        new ModelProfile(
+            "Claude",
+            EndpointPolicy.AnthropicEndpoint,
+            "claude-opus-5-5",
+            [ModelCapabilities.Text, ModelCapabilities.Image],
+            new ModelFile(null, null, null, null),
+            null,
+            GenerationSettings.Default with { MaxTokens = AnthropicSettings.DefaultMaxTokens },
+            "protected")
+        {
+            Provider = ModelProviders.Anthropic,
+            Effort = "high"
+        };
+
+    private static ModelResponse ClaudeAnswer(string reference, string stop = "end_turn") =>
+        StandInEndpoint.Valid(reference, stop) with { RequestId = "req_011", ResponseModel = "claude-opus-5-5" };
+
+    [Fact]
+    public async Task A_Claude_step_is_sent_as_a_messages_request_and_records_the_service_and_its_answer()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text("Claude"), cancellationToken: Token);
+        var endpoint = new StandInEndpoint { Build = AnthropicMessages.ServerBuild, Answer = (_, _, _) => Task.FromResult(ClaudeAnswer("E1")) };
+
+        await new AnalysisWorker(catalog, SettingsWith(3, Claude()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
+        // Nothing is loaded or unloaded for a model Anthropic serves.
+        Assert.Equal(["complete Claude"], endpoint.Calls);
+        using var body = JsonDocument.Parse(endpoint.Bodies.Single());
+        Assert.Equal("claude-opus-5-5", body.RootElement.GetProperty("model").GetString());
+        Assert.Equal("Describe.", body.RootElement.GetProperty("system").GetString());
+        Assert.False(body.RootElement.TryGetProperty("temperature", out _));
+        var attempt = Assert.Single(await AttemptsAsync(task));
+        Assert.Equal(AttemptOutcomes.Accepted, attempt["outcome"]);
+        Assert.Null(attempt["model_sha256"]);
+        Assert.Equal(AnalysisWorker.ServiceBasis, attempt["model_sha256_basis"]);
+        Assert.Equal("anthropic-version 2026-10-21", attempt["server_build"]);
+        Assert.Equal("end_turn", attempt["finish_reason"]);
+        using var parameters = JsonDocument.Parse((string)attempt["parameters"]!);
+        Assert.Equal("anthropic", parameters.RootElement.GetProperty("provider").GetString());
+        Assert.Equal("high", parameters.RootElement.GetProperty("effort").GetString());
+        Assert.Equal(32000, parameters.RootElement.GetProperty("max_tokens").GetInt32());
+        Assert.False(parameters.RootElement.TryGetProperty("seed", out _));
+        var service = Assert.Single(await RowsAsync(
+            "SELECT service_request_id, service_model, profile::text AS profile FROM analysis_attempts WHERE task_id = $1", task));
+        Assert.Equal("req_011", service["service_request_id"]);
+        Assert.Equal("claude-opus-5-5", service["service_model"]);
+        Assert.Contains("\"provider\": \"anthropic\"", (string)service["profile"]!, StringComparison.Ordinal);
+        Assert.DoesNotContain("protected", (string)service["profile"]!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_Claude_answer_that_fails_its_checks_is_asked_for_again_with_the_same_request()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text("Claude"), cancellationToken: Token);
+        var calls = 0;
+        var endpoint = new StandInEndpoint
+        {
+            Build = AnthropicMessages.ServerBuild,
+            Answer = (_, _, _) => Task.FromResult(++calls switch
+            {
+                1 => ClaudeAnswer("E7"),
+                2 => ClaudeAnswer("E1", "max_tokens") with { Content = "{ \"description\": [ [ { \"text\"" },
+                _ => ClaudeAnswer("E1")
+            })
+        };
+
+        await new AnalysisWorker(catalog, SettingsWith(3, Claude()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
+        Assert.Equal(3, calls);
+        Assert.Single(endpoint.Bodies.Distinct(StringComparer.Ordinal));
+        var attempts = await AttemptsAsync(task);
+        Assert.Equal([AttemptOutcomes.Failed, AttemptOutcomes.Failed, AttemptOutcomes.Accepted], attempts.Select(attempt => attempt["outcome"]));
+        Assert.Contains("cites E7", (string)attempts[0]["failure"]!, StringComparison.Ordinal);
+        Assert.Contains("output limit of 32000 tokens", (string)attempts[1]["failure"]!, StringComparison.Ordinal);
+        Assert.Single(attempts.Select(attempt => attempt["input_sha256"]).Distinct());
+    }
+
+    [Fact]
+    public async Task A_Claude_answer_that_fails_at_every_attempt_fails_at_the_limit()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text("Claude"), cancellationToken: Token);
+        var endpoint = new StandInEndpoint { Build = AnthropicMessages.ServerBuild, Answer = (_, _, _) => Task.FromResult(ClaudeAnswer("E7")) };
+
+        await new AnalysisWorker(catalog, SettingsWith(3, Claude()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
+        Assert.Contains("failed 3 times, the limit", await FailureAsync(task), StringComparison.Ordinal);
+        Assert.Equal(3, endpoint.Calls.Count);
+    }
+
+    [Fact]
+    public async Task A_Claude_refusal_fails_the_step_at_once()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text("Claude"), cancellationToken: Token);
+        var endpoint = new StandInEndpoint
+        {
+            Build = AnthropicMessages.ServerBuild,
+            Answer = (_, _, _) => Task.FromResult(ClaudeAnswer("E1", "refusal") with { Content = "I can't help with that." })
+        };
+
+        await new AnalysisWorker(catalog, SettingsWith(3, Claude()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
+        Assert.Contains("Claude refused to answer", await FailureAsync(task), StringComparison.Ordinal);
+        Assert.Single(endpoint.Calls);
+        Assert.Equal("refusal", Assert.Single(await AttemptsAsync(task))["finish_reason"]);
+    }
+
+    [Fact]
+    public async Task A_Claude_task_run_again_reuses_its_accepted_steps_without_asking()
+    {
+        var catalog = await CatalogAsync();
+        var recording = await RecordingAsync();
+        var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text("Claude"), cancellationToken: Token);
+        var endpoint = new StandInEndpoint { Build = AnthropicMessages.ServerBuild, Answer = (_, _, _) => Task.FromResult(ClaudeAnswer("E1")) };
+        await new AnalysisWorker(catalog, SettingsWith(3, Claude()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text("Claude"), rerunOfTaskId: first, cancellationToken: Token);
+        await new AnalysisWorker(catalog, SettingsWith(3, Claude()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(again));
+        Assert.Single(endpoint.Calls);
+        var reused = Assert.Single(await RowsAsync(
+            "SELECT reused_from_attempt_id, service_request_id, service_model FROM analysis_attempts WHERE task_id = $1", again));
+        Assert.NotNull(reused["reused_from_attempt_id"]);
+        Assert.Equal("req_011", reused["service_request_id"]);
+        Assert.Equal("claude-opus-5-5", reused["service_model"]);
+    }
+
+    [Fact]
+    public async Task A_Claude_step_does_not_unload_the_model_this_PC_serves()
+    {
+        var catalog = await CatalogAsync();
+        var recording = await RecordingAsync();
+        var local = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var cloud = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text("Claude"), cancellationToken: Token);
+        var endpoint = new StandInEndpoint();
+
+        await new AnalysisWorker(catalog, SettingsWith(3, Profile("This PC", "qwen"), Claude()), [new StandInKind("visit-1")], endpoint, options: Fast)
+            .RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(local));
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(cloud));
+        Assert.Equal(["load This PC", "complete This PC", "complete Claude", "unload This PC"], endpoint.Calls);
+    }
 }
 
 /// <summary>The HTTP model endpoint against a stand-in server on loopback.</summary>

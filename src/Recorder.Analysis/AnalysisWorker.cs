@@ -322,7 +322,9 @@ public sealed class AnalysisWorker
             throw new StoppedForRecordingException();
         }
 
-        if (_loaded is { } loaded && loaded.Name != profile.Name &&
+        // A profile that sends to Anthropic loads nothing, so it does not
+        // wait for the model loaded here to be finished with.
+        if (!profile.SendsToAnthropic && _loaded is { } loaded && loaded.Name != profile.Name &&
             _runnable.Any(other => other.TaskId != task.TaskId && UsesLoadedModel(other)))
         {
             throw new ModelSwitchNeededException(profile.Name);
@@ -342,7 +344,10 @@ public sealed class AnalysisWorker
         // are unchanged; and where the step failed there with them all
         // unchanged at temperature 0, it fails at once (owner, 2026-10-14).
         // See analysis-runner.md, "Reusing steps when run again".
-        if (task.RerunOfTaskId is { } source && modelSha is not null && build is not null)
+        // A profile that sends to Anthropic has no model file to hash; its
+        // model is named in the request, whose SHA-256 is part of the
+        // identity (cloud-models.md, "5. Repeatability").
+        if (task.RerunOfTaskId is { } source && (modelSha is not null || profile.SendsToAnthropic) && build is not null)
         {
             var identity = new StepIdentity(inputSha, modelSha, build, (JsonObject)parameters.DeepClone());
             if (await Catalog.ReusableAttemptAsync(source, stepKey, identity, cancellationToken).ConfigureAwait(false) is { } reusable)
@@ -441,9 +446,13 @@ public sealed class AnalysisWorker
             {
                 failure = stopped;
             }
-            else if (failure is null && response!.FinishReason == "length")
+            else if (failure is null && ReachedOutputLimit(profile, response!))
             {
                 failure = $"{OutputLimitFailure}{profile.Generation.MaxTokens} tokens.";
+            }
+            else if (failure is null && Refused(profile, response!))
+            {
+                failure = RefusalFailure;
             }
 
             if (failure is null)
@@ -538,6 +547,18 @@ public sealed class AnalysisWorker
                         $"Step {stepKey} failed: {failure} The server refused the request itself, so it was not sent again.");
                 }
 
+                // Claude's refusal is not repaired and not sent again
+                // (cloud-models.md, "4. The answer").
+                if (failure == RefusalFailure)
+                {
+                    throw new StepFailedException($"Step {stepKey} failed: {failure}", response?.Content);
+                }
+
+                // Any other failed answer from a model that cannot repeat
+                // an answer, as Claude cannot, is asked for again with the
+                // same request, up to the step's limit of attempts, and the
+                // first that passes is kept (cloud-models.md, "5.
+                // Repeatability"). Each try is an attempt of its own.
                 continue;
             }
 
@@ -680,6 +701,20 @@ public sealed class AnalysisWorker
     }
 
     private sealed record EarlierAttempt(AcceptedStep? Accepted, string? Failure);
+
+    // Whether an answer stopped at the output limit: llama.cpp's finish
+    // reason "length", or Anthropic's stop reason "max_tokens".
+    private static bool ReachedOutputLimit(ModelProfile profile, ModelResponse response) =>
+        response.FinishReason == "length" || (profile.SendsToAnthropic && response.FinishReason == "max_tokens");
+
+    // Whether Claude refused to answer: Anthropic's stop reason "refusal",
+    // whose answer need not match the schema (structured outputs
+    // documentation, checked 2026-11-11).
+    private static bool Refused(ModelProfile profile, ModelResponse response) =>
+        profile.SendsToAnthropic && response.FinishReason == "refusal";
+
+    // How an answer Claude refused is recorded as failing.
+    internal const string RefusalFailure = "Claude refused to answer (stop reason \"refusal\"), so the step was not asked for again.";
 
     // How an attempt that reached the output limit is recorded as failing.
     private const string OutputLimitFailure = "The output stopped at the output limit of ";
@@ -958,6 +993,16 @@ public sealed class AnalysisWorker
 
         var given = StepProfile(task, request);
         var chosen = trial.Profile is { } name ? ChosenProfile(name, request) : given;
+
+        // Anthropic takes no temperature, seed, thinking switch or sampling
+        // options, and has no one-line grammar; only the output limit may
+        // be tried.
+        if (chosen.SendsToAnthropic &&
+            (trial.OneLine || trial.Thinking is not null || trial.Sampling.Keys.Any(option => option != "max_tokens")))
+        {
+            throw new StepFailedException(
+                $"Profile \"{chosen.Name}\" sends to Anthropic, so a trial may set only the output limit, not a temperature, seed, thinking, sampling option or the one-line grammar.");
+        }
         var options = chosen.Generation.Sampling.ToBuilder();
         var generation = trial.Thinking is { } thinking ? chosen.Generation with { Thinking = thinking } : chosen.Generation;
         foreach (var (option, value) in trial.Sampling)
@@ -1029,7 +1074,8 @@ public sealed class AnalysisWorker
         {
             response = await _endpoint.CompleteAsync(profile, body, watch.Check, cancellationToken).ConfigureAwait(false);
             failure = response.StoppedBecause ??
-                (response.FinishReason == "length" ? $"The output stopped at the output limit of {profile.Generation.MaxTokens} tokens." : null) ??
+                (ReachedOutputLimit(profile, response) ? $"The output stopped at the output limit of {profile.Generation.MaxTokens} tokens." : null) ??
+                (Refused(profile, response) ? RefusalFailure : null) ??
                 Check(response.Content, request).Failure;
 
             // What the wording check would have found in a step it does not
@@ -1067,7 +1113,7 @@ public sealed class AnalysisWorker
     private static string? AnswerForm(string body)
     {
         var node = JsonNode.Parse(body) as JsonObject;
-        var form = node?["response_format"] ?? node?["grammar"] ?? node?["json_schema"];
+        var form = node?["response_format"] ?? node?["grammar"] ?? node?["json_schema"] ?? node?["output_config"]?["format"];
         return form switch
         {
             null => null,
@@ -1080,7 +1126,11 @@ public sealed class AnalysisWorker
     public static bool Repeatable(ModelProfile profile)
     {
         ArgumentNullException.ThrowIfNull(profile);
-        return profile.Generation.Temperature == 0;
+
+        // Claude has no seed and takes no temperature, so the same request
+        // need not give the same answer (cloud-models.md, "5.
+        // Repeatability").
+        return !profile.SendsToAnthropic && profile.Generation.Temperature == 0;
     }
 
     private sealed record RequestResult(ModelResponse? Response, string? Failure, string? Interruption, bool Refused = false);
@@ -1172,7 +1222,9 @@ public sealed class AnalysisWorker
 
     private async Task EnsureLoadedAsync(ModelProfile profile, CancellationToken cancellationToken)
     {
-        if (_loaded?.Name == profile.Name)
+        // A profile that sends to Anthropic has nothing to load, and leaves
+        // a model loaded here for the steps that use it.
+        if (_loaded?.Name == profile.Name || profile.SendsToAnthropic)
         {
             return;
         }
@@ -1217,12 +1269,24 @@ public sealed class AnalysisWorker
         }
     }
 
+    /// <summary>
+    /// The basis of an attempt's model SHA-256 for a model a service names,
+    /// such as Anthropic's: there is no file, so no SHA-256.
+    /// </summary>
+    public const string ServiceBasis = "service";
+
     // The model file's SHA-256: computed by the worker when the file is on
     // this PC, once for each size and change time; otherwise as the profile
     // states it, or unknown. A computed hash that differs from the stated
     // one fails the step, since the file is not the one the profile names.
     private async Task<(string? Sha256, string Basis)> ModelHashAsync(ModelProfile profile, CancellationToken cancellationToken)
     {
+        // Anthropic's model has no file here; it is named by the service.
+        if (profile.SendsToAnthropic)
+        {
+            return (null, ServiceBasis);
+        }
+
         var path = profile.Local?.ModelPath ?? profile.File.Path;
         if (path is not null && File.Exists(path))
         {

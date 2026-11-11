@@ -22,6 +22,14 @@ Changes on `main` since 1.1.0, not yet released.
   [the trials of 2026-10-20](docs/architecture/model-trials-2026-10-20.md).
 - Database migrations 0034 to 0037 add the analysis tasks, their steps and
   their claims to the catalog.
+- Claude profiles in the analysis settings file (`"provider":
+  "anthropic"`): requests in the form of Anthropic's Messages API, sent
+  only to `https://api.anthropic.com`, streamed and watched for loops,
+  waited out and tried again when the service is busy, and recorded with
+  Anthropic's request ID and model. Not yet in the player and not yet
+  sent to Anthropic; see [cloud models](docs/architecture/cloud-models.md).
+- Database migration 0041 adds the `service` basis and the request ID and
+  model columns to the analysis attempts.
 
 ### Installer and model setup
 
