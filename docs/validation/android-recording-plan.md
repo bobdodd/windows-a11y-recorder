@@ -2926,3 +2926,120 @@ the "android.talkback" line reads "TalkBack:" with at least 2
 utterances, not "no speech lines yet"; and the "android.touch" line
 counts at least 3 touches. Send the screenshot, and say which app was
 opened. The comparison is then made from the recording's folder.
+
+## Results of part 8, step 8b
+
+Run on the development PC and the Pixel on 2026-11-11 with the version
+installed for test 68 (companion version code 753). Test 72 passed:
+every collector was Running and Healthy, with 5 TalkBack utterances and
+3 touches. The app opened was Gmail. The recording,
+`20261111-163053-c24f2994c331444996b2858762e14ca0`, was read from the
+development PC: its events (`recording.mcap`), the phone's sound
+(`audio/device.wav`) and its video stream (`android/screen.h264`),
+which was decoded again to compare pictures. Decoding gave 378
+pictures, one for each picture recorded.
+
+How each time was found, all on the session clock:
+
+- **Touch:** the touch-down report on `input.android.touch`.
+- **Accessibility event:** the records on `accessibility.android.events`.
+- **TalkBack's actions:** the lines TalkBack wrote to the phone's log,
+  on `screen-reader.talkback.log`.
+- **Picture:** the first picture whose pixels differ visibly from the
+  one before. The first new picture after each tap (pictures 34 and
+  112) differed from the one before by at most 4 of 255 in any colour,
+  which is compression noise, so the first new picture is not the first
+  visible change.
+- **Utterance:** the `utterance-started` record on
+  `screen-reader.talkback.speech`, and the first `word-reached`.
+- **Sound:** the first 2 ms of `audio/device.wav` louder than 0.0005 of
+  full scale after at least 20 ms of silence, placed by its packet's
+  time. Between sounds the phone's sound is exactly zero.
+
+The tap on the icon (TalkBack moves its focus to it):
+
+| Source | Time | Uncertainty |
+|---|---|---|
+| Touch-down | 11.891 s | 2.3 ms |
+| TYPE_TOUCH_INTERACTION_START | 11.934 s | 3.3 ms |
+| TYPE_VIEW_ACCESSIBILITY_FOCUSED, "Gmail" | 12.279 s | 2.6 ms |
+| TalkBack logs `ACTION_ACCESSIBILITY_FOCUS` | 12.281 s | |
+| First visible change: the focus outline moves to the icon (picture 35) | 12.310 s | 1.8 ms |
+| TalkBack asks for its focus sound | 12.342 s | |
+| Utterance "Gmail" started | 12.345 s | 1.8 ms |
+| Sound starts | 12.451 s | 1.8 ms, plus 2 ms, and see below |
+| Word "Gmail" reached | 12.473 s | 1.8 ms |
+
+The double tap that opens Gmail:
+
+| Source | Time | Uncertainty |
+|---|---|---|
+| Second touch-down | 17.701 s | 1.6 ms |
+| Second touch-up | 17.788 s | |
+| TalkBack logs that it detected a double tap | 17.794 s | |
+| TalkBack logs `ACTION_CLICK` | 17.852 s | |
+| TYPE_VIEW_CLICKED, "Gmail" | 17.851 s | 2.0 ms |
+| First visible change: the launch animation starts (picture 120) | 17.929 s | 1.0 ms |
+| TalkBack asks for its click sound | 18.029 s | |
+| A quiet sound starts | 18.030 s | 1.0 ms, plus 2 ms |
+| TYPE_WINDOW_STATE_CHANGED, Gmail's "Primary" | 18.111 s | 2.2 ms |
+| Utterance "Mail" started | 18.846 s | 0.5 ms |
+| Word "Mail" reached | 18.941 s | 0.5 ms |
+| Sound of "Mail" starts | 18.964 s | 0.5 ms, plus 2 ms, and see below |
+
+TalkBack's log lines carry the phone's own time, to the microsecond,
+so they are placed by the same clock mapping as the rest.
+
+What this shows:
+
+- **The order holds in both.** Touch, then event, then picture, then
+  utterance, then sound, each by more than the two sources'
+  uncertainties together. The smallest gaps are 31 ms (focus event to
+  the picture of the outline) and 35 ms (picture to utterance); the
+  uncertainties there add to 4.4 ms and 3.6 ms.
+- **Gmail's window event comes after the first changed picture.** The
+  click event comes 78 ms before the launch animation's first picture,
+  but Gmail's TYPE_WINDOW_STATE_CHANGED comes 182 ms after it. The
+  animation is drawn before Gmail's window is reported, which is
+  expected of an app launch (an inference; how Android draws the launch
+  animation was not looked up). It is not a clock fault, as the click
+  event, on the same clock, comes first.
+- **Accessibility event times are on CLOCK_MONOTONIC.** The focus and
+  click events have times 1 to 2 ms before TalkBack logged the actions
+  that raised them. The log's times are CLOCK_MONOTONIC (`logcat -v
+  monotonic`), and an event's time is in whole milliseconds, so it can
+  be up to 1 ms early. The companion app received each of the 3 focus
+  and click events 2.5 to 23 ms after its time, by `System.nanoTime()`,
+  never before. This settles, for the Pixel, the inference that
+  `getEventTime()` is on CLOCK_MONOTONIC.
+- **Touch times are on the same clock.** TalkBack logged its double
+  tap 5 ms after the second finger came up, by `getevent`.
+- **Video times are consistent.** The picture of the focus outline is
+  29 ms after TalkBack's focus action, and the launch animation's first
+  picture is 77 ms after its click action: never before the action,
+  and within a few frames of it. That is consistent with the video's
+  times being on CLOCK_MONOTONIC with a small delay for drawing. It
+  does not measure the delay.
+- **The sound is within about one packet.** Each utterance's sound
+  started 10 to 23 ms after TalkBack logged its first word: 13.734 s
+  against 13.722 s, 18.964 s against 18.941 s, 19.626 s against
+  19.616 s, and 22.026 s against 22.011 s. For "Gmail" the sound
+  started 22 ms before the word was logged, perhaps as TalkBack's focus
+  sound came first (an inference). Each utterance's sound starts 106 to
+  146 ms after its `utterance-started` line, so the order holds by a
+  wide margin. scrcpy 5.0.1 gives each sound packet the time from
+  `AudioRecord.getTimestamp()` without that time's frame position
+  ([scrcpy, AudioRecordReader.java](https://github.com/Genymobile/scrcpy/blob/a60891aea193d92e7e5c3942700eca63f9d19a5f/server/src/main/java/com/genymobile/scrcpy/audio/AudioRecordReader.java)),
+  so which sample of the 21.3 ms packet that time marks is not known.
+  The recorder takes it to be the last. The sound may therefore be
+  placed up to about one packet early or late; the gaps above are in
+  keeping with that.
+- **The click sound is not identified.** TalkBack asked for a sound for
+  the double tap at 17.795 s and for the click at 18.029 s. Nothing was
+  heard between 17.620 s and 18.030 s; then came quiet sounds at
+  18.030 s and 18.114 s, and a louder one at 18.286 s. If the sound at
+  18.030 s is the click sound, it started within 1 ms of being asked
+  for, while speech starts 10 to 23 ms after its word is logged; that
+  would suggest the sound is placed up to one packet early. Which
+  sound is which was not established, so this is not used as evidence.
+- **Not checked.** One recording, on one phone, with one app.

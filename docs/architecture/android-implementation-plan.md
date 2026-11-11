@@ -1726,14 +1726,27 @@ slice's full test goes into a validation plan,
     phone had never written reads "not set" at the start; the results
     are in the validation plan, "Results of part 8, step 8a". Step 8a is
     complete; step 8b, the one-timeline check, is next.
+- **Done, step 8b (2026-11-11).** The owner chose that the comparison
+  is not built into the recorder: the owner made one recording (test
+  72), and its folder was read from the development PC and compared
+  outside the recorder. In both a single tap (TalkBack's focus moving to
+  Gmail's icon) and a double tap (Gmail opening), the touch came first,
+  then the accessibility event, then the first visible change in the
+  picture, then the utterance, then its sound, each by more than the
+  sources' uncertainties together. Gmail's window event came after the
+  launch animation's first picture, though the click event came before
+  it. The results, with each time, are in the validation plan, "Results
+  of part 8, step 8b". Step 8c, the whole recording and the installer,
+  is next.
 
 ## Risks, and where each is settled
 
 | Point | Status | Settled in |
 |---|---|---|
 | Media Foundation decodes the phone's 1080 by 2404 H.264 | Checked on the development PC with one frame; the Alienware not checked | slice 3 |
-| Video packet times are CLOCK_MONOTONIC | Inference | slice 8, one-timeline check |
-| Accessibility event times match CLOCK_MONOTONIC | Inference from source | slice 8 |
+| Video packet times are CLOCK_MONOTONIC | Consistent on the Pixel (test 72): the first visible change came 29 ms after TalkBack's logged focus action and 77 ms after its click, never before; the delay is not measured | slice 8, step 8b |
+| Accessibility event times match CLOCK_MONOTONIC | Checked on the Pixel (test 72): each event's time is 1 to 2 ms before TalkBack's logged action, and 2.5 to 23 ms before the companion app received it | slice 8, step 8b |
+| Which sample a sound packet's time marks | Not known: scrcpy gives `AudioRecord.getTimestamp()`'s time without its frame position; on the Pixel (test 72) each utterance's sound began 10 to 23 ms after its first word was logged, within one 21.3 ms packet | slice 8, step 8b |
 | `adb install` avoids the restricted settings block | Checked for the recorder's way: Android 17 on the Pixel accepted `settings put` for the app installed with `adb install` (test 11) | slice 2 |
 | Accessibility volume can be read or set over adb | Settled from Android's source: adb's shell cannot set it; the companion app can, as an accessibility service that is on. Checked on the Pixel by tests 34 to 36 | slice 4, step 4c |
 | "Display speech output" can be read over adb | Not checked | slice 1 |
