@@ -3209,6 +3209,10 @@ four included parts and not the Android files. It now lists a fifth,
 "The scrcpy server and the companion app, for recording an Android
 phone". The script compiles with Inno Setup 7.
 
+Set aside by the owner on 2026-11-11, not run: the installer already
+installs reliably on the development PC, and the Alienware is tried
+later.
+
 The development PC tests are 75 to 79. On the Alienware, run tests 2 to
 7 of [the Windows installer plan](windows-installer-plan.md) first,
 which install the recorder and check the models on the RTX 3090, then
