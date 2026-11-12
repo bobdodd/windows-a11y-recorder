@@ -383,6 +383,25 @@ public sealed class PhoneAccessibilityTimeline
     }
 
     /// <summary>
+    /// The time of the first snapshot after a time that lists a window,
+    /// when the window may have changed; null when none does. The contrast
+    /// measurement (android-checks.md, step 4b) takes the picture of a
+    /// settled snapshot from before it.
+    /// </summary>
+    public long? NextListing(long time, int windowId)
+    {
+        for (var index = LastAtOrBefore(_snapshotTimes, time) + 1; index < _snapshots.Length; index++)
+        {
+            if (_snapshots[index].Windows.Any(entry => entry.Id == windowId))
+            {
+                return _snapshotTimes[index];
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// The snapshot whose items for a window the tree view shows at a time:
     /// null when the latest snapshot does not list the window, or none took
     /// its items.

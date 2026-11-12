@@ -9,7 +9,10 @@ display density and each app's version, is built (see "As built: step
 2") and was checked on the phone on 2026-11-12. Step 3, the checks from
 the tree and the findings list, is built (see "As built: step 3") and
 was checked on the development PC on 2026-11-12 with recordings already
-made (tests 11 to 13 of the validation plan). The owner's
+made (tests 11 to 13 of the validation plan). Step 4, contrast, is being
+built: the phone's own screenshots (4a, checked on the phone on
+2026-11-12) and the colour measurement with the text found by OCR (4b,
+checked on the development PC with tests 16 and 18's recordings). The owner's
 decisions of 2026-11-11 are in "Decisions (2026-11-11)" and "Decisions
 on the open questions (2026-11-11)". Before any check is assigned a
 result, the recording has to say which app and which screen each moment
@@ -941,6 +944,106 @@ with the setting and its findings; then non-text contrast.
   clock, no companion connection, and the connection ending. None of
   that shows Android taking them on the Pixel; tests 17 and 18 of the
   validation plan do.
+
+### As built: step 4b, measuring the colours and finding the text
+
+Step 4b measures; it reports nothing yet, and nothing in the recorder's
+window changes. Step 4c turns the measurements into findings.
+
+- **The screens measured** (`PhoneContrastRun`). For each visit, each
+  settled snapshot whose items for the app's window were taken by a
+  snapshot not already measured in the visit, so a screen is measured
+  once for each time its items were read.
+- **The picture.** The first of the companion's screenshots taken from
+  the settled snapshot until the next snapshot that lists the app's
+  window, or the visit's end; if there is none, the last frame of the
+  video before then, if it is in the visit; if there is neither, the run
+  says so for that snapshot. This is not quite the design's rule, "no
+  change of picture in the video between the two": the video's picture
+  also changes when only the status bar's clock does (measured in test
+  18's screenshots 4 and 5), so the tree is used instead, as the
+  companion takes a snapshot after each change in the app's window
+  (inference from the step 7b rules).
+- **The screenshots in the player's index.** A recording read from its
+  recording file keeps only some records in memory, in the playback
+  index; the screenshot records were not among them, so the first run on
+  test 18's recording found none. The index, now version 28, keeps them
+  with their paths (`SessionPlaybackArchive.PhoneScreenshots`), and an
+  older index is worked out again when a recording is opened.
+- **The colours** (`PhoneColours`). ATF's swatch with one text colour,
+  as in the measurement: the colours are counted exactly, those closer
+  than a Delta E of 3 joined, most common first, into the first kept
+  colour (ATF's `colorDifference`), then the most common colour above
+  the average luminance of the colours and the most common below it are
+  the two, the more common of them the background, a tie going to the
+  darker, as in ATF; the ratio is rounded to two places. The same
+  joining is used on screenshots: on test 16's screenshots it changed no
+  ratio (measured, 110 lines).
+- **Reading the text.** `WindowsPhoneTextReader` uses Windows' OCR
+  (`Windows.Media.Ocr`) for the user's languages, and gives its words
+  with their boxes and lines and the engine's name and language. For
+  this step the words were read on the PC by PowerShell with the same
+  calls and saved; the reader itself is first run on the PC in step 4c.
+- **Matching the words to the items** (`PhoneTextMatching`). A word
+  goes to the smallest item its middle is in whose text, hint or
+  content description has it: spelt the same, allowing "0" for "o"; "1",
+  "i", "|" and "!" for "l"; and "5" for "s"; within one letter for a
+  word of four letters or more and two for eight or more; or as part of
+  the item's text run together, as OCR joins and splits words. The words
+  of one OCR line that go to one item are one line to measure, so a row
+  of tiles read as one line is measured tile by tile. A word in no
+  item's text is text OCR found if it has at least two letters or
+  digits. A word whose middle is outside the app's window, or in a
+  window above it such as the status bar, is not the app's.
+- **The box measured** is the line's words, widened by a fifth of its
+  height on each side, at least 2 pixels, but not past the item it is
+  in, so there is background around the letters.
+- **Text OCR did not read.** An item with text of which OCR placed
+  nothing is measured on its bounds if it is not an image, has no
+  children, and is not cut off by a list that scrolls (ATF's "against a
+  scrollable edge"). That last rule was added after the measurement
+  below: two items at the bottom of a list, mostly scrolled out of
+  sight, were measured on the slivers left, which showed a border and
+  no text.
+- **Pictures smaller than the screen.** The tree's bounds are in the
+  screen's pixels; a picture of another size is measured with the
+  bounds scaled to it.
+
+Measured with test 16's recording and 20 screenshots taken with
+`screencap -p` (as in "Step 4: what the measurement found"), and test
+18's recording:
+
+- **Test 16, from the video.** 5 settled snapshots, each measured on a
+  frame, as the recording has no companion screenshots: 110 lines, 105
+  placed by OCR and 5 on an item's bounds, none found by OCR alone.
+  Each frame was matched to its screenshot by its pixels (1.1 to 1.3
+  levels in 255 apart on average below the status bar) and the same
+  boxes measured on the screenshot. All 110 have the screenshot's level
+  (against 3:1 and 4.5:1); the ratios differ by a median of 0.9%, by
+  4% or less for 106, and by 6.5% at most, against 11.2% when the whole
+  item was measured; the frame's was the lower in 17. On the screenshots
+  99 pass 4.5:1, 6 are between 3:1 and 4.5:1, and 5 are below 3:1.
+- **The emoji tiles** that came out wrong in the measurement ("Good"
+  under an emoji) are now measured on their words alone and have the
+  screenshot's level.
+- **The same as ATF.** Measured without joining, the swatch on the
+  screenshots gives the same ratio as a separate re-implementation of
+  ATF's for all 110 boxes.
+- **Test 18, from the phone's screenshots.** 3 settled snapshots, each
+  measured on a companion screenshot taken 9, 529 and 518 ms after it.
+- **Checked before any Pixel test:** the solution builds with no
+  warnings and the tests pass, 2,330 of them, with the 10 that need
+  Windows failing as before. The new tests cover the swatch (one colour,
+  two, a tie, rounding, joining, the Delta E, a box outside the
+  picture), reading a PNG, the matching (the smallest item, tiles, a
+  near misspelling, the status bar and the window's edge, text OCR
+  found, the bounds rule and its exceptions, a smaller picture), the
+  choice of picture, the next snapshot listing a window, and the
+  screenshots in the index. There is no Pixel test for 4b, as nothing
+  on the screen changes; step 4c's tests check the findings on the
+  phone.
+- **Limits.** As in the measurement: one app, one light theme, five
+  screens, held still, one phone, and one OCR language.
 
 ## Decisions on the open questions (2026-11-11)
 

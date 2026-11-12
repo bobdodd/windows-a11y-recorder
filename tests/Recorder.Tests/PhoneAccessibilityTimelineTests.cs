@@ -150,7 +150,7 @@ public sealed class PhoneAccessibilityTimelineTests : IDisposable
     {
         FromIndex(out var index, out _);
 
-        Assert.Equal(27, index.Version);
+        Assert.Equal(28, index.Version);
         var trees = index.Events.Where(item => item.Channel == AndroidAccessibilityRecords.TreeChannel).ToArray();
         Assert.Equal(2, trees.Length);
         var windows = trees[0].Payload.GetProperty("windows").EnumerateArray().ToArray();
@@ -165,6 +165,17 @@ public sealed class PhoneAccessibilityTimelineTests : IDisposable
         Assert.Equal(3, focus.Length);
         Assert.Equal(420, focus[0].Payload.GetProperty("source").GetProperty("bounds").GetProperty("top").GetInt32());
         Assert.Equal(2, index.Events.Count(item => item.Channel == AndroidCompanionRecords.DisplayChannel));
+    }
+
+    [Fact]
+    public void NextListing_IsTheNextSnapshotListingTheWindow()
+    {
+        var phone = FromIndex(out _, out _).PhoneAccessibility;
+
+        Assert.Equal(At(2), phone.NextListing(At(1), 512));
+        Assert.Equal(At(3), phone.NextListing(At(2), 512));
+        Assert.Null(phone.NextListing(At(3), 512));
+        Assert.Null(phone.NextListing(At(1), 99));
     }
 
     [Fact]

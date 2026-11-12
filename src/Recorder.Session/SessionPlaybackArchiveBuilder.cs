@@ -119,6 +119,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _phoneFocus = [];
     private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _phoneWindowStates = [];
     private readonly List<(long Time, JsonElement Payload)> _phoneDisplays = [];
+    private readonly List<PhoneScreenshot> _phoneScreenshots = [];
     private readonly List<(long Time, string EventType, JsonElement Payload)> _phoneSettings = [];
     private readonly List<(long Time, string EventType, JsonElement Payload)> _phoneDevice = [];
     private readonly List<KeyEvidenceRecord> _accessibilityRequests = [];
@@ -333,6 +334,21 @@ public sealed class SessionPlaybackArchiveBuilder
             payload.ValueKind == JsonValueKind.Object)
         {
             _phoneDisplays.Add((timestamp, payload.Clone()));
+        }
+
+        // The companion's screenshots, for measuring colours
+        // (android-checks.md, step 4b).
+        if (timelineEvent.Channel == AndroidScreenshotRecords.Channel &&
+            timelineEvent.EventType == AndroidScreenshotRecords.ScreenshotEventType &&
+            payload.ValueKind == JsonValueKind.Object &&
+            payload.TryGetProperty("path", out var screenshotPath) &&
+            screenshotPath.ValueKind == JsonValueKind.String &&
+            screenshotPath.GetString() is { Length: > 0 } relativePath)
+        {
+            _phoneScreenshots.Add(new PhoneScreenshot(
+                timestamp,
+                relativePath,
+                Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar))));
         }
 
         // The phone's settings (Android slice 8, step 8a).
@@ -595,6 +611,7 @@ public sealed class SessionPlaybackArchiveBuilder
             PhoneScreens = _phoneTrees.Count == 0
                 ? PhoneScreenTimeline.Empty
                 : new PhoneScreenTimeline(_phoneTrees, _phoneWindowStates, phoneAccessibility.ScreenAt, duration),
+            PhoneScreenshots = [.. _phoneScreenshots.OrderBy(shot => shot.MonotonicNanoseconds)],
             PhoneSettings = _phoneSettings.Count == 0
                 ? PhoneSettingsTimeline.Empty
                 : new PhoneSettingsTimeline(_phoneSettings),

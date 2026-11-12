@@ -685,3 +685,13 @@ screenshots are then read from the PC for step 4b.
   sRGB IEC61966-2.1, the phone took a median 376 ms from asking to the
   PNG, median delay from PNG to recorder 24 ms." The 376 ms agrees with
   the companion's times in the records.
+
+## Step 4b: measuring the colours and finding the text
+
+Step 4b of [Android checks](../architecture/android-checks.md), "As
+built: step 4b, measuring the colours and finding the text", measures
+the colours of each line of text on the phone's pictures but reports
+nothing yet, so it has no test on the phone. It was checked on the
+development PC with test 16's recording and its 20 `screencap`
+screenshots, and with test 18's recording; the results are in that
+section. Step 4c's tests check the findings on the phone.

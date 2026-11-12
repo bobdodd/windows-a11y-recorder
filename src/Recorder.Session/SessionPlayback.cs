@@ -134,6 +134,12 @@ public sealed record SessionPlaybackArchive(
     /// </summary>
     public PhoneAccessibilityTimeline PhoneAccessibility { get; init; } = PhoneAccessibilityTimeline.Empty;
 
+    /// <summary>
+    /// The companion's screenshots, in time order, for measuring colours
+    /// (android-checks.md, step 4b); empty for a recording without them.
+    /// </summary>
+    public IReadOnlyList<PhoneScreenshot> PhoneScreenshots { get; init; } = [];
+
     /// <summary>The phone's apps, screens and visits (android-checks.md, step 1).</summary>
     public PhoneScreenTimeline PhoneScreens { get; init; } = PhoneScreenTimeline.Empty;
 
@@ -291,3 +297,10 @@ public sealed record SessionAudioTrack(
     string Path,
     string AbsolutePath,
     long StartNanoseconds);
+
+/// <summary>
+/// A screenshot the companion took (android-checks.md, step 4a): its time
+/// on the session clock, its path relative to the recording's folder, and
+/// its full path.
+/// </summary>
+public sealed record PhoneScreenshot(long MonotonicNanoseconds, string Path, string AbsolutePath);

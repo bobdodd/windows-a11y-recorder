@@ -100,7 +100,11 @@ public sealed record PlaybackIndex
     // Version 27 keeps the phone's density and app version records
     // (device.android, android-checks.md step 2) whole, for the Checks
     // tab's phone row and each app's version.
-    public const int CurrentVersion = 27;
+    // Version 28 keeps the companion's screenshot records
+    // (graphics.android.screenshots, android-screenshot, android-checks.md
+    // step 4a) with their path, for measuring colours on them (step 4b);
+    // an older index is derived again.
+    public const int CurrentVersion = 28;
 
     public required int Version { get; init; }
 
@@ -290,8 +294,10 @@ public sealed class PlaybackIndexBuilder
             return;
         }
 
-        if (channel == Recorder.Contracts.AndroidFrameRecords.FramesChannel &&
-            record.EventType == Recorder.Contracts.AndroidFrameRecords.FrameEventType)
+        if ((channel == Recorder.Contracts.AndroidFrameRecords.FramesChannel &&
+             record.EventType == Recorder.Contracts.AndroidFrameRecords.FrameEventType) ||
+            (channel == Recorder.Contracts.AndroidScreenshotRecords.Channel &&
+             record.EventType == Recorder.Contracts.AndroidScreenshotRecords.ScreenshotEventType))
         {
             Keep(eventKey, record);
             return;

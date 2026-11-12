@@ -499,7 +499,7 @@ public static class PhoneTreeChecks
     }
 
     // ViewHierarchyElement.isAgainstScrollableEdge.
-    private static bool IsAgainstScrollableEdge(PhoneCheckItem view)
+    internal static bool IsAgainstScrollableEdge(PhoneCheckItem view)
     {
         if (!view.Node.VisibleToUser)
         {
