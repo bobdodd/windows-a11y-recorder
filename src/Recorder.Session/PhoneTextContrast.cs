@@ -94,7 +94,7 @@ public sealed record PhoneCheckSettings
 /// as the text's size and weight are not known; from the video, a ratio
 /// that could be 12% higher or lower than measured and so on the other
 /// side of a limit is a warning, near the limit. The findings are merged
-/// on each screen by level and line, as the tree checks' are by item.
+/// in each visit by level and line, as the tree checks' are by item.
 /// </summary>
 public sealed class PhoneTextContrastRun
 {
@@ -107,6 +107,8 @@ public sealed class PhoneTextContrastRun
 
     private readonly Dictionary<PhoneScreen, List<PhoneFinding>> _byScreen = [];
     private readonly Dictionary<PhoneScreen, int> _linesByScreen = [];
+    private readonly Dictionary<PhoneVisit, List<PhoneFinding>> _byVisit = [];
+    private readonly Dictionary<PhoneVisit, int> _linesByVisit = [];
 
     private PhoneTextContrastRun(PhoneContrastLevel level)
     {
@@ -120,7 +122,7 @@ public sealed class PhoneTextContrastRun
     /// <summary>The check's name for the level.</summary>
     public string Check => CheckFor(Level);
 
-    /// <summary>The findings, by app, screen, level, then first time.</summary>
+    /// <summary>The findings, by app, screen, visit, level, then first time.</summary>
     public IReadOnlyList<PhoneFinding> Findings { get; private set; } = [];
 
     /// <summary>The lines measured, counted once for each settled snapshot they were measured on.</summary>
@@ -131,8 +133,16 @@ public sealed class PhoneTextContrastRun
 
     public TimeSpan Elapsed { get; private set; }
 
+    /// <summary>A screen's findings, from all its visits.</summary>
     public IReadOnlyList<PhoneFinding> For(PhoneScreen screen) =>
         _byScreen.TryGetValue(screen, out var list) ? list : [];
+
+    public IReadOnlyList<PhoneFinding> For(PhoneVisit visit) =>
+        _byVisit.TryGetValue(visit, out var list) ? list : [];
+
+    /// <summary>How many lines were measured in a visit, counted as <see cref="Lines"/> is.</summary>
+    public int LinesIn(PhoneVisit visit) =>
+        _linesByVisit.TryGetValue(visit, out var count) ? count : 0;
 
     /// <summary>How many lines were measured on a screen, counted as <see cref="Lines"/> is.</summary>
     public int LinesOn(PhoneScreen screen) =>
@@ -157,7 +167,7 @@ public sealed class PhoneTextContrastRun
         var stopwatch = Stopwatch.StartNew();
         var run = new PhoneTextContrastRun(level);
         var check = run.Check;
-        var findings = new Dictionary<(PhoneScreen, PhoneCheckLevel, string), PhoneFinding>();
+        var findings = new Dictionary<(PhoneVisit, PhoneCheckLevel, string), PhoneFinding>();
         foreach (var snapshot in measured.Snapshots)
         {
             var visit = snapshot.Visit;
@@ -186,6 +196,7 @@ public sealed class PhoneTextContrastRun
 
                 run.Lines++;
                 run._linesByScreen[visit.Screen] = run.LinesOn(visit.Screen) + 1;
+                run._linesByVisit[visit] = run.LinesIn(visit) + 1;
                 var judged = Judge(line, colours, snapshot.Picture.Kind, snapshot.Engine, level, density?.PixelsPerDp);
                 if (judged is not { } result)
                 {
@@ -194,10 +205,10 @@ public sealed class PhoneTextContrastRun
                 }
 
                 var (identity, label) = Name(line, lineOf.TryGetValue(line, out var number) ? number : (1, 1));
-                var key = (visit.Screen, result.Level, identity);
+                var key = (visit, result.Level, identity);
                 if (!findings.TryGetValue(key, out var finding))
                 {
-                    findings[key] = finding = new PhoneFinding(check, result.Level, visit.Screen, identity, label);
+                    findings[key] = finding = new PhoneFinding(check, result.Level, visit, identity, label);
                 }
 
                 // One time for each settled snapshot: a line read twice on
@@ -222,6 +233,7 @@ public sealed class PhoneTextContrastRun
             .ToDictionary(pair => pair.screen, pair => pair.index);
         run.Findings = [.. findings.Values
             .OrderBy(finding => screenOrder.TryGetValue(finding.Screen, out var at) ? at : int.MaxValue)
+            .ThenBy(finding => finding.Visit.Start)
             .ThenBy(finding => finding.Level)
             .ThenBy(finding => finding.Times[0].Time)
             .ThenBy(finding => finding.Times[0].Bounds.Top)];
@@ -233,6 +245,12 @@ public sealed class PhoneTextContrastRun
             }
 
             list.Add(finding);
+            if (!run._byVisit.TryGetValue(finding.Visit, out var ofVisit))
+            {
+                run._byVisit[finding.Visit] = ofVisit = [];
+            }
+
+            ofVisit.Add(finding);
         }
 
         run.Elapsed = stopwatch.Elapsed;

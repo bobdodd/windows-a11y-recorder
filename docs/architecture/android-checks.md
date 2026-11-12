@@ -14,7 +14,8 @@ built: the phone's own screenshots (4a, checked on the phone on
 2026-11-12), the colour measurement with the text found by OCR (4b,
 checked on the development PC with tests 16 and 18's recordings), and
 the text contrast check with its AA or AAA setting and its findings (4c,
-see "As built: step 4c", built and awaiting tests 19 to 22); non-text
+see "As built: step 4c", tests 19 to 21 passed;
+findings are since listed under each visit, awaiting tests 23 and 24); non-text
 contrast is next. The owner's
 decisions of 2026-11-11 are in "Decisions (2026-11-11)" and "Decisions
 on the open questions (2026-11-11)". Before any check is assigned a
@@ -70,6 +71,13 @@ them.
 7. **Within a recording first.** Screens are matched within one
    recording. Matching the same screen across recordings waits for the
    test data model.
+8. **Findings belong to visits (2026-11-12).** A finding is listed
+   under the visit it was seen in, as the screen's content can change
+   between visits: "I expected the checks to relate to the visit in
+   which they occur (since content can change)" (owner), choosing
+   "Under each visit" over one finding per screen naming its visits.
+   This replaces the merging across visits first planned in "Items and
+   findings".
 
 ## What a recording holds
 
@@ -270,11 +278,12 @@ An item is identified within a screen by, in order:
 2. otherwise its class, its text or content description, and the view
    IDs and classes of the path from the window's root.
 
-A **finding** is one check's result for one item on one screen, at one
-level. It lists every settled snapshot in which it was seen, with its
-time, so the player can move to the first and step through the rest.
-The same item failing the same check on two visits to the same screen
-is one finding with two visits.
+A **finding** is one check's result for one item in one visit to a
+screen, at one level. It lists every settled snapshot of the visit in
+which it was seen, with its time, so the player can move to the first
+and step through the rest. The same item failing the same check on two
+visits to the same screen is two findings, one under each visit
+(decision 8); as first planned it was one finding with two visits.
 
 Each finding keeps the rule that gave it, the values measured (such as
 "40 by 40 dp" or "contrast 3.2 to 1"), the snapshot or frame it was
@@ -336,7 +345,7 @@ and the frame's.
 ## The player
 
 A new tab, "Checks", lists the findings of the open recording, grouped
-by app, then screen, then check. Each row says the check, the level,
+by app, then screen, then visit, then check (decision 8). Each row says the check, the level,
 the item, the measured value and the state, such as "Touch target under
 48dp: 'Navigate up' button, 40 by 40 dp, Safety and emergency
 (Settings)". Choosing a row moves the playhead to the finding's first
@@ -624,7 +633,8 @@ notice and lists what was changed.
   which used the density at the snapshot's time, gave six false errors
   for buttons 48 dp wide measured at the new density.
 - **Findings.** A finding is one check's result for one item on one
-  screen at one level, merged across visits, with each time it was seen:
+  visit at one level, with each time it was seen in the visit (decision
+  8; until 2026-11-12 merged across the screen's visits):
   the snapshot, the item's bounds and row in the tree view, the values
   measured and the screen's state. An item is identified by its view ID
   with its place among items of that ID, or else by its class, text or
@@ -1112,17 +1122,19 @@ Step 4c turns step 4b's measurements into findings in the Checks tab.
   approximate, from the video; the app's text, placed on the screen by
   OCR (Windows OCR, en-US); seen once, at 00:00:42.154".
 - **Which line a finding is.** As a tree check's finding is one item's,
-  a contrast finding is one line's, merged on each screen by level and
-  line across the snapshots measured: an item's line is the item's
+  a contrast finding is one line's, merged in each visit by level and
+  line across the snapshots measured (decision 8): an item's line is the item's
   identity and the line's number from the top, the label naming the
   line ("line 2 of 2, 'Update your goals'") when the item has more than
   one; text found by OCR is the item it is in and the words as matched
   (`PhoneTextMatching.Spelling`), labelled with OCR's words, so the same
   words read differently by OCR at another time are another finding.
-- **The rows.** After each screen's tree findings, a row for the check
-  with how many findings at each level and how many lines were
-  measured on the screen, or that it found nothing, or that no text was
-  measured on the screen; then a row for each finding. Choosing one
+- **The rows.** Under each visit, after its tree findings, a row for
+  the check with how many findings at each level and how many lines
+  were measured in the visit, or that it found nothing, or that no text
+  was measured in the visit; then a row for each finding. A visit with
+  no settled snapshot has one row, "Not checked, as no snapshot of this
+  visit settled.", as both checks run only on settled snapshots. Choosing one
   moves the playhead to the picture the line was measured on, selects
   the item, or the
   item the words are in, in the "Accessibility tree" tab, and outlines
@@ -1149,8 +1161,8 @@ Windows' OCR read on the PC for step 4b (not yet the reader in the
 recorder):
 
 - **At AA**, 110 lines on 5 settled snapshots, all from the video: 99
-  pass; 4 errors, the badge "3" (2.41:1, on 2 visits, so 1 finding of 2
-  times) and "0" (1.55:1), "0%" (1.98:1) and "0.0" (1.94:1) on the
+  pass; 4 errors, the badge "3" (2.41:1, on 2 visits, so, since
+  decision 8, 2 findings) and "0" (1.55:1), "0%" (1.98:1) and "0.0" (1.94:1) on the
   PROFILE screen; 6 warnings, the grey second lines of the PROFILE
   screen's 5 buttons (3.81:1 to 3.83:1) and "RECENT SLEEP ENTRIES"
   (3.51:1). These are the lines step 4b found below 3:1 and between the

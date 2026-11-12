@@ -854,3 +854,73 @@ line under "Show current visit" includes "Text contrast at AAA (WCAG
 measured, 98 passed, on 5 settled snapshots (0 from the phone's
 screenshots, 5 from the video)", and does not end with "Showing time".
 Send both screenshots.
+
+## Step 4c: findings under each visit
+
+After test 22 the owner found that the badge "3" finding, "seen 2 times
+on 2 visits, first at 00:00:01.608", did not say which visits, and that
+choosing it showed no picture. Two changes followed (see "As built:
+step 4c" and decision 8 in [Android checks](../architecture/android-checks.md)):
+a contrast finding's times are the times of the pictures measured, and
+every finding, of the tree checks and of the contrast check, belongs to
+one visit and is listed under it. Checked in the Linux build
+environment: the solution builds with no warnings, the new test of two
+visits to one screen passes with the other checks' tests, and the
+throwaway program gives the rows below from test 16's recording.
+
+## Test 23: findings under each visit, with their pictures
+
+Build and install as in test 19 first. If "AA (WCAG 1.4.3)" is not
+chosen in the Checks tab, click it.
+
+1. Choose "Open recording...", and open
+   `20261112-154851-32c7b61a5552453bbf5febffcca978c7` (test 16). If the
+   Checks window is closed, click the "Checks" tab, then move it so the
+   phone's picture is fully in view. Wait 10 seconds.
+2. Scroll the list so the row starting "Visit 1, 00:00:01.608" is at the
+   top, and take a screenshot of the whole screen.
+3. Click the row starting "Error: Button described as "3"" just below
+   it, and take a screenshot of the whole screen.
+4. Scroll to the row starting "Visit 6, 00:00:54.359", click the row
+   starting "Error: Button described as "3"" below it, and take a
+   screenshot of the whole screen.
+
+**On screen:** the line under "Show current visit" includes "Text
+contrast at AA (WCAG 1.4.3): 11 findings (5 errors, 6 warnings), from
+110 lines of text measured, 99 passed". In step 2, below the Visit 1
+row, in this order: "No findings from the checks of the tree in this
+visit." in bold; "Text contrast at AA (WCAG 1.4.3): 1 error, from 29
+lines measured" in bold; and a row starting "Error: Button described as
+"3", 2.41:1" and ending "seen once, at 00:00:02.655", indented further.
+Then the row starting "Visit 6". In step 3 the time under the phone's
+picture starts "00:00:02.655", the picture shows the Home screen, not
+black, and a cyan outline surrounds the badge "3" at its top right. In
+step 4 the row ends "seen once, at 00:01:06.223", the time starts
+"00:01:06.223", and the outline surrounds the badge again. In steps 3
+and 4 "Previous time" and "Next time" are greyed out. Send the three
+screenshots.
+
+## Test 24: changing the level, and keeping it after a restart
+
+The recording from test 23 is open, with AA chosen.
+
+1. Scroll the list to the row starting "Warning: Button described as
+   "Sleep Goals Update your goals", line 2 of 2" (under Screen 3's Visit
+   5), click it, and take a screenshot of the whole screen.
+2. Above the list, click "AAA (WCAG 1.4.6)", wait 5 seconds, and take a
+   screenshot of the whole screen.
+3. Close the recorder, start it again from the Start menu, and open
+   `20261112-154851-32c7b61a5552453bbf5febffcca978c7` again with "Open
+   recording...". If the Checks window is closed, click the "Checks"
+   tab.
+4. Wait 10 seconds, and take a screenshot of the whole screen.
+
+**On screen:** in step 1 the time under the phone's picture starts
+"00:00:47.633", and a cyan outline surrounds "Update your goals". In
+step 2 "AAA (WCAG 1.4.6)" is chosen, there is no cyan outline on the
+phone's picture, "Previous time" and "Next time" are greyed out, and the
+line under "Show current visit" includes "Text contrast at AAA (WCAG
+1.4.6): 12 findings (11 errors, 1 warning)" and does not end with
+"Showing time". In step 4 "AAA (WCAG 1.4.6)" is still chosen, and the
+line includes the same "Text contrast at AAA (WCAG 1.4.6): 12 findings
+(11 errors, 1 warning)". Send the three screenshots.

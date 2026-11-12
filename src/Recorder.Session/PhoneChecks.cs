@@ -24,18 +24,21 @@ public sealed record PhoneFindingTime(
 
 /// <summary>
 /// A finding (android-checks.md, "Items and findings"): one check's result
-/// for one item on one screen, at one level, with every settled snapshot it
-/// was seen in. Every finding of the tree checks is exact, from the tree.
+/// for one item in one visit to a screen, at one level, with every settled
+/// snapshot of the visit it was seen in. The same item failing on another
+/// visit is another finding, as the screen's content can change between
+/// visits (owner, 2026-11-12). Every finding of the tree checks is exact,
+/// from the tree.
 /// </summary>
 public sealed class PhoneFinding
 {
     internal readonly List<PhoneFindingTime> _times = [];
 
-    internal PhoneFinding(string check, PhoneCheckLevel level, PhoneScreen screen, string identity, string label)
+    internal PhoneFinding(string check, PhoneCheckLevel level, PhoneVisit visit, string identity, string label)
     {
         Check = check;
         Level = level;
-        Screen = screen;
+        Visit = visit;
         Identity = identity;
         Label = label;
     }
@@ -44,7 +47,9 @@ public sealed class PhoneFinding
 
     public PhoneCheckLevel Level { get; }
 
-    public PhoneScreen Screen { get; }
+    public PhoneVisit Visit { get; }
+
+    public PhoneScreen Screen => Visit.Screen;
 
     /// <summary>The item's identity within the screen.</summary>
     public string Identity { get; }
@@ -54,8 +59,6 @@ public sealed class PhoneFinding
 
     /// <summary>The times it was seen, in time order.</summary>
     public IReadOnlyList<PhoneFindingTime> Times => _times;
-
-    public int VisitCount => _times.Select(time => time.Visit).Distinct().Count();
 
     /// <summary>The finding as its row says it.</summary>
     public string Text
@@ -68,7 +71,7 @@ public sealed class PhoneFinding
             var seen = _times.Count == 1
                 ? $"seen once, at {WindowsPreferenceTimeline.Clock(first.Time)}"
                 : string.Create(CultureInfo.CurrentCulture,
-                    $"seen {_times.Count:N0} times on {VisitCount:N0} {(VisitCount == 1 ? "visit" : "visits")}, first at {WindowsPreferenceTimeline.Clock(first.Time)}");
+                    $"seen {_times.Count:N0} times, first at {WindowsPreferenceTimeline.Clock(first.Time)}");
             return $"{Capitalized(PhoneCheckNames.Word(Level))}: {Label}, {first.Measured}{others}{state}; {seen}";
         }
     }
@@ -82,13 +85,14 @@ public sealed class PhoneFinding
 /// items as the latest snapshot that took them gives them. The items a
 /// snapshot took are checked once in a visit however many settled snapshots
 /// show them, and are one time a finding was seen, at the first of those.
-/// The findings are merged on each screen by check, level and item.
+/// The findings are merged in each visit by check, level and item.
 /// </summary>
 public sealed class PhoneCheckRun
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly Dictionary<PhoneScreen, List<PhoneFinding>> _byScreen = [];
+    private readonly Dictionary<PhoneVisit, List<PhoneFinding>> _byVisit = [];
 
     private PhoneCheckRun()
     {
@@ -96,7 +100,7 @@ public sealed class PhoneCheckRun
 
     public static PhoneCheckRun Empty { get; } = new();
 
-    /// <summary>The findings, by app, screen, check (in <see cref="PhoneCheckNames.All"/> order), then first time.</summary>
+    /// <summary>The findings, by app, screen, visit, check (in <see cref="PhoneCheckNames.All"/> order), then first time.</summary>
     public IReadOnlyList<PhoneFinding> Findings { get; private set; } = [];
 
     /// <summary>How many settled snapshots were checked, and how many distinct takings of a window's items that was.</summary>
@@ -119,8 +123,12 @@ public sealed class PhoneCheckRun
 
     public TimeSpan Elapsed { get; private set; }
 
+    /// <summary>A screen's findings, from all its visits.</summary>
     public IReadOnlyList<PhoneFinding> For(PhoneScreen screen) =>
         _byScreen.TryGetValue(screen, out var list) ? list : [];
+
+    public IReadOnlyList<PhoneFinding> For(PhoneVisit visit) =>
+        _byVisit.TryGetValue(visit, out var list) ? list : [];
 
     public static PhoneCheckRun Run(
         PhoneScreenTimeline screens,
@@ -139,7 +147,7 @@ public sealed class PhoneCheckRun
         }
 
         var stopwatch = Stopwatch.StartNew();
-        var findings = new Dictionary<(PhoneScreen, string, PhoneCheckLevel, string), PhoneFinding>();
+        var findings = new Dictionary<(PhoneVisit, string, PhoneCheckLevel, string), PhoneFinding>();
         var problems = new List<string>();
         var checkedTakings = new HashSet<string>(StringComparer.Ordinal);
         foreach (var visit in screens.Visits)
@@ -232,10 +240,10 @@ public sealed class PhoneCheckRun
                         continue;
                     }
 
-                    var findingKey = (visit.Screen, result.Check, result.Level, item.Identity);
+                    var findingKey = (visit, result.Check, result.Level, item.Identity);
                     if (!findings.TryGetValue(findingKey, out var finding))
                     {
-                        findings[findingKey] = finding = new PhoneFinding(result.Check, result.Level, visit.Screen, item.Identity, item.Label);
+                        findings[findingKey] = finding = new PhoneFinding(result.Check, result.Level, visit, item.Identity, item.Label);
                     }
 
                     finding._times.Add(new PhoneFindingTime(time, visit, settled, taking, visit.WindowId, item.Bounds, item.TreeKey, result.Measured, state));
@@ -250,6 +258,7 @@ public sealed class PhoneCheckRun
             .ToDictionary(pair => pair.screen, pair => pair.index);
         run.Findings = [.. findings.Values
             .OrderBy(finding => screenOrder.TryGetValue(finding.Screen, out var at) ? at : int.MaxValue)
+            .ThenBy(finding => finding.Visit.Start)
             .ThenBy(finding => order.TryGetValue(finding.Check, out var at) ? at : int.MaxValue)
             .ThenBy(finding => finding.Level)
             .ThenBy(finding => finding.Times[0].Time)];
@@ -261,6 +270,12 @@ public sealed class PhoneCheckRun
             }
 
             list.Add(finding);
+            if (!run._byVisit.TryGetValue(finding.Visit, out var ofVisit))
+            {
+                run._byVisit[finding.Visit] = ofVisit = [];
+            }
+
+            ofVisit.Add(finding);
         }
 
         run.Problems = problems;

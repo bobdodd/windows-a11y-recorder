@@ -8,7 +8,7 @@ namespace Recorder.Tests;
 
 // Step 3 of docs/architecture/android-checks.md, "Build order": the checks
 // run on a phone recording, on each visit's settled snapshots, with the
-// findings merged by screen, check, level and item. The recording is made
+// findings merged by visit, check, level and item. The recording is made
 // up: a Settings window with a 40 dp "Save" button, its items taken twice
 // and then listed without being taken again, at the Pixel 10 Pro XL's
 // measured 390 dpi and 1080 by 2404 pixels.
@@ -67,16 +67,52 @@ public sealed class PhoneCheckRunTests : IDisposable
         return read!;
     }
 
-    private SessionPlaybackArchive Archive(out FakeRecords recording)
+    // Another app's window in front, the Clock's, whose only item is its page.
+    private static AndroidAccessibilityTree OtherApp(long index)
     {
-        List<(long Time, string Channel, string EventType, object Payload)> records =
-        [
-            (At(0.5), AndroidCompanionRecords.DisplayChannel, AndroidCompanionRecords.DisplayEventType,
-                new AndroidDisplayState(AndroidCompanionRecords.InitialReason, 0, 1080, 2404)),
-            (At(1), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(1, Items(0))),
-            (At(3), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(2, Items(10))),
-            (At(5), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(3, null)),
-        ];
+        const string clock = "com.google.android.deskclock";
+        var tree = JsonNode.Parse(AndroidAccessibilityTreeTests.TreeLine(index: index, everyWindow: true))!.AsObject();
+        var window = tree["windows"]![0]!.AsObject();
+        window["id"] = 600;
+        window["title"] = "Clock";
+        window["items"] = JsonSerializer.SerializeToNode(
+            new AndroidTreeNode[]
+            {
+                new()
+                {
+                    Index = 0, WindowId = 600, PackageName = clock, ClassName = "android.widget.FrameLayout",
+                    Bounds = new AndroidNodeBounds(0, 0, 1080, 2404), Checked = "unchecked",
+                    ImportantForAccessibility = true, VisibleToUser = true,
+                },
+            },
+            JsonSerializerOptions.Web);
+        var (read, problem) = CompanionProtocol.ReadTree(tree.ToJsonString());
+        Assert.Null(problem);
+        return read!;
+    }
+
+    // With returning, the Clock app is in front from 2 seconds, and
+    // Settings again from 4, so Settings has two visits.
+    private SessionPlaybackArchive Archive(out FakeRecords recording, bool returning = false)
+    {
+        List<(long Time, string Channel, string EventType, object Payload)> records = returning
+            ?
+            [
+                (At(0.5), AndroidCompanionRecords.DisplayChannel, AndroidCompanionRecords.DisplayEventType,
+                    new AndroidDisplayState(AndroidCompanionRecords.InitialReason, 0, 1080, 2404)),
+                (At(1), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(1, Items(0))),
+                (At(2), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, OtherApp(2)),
+                (At(4), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(3, Items(10))),
+                (At(6), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(4, null)),
+            ]
+            :
+            [
+                (At(0.5), AndroidCompanionRecords.DisplayChannel, AndroidCompanionRecords.DisplayEventType,
+                    new AndroidDisplayState(AndroidCompanionRecords.InitialReason, 0, 1080, 2404)),
+                (At(1), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(1, Items(0))),
+                (At(3), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(2, Items(10))),
+                (At(5), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(3, null)),
+            ];
         var builder = new PlaybackIndexBuilder(10_000_000, TimeSpan.Zero);
         recording = new FakeRecords();
         var sequence = 0UL;
@@ -127,10 +163,35 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Equal([At(1), At(3)], finding.Times.Select(time => time.TakenBy.MonotonicNanoseconds));
         Assert.Equal([200, 210], finding.Times.Select(time => time.Bounds.Top));
         Assert.All(finding.Times, time => Assert.Equal("window:512/0/0", time.TreeKey));
-        Assert.Equal(1, finding.VisitCount);
+        Assert.Same(finding, Assert.Single(run.For(Assert.Single(archive.PhoneScreens.Visits))));
         Assert.Equal(
-            "Error: Button \"Save\", 40 by 40 dp, too narrow and too short; ATF needs 48 by 48 dp; seen 2 times on 1 visit, first at 00:00:01.000",
+            "Error: Button \"Save\", 40 by 40 dp, too narrow and too short; ATF needs 48 by 48 dp; seen 2 times, first at 00:00:01.000",
             finding.Text);
+    }
+
+    // The owner, 2026-11-12: findings belong to the visit they were seen
+    // in, as the screen's content can change between visits. Settings,
+    // then the Clock app, then Settings again: the same button failing on
+    // both visits to Settings is two findings, one for each.
+    [Fact]
+    public void Run_KeepsEachVisitsFindingsApart_ForTheSameItem()
+    {
+        var archive = Archive(out var recording, returning: true);
+        var settings = archive.PhoneScreens.Visits.Where(visit => visit.Screen.Package == Settings).ToList();
+        Assert.Equal(2, settings.Count);
+        Assert.Same(settings[0].Screen, settings[1].Screen);
+
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording, TestContext.Current.CancellationToken);
+
+        var findings = run.Findings.Where(finding => finding.Screen == settings[0].Screen).ToList();
+        Assert.Equal(2, findings.Count);
+        Assert.Equal(findings, run.For(settings[0].Screen));
+        Assert.Same(findings[0], Assert.Single(run.For(settings[0])));
+        Assert.Same(findings[1], Assert.Single(run.For(settings[1])));
+        Assert.All(findings, finding => Assert.Equal("id:com.android.settings:id/save#0", finding.Identity));
+        Assert.Equal([settings[0], settings[1]], findings.Select(finding => finding.Visit));
+        Assert.EndsWith("seen once, at 00:00:01.000", findings[0].Text, StringComparison.Ordinal);
+        Assert.EndsWith("seen once, at 00:00:04.000", findings[1].Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -233,7 +294,7 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Equal(
             "Warning: Button \"Save\", 4.48:1, #777777 on #FFFFFF; fails unless the text is large: 4.5:1 is needed, 3:1 for large text; " +
             "the words are 16 dp tall in OCR's box; the text's size and weight are not known; from the phone's screenshot; " +
-            "the app's text, placed on the screen by OCR (Windows OCR, en-US); seen 2 times on 1 visit, first at 00:00:01.250",
+            "the app's text, placed on the screen by OCR (Windows OCR, en-US); seen 2 times, first at 00:00:01.250",
             line.Text);
 
         // At AAA the same measurement is two errors.

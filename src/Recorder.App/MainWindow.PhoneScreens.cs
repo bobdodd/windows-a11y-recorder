@@ -288,9 +288,9 @@ public partial class MainWindow
                             state.Start,
                             null));
                     }
-                }
 
-                AddFindingRows(screen);
+                    AddFindingRows(visit);
+                }
             }
         }
 
@@ -299,17 +299,32 @@ public partial class MainWindow
         DisplayPhoneVisitAt(_playbackPositionNanoseconds);
     }
 
-    // A screen's findings, after its visits: a row for each check that
-    // found something, saying how many at each level, then a row for each
-    // finding.
-    private void AddFindingRows(PhoneScreen screen)
+    // A visit's findings, after its row and its states (owner,
+    // 2026-11-12: the content can change between visits): a row for each
+    // check that found something, saying how many at each level, then a
+    // row for each finding. A visit with no settled snapshot is not
+    // checked, as both checks run only on settled snapshots.
+    private void AddFindingRows(PhoneVisit visit)
     {
+        if (visit.SettledSnapshots.Count == 0)
+        {
+            if (_phoneChecks is not null || _phoneTextContrast is not null)
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, "Not checked, as no snapshot of this visit settled.", visit.Start, null)
+                {
+                    IsCheck = true,
+                });
+            }
+
+            return;
+        }
+
         if (_phoneChecks is { } run)
         {
-            var findings = run.For(screen);
+            var findings = run.For(visit);
             if (findings.Count == 0)
             {
-                _phoneScreenRows.Add(new PhoneScreenRowView(2, "No findings from the checks of the tree on this screen.", screen.Visits[0].Start, null)
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, "No findings from the checks of the tree in this visit.", visit.Start, null)
                 {
                     IsCheck = true,
                 });
@@ -322,19 +337,19 @@ public partial class MainWindow
 
         if (_phoneTextContrast is { } contrast)
         {
-            var findings = contrast.For(screen);
+            var findings = contrast.For(visit);
             var title = PhoneCheckNames.Title(contrast.Check);
-            var lines = contrast.LinesOn(screen);
+            var lines = contrast.LinesIn(visit);
             if (lines == 0)
             {
-                _phoneScreenRows.Add(new PhoneScreenRowView(2, $"{title}: no text was measured on this screen.", screen.Visits[0].Start, null)
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{title}: no text was measured in this visit.", visit.Start, null)
                 {
                     IsCheck = true,
                 });
             }
             else if (findings.Count == 0)
             {
-                _phoneScreenRows.Add(new PhoneScreenRowView(2, $"{title}: no findings, from {Count(lines, "line")} measured.", screen.Visits[0].Start, null)
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{title}: no findings, from {Count(lines, "line")} measured.", visit.Start, null)
                 {
                     IsCheck = true,
                 });
@@ -353,7 +368,7 @@ public partial class MainWindow
         foreach (var check in findings.GroupBy(finding => finding.Check))
         {
             _phoneScreenRows.Add(new PhoneScreenRowView(
-                2,
+                3,
                 $"{PhoneCheckNames.Title(check.Key)}: {Levels(check)}{measured}",
                 check.First().Times[0].Time,
                 null)
@@ -362,7 +377,7 @@ public partial class MainWindow
             });
             foreach (var finding in check)
             {
-                _phoneScreenRows.Add(new PhoneScreenRowView(3, finding.Text, finding.Times[0].Time, null)
+                _phoneScreenRows.Add(new PhoneScreenRowView(4, finding.Text, finding.Times[0].Time, null)
                 {
                     Finding = finding,
                 });
@@ -602,7 +617,7 @@ public sealed class PhoneScreenRowView : INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    /// <summary>0 for the density or an app, 1 a screen, 2 a visit or a check, 3 a state or a finding.</summary>
+    /// <summary>0 for the density or an app, 1 a screen, 2 a visit, 3 a state or a check, 4 a finding.</summary>
     public int Level { get; }
 
     public string Text { get; }
@@ -616,7 +631,7 @@ public sealed class PhoneScreenRowView : INotifyPropertyChanged
     /// <summary>The finding, for a finding's row.</summary>
     public PhoneFinding? Finding { get; init; }
 
-    /// <summary>Whether the row heads a check's findings, or says a screen has none.</summary>
+    /// <summary>Whether the row heads a check's findings, or says a visit has none or was not checked.</summary>
     public bool IsCheck { get; init; }
 
     public bool IsHeading => Level < 2 || IsCheck;
