@@ -1,4 +1,4 @@
-# Validation plan: Android checks, steps 1 to 3 (screens and visits; density and versions; checks of the tree)
+# Validation plan: Android checks, steps 1 to 4 (screens and visits; density and versions; checks of the tree; measuring the video)
 
 These tests are step 1 of [Android checks](../architecture/android-checks.md),
 "Build order": the player dividing a phone recording into apps, screens,
@@ -498,3 +498,74 @@ and came back with it, in front of it.
 Result, 2026-11-12, commit 4a37d75: test 14 passed (owner: "those
 smaller windows stay in front").
 
+
+## Test 15: the Checks list's chosen row keeps a dark edge
+
+Built with the commit after 9562de8.
+
+1. Choose "Open recording...", and open
+   `20261112-005243-5528d67531dd4441a50b2c2985350c59`.
+2. If the Checks window is closed, click the "Checks" tab.
+3. Scroll the list until the row starting "Error: View with no text" is
+   in view, and click it.
+4. Press Tab once, so that the list no longer has the focus.
+5. Take a screenshot of the Checks list.
+
+**On screen:** in step 5 the row starting "Error: View with no text" has
+a pale purple background with a dark purple edge round it, 2 pixels
+wide. A pale grey row with no edge is a failure. Send the screenshot.
+
+## Step 4: measuring the video against the phone's screenshots
+
+Before any contrast check is built, the colours of the recorder's frames
+are compared with screenshots taken on the phone at the same moments
+(android-checks.md, "Step 4: measuring the video first"). Test 16 makes
+the recording and the screenshots; the comparison is done from the
+files, so there is nothing to check on screen beyond the script's lines.
+
+## Test 16: a recording with the phone's own screenshots
+
+The current build is used; nothing new is installed. Before the test,
+open Nova SleepCare on the phone, on its Home screen, and leave the
+recorder open with "Android device" chosen. Open a PowerShell window
+beside the recorder and paste the script below, but do not press Enter
+yet. The script takes a screenshot on the phone about every 3 seconds,
+20 in all, into a new folder in Documents.
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+$adb = Join-Path $env:LOCALAPPDATA "Windows A11y Recorder\android\platform-tools\adb.exe"
+$out = Join-Path ([Environment]::GetFolderPath("MyDocuments")) ("phone-screenshots-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+New-Item -ItemType Directory -Force -Path $out | Out-Null
+$times = Join-Path $out "times.txt"
+for ($i = 1; $i -le 20; $i++) {
+    $name = "shot-{0:D2}.png" -f $i
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
+    & $adb shell screencap -p /data/local/tmp/a11y-shot.png
+    & $adb pull /data/local/tmp/a11y-shot.png (Join-Path $out $name) | Out-Null
+    $clock.Stop()
+    $stamp = Get-Date -Format "HH:mm:ss.fff"
+    Add-Content -Path $times -Value "$name $stamp $($clock.ElapsedMilliseconds) ms"
+    "Shot $i saved at $stamp, took $($clock.ElapsedMilliseconds) ms"
+    Start-Sleep -Seconds 2
+}
+& $adb shell rm /data/local/tmp/a11y-shot.png
+"DONE: 20 screenshots in $out"
+```
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. In PowerShell, press Enter to run the script.
+3. On the phone, keep each screen still, and change it only after these
+   lines appear in PowerShell: after "Shot 4", tap LEARN; after "Shot
+   8", tap DIARY; after "Shot 12", tap PROFILE; after "Shot 16", tap
+   HOME.
+4. When PowerShell shows the line starting "DONE", choose "Stop
+   recording" in the recorder, and wait until the recording has opened
+   in the player.
+5. Take a screenshot of the PowerShell window.
+
+**On screen:** in step 5 PowerShell shows 20 lines from "Shot 1 saved
+at" to "Shot 20 saved at", each with a time and "took" a number of ms,
+then "DONE: 20 screenshots in" and the folder. Red error lines are a
+failure; send them as they are. Send the screenshot; the recording and
+the screenshots are then read from the PC for the comparison.

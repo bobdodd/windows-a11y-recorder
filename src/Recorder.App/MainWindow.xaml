@@ -1612,6 +1612,39 @@
                     <Setter Property="AutomationProperties.Name" Value="{Binding Spoken}" />
                     <EventSetter Event="MouseLeftButtonUp" Handler="PhoneScreenRow_MouseLeftButtonUp" />
                     <EventSetter Event="KeyDown" Handler="PhoneScreenRow_KeyDown" />
+                    <!-- The selected row as the tree's: #E6E0F0 with a
+                         border of #3D2D5C, 9.4:1 on it and 12.2:1 on the
+                         list's white, with focus or without. Windows'
+                         own was #F6F6F6 without focus, 1.08:1 (owner,
+                         2026-11-12, asked for the tree's border here). -->
+                    <Setter Property="Template">
+                      <Setter.Value>
+                        <ControlTemplate TargetType="ListBoxItem">
+                          <Border x:Name="RowBorder"
+                                  Background="Transparent"
+                                  BorderBrush="{TemplateBinding BorderBrush}"
+                                  BorderThickness="{TemplateBinding BorderThickness}"
+                                  SnapsToDevicePixels="True">
+                            <Border x:Name="SelectionBorder"
+                                    BorderBrush="Transparent"
+                                    BorderThickness="2"
+                                    Padding="{TemplateBinding Padding}">
+                              <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                            </Border>
+                          </Border>
+                          <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                              <Setter TargetName="RowBorder" Property="Background" Value="#F3F0F8" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                              <Setter TargetName="RowBorder" Property="Background" Value="#E6E0F0" />
+                              <Setter TargetName="SelectionBorder" Property="BorderBrush" Value="#3D2D5C" />
+                            </Trigger>
+                          </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                      </Setter.Value>
+                    </Setter>
                     <Style.Triggers>
                       <DataTrigger Binding="{Binding IsHeading}" Value="True">
                         <Setter Property="FontWeight" Value="SemiBold" />

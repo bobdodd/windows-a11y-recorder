@@ -716,6 +716,40 @@ above was added. The times are from one run each and vary between runs
 by some tens of milliseconds (measured: 156, 127 and 103 ms on the
 first run).
 
+## Step 4: measuring the video first
+
+Step 4 starts with the measurement "Build order" asks for, before any
+contrast check is built: how far the colours of the recorder's frames
+are from the colours on the phone.
+
+- **What the frames are.** The phone's picture is H.264 from scrcpy's
+  server at its default 8 Mbit/s (`ScrcpyProtocol.VideoBitRate`),
+  decoded and written as PNG only when a picture differs from the one
+  before (`PhoneFrames.cs`); each 2 by 2 block of pixels shares one
+  colour sample, used as it is with no smoothing
+  (`PhonePicture.ToRgb`). So the frame is exact as a PNG of what was
+  decoded, but not of what the phone drew (checked in the source).
+- **What they are compared with.** Screenshots taken on the phone with
+  `screencap -p` while the recording runs, which are lossless PNGs of
+  the screen at the screen's size (inference from Android's
+  `screencap`; the size is checked on the files). Each screenshot is
+  matched to the frame of the same picture by its pixels, so no clock
+  is needed; the screens are held still for several seconds so that
+  each is in at least two screenshots.
+- **What is measured.** For every item with text, and every image
+  item, in the settled snapshot of the matched frame, ATF's colour
+  swatch (`ContrastSwatch`, at commit `c65cab0`) is applied to the
+  item's bounds in the frame and in the screenshot: the background and
+  text colours each gives, and the two ratios. Also the share of
+  pixels in the item that differ, and by how much.
+- **What it decides.** Whether a ratio from the frame is close enough
+  to the screenshot's to report, and with what margin, or whether the
+  recorder should take a screenshot itself at each settled snapshot,
+  which would make the contrast checks exact. The times between
+  screenshots in the measurement show what a screenshot costs on the
+  Pixel. The results and the choice go to the owner before the check is
+  built.
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A
