@@ -94,7 +94,10 @@ public sealed record PlaybackIndex
     // the screen (PhoneScreenEvidence: package, first heading, pane titles,
     // view IDs), for the apps, screens and visits of android-checks.md
     // step 1 (PhoneScreenTimeline); an older index is derived again.
-    public const int CurrentVersion = 25;
+    // Version 26 adds each window's first fixed text, and each titled
+    // pane's, to that evidence, for screens of one window that share its
+    // title, as in the client's app measured on 2026-11-12.
+    public const int CurrentVersion = 26;
 
     public required int Version { get; init; }
 

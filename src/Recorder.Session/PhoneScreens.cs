@@ -25,6 +25,13 @@ public enum PhoneTitleSource
     /// <summary>The text of the first heading in the window's items, in the tree's order.</summary>
     FirstHeading,
 
+    /// <summary>
+    /// The window's first fixed text: in the tree's order, the first text
+    /// that is not a control's, not in a scrolling container and not in a
+    /// titled pane. Used when screens share a title, or have none.
+    /// </summary>
+    FirstFixedText,
+
     /// <summary>A pane's title, for a state.</summary>
     PaneTitle,
 
@@ -47,6 +54,9 @@ public enum PhoneVisitCause
     /// <summary>The app's window title changed.</summary>
     WindowTitleChanged,
 
+    /// <summary>The first fixed text of the app's window changed, in the same window with the same title.</summary>
+    FixedTextChanged,
+
     /// <summary>Another app's window came to the front.</summary>
     AnotherApp,
 }
@@ -66,7 +76,7 @@ public sealed class PhoneApp
 /// <summary>A screen: the identity visits with the same screen key belong to.</summary>
 public sealed class PhoneScreen
 {
-    internal PhoneScreen(int number, string package, string? activity, string? title, PhoneTitleSource titleSource, string? viewIdSignature)
+    internal PhoneScreen(int number, string package, string? activity, string? title, PhoneTitleSource titleSource, string? viewIdSignature, string? sharedTitle = null, int sharedBy = 0)
     {
         Number = number;
         Package = package;
@@ -74,6 +84,8 @@ public sealed class PhoneScreen
         Title = title;
         TitleSource = titleSource;
         ViewIdSignature = viewIdSignature;
+        SharedTitle = sharedTitle;
+        SharedBy = sharedBy;
     }
 
     /// <summary>The screen's number in order of first visit, from 1.</summary>
@@ -91,6 +103,16 @@ public sealed class PhoneScreen
 
     /// <summary>For an untitled screen, a hash of the sorted view IDs in the app's window; null when it had none.</summary>
     public string? ViewIdSignature { get; }
+
+    /// <summary>
+    /// For a screen named by its first fixed text, the title it shares
+    /// with other screens (window title, window-state text or heading);
+    /// null when it had none.
+    /// </summary>
+    public string? SharedTitle { get; }
+
+    /// <summary>For a screen named by its first fixed text under a shared title, how many screens share it.</summary>
+    public int SharedBy { get; }
 
     /// <summary>For an untitled screen, its number among untitled screens; 0 otherwise.</summary>
     public int UntitledNumber { get; internal set; }
@@ -113,6 +135,9 @@ public sealed class PhoneScreen
         PhoneTitleSource.WindowTitle => "named by its window title",
         PhoneTitleSource.WindowStateText => "named by the text of its window-state event",
         PhoneTitleSource.FirstHeading => "named by its first heading",
+        PhoneTitleSource.FirstFixedText when SharedTitle is { } shared => string.Create(CultureInfo.InvariantCulture,
+            $"named by its first fixed text, as {SharedBy} screens share the title '{shared}'"),
+        PhoneTitleSource.FirstFixedText => "named by its first fixed text, as it has no title",
         _ when ViewIdSignature is null => "untitled, and with no view IDs, so every untitled visit to this activity is counted as this screen",
         _ => "untitled, kept apart by its view IDs",
     };
@@ -166,6 +191,9 @@ public sealed class PhoneVisit
 
     public string? ViewIdSignature { get; internal set; }
 
+    /// <summary>The first fixed text of the app's window in the visit: the one that started it, or else the first seen.</summary>
+    public string? FixedText { get; internal set; }
+
     public PhoneScreen Screen { get; internal set; } = null!;
 
     /// <summary>Whether this is a return: the screen was visited before.</summary>
@@ -185,6 +213,9 @@ public sealed class PhoneVisit
 
     internal readonly List<SessionTimelineEvent> _settled = [];
 
+    // The app window's listings, for working out which are settled.
+    internal readonly List<(SessionTimelineEvent Event, PhoneBounds? Bounds, long? TransitionTime, PhoneScreenEvidence? Evidence)> _listings = [];
+
     public string When => $"{WindowsPreferenceTimeline.Clock(Start)} to {WindowsPreferenceTimeline.Clock(End)}";
 
     public string CauseText => Cause switch
@@ -192,13 +223,14 @@ public sealed class PhoneVisit
         PhoneVisitCause.FirstWindow => "the recording's first app window",
         PhoneVisitCause.NewWindow => "a new window",
         PhoneVisitCause.WindowStateChanged => "a window-state event",
-        PhoneVisitCause.WindowTitleChanged => "the window title changed",
-        _ => "another app came to the front",
+        PhoneVisitCause.WindowTitleChanged => "a change of window title",
+        PhoneVisitCause.FixedTextChanged => "a change of first fixed text",
+        _ => "another app coming to the front",
     };
 }
 
 /// <summary>A dialog, menu, sheet or pane over a visit's screen (decision 6).</summary>
-public sealed record PhoneScreenState(long Start, long End, string Kind, string Name, PhoneTitleSource NamedBy, string? Package, int? WindowId)
+public sealed record PhoneScreenState(long Start, long End, string Kind, string Name, PhoneTitleSource NamedBy, string? Package, int? WindowId, string? FixedText = null)
 {
     public string When => $"{WindowsPreferenceTimeline.Clock(Start)} to {WindowsPreferenceTimeline.Clock(End)}";
 }
@@ -211,6 +243,20 @@ public sealed record PhoneScreenState(long Start, long End, string Kind, string 
 public sealed record PhoneScreenEvidence(string? Package, string? FirstHeading, IReadOnlyList<string> PaneTitles, string? ViewIdSignature, int ViewIdCount)
 {
     public const string Field = "screenEvidence";
+
+    /// <summary>
+    /// The window's first fixed text (<see cref="PhoneTitleSource.FirstFixedText"/>):
+    /// in the tree's order, the first visible text or content description
+    /// of an item that is not clickable, with no clickable or scrollable
+    /// item around it, and in no titled pane. Measured on the client's app
+    /// (20261112-005243): one window titled "Nova SleepCare" for every
+    /// screen, no headings and no view IDs of its own, but a first fixed
+    /// text of its own on each screen.
+    /// </summary>
+    public string? FixedText { get; init; }
+
+    /// <summary>Each titled pane's first fixed text, by pane title, for panes that have one.</summary>
+    public IReadOnlyDictionary<string, string> PaneFixedTexts { get; init; } = new Dictionary<string, string>();
 
     /// <summary>The evidence in a window's items.</summary>
     public static PhoneScreenEvidence Of(JsonElement items)
@@ -261,6 +307,58 @@ public sealed record PhoneScreenEvidence(string? Package, string? FirstHeading, 
             }
         }
 
+        // Each item's parent, whether it is a control or a scrolling
+        // container (a barrier: no text inside is fixed), and its pane title.
+        var barriers = new Dictionary<int, bool>();
+        var paneOf = new Dictionary<int, string?>();
+        foreach (var item in list)
+        {
+            if (ReadInt32(item, "index") is { } index)
+            {
+                barriers[index] = ReadBoolean(item, "clickable") || ReadBoolean(item, "scrollable");
+                paneOf[index] = Clean(ReadString(item, "paneTitle"));
+            }
+        }
+
+        string? fixedText = null;
+        var paneFixedTexts = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var item in list)
+        {
+            if (ReadInt32(item, "index") is not { } index ||
+                !ReadBoolean(item, "visibleToUser") ||
+                barriers.GetValueOrDefault(index) ||
+                TextOf(item) is not { } text)
+            {
+                continue;
+            }
+
+            // The nearest titled pane around the item, and whether a
+            // control or a scrolling container is around it.
+            string? pane = paneOf.GetValueOrDefault(index);
+            var blocked = false;
+            var current = parents.GetValueOrDefault(index);
+            for (var steps = 0; current is { } ancestor && steps < 500 && !blocked; steps++)
+            {
+                blocked = barriers.GetValueOrDefault(ancestor);
+                pane ??= paneOf.GetValueOrDefault(ancestor);
+                current = parents.GetValueOrDefault(ancestor);
+            }
+
+            if (blocked)
+            {
+                continue;
+            }
+
+            if (pane is null)
+            {
+                fixedText ??= text;
+            }
+            else
+            {
+                paneFixedTexts.TryAdd(pane, text);
+            }
+        }
+
         var panes = list
             .Select(item => Clean(ReadString(item, "paneTitle")))
             .OfType<string>()
@@ -276,7 +374,11 @@ public sealed record PhoneScreenEvidence(string? Package, string? FirstHeading, 
         var signature = viewIds.Length == 0
             ? null
             : Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', viewIds))))[..16];
-        return new PhoneScreenEvidence(package, heading, panes, signature, viewIds.Length);
+        return new PhoneScreenEvidence(package, heading, panes, signature, viewIds.Length)
+        {
+            FixedText = fixedText,
+            PaneFixedTexts = paneFixedTexts,
+        };
     }
 
     public JsonObject ToJson()
@@ -287,11 +389,19 @@ public sealed record PhoneScreenEvidence(string? Package, string? FirstHeading, 
             panes.Add(pane);
         }
 
+        var paneTexts = new JsonObject();
+        foreach (var (pane, text) in PaneFixedTexts)
+        {
+            paneTexts[pane] = text;
+        }
+
         return new JsonObject
         {
             ["package"] = Package,
             ["firstHeading"] = FirstHeading,
+            ["fixedText"] = FixedText,
             ["paneTitles"] = panes,
+            ["paneFixedTexts"] = paneTexts,
             ["viewIdSignature"] = ViewIdSignature,
             ["viewIdCount"] = ViewIdCount,
         };
@@ -309,12 +419,28 @@ public sealed record PhoneScreenEvidence(string? Package, string? FirstHeading, 
         var panes = evidence.TryGetProperty("paneTitles", out var list) && list.ValueKind == JsonValueKind.Array
             ? list.EnumerateArray().Where(pane => pane.ValueKind == JsonValueKind.String).Select(pane => pane.GetString()!).ToArray()
             : [];
+        var paneTexts = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (evidence.TryGetProperty("paneFixedTexts", out var texts) && texts.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in texts.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.String)
+                {
+                    paneTexts[property.Name] = property.Value.GetString()!;
+                }
+            }
+        }
+
         return new PhoneScreenEvidence(
             ReadString(evidence, "package"),
             ReadString(evidence, "firstHeading"),
             panes,
             ReadString(evidence, "viewIdSignature"),
-            ReadInt32(evidence, "viewIdCount") ?? 0);
+            ReadInt32(evidence, "viewIdCount") ?? 0)
+        {
+            FixedText = ReadString(evidence, "fixedText"),
+            PaneFixedTexts = paneTexts,
+        };
     }
 
     private static bool IsInside(int index, int ancestor, Dictionary<int, int?> parents)
@@ -381,6 +507,12 @@ public sealed class PhoneScreenTimeline
     // be the app's window; a smaller one above it is a state. A window
     // sliding in, as measured at 16.57 s in test 64 (82%), still counts.
     private const double AppWindowShare = 0.5;
+
+    // A listing is settled only when the app's window is not listed again
+    // within this time: in the client's app (20261112-005243) a new screen
+    // came in the same window with the same transition time, its snapshots
+    // 10 to 20 ms apart for about half a second, one with no text at all.
+    private const long QuietNanoseconds = 500_000_000;
 
     private static readonly string[] StateClassWords = ["Dialog", "BottomSheet", "PopupWindow", "PopupMenu"];
 
@@ -564,8 +696,10 @@ public sealed class PhoneScreenTimeline
     private sealed record Window(int Id, bool Application, int Layer, string? Title, PhoneBounds? Bounds, long? TransitionTime, bool Active, PhoneScreenEvidence? Evidence);
 
     // A state open in the current visit, keyed by its window or pane title.
-    private sealed class OpenState(long start, string kind, string name, PhoneTitleSource namedBy, string? package, int? windowId)
+    private sealed class OpenState(long start, string kind, string name, PhoneTitleSource namedBy, string? package, int? windowId, string? fixedText)
     {
+        public string? FixedText { get; set; } = fixedText;
+
         public long Start { get; } = start;
 
         public string Kind { get; } = kind;
@@ -590,11 +724,11 @@ public sealed class PhoneScreenTimeline
         // Each window's latest evidence, from the last snapshot that took its items.
         private readonly Dictionary<int, PhoneScreenEvidence> _evidence = [];
 
-        // The current visit's snapshots of its window, with the window's
-        // bounds and transition time.
-        private readonly List<(SessionTimelineEvent Event, PhoneBounds? Bounds, long? TransitionTime, PhoneScreenEvidence? Evidence)> _listings = [];
-
         private readonly Dictionary<string, OpenState> _open = [];
+
+        // Every listing of an app's window, in time order, for whether a
+        // listing was followed within QuietNanoseconds by another.
+        private readonly Dictionary<int, List<long>> _listingTimes = [];
 
         private PhoneVisit? _current;
 
@@ -620,7 +754,7 @@ public sealed class PhoneScreenTimeline
                 (state.ClassName != visit.Activity || state.Text != visit.StateText) &&
                 !IsStateClass(state.ClassName))
             {
-                Begin(time, PhoneVisitCause.WindowStateChanged, state.WindowId, visit.Package, visit.WindowTitle, _currentLayer);
+                Begin(time, PhoneVisitCause.WindowStateChanged, state.WindowId, visit.Package, visit.WindowTitle, null, _currentLayer);
             }
         }
 
@@ -646,40 +780,81 @@ public sealed class PhoneScreenTimeline
                 ?? (_states.TryGetValue(app.Id, out var appState) ? appState.State.Package : null)
                 ?? _current?.Package
                 ?? "unknown app";
+            var fixedText = _evidence.GetValueOrDefault(app.Id)?.FixedText;
             if (_current is not { } visit)
             {
-                Begin(StartOf(app.Id, time), PhoneVisitCause.FirstWindow, app.Id, package, app.Title, app.Layer);
+                Begin(StartOf(app.Id, time), PhoneVisitCause.FirstWindow, app.Id, package, app.Title, fixedText, app.Layer);
             }
             else if (app.Id != visit.WindowId)
             {
                 Begin(StartOf(app.Id, time),
                     package == visit.Package ? PhoneVisitCause.NewWindow : PhoneVisitCause.AnotherApp,
-                    app.Id, package, app.Title, app.Layer);
+                    app.Id, package, app.Title, fixedText, app.Layer);
             }
             else if (app.Title != visit.WindowTitle)
             {
-                Begin(time, PhoneVisitCause.WindowTitleChanged, app.Id, package, app.Title, app.Layer);
+                Begin(time, PhoneVisitCause.WindowTitleChanged, app.Id, package, app.Title, fixedText, app.Layer);
+            }
+            else if (fixedText is not null && visit.FixedText is not null && fixedText != visit.FixedText)
+            {
+                // A new screen in the same window, as in an app drawn by
+                // Jetpack Compose. A snapshot with no fixed text, as while
+                // a screen is drawn, or a titled pane over the whole
+                // window, as a dialog, changes nothing.
+                Begin(time, PhoneVisitCause.FixedTextChanged, app.Id, package, app.Title, fixedText, app.Layer);
             }
 
             _currentLayer = app.Layer;
-            _listings.Add((item, app.Bounds, app.TransitionTime, _evidence.GetValueOrDefault(app.Id)));
-            _current!._snapshots.Add(item);
+            _current!.FixedText ??= fixedText;
+            _current._listings.Add((item, app.Bounds, app.TransitionTime, _evidence.GetValueOrDefault(app.Id)));
+            if (!_listingTimes.TryGetValue(app.Id, out var times))
+            {
+                _listingTimes[app.Id] = times = [];
+            }
+
+            times.Add(time);
+            _current._snapshots.Add(item);
             UpdateStates(time, app, applications);
         }
 
         public (IReadOnlyList<PhoneVisit>, IReadOnlyList<PhoneScreen>, IReadOnlyList<PhoneApp>) Finish()
         {
             End(duration);
+            foreach (var visit in _visits)
+            {
+                Settle(visit);
+            }
+
+            // A title (window title, window-state text or first heading)
+            // shared by visits with different first fixed texts names no
+            // one screen: those visits are named by their fixed texts.
+            static (string? Title, PhoneTitleSource Source) BaseTitle(PhoneVisit visit) =>
+                visit.WindowTitle is { } windowTitle ? (windowTitle, PhoneTitleSource.WindowTitle)
+                : visit.StateText is { } stateText ? (stateText, PhoneTitleSource.WindowStateText)
+                : visit.FirstHeading is { } heading ? (heading, PhoneTitleSource.FirstHeading)
+                : (null, PhoneTitleSource.Untitled);
+            var fixedTexts = _visits
+                .Where(visit => visit.FixedText is not null)
+                .GroupBy(visit => (visit.Package, BaseTitle(visit).Title))
+                .ToDictionary(group => group.Key, group => group.Select(visit => visit.FixedText!).Distinct(StringComparer.Ordinal).Count());
+
             var screens = new List<PhoneScreen>();
             var apps = new List<PhoneApp>();
             var untitled = 0;
             for (var index = 0; index < _visits.Count; index++)
             {
                 var visit = _visits[index];
-                var (title, source) = visit.WindowTitle is { } windowTitle ? (windowTitle, PhoneTitleSource.WindowTitle)
-                    : visit.StateText is { } stateText ? (stateText, PhoneTitleSource.WindowStateText)
-                    : visit.FirstHeading is { } heading ? (heading, PhoneTitleSource.FirstHeading)
-                    : ((string?)null, PhoneTitleSource.Untitled);
+                var (title, source) = BaseTitle(visit);
+                string? sharedTitle = null;
+                var sharedBy = 0;
+                if (visit.FixedText is { } fixedText &&
+                    (title is null || fixedTexts.GetValueOrDefault((visit.Package, title)) > 1))
+                {
+                    sharedTitle = title;
+                    sharedBy = title is null ? 0 : fixedTexts[(visit.Package, title)];
+                    (title, source) = (fixedText, PhoneTitleSource.FirstFixedText);
+                }
+
                 var signature = title is null ? visit.ViewIdSignature : null;
 
                 // The same screen: the same app and title (or, untitled,
@@ -688,11 +863,12 @@ public sealed class PhoneScreenTimeline
                 var screen = screens.FirstOrDefault(candidate =>
                     candidate.Package == visit.Package &&
                     candidate.Title == title &&
+                    candidate.SharedTitle == sharedTitle &&
                     candidate.ViewIdSignature == signature &&
                     (candidate.Activity is null || visit.Activity is null || candidate.Activity == visit.Activity));
                 if (screen is null)
                 {
-                    screen = new PhoneScreen(screens.Count + 1, visit.Package, visit.Activity, title, source, signature);
+                    screen = new PhoneScreen(screens.Count + 1, visit.Package, visit.Activity, title, source, signature, sharedTitle, sharedBy);
                     if (title is null)
                     {
                         screen.UntitledNumber = ++untitled;
@@ -756,28 +932,29 @@ public sealed class PhoneScreenTimeline
                 ? state.Since
                 : time;
 
-        private void Begin(long start, PhoneVisitCause cause, int windowId, string package, string? windowTitle, int layer)
+        private void Begin(long start, PhoneVisitCause cause, int windowId, string package, string? windowTitle, string? fixedText, int layer)
         {
             var state = _states.TryGetValue(windowId, out var given) ? given.State : null;
             var activity = state?.ClassName;
             var text = state?.Text;
             if (_current is { } current &&
                 current.WindowId == windowId && current.Package == package &&
-                current.Activity == activity && current.StateText == text && current.WindowTitle == windowTitle)
+                current.Activity == activity && current.StateText == text && current.WindowTitle == windowTitle &&
+                (fixedText is null || current.FixedText is null || current.FixedText == fixedText))
             {
                 return;
             }
 
             End(start);
-            _current = new PhoneVisit(_visits.Count + 1, start, cause, windowId, package, activity, windowTitle, text);
+            _current = new PhoneVisit(_visits.Count + 1, start, cause, windowId, package, activity, windowTitle, text)
+            {
+                FixedText = fixedText,
+            };
             _currentLayer = layer;
             _visits.Add(_current);
         }
 
-        // Closes the current visit: its states, its settled snapshots (each
-        // listing of its window with the bounds and transition time of
-        // every later listing in the visit), and its heading and view IDs
-        // from them.
+        // Closes the current visit and its open states.
         private void End(long end)
         {
             if (_current is not { } visit)
@@ -788,37 +965,66 @@ public sealed class PhoneScreenTimeline
             visit.End = Math.Max(visit.Start, end);
             foreach (var open in _open.Values)
             {
-                visit._states.Add(new PhoneScreenState(open.Start, visit.End, open.Kind, open.Name, open.NamedBy, open.Package, open.WindowId));
+                visit._states.Add(new PhoneScreenState(open.Start, visit.End, open.Kind, open.Name, open.NamedBy, open.Package, open.WindowId, open.FixedText));
             }
 
             _open.Clear();
-            var settled = new bool[_listings.Count];
-            for (var index = _listings.Count - 1; index >= 0; index--)
+            visit._states.Sort((a, b) => a.Start.CompareTo(b.Start));
+            _current = null;
+        }
+
+        // A visit's settled snapshots: each listing of its window with the
+        // bounds and transition time of every later listing in the visit,
+        // and with no listing of the window, in any visit, within
+        // QuietNanoseconds after it. Then its heading and view IDs, from
+        // the settled ones first.
+        private void Settle(PhoneVisit visit)
+        {
+            var listings = visit._listings;
+            var same = new bool[listings.Count];
+            for (var index = listings.Count - 1; index >= 0; index--)
             {
-                settled[index] = index == _listings.Count - 1
-                    ? true
-                    : settled[index + 1] &&
-                      _listings[index].Bounds == _listings[index + 1].Bounds &&
-                      _listings[index].TransitionTime == _listings[index + 1].TransitionTime;
+                same[index] = index == listings.Count - 1 ||
+                    (same[index + 1] &&
+                     listings[index].Bounds == listings[index + 1].Bounds &&
+                     listings[index].TransitionTime == listings[index + 1].TransitionTime);
             }
 
-            for (var index = 0; index < _listings.Count; index++)
+            var settled = new bool[listings.Count];
+            for (var index = 0; index < listings.Count; index++)
             {
+                var time = listings[index].Event.MonotonicNanoseconds;
+                settled[index] = same[index] && !ListedWithin(visit.WindowId, time);
                 if (settled[index])
                 {
-                    visit._settled.Add(_listings[index].Event);
+                    visit._settled.Add(listings[index].Event);
                 }
             }
 
-            var evidence = _listings.Where((_, index) => settled[index]).Select(listing => listing.Evidence)
-                .Concat(_listings.Select(listing => listing.Evidence))
+            var evidence = listings.Where((_, index) => settled[index]).Select(listing => listing.Evidence)
+                .Concat(listings.Select(listing => listing.Evidence))
                 .OfType<PhoneScreenEvidence>()
                 .ToList();
             visit.FirstHeading = evidence.Select(item => item.FirstHeading).FirstOrDefault(heading => heading is not null);
             visit.ViewIdSignature = evidence.Select(item => item.ViewIdSignature).FirstOrDefault(signature => signature is not null);
-            visit._states.Sort((a, b) => a.Start.CompareTo(b.Start));
-            _listings.Clear();
-            _current = null;
+        }
+
+        // Whether the window was listed again within QuietNanoseconds after a time.
+        private bool ListedWithin(int windowId, long time)
+        {
+            if (!_listingTimes.TryGetValue(windowId, out var times))
+            {
+                return false;
+            }
+
+            var index = times.BinarySearch(time);
+            index = index < 0 ? ~index : index + 1;
+            while (index < times.Count && times[index] == time)
+            {
+                index++;
+            }
+
+            return index < times.Count && times[index] - time < QuietNanoseconds;
         }
 
         // The visit's states at a snapshot: application windows above the
@@ -826,7 +1032,7 @@ public sealed class PhoneScreenTimeline
         // window by their titles.
         private void UpdateStates(long time, Window app, List<Window> applications)
         {
-            var now = new Dictionary<string, (string Kind, string Name, PhoneTitleSource NamedBy, string? Package, int? WindowId)>();
+            var now = new Dictionary<string, (string Kind, string Name, PhoneTitleSource NamedBy, string? Package, int? WindowId, string? FixedText)>();
             foreach (var window in applications.Where(window => window.Id != app.Id))
             {
                 var state = _states.TryGetValue(window.Id, out var given) ? given.State : null;
@@ -844,18 +1050,19 @@ public sealed class PhoneScreenTimeline
                     ? KindOf(className)
                     : "window";
                 now["window:" + window.Id.ToString(CultureInfo.InvariantCulture)] =
-                    (kind, name, namedBy, evidence?.Package ?? state?.Package, window.Id);
+                    (kind, name, namedBy, evidence?.Package ?? state?.Package, window.Id, evidence?.FixedText);
             }
 
-            foreach (var pane in _evidence.TryGetValue(app.Id, out var appEvidence) ? appEvidence.PaneTitles : [])
+            var appEvidence = _evidence.GetValueOrDefault(app.Id);
+            foreach (var pane in appEvidence?.PaneTitles ?? [])
             {
-                now["pane:" + pane] = ("pane", pane, PhoneTitleSource.PaneTitle, null, null);
+                now["pane:" + pane] = ("pane", pane, PhoneTitleSource.PaneTitle, null, null, appEvidence!.PaneFixedTexts.GetValueOrDefault(pane));
             }
 
             foreach (var key in _open.Keys.Where(key => !now.ContainsKey(key)).ToList())
             {
                 var open = _open[key];
-                _current!._states.Add(new PhoneScreenState(open.Start, time, open.Kind, open.Name, open.NamedBy, open.Package, open.WindowId));
+                _current!._states.Add(new PhoneScreenState(open.Start, time, open.Kind, open.Name, open.NamedBy, open.Package, open.WindowId, open.FixedText));
                 _open.Remove(key);
             }
 
@@ -869,10 +1076,11 @@ public sealed class PhoneScreenTimeline
                         open.NamedBy = state.NamedBy;
                     }
 
+                    open.FixedText ??= state.FixedText;
                     continue;
                 }
 
-                _open[key] = new OpenState(time, state.Kind, state.Name, state.NamedBy, state.Package == _current!.Package ? null : state.Package, state.WindowId);
+                _open[key] = new OpenState(time, state.Kind, state.Name, state.NamedBy, state.Package == _current!.Package ? null : state.Package, state.WindowId, state.FixedText);
             }
         }
 

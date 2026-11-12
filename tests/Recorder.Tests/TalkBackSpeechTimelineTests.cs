@@ -78,7 +78,7 @@ public sealed class TalkBackSpeechTimelineTests : IDisposable
         var speech = Check3Speech();
         FromIndex(speech, out var index);
 
-        Assert.Equal(25, index.Version);
+        Assert.Equal(26, index.Version);
         var kept = index.Events.Where(item => item.Channel == AndroidTalkBackRecords.SpeechChannel).ToArray();
         Assert.Equal(speech.Count, kept.Length);
         var session = kept.First(item => item.EventType == AndroidTalkBackRecords.UtteranceStartedEventType);

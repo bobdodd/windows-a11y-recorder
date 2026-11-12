@@ -3,7 +3,9 @@
 ## Status
 
 Proposed 2026-11-11. Step 1 of "Build order", screens and visits, is
-built (see "As built: step 1"); no check is built yet. The owner's
+built (see "As built: step 1"), with rules added on 2026-11-12 for
+screens drawn in one window, measured in the client's app; no check is
+built yet. The owner's
 decisions of 2026-11-11 are in "Decisions (2026-11-11)" and "Decisions
 on the open questions (2026-11-11)". Before any check is assigned a
 result, the recording has to say which app and which screen each moment
@@ -168,10 +170,17 @@ A new visit starts when, in the app on screen:
    `_PANE_DISAPPEARED`) does not start a visit: a pane is a state of the
    screen (decision 6, and "States" below).
 3. **Another app comes to the front,** as above.
+4. **The window's first fixed text changes,** in the same window with
+   the same title (added 2026-11-12, measured in the client's app
+   below). The **first fixed text** is, in the tree's order, the first
+   visible text or content description of an item that is not
+   clickable, has no clickable or scrollable item around it, and is in
+   no titled pane. A snapshot with no fixed text, as while a screen is
+   drawn, changes nothing.
 
 Scrolling, focus moving, text typed, items changing, and content changes
-that keep the window, its class name and its title do not start a
-visit.
+that keep the window, its class name, its title and its first fixed text
+do not start a visit.
 
 ### What names a screen
 
@@ -189,6 +198,13 @@ Within a recording, two visits are to the same screen when they share a
 
 The player names each screen by its title and app, such as "Safety and
 emergency (Settings)", and shows which of the three gave the title.
+
+When visits with the same title in the same app have different first
+fixed texts, the title names no one screen: those visits are named, and
+matched, by their first fixed text, and the player says how many
+screens share the title. A screen with none of the three titles but a
+first fixed text is named by that text. (Added 2026-11-12, for the
+client's app below.)
 
 When none of the three gives a title, the screen is named by its
 activity and a number in order of first visit, such as "SubSettings,
@@ -223,10 +239,12 @@ The keyboard (`TYPE_INPUT_METHOD`) is not a state and is not checked.
 
 The checks run only on **settled** snapshots: those in which the app's
 window has the same bounds and transition time as in every later
-snapshot of that window in the visit (the last snapshot of a visit is
-settled). A snapshot taken while a
-window slides in, as at 16.57 s above, is shown in the tree view as
-now, but no check uses it.
+snapshot of that window in the visit, and after which the window is not
+listed again within half a second (added 2026-11-12: in the client's
+app a new screen is drawn in the same window with the same transition
+time, its snapshots 10 to 20 ms apart). A snapshot taken while a window
+slides in, as at 16.57 s above, or while a screen is drawn, is shown in
+the tree view as now, but no check uses it.
 
 ## Items and findings
 
@@ -340,13 +358,14 @@ Built 2026-11-11 in `src/Recorder.Session/PhoneScreens.cs`
 applied as follows; where this section is more exact than the sections
 above, it is what the code does.
 
-- **What it reads.** The playback index (version 25) keeps every
+- **What it reads.** The playback index (version 26) keeps every
   `TYPE_WINDOW_STATE_CHANGED` event whole, and each compact tree
   snapshot keeps, for every window whose items were taken, what the
   items say about the screen (`PhoneScreenEvidence`): the root item's
   package, the first visible heading's text (or the first text inside
   it, as the Settings toolbar's heading had none of its own), the pane
-  titles, and the number and a hash of the sorted distinct view IDs.
+  titles, the first fixed text of the window and of each titled pane,
+  and the number and a hash of the sorted distinct view IDs.
   A window whose items were not taken in a snapshot keeps the evidence
   from the last snapshot that took them. An index from an older version
   is derived again, so earlier recordings get their screens.
@@ -363,19 +382,25 @@ above, it is what the code does.
   visit began, as the event comes before the first snapshot listing the
   window (16.51 s against 16.57 s in test 64); otherwise at the
   snapshot. A new window from the same app is "a new window"; from
-  another package, "another app". A visit whose window, app, activity,
-  title and window-state text are all unchanged goes on.
+  another package, "another app". A change of first fixed text starts a
+  visit at the snapshot that shows it. A visit whose window, app,
+  activity, title, window-state text and first fixed text are all
+  unchanged goes on.
 - **Screens.** Visits are matched to screens once the recording is
   read, in order: same package, same title, and the same activity or an
   activity unknown on either side, as for the window a recording begins
   in, which has had no window-state event. An untitled screen is also
   matched by its view-ID hash. The heading and the view-ID hash of a
-  visit are taken from its settled snapshots first.
+  visit are taken from its settled snapshots first. A title shared by
+  visits with different first fixed texts gives way to the fixed text,
+  as in "What names a screen".
 - **States.** Application windows above the app's window, and windows
   that are dialogs, bottom sheets or popups by their class name, are
   states, named by their window title, window-state text or first
   heading, and labelled with their package when it is not the app's.
-  Each pane title in the app's window is a state. A state runs from the
+  Each pane title in the app's window is a state; the player also shows
+  the state's first fixed text, as a pane titled "Dialog" says little.
+  A state runs from the
   first snapshot it is in to the first it is not in, or to the end of the
   visit.
 - **Apps** are named by package; the app's own name is not recorded.
@@ -394,16 +419,66 @@ Measured against test 64's recording with a throwaway program on the
 development machine: one app, two screens, "Settings" (named by its
 window title, activity unknown) from 1.209 s and "Safety and emergency"
 (named by its window title, activity `SubSettings`) from 16.511 s, with
-two of its five snapshots settled (17.00 and 17.02 s).
+two of its five snapshots settled (17.00 and 17.02 s). With the half
+second rule added on 2026-11-12, one of those five is settled (17.02 s)
+and four of the first visit's seven.
 
-Not yet known, to be measured with the client's app:
+### Measured in the client's app (2026-11-12)
 
-- whether an app that changes screens inside one window, such as one
-  written with Jetpack Compose, raises window-state events or changes
-  its window title; if it does neither, its screens are one visit (a
-  known limit until measured);
-- whether dialogs, menus and bottom sheets are their own windows, and
-  what class names their window-state events carry;
+The owner recorded the client's app, Nova SleepCare
+(`com.pss.novasleepcare`), in session
+`20261112-005243-5528d67531dd4441a50b2c2985350c59`: Home, then Learn,
+then the Understanding Melatonin module, then Diary, then the Good
+morning card, which opened a dialog; then Back twice. The first build of
+step 1 found 2 apps, 2 screens and 3 visits: all four of the app's
+screens were one screen, "Nova SleepCare". Measured in the recording:
+
+- every screen was in one window (ID 264), titled "Nova SleepCare" from
+  start to end, with one transition time (51734729) throughout;
+- moving between screens raised only `TYPE_WINDOW_CONTENT_CHANGED`
+  events from `android.view.View` items: no window-state event and no
+  title change (inference: the app is drawn with Jetpack Compose);
+- no item was a heading, and the only view IDs were Android's own
+  (`android:id/content`, `android:id/navigationBarBackground`), the same
+  on every screen;
+- the root pane's title was a single space; the dialog was a pane
+  titled "Dialog" in the same window, raised with a pane-title
+  window-state event, and while it was open the tree held only the
+  dialog's items;
+- each screen's first fixed text was its own and stayed while it was
+  shown: "Welcome, Bob Dodd" (Home), "Sleep Learning Library" (Learn),
+  "Sleep Learning" (the module, with "Module: Understanding Melatonin"
+  under it), "Sleep Diary" (Diary), and in the dialog's pane "Last
+  Night's Sleep";
+- a new screen was drawn over about half a second with a snapshot every
+  10 to 20 ms (8.95 to 9.39 s for Learn), one at 13.91 s with no text;
+- Back on Sleep Diary left the app for the launcher: the recording has
+  two Back presses (41.06 s, which closed the dialog, and 42.04 s);
+- none of the bottom bar's tabs (HOME, LEARN, DIARY, PROFILE) was
+  marked as selected.
+
+With the rules added on 2026-11-12, the throwaway program gives 2 apps,
+5 screens and 6 visits: "Welcome, Bob Dodd", "Sleep Learning Library",
+"Sleep Learning" and "Sleep Diary" (each named by its first fixed text,
+as 4 screens share the title "Nova SleepCare"), the launcher's "Home"
+(named by its window title), and a return to "Sleep Diary" at 44.135 s,
+after the launcher. The dialog is a state of the first Sleep Diary
+visit, pane "Dialog" with first fixed text "Last Night's Sleep", from
+23.157 to 41.307 s. Settled snapshots: Home 1 of 1, Learn 1 of 49, the
+module 2 of 42, Sleep Diary 4 of 52 and 1 of 3, the launcher 2 of 12.
+
+Not yet known:
+
+- apps whose first fixed text changes while one screen is shown, such
+  as a clock or a counter at the top; each change would start a visit
+  to a new screen;
+- two screens of one template with the same first fixed text, as two
+  modules might both begin "Sleep Learning"; they would be one screen
+  (decision 8 keeps content titles apart, but this text is not the
+  content's title);
+- apps where each screen is a titled pane, which are states here;
+- whether dialogs, menus and bottom sheets in other apps are their own
+  windows, and what class names their window-state events carry;
 - whether turning the phone gives the app's window a new ID, which
   would start a new visit to the same screen.
 

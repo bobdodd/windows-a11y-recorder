@@ -10,7 +10,10 @@ namespace Recorder.Tests;
 // recording's apps, visits, screens and states. The first case follows the
 // measured windows and events of test 64 (session
 // 20261111-002648-06be83ce21ec47309bd4bc68b4ae1cb4: Settings, then "Safety
-// and emergency" sliding in); the others are made up, one rule each.
+// and emergency" sliding in), and the second those of the client's app
+// (session 20261112-005243-5528d67531dd4441a50b2c2985350c59: Nova
+// SleepCare, every screen in one window); the others are made up, one
+// rule each.
 public sealed class PhoneScreenTimelineTests : IDisposable
 {
     private const long Second = 1_000_000_000;
@@ -44,7 +47,7 @@ public sealed class PhoneScreenTimelineTests : IDisposable
         int id, string? title, int left = 0, int top = 0, int right = 1080, int bottom = 2404,
         int layer = 0, bool active = true, string typeName = "TYPE_APPLICATION",
         string? package = Settings, string? heading = null, string[]? panes = null, string? signature = null,
-        long? transition = null)
+        long? transition = null, string? fixedText = null, Dictionary<string, string>? paneTexts = null)
     {
         var window = new JsonObject
         {
@@ -61,7 +64,11 @@ public sealed class PhoneScreenTimelineTests : IDisposable
         };
         if (package is not null)
         {
-            window[PhoneScreenEvidence.Field] = new PhoneScreenEvidence(package, heading, panes ?? [], signature, signature is null ? 0 : 4).ToJson();
+            window[PhoneScreenEvidence.Field] = new PhoneScreenEvidence(package, heading, panes ?? [], signature, signature is null ? 0 : 4)
+            {
+                FixedText = fixedText,
+                PaneFixedTexts = paneTexts ?? [],
+            }.ToJson();
         }
 
         return window;
@@ -130,13 +137,95 @@ public sealed class PhoneScreenTimelineTests : IDisposable
         Assert.Equal("Safety and emergency (com.android.settings)", second.Screen.Label);
         Assert.Equal("com.android.settings.SubSettings", second.Screen.Activity);
         Assert.Equal(5, second.Snapshots.Count);
-        Assert.Equal([At(17.00), At(17.02)], second.SettledSnapshots.Select(item => item.MonotonicNanoseconds));
+        // 17.00 has the final bounds and transition time, but the window
+        // was listed again 20 ms later.
+        Assert.Equal([At(17.02)], second.SettledSnapshots.Select(item => item.MonotonicNanoseconds));
         Assert.Equal(2, first.SettledSnapshots.Count);
         Assert.Empty(first.States);
         Assert.Empty(second.States);
         Assert.Same(second, screens.VisitAt(At(16.51)));
         Assert.Same(first, screens.VisitAt(At(16.50)));
         Assert.Null(screens.VisitAt(At(1)));
+    }
+
+    private const string Nova = "com.pss.novasleepcare";
+
+    private const string Launcher = "com.google.android.apps.nexuslauncher";
+
+    private static JsonObject NovaWindow(string? fixedText, string[]? panes = null, Dictionary<string, string>? paneTexts = null) =>
+        Window(264, "Nova SleepCare", package: Nova, transition: 51734729, fixedText: fixedText, panes: panes, paneTexts: paneTexts);
+
+    [Fact]
+    public void TheClientsApp_ScreensInOneWindowWithOneTitle_AreVisitsByTheirFirstFixedText()
+    {
+        Snapshot(2.06, NovaWindow("Welcome, Bob Dodd"));
+        // Learn: drawn over about 0.45 s, a snapshot every 10 ms or so.
+        for (var time = 8.95; time < 9.395; time += 0.01)
+        {
+            Snapshot(time, NovaWindow("Sleep Learning Library"));
+        }
+
+        // Understanding Melatonin: first a snapshot with no text at all.
+        Snapshot(13.91, NovaWindow(null));
+        Snapshot(13.93, NovaWindow("Sleep Learning"));
+        Snapshot(14.35, NovaWindow("Sleep Learning"));
+        Snapshot(19.68, NovaWindow("Sleep Diary"));
+        Snapshot(20.09, NovaWindow("Sleep Diary"));
+        // The Good morning card opens a dialog: a pane titled "Dialog" over
+        // the whole window, its event a pane title change.
+        WindowState(23.13, 264, "android.widget.FrameLayout", "Dialog", contentChangeTypes: 0x8, package: Nova);
+        var dialog = new Dictionary<string, string> { ["Dialog"] = "Last Night's Sleep" };
+        Snapshot(23.16, NovaWindow(null, ["Dialog"], dialog));
+        Snapshot(23.37, NovaWindow(null, ["Dialog"], dialog));
+        Snapshot(41.31, NovaWindow("Sleep Diary"));
+        // Back on Sleep Diary goes to the launcher.
+        WindowState(42.19, 262, "com.google.android.apps.nexuslauncher.NexusLauncherActivity", "Home screen 3 of 3", package: Launcher);
+        Snapshot(42.29, Window(262, "Home", package: Launcher, fixedText: "Wed, Nov 11"));
+        WindowState(44.14, 264, "com.pss.novasleepcare.MainActivity", "Nova SleepCare", package: Nova);
+        Snapshot(44.21, NovaWindow("Sleep Diary"));
+
+        var screens = Screens(60.793);
+
+        Assert.Equal([Nova, Launcher], screens.Apps.Select(app => app.Package));
+        Assert.Equal(
+            ["Welcome, Bob Dodd", "Sleep Learning Library", "Sleep Learning", "Sleep Diary", "Home"],
+            screens.Screens.Select(screen => screen.Name));
+        Assert.Equal(
+            [PhoneVisitCause.FirstWindow, PhoneVisitCause.FixedTextChanged, PhoneVisitCause.FixedTextChanged,
+             PhoneVisitCause.FixedTextChanged, PhoneVisitCause.AnotherApp, PhoneVisitCause.AnotherApp],
+            screens.Visits.Select(visit => visit.Cause));
+        Assert.Equal([At(2.06), At(8.95), At(13.93), At(19.68), At(42.19), At(44.14)], screens.Visits.Select(visit => visit.Start));
+        var diary = screens.Screens[3];
+        Assert.Equal(PhoneTitleSource.FirstFixedText, diary.TitleSource);
+        Assert.Equal("named by its first fixed text, as 4 screens share the title 'Nova SleepCare'", diary.NamedBy);
+        Assert.Equal([4, 6], diary.Visits.Select(visit => visit.Number));
+        Assert.True(diary.Visits[1].IsReturn);
+        Assert.Equal("com.pss.novasleepcare.MainActivity", diary.Activity);
+        // The launcher's one fixed text does not displace its window title.
+        Assert.Equal(PhoneTitleSource.WindowTitle, screens.Screens[4].TitleSource);
+
+        var state = Assert.Single(screens.Visits[3].States);
+        Assert.Equal(("pane", "Dialog", "Last Night's Sleep", At(23.16), At(41.31)),
+            (state.Kind, state.Name, state.FixedText, state.Start, state.End));
+        // Of Learn's 45 snapshots only the last, with no other within
+        // half a second, is settled.
+        Assert.Equal([At(9.39)], screens.Visits[1].SettledSnapshots.Select(item => item.MonotonicNanoseconds));
+        // The snapshot with no text stays in the Learn visit.
+        Assert.Equal(2, screens.Visits[2].Snapshots.Count);
+    }
+
+    [Fact]
+    public void OneFixedTextUnderAWindowTitle_KeepsTheWindowTitle_AndNoFixedTextNamesAnUntitledScreen()
+    {
+        Snapshot(1, Window(70, "Settings", fixedText: "Search Settings"));
+        WindowState(1.9, 71, "com.example.app.MainActivity", null, package: "com.example.app");
+        Snapshot(2, Window(71, null, package: "com.example.app", fixedText: "Today"));
+
+        var screens = Screens(3);
+
+        Assert.Equal(["Settings", "Today"], screens.Screens.Select(screen => screen.Name));
+        Assert.Equal(PhoneTitleSource.WindowTitle, screens.Screens[0].TitleSource);
+        Assert.Equal("named by its first fixed text, as it has no title", screens.Screens[1].NamedBy);
     }
 
     [Fact]
@@ -300,6 +389,46 @@ public sealed class PhoneScreenTimelineTests : IDisposable
         Assert.Equal(["Filters"], evidence.PaneTitles);
         Assert.Equal(PhoneScreenEvidence.Of(reordered).ViewIdSignature, evidence.ViewIdSignature);
         Assert.Equal(16, evidence.ViewIdSignature!.Length);
+    }
+
+    [Fact]
+    public void Evidence_FirstFixedText_SkipsControls_ScrollingContainers_AndTitledPanes()
+    {
+        static JsonObject Item(int index, int? parent, string? text = null, bool clickable = false, bool scrollable = false, string? pane = null) => new()
+        {
+            ["index"] = index,
+            ["parent"] = parent,
+            ["packageName"] = "com.pss.novasleepcare",
+            ["className"] = "android.view.View",
+            ["contentDescription"] = text,
+            ["paneTitle"] = pane,
+            ["clickable"] = clickable,
+            ["scrollable"] = scrollable,
+            ["visibleToUser"] = true,
+        };
+
+        // As measured: the root pane's title is a single space, which is
+        // no title; a dialog is a pane titled "Dialog".
+        var items = JsonSerializer.SerializeToElement(new JsonArray(
+            Item(0, null, pane: " "),
+            Item(1, 0, "3", clickable: true),
+            Item(2, 0, clickable: true),
+            Item(3, 2, "OPEN BEDTIME MODE"),
+            Item(4, 0, scrollable: true),
+            Item(5, 4, "How did you sleep last night?"),
+            Item(6, 0, "Sleep Diary"),
+            Item(7, 0, pane: "Dialog"),
+            Item(8, 7, "Scrim", clickable: true),
+            Item(9, 7, "Last Night's Sleep")));
+
+        var evidence = PhoneScreenEvidence.Of(items);
+        var read = PhoneScreenEvidence.Read(new JsonObject { [PhoneScreenEvidence.Field] = evidence.ToJson() }.Deserialize<JsonElement>())!;
+
+        Assert.Equal("Sleep Diary", evidence.FixedText);
+        Assert.Equal(["Dialog"], evidence.PaneTitles);
+        Assert.Equal("Last Night's Sleep", evidence.PaneFixedTexts["Dialog"]);
+        Assert.Equal("Sleep Diary", read.FixedText);
+        Assert.Equal("Last Night's Sleep", read.PaneFixedTexts["Dialog"]);
     }
 
     [Fact]

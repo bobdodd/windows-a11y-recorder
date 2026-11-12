@@ -62,9 +62,12 @@ public partial class MainWindow
                     {
                         var from = state.Package is null ? string.Empty : $", from {state.Package}";
                         var named = state.NamedBy == PhoneTitleSource.Untitled ? ", untitled" : $" '{state.Name}'";
+                        var shows = state.FixedText is { } fixedText && fixedText != state.Name
+                            ? $", first fixed text '{fixedText}'"
+                            : string.Empty;
                         _phoneScreenRows.Add(new PhoneScreenRowView(
                             3,
-                            $"In {state.Kind}{named}{from}, {state.When}",
+                            $"In {state.Kind}{named}{shows}{from}, {state.When}",
                             state.Start,
                             null));
                     }
