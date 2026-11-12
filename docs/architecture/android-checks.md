@@ -799,6 +799,96 @@ files unless it says otherwise.
   phone. Dark themes, gradients, pictures behind text and motion were
   not in it.
 
+### Step 4: the owner's decisions (2026-11-12)
+
+1. **Where the colours come from: the phone's screenshot, else the
+   video** (option C). The checks use a lossless screenshot of the
+   screen when one was taken while the picture was the one the settled
+   snapshot shows, and otherwise the video, with near colours joined
+   and the finding marked approximate.
+2. **Text is text, whatever ATF counts.** Any text seen on a background
+   is checked for contrast, whether the app gives it as text, as a hint,
+   as a content description, or not at all (text drawn in a picture).
+3. **A setting for AA or AAA.** WCAG 2.2's 1.4.3, Contrast (Minimum),
+   is level AA: 4.5:1, or 3:1 for large text; 1.4.6, Contrast
+   (Enhanced), is level AAA: 7:1, or 4.5:1 for large text
+   (https://www.w3.org/TR/WCAG22/#contrast-minimum,
+   https://www.w3.org/TR/WCAG22/#contrast-enhanced).
+4. **Non-text contrast as well**, a separate check (WCAG 2.2's 1.4.11,
+   Non-text Contrast, level AA: 3:1 for the parts of controls needed to
+   identify them and their states, and for parts of graphics needed to
+   understand them, https://www.w3.org/TR/WCAG22/#non-text-contrast).
+
+### Step 4: the design
+
+- **The phone's screenshots.** The companion is an accessibility
+  service, and an accessibility service can take a screenshot of the
+  display itself, `AccessibilityService.takeScreenshot`, once it
+  declares `canTakeScreenshot` in its configuration; the screenshot is a
+  `HardwareBuffer`, and calls closer than 333 ms apart are refused
+  (`ACCESSIBILITY_TAKE_SCREENSHOT_REQUEST_INTERVAL_TIMES_MS`), and a
+  window marked secure cannot be taken (`ERROR_TAKE_SCREENSHOT_SECURE_WINDOW`)
+  (checked in AOSP's `AccessibilityService.java`). The companion takes
+  one when the app's window has had no change for half a second, the
+  same rule as a settled snapshot, and sends it as PNG with its time on
+  the phone's clock over the link it already uses; the PC stores it with
+  the recording beside the frames. A settled snapshot uses the first
+  screenshot taken after it with no change of picture in the video
+  between the two; if there is none (refused, secure, too soon, or a
+  recording made before this), it uses the last frame before the next
+  change of picture, as the measurement found the first frames after a
+  change still sharpening. Turning `canTakeScreenshot` on changes the
+  service's configuration, so the companion is installed again and, if
+  Android asks, its service turned on again (inference; checked on the
+  Pixel when built).
+- **Finding the text.** Windows' own OCR (`Windows.Media.Ocr`) reads
+  the screenshot or frame: it is part of Windows, runs on the PC, costs
+  nothing, and gives the same answer for the same picture. On the PC it
+  has English installed and read a whole phone screenshot in 72 ms,
+  finding every line on the PROFILE screen, but reading "0" as "O"
+  (measured with test 16's screenshot 13). So it is used for where text
+  is drawn, not for what it says: an item's text, hint or content
+  description is matched to the OCR lines inside its bounds, allowing
+  for misread characters; an item whose description is not drawn (an
+  icon's) is not text, and goes to the non-text check; a line inside no
+  item's text, such as words in a picture, is checked as text in a
+  picture.
+- **Measuring a line.** The colours are measured in each OCR line's box,
+  not the whole item, so an emoji or an icon beside the text is not
+  taken for it (the 3 left over in the measurement were such a tile):
+  ATF's swatch, one text colour, after joining colours closer than a
+  Delta E of 3.
+- **Text size.** Large text is 18 point, or 14 point bold
+  (https://www.w3.org/TR/WCAG22/#dfn-large-scale); ATF takes that as 18
+  or 14 bold in scaled pixels, the text's size divided by the scaled
+  density (`isLargeText` and `ContrastUtils`, checked in the source at
+  `c65cab0`), and the checks do the same. The app's size is
+  used where Android gives it (`AccessibilityNodeInfo`'s rendering
+  information, API 30, TextViews only); otherwise it is estimated from
+  the line's height in pixels and the density, and the finding says
+  so. Boldness is not known, so a ratio between the large and the normal
+  limit is a warning, "fails unless the text is large", with the
+  measured height.
+- **Levels.** Below the limit for large text, an error; between the two
+  limits, the warning above; from the video, a ratio within 12% of a
+  limit is "near the limit", a warning, as the measured error was up to
+  11.2%. The setting, AA or AAA, is in the Checks tab, kept between
+  runs, and the findings are worked out again when it changes.
+- **Non-text contrast (a later step).** What can be measured without
+  judgement: an icon or image that is the only thing identifying a
+  control, against its background (as ATF's `ImageContrastCheck`, 3:1);
+  and the edge of a text field, a checkbox, a switch or a radio button
+  against what is next to it, from a band of pixels just inside the
+  item's bounds and one just outside. Whether a button's edge is needed
+  to identify it cannot be told from the pixels (a button with text
+  needs none), so those ratios are info, for review, not errors.
+  Focus indicators are not in it, as they need the focus moved.
+
+Build order: 4a, the companion's screenshots and their storage; 4b, the
+colour measurement and the OCR matching, run on test 16's recording and
+screenshots against the measurement above; 4c, the text contrast check
+with the setting and its findings; then non-text contrast.
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A
