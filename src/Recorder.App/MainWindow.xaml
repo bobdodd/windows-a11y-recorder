@@ -1549,31 +1549,49 @@
             <Grid Margin="8">
               <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
               </Grid.RowDefinitions>
-              <DockPanel Grid.Row="0" Margin="0,0,0,6" LastChildFill="True">
+              <WrapPanel Grid.Row="0" Margin="0,0,0,6">
                 <Button x:Name="ShowCurrentVisitButton"
-                        DockPanel.Dock="Left"
                         MinHeight="44"
                         MinWidth="44"
+                        Margin="0,0,8,0"
                         Padding="12,0"
                         Content="Show current visit"
                         Click="ShowCurrentVisitButton_Click"
                         AutomationProperties.HelpText="Scrolls the list to the visit at the playhead. The list does not scroll by itself." />
-                <local:SelectableText x:Name="ChecksStatusTextBlock"
-                           Margin="12,0,0,0"
-                           VerticalAlignment="Center"
-                           TextWrapping="Wrap"
-                           Text="Open a recording of a phone to list its apps, screens and visits." />
-              </DockPanel>
+                <Button x:Name="PreviousFindingTimeButton"
+                        MinHeight="44"
+                        MinWidth="44"
+                        Margin="0,0,8,0"
+                        Padding="12,0"
+                        Content="Previous time"
+                        IsEnabled="False"
+                        Click="PreviousFindingTimeButton_Click"
+                        AutomationProperties.HelpText="Moves the playhead to the previous time the chosen finding was seen." />
+                <Button x:Name="NextFindingTimeButton"
+                        MinHeight="44"
+                        MinWidth="44"
+                        Padding="12,0"
+                        Content="Next time"
+                        IsEnabled="False"
+                        Click="NextFindingTimeButton_Click"
+                        AutomationProperties.HelpText="Moves the playhead to the next time the chosen finding was seen." />
+              </WrapPanel>
+              <local:SelectableText x:Name="ChecksStatusTextBlock"
+                         Grid.Row="1"
+                         Margin="0,0,0,6"
+                         TextWrapping="Wrap"
+                         Text="Open a recording of a phone to list its apps, screens and visits." />
               <ListBox x:Name="PhoneScreensListBox"
-                       Grid.Row="1"
+                       Grid.Row="2"
                        MinHeight="70"
                        HorizontalContentAlignment="Stretch"
                        ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                        VirtualizingPanel.ScrollUnit="Pixel"
-                       AutomationProperties.Name="Apps, screens and visits"
-                       AutomationProperties.HelpText="Click a row, or press Enter or Space on it, to move the playhead to the start of its visit or state; a screen's or an app's row moves it to the first visit.">
+                       AutomationProperties.Name="Apps, screens, visits and findings"
+                       AutomationProperties.HelpText="Click a row, or press Enter or Space on it, to move the playhead to the start of its visit or state; a screen's or an app's row moves it to the first visit. A finding's row moves it to the first time the finding was seen, selects its item in the Accessibility tree tab and outlines it on the phone's picture; Previous time and Next time step through the other times.">
                 <ListBox.ItemContainerStyle>
                   <Style TargetType="ListBoxItem">
                     <Setter Property="MinHeight" Value="44" />

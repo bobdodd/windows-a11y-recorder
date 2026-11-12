@@ -1,4 +1,4 @@
-# Validation plan: Android checks, steps 1 and 2 (screens and visits; density and versions)
+# Validation plan: Android checks, steps 1 to 3 (screens and visits; density and versions; checks of the tree)
 
 These tests are step 1 of [Android checks](../architecture/android-checks.md),
 "Build order": the player dividing a phone recording into apps, screens,
@@ -328,3 +328,102 @@ Run on the development PC with commit efdc2fd.
   new window, a return". This density change started a new visit to the
   same screen; whether other configuration changes, such as turning the
   phone, do the same is inference until tested.
+
+## Step 3: the checks of the tree and the findings
+
+These tests are step 3 of [Android checks](../architecture/android-checks.md),
+"As built: step 3": checks rewritten from Google's Accessibility Test
+Framework for Android (ATF), and WCAG 2.5.8's 24dp level, run on each
+screen's settled snapshots when a recording is opened, with each screen's
+findings listed under it in the Checks tab. Choosing a finding moves the
+playhead to it and outlines its item on the phone's picture. The tests
+use recordings already made, so no phone is needed.
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings and the new tests pass, and a
+throwaway program ran the checks on the recordings of tests 4 and 9
+and gave the rows and times these tests expect. Test 9's recording first
+gave six errors for Display size buttons measured at the wrong density;
+the rule that fixed it is in "As built: step 3", "The density changing
+during a visit".
+
+## Test 10: build and install the fourth build (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Start the recorder from the Start menu.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the recorder
+opens.
+
+## Test 11: the client's app's findings in the Checks tab
+
+1. Choose "Open recording...", and open
+   `20261112-005243-5528d67531dd4441a50b2c2985350c59`.
+2. If the Checks window is closed, click the "Checks" tab.
+3. Wait 5 seconds, then take a screenshot of the whole recorder window.
+4. Scroll the list until the row starting "Screen 3: Sleep Learning" is
+   at its top, and take another screenshot.
+
+**On screen:** in step 3 the line under "Show current visit" reads "2
+apps, 5 screens, 6 visits. Before the first visit. Checks of the tree: 4
+findings (2 errors, 1 warning, 1 info), from 11 settled snapshots, in",
+a number, "seconds. The touch target checks did not run on 11 settled
+snapshots, as no density was recorded for them." Under Screen 1's visit
+row is the row "No findings from the checks of the tree on this
+screen." In step 4, after Screen 3's visit row, there are these rows in
+this order: "Speakable text present (ATF): 1 error" in bold; "Error: View
+with no text, a screen reader would focus it, but it has no text,
+content description, label from another item, or text from the items in
+it; seen once, at 00:00:14.354"; "Duplicate speakable text (ATF): 1
+info" in bold; and "Info: View described as "2", speaks "2", as 1 other
+item does; none is clickable; seen once, at 00:00:14.354". Each finding
+row is indented further than its bold row. Long rows wrap; there is no
+horizontal scrollbar. Send both screenshots.
+
+## Test 12: choosing a finding
+
+The recording from test 11 is open, with the list as step 4 left it.
+
+1. Click the row starting "Error: View with no text".
+2. Take a screenshot of the whole recorder window.
+
+**On screen:** the time under the phone's picture starts
+"00:00:14.354". On the phone's picture a dashed cyan rectangle outlines
+an item. The line under "Show current visit" ends "Showing time 1 of 1
+of the chosen finding, outlined on the phone's picture while its items
+are shown." "Previous time" and "Next time" are both greyed out, as the
+finding was seen once. In the "Accessibility tree" tab, or its window, a
+row starting "View" is highlighted as selected. Send the screenshot.
+
+## Test 13: stepping through a finding's times
+
+1. Choose "Open recording...", and open
+   `20261112-031508-262e4d97af4847dca17d45d0131b4814` (test 9, Display
+   size), then, if the Checks window is closed, click the "Checks" tab.
+2. Under the bold row "Touch target size (ATF, 48dp): 2 not run", click
+   the row starting "Not run: LinearLayout containing "Outline text"",
+   and take a screenshot of the whole recorder window.
+3. Click "Next time", and take a screenshot.
+4. Click "Next time" again, and take a screenshot.
+
+**On screen:** in step 2 the line under "Show current visit" includes
+"Checks of the tree: 3 findings (3 not run), from 6 settled snapshots",
+and no row in the list starts "Error". In steps 2, 3 and 4 the time
+under the phone's picture starts "00:00:02.933", "00:00:12.887" and
+"00:00:20.419", the line ends "Showing time 1 of 3", "2 of 3" and "3 of
+3" followed by "of the chosen finding, outlined on the phone's picture
+while its items are shown.", and a dashed cyan rectangle about as wide
+as the screen and short outlines the item. In step 4 "Next time" is
+greyed out and "Previous time" is not. Send the three screenshots.
+

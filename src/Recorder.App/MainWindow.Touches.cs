@@ -23,6 +23,9 @@ public partial class MainWindow
 
     private static readonly Brush TouchFillBrush = Frozen(new SolidColorBrush(Color.FromArgb(0x66, 0x00, 0x00, 0x00)));
 
+    // The chosen finding's outline (android-checks.md, step 3).
+    private static readonly Brush FindingOutlineBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x00, 0xE5, 0xFF)));
+
     // The frame as shown without touches, and the words its help text has.
     private ImageSource? _frameSource;
     private string _frameHelpText = string.Empty;
@@ -48,7 +51,8 @@ public partial class MainWindow
                 : null;
         var frame = archive.Frames[_displayedFrameIndex];
         var focus = FocusOutlineAt(archive, positionNanoseconds, frame.Width, frame.Height);
-        if (touches is null && focus is null)
+        var finding = FindingOutlineAt(archive, positionNanoseconds, frame.Width, frame.Height);
+        if (touches is null && focus is null && finding is null)
         {
             ShowPlainFrame();
             return;
@@ -59,12 +63,65 @@ public partial class MainWindow
         var shown = VideoImage.ActualWidth > 0 && frame.Width > 0
             ? VideoImage.ActualWidth / frame.Width
             : 1;
-        VideoImage.Source = WithTouches(_frameSource, frame.Width, frame.Height, shown, touches, focus?.Bounds);
+        VideoImage.Source = WithTouches(_frameSource, frame.Width, frame.Height, shown, touches, focus?.Bounds, finding?.Bounds);
         SetVideoHelpText(string.Join(", ", new[]
         {
             touches?.Describe(),
-            focus is null ? null : $"accessibility focus on {focus.Value.Label}"
+            focus is null ? null : $"accessibility focus on {focus.Value.Label}",
+            finding is null ? null : $"the chosen finding outlined on {finding.Value.Label}"
         }.Where(text => !string.IsNullOrEmpty(text))));
+    }
+
+    // The chosen finding's item at a time, in the frame's pixels, while the
+    // phone's tree shows the items it was checked on: from the time the
+    // playhead is moved to it until its window's items are taken again.
+    private (Rect Bounds, string Label)? FindingOutlineAt(SessionPlaybackArchive archive, long time, int width, int height)
+    {
+        if (_shownFinding is not { } finding || _shownFindingTime >= finding.Times.Count)
+        {
+            return null;
+        }
+
+        var seen = finding.Times[_shownFindingTime];
+        var phone = archive.PhoneAccessibility;
+        if (phone.TakenAt(time, seen.WindowId)?.EventId != seen.TakenBy.EventId)
+        {
+            return null;
+        }
+
+        return ScaledToFrame(phone, time, seen.Bounds, width, height) is { } rect ? (rect, finding.Label) : null;
+    }
+
+    // Bounds in the pixels of the phone's screen as it was turned, scaled to
+    // the frame's; null when empty, or when the frame and the screen are
+    // turned differently, as for the moment after the phone is turned.
+    private static Rect? ScaledToFrame(PhoneAccessibilityTimeline phone, long time, PhoneBounds bounds, int width, int height)
+    {
+        if (bounds.IsEmpty || width <= 0 || height <= 0)
+        {
+            return null;
+        }
+
+        double scaleX = 1;
+        double scaleY = 1;
+        if (phone.ScreenAt(time) is { } screen)
+        {
+            if (width > height != screen.Width > screen.Height)
+            {
+                return null;
+            }
+
+            scaleX = (double)width / screen.Width;
+            scaleY = (double)height / screen.Height;
+        }
+
+        var rect = new Rect(
+            bounds.Left * scaleX,
+            bounds.Top * scaleY,
+            bounds.Width * scaleX,
+            bounds.Height * scaleY);
+        rect.Intersect(new Rect(0, 0, width, height));
+        return rect.IsEmpty || rect.Width <= 0 || rect.Height <= 0 ? null : rect;
     }
 
     private void ShowPlainFrame()
@@ -94,31 +151,7 @@ public partial class MainWindow
 
         var tree = phone.TreesRecorded ? phone.TreeAt(time, archive.RecordSource) : null;
         var bounds = tree is { FocusKey: not null, FocusBounds: { } newer } ? newer : focus.Item.Bounds;
-        if (bounds.IsEmpty)
-        {
-            return null;
-        }
-
-        double scaleX = 1;
-        double scaleY = 1;
-        if (phone.ScreenAt(time) is { } screen)
-        {
-            if (width > height != screen.Width > screen.Height)
-            {
-                return null;
-            }
-
-            scaleX = (double)width / screen.Width;
-            scaleY = (double)height / screen.Height;
-        }
-
-        var rect = new Rect(
-            bounds.Left * scaleX,
-            bounds.Top * scaleY,
-            bounds.Width * scaleX,
-            bounds.Height * scaleY);
-        rect.Intersect(new Rect(0, 0, width, height));
-        return rect.IsEmpty || rect.Width <= 0 || rect.Height <= 0 ? null : (rect, focus.Item.Label);
+        return ScaledToFrame(phone, time, bounds, width, height) is { } rect ? (rect, focus.Item.Label) : null;
     }
 
     // The circles' least size is on this PC's screen, so they are drawn
@@ -126,7 +159,7 @@ public partial class MainWindow
     private void VideoImage_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (_playbackArchive is { } archive &&
-            (archive.PhoneTouches.Recorded || archive.PhoneAccessibility.FocusRecorded))
+            (archive.PhoneTouches.Recorded || archive.PhoneAccessibility.FocusRecorded || _shownFinding is not null))
         {
             DisplayTouchesAt(_playbackPositionNanoseconds);
         }
@@ -145,9 +178,10 @@ public partial class MainWindow
     // The frame with the fingers over it, at the frame's size. The touch
     // positions are in the pixels of the screen size their report gives,
     // and are scaled to the frame's. The outline of the item with
-    // accessibility focus, already in the frame's pixels, is drawn under
-    // the fingers.
-    private static ImageSource WithTouches(ImageSource frameImage, int width, int height, double shown, PhoneTouches? touches, Rect? focus)
+    // accessibility focus, and of the chosen finding's item, already in the
+    // frame's pixels, are drawn under the fingers: the finding's dashed in
+    // cyan over black, so it is told from the focus's solid yellow.
+    private static ImageSource WithTouches(ImageSource frameImage, int width, int height, double shown, PhoneTouches? touches, Rect? focus, Rect? finding)
     {
         var whole = new Rect(0, 0, width, height);
         var group = new DrawingGroup();
@@ -170,6 +204,18 @@ public partial class MainWindow
             box.Freeze();
             group.Children.Add(new GeometryDrawing(null, dark, box));
             group.Children.Add(new GeometryDrawing(null, light, box));
+        }
+
+        if (finding is { } findingOutline)
+        {
+            var box = new RectangleGeometry(findingOutline);
+            box.Freeze();
+            var dashed = Frozen(new Pen(FindingOutlineBrush, thickness * 1.5)
+            {
+                DashStyle = Frozen(new DashStyle([3, 2], 0)),
+            });
+            group.Children.Add(new GeometryDrawing(null, Frozen(new Pen(Brushes.Black, thickness * 2.5)), box));
+            group.Children.Add(new GeometryDrawing(null, dashed, box));
         }
 
         // The paths first, so that no path crosses a circle.

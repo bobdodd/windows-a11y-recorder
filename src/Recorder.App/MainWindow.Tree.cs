@@ -290,8 +290,8 @@ public partial class MainWindow
 
     private void ShowUnderPointerButton_Click(object sender, RoutedEventArgs e) => ShowTreeRow(_pointerKey);
 
-    // Expands the path to a row and scrolls to it.
-    private void ShowTreeRow(string? key)
+    // Expands the path to a row and scrolls to it, and selects it when asked.
+    private void ShowTreeRow(string? key, bool select = false)
     {
         if (key is null || !ExpandPathTo(key) || _treeSnapshot?.PathTo(key) is not { } path)
         {
@@ -317,6 +317,11 @@ public partial class MainWindow
 
         if (item is not null)
         {
+            if (select)
+            {
+                item.IsSelected = true;
+            }
+
             _allowTreeScroll = true;
             item.BringIntoView();
             _allowTreeScroll = false;

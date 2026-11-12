@@ -6,7 +6,9 @@ Proposed 2026-11-11. Step 1 of "Build order", screens and visits, is
 built (see "As built: step 1"), with rules added on 2026-11-12 for
 screens drawn in one window, measured in the client's app. Step 2, the
 display density and each app's version, is built (see "As built: step
-2") and was checked on the phone on 2026-11-12. No check is built yet. The owner's
+2") and was checked on the phone on 2026-11-12. Step 3, the checks from
+the tree and the findings list, is built (see "As built: step 3") and
+not yet checked on the phone. The owner's
 decisions of 2026-11-11 are in "Decisions (2026-11-11)" and "Decisions
 on the open questions (2026-11-11)". Before any check is assigned a
 result, the recording has to say which app and which screen each moment
@@ -281,7 +283,10 @@ Apache License 2.0), which runs on the same accessibility items. Each is
 rewritten in C# against the recorded snapshot, not linked, as ATF needs
 a running Android device; the code says which ATF check each follows,
 and its licence notice is kept with it. ATF's results are "error",
-"warning" and "not run"; the recorder keeps those words.
+"warning", "info" and "not run" (checked in source:
+`AccessibilityCheckResultType`); the recorder keeps those words. Of the
+checks below only Duplicate speakable text gives "info", for items none
+of which is clickable.
 
 ### From the tree, exact
 
@@ -335,10 +340,10 @@ title was found. Text wraps in the tab; there is no horizontal
 scrollbar.
 
 The checks run when the recording is opened, from its stored snapshots
-and frames, and their results are kept beside the recording so they are
-not run again until the recorder's check version changes (inference:
-the time they take is to be measured; a recording of a few minutes has
-some hundreds of snapshots).
+and frames. Keeping their results beside the recording was proposed in
+case they were slow; step 3 measured them at 0.1 to 0.2 seconds for the
+recordings to hand (see "As built: step 3"), so they are run each time
+the recording is opened and nothing is kept.
 
 ## Build order
 
@@ -572,6 +577,134 @@ Measured before step 2, in the client's recording (session
 `20261112-005243-5528d67531dd4441a50b2c2985350c59`): "Display size" was
 not set (`display_density_forced` null) and the display mode was 1080 by
 2404 pixels. The physical density was not recorded then.
+
+## As built: step 3
+
+Built 2026-11-12 in `src/Recorder.Session/PhoneTreeChecks.cs` (the
+rules) and `src/Recorder.Session/PhoneChecks.cs` (running them on a
+recording and merging the findings), with the player's part in
+`src/Recorder.App/MainWindow.PhoneScreens.cs` and
+`MainWindow.Touches.cs`, and tests in
+`tests/Recorder.Tests/PhoneTreeChecksTests.cs` and
+`PhoneCheckRunTests.cs`. Each rule was rewritten from ATF's source at
+commit `c65cab0`; `PhoneTreeChecks.cs` carries ATF's Apache License 2.0
+notice and lists what was changed.
+
+- **What is checked.** For each visit, each settled snapshot's app
+  window, with its items as the latest snapshot that took them gives
+  them. The items one snapshot took are checked once in a visit, however
+  many settled snapshots show them, and are one time a finding was seen,
+  at the first of those. Only the app's own window is checked: a dialog
+  or menu drawn in a window of its own is not yet checked, and a finding
+  seen while one was over the app says so, such as "while dialog
+  'Delete entry' was over it". A pane in the app's window is checked
+  with the window, and its finding says "in pane 'Dialog'".
+- **The density and the screen's size.** The touch target checks use
+  the density in use when the items were taken (step 2), not when the
+  snapshot listed them, and the screen's size in pixels at that time
+  from the companion app's display records for the edge allowance. With
+  no density recorded, as for recordings made before step 2, the touch
+  target checks do not run, and the status line says on how many
+  settled snapshots.
+- **The density changing during a visit.** When the density changed
+  after the visit began and before the items were taken, the touch
+  target checks do not run on them, as they may have been laid out at
+  either density, and the status line says on how many settled
+  snapshots. Measured in test 9's recording: Display size was changed
+  at 00:00:20.152; a snapshot at 00:00:20.223 still listed Settings'
+  old window, with its items taken at 00:00:19.844 under the old
+  density, and a new window replaced it at 00:00:20.42. The first run,
+  which used the density at the snapshot's time, gave six false errors
+  for buttons 48 dp wide measured at the new density.
+- **Findings.** A finding is one check's result for one item on one
+  screen at one level, merged across visits, with each time it was seen:
+  the snapshot, the item's bounds and row in the tree view, the values
+  measured and the screen's state. An item is identified by its view ID
+  with its place among items of that ID, or else by its class, text or
+  content description, and the view IDs and classes of its ancestors, as
+  "Items and findings" says.
+
+ATF's behaviour kept as it is, each checked in ATF's source:
+
+- **A clickable ancestor** makes an undersized target a warning when
+  the ancestor is at least the needed size. ATF compares the ancestor's
+  bounds in pixels with the needed size in dp
+  (`TouchTargetSizeCheck.hasQualifyingClickableAncestor`), so an
+  ancestor of 48 pixels counts as 48 dp. The recorder does the same, to
+  give ATF's result.
+- **Sizes are rounded** to whole dp as Java's `Math.round` does, halves
+  up, before they are compared.
+- **An item against the edge of a list that scrolls** is "not run", as
+  it may be cut off by the list (`isAgainstScrollableEdge`, from the
+  list's scroll forward and scroll backward actions). The recorder's
+  24dp level does the same (inference: the same reason applies; added
+  after the first run on test 9's recording gave an error for a row
+  12 dp high cut off at the bottom of the Display size page).
+- **Duplicate speakable text** is a warning on the first clickable item
+  when one is clickable, and "info" on the first item when none is.
+
+Where the recorder differs from ATF, as the recording does not hold
+what ATF reads on the phone:
+
+- **Touch delegates** and the size of a View before its parent clips it
+  are not in the snapshot, so both are treated as absent. ATF would make
+  some undersized targets a warning, or not run, with them.
+- **Superclasses.** ATF loads each item's class on the phone to find its
+  superclasses. The recorder has a fixed table of Android's own widgets
+  from the Android API reference, and treats an app's own class as
+  having none (inference: correct for the framework widgets listed; an
+  app's own subclass of, say, `EditText` is not known to be one).
+- **The words** of Redundant description are ATF's English words, as the
+  phone's language is not recorded. ATF gives a result for each word;
+  the recorder gives one per item naming every word.
+- **The 24dp level** counts a target's own ancestors and descendants as
+  the same place to touch, not as other targets (inference: WCAG 2.5.8
+  speaks of separate targets).
+- **"Not run"** is listed only for the scrollable edge. ATF's other
+  "not run" results (such as an item with no bounds) are left out, as
+  they say nothing about the app.
+
+The player:
+
+- The checks run in the background when a recording is opened. Under
+  each screen, after its visits, a row for each check that found
+  something says how many findings it has at each level, such as
+  "Speakable text present (ATF): 1 error", followed by a row for each
+  finding, such as "Error: View with no text, a screen reader would
+  focus it, but it has no text, content description, label from another
+  item, or text from the items in it; seen once, at 00:00:14.354". A
+  screen with none says "No findings from the checks of the tree on
+  this screen."
+- The status line gives the number of findings at each level, the
+  settled snapshots checked and the time taken.
+- Choosing a finding's row pauses playback, moves the playhead to the
+  first time it was seen, selects its item in the "Accessibility tree"
+  tab, and outlines the item on the phone's picture with a dashed cyan
+  rectangle over black, told apart from the solid yellow outline of
+  accessibility focus. The outline is shown while the tree shows the
+  items the finding was checked on, until the window's items are taken
+  again. "Previous time" and "Next time" step through the other times.
+
+Measured on the development machine, 2026-11-12, from the recordings'
+files (not on the phone):
+
+| Recording | Settled snapshots checked | Takings checked | Findings | Time |
+|---|---|---|---|---|
+| Client's app, `20261112-005243-5528d67531dd4441a50b2c2985350c59` | 11 | 10 | 4, touch target checks not run (no density) | 117 ms |
+| Test 9, Display size, `20261112-031508-262e4d97af4847dca17d45d0131b4814` | 6 | 6 | 3, all not run (scrolling list's edge) | 151 ms |
+| Test 64, Settings, `20261111-002648-06be83ce21ec47309bd4bc68b4ae1cb4` | 5 | 3 | 0 (no density) | 99 ms |
+
+In the client's app, the findings were a View with no text a screen
+reader would focus on "Sleep Learning", two items both speaking "2" on
+the same screen (info, none clickable), a Button with no text in the
+pane "Dialog" on "Sleep Diary", and the launcher's Google widget class.
+In test 9, the findings were two rows and a button against the edge of
+the Display size page's list that scrolls, each "not run". The page's
+six preview and size buttons were 48 by 48 dp (117 pixels at 390 dpi),
+so met ATF's 48; they had been reported as 43 by 43 dp before the rule
+above was added. The times are from one run each and vary between runs
+by some tens of milliseconds (measured: 156, 127 and 103 ms on the
+first run).
 
 ## Decisions on the open questions (2026-11-11)
 

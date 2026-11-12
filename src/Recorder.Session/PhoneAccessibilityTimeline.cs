@@ -361,6 +361,54 @@ public sealed class PhoneAccessibilityTimeline
     }
 
     /// <summary>
+    /// The snapshot that last took a window's items at or before a
+    /// snapshot, the given one when it took them; null when none did. The
+    /// checks (android-checks.md, step 3) read a settled snapshot's items
+    /// from it.
+    /// </summary>
+    public SessionTimelineEvent? TakenBy(SessionTimelineEvent snapshot, int windowId)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var at = LastAtOrBefore(_snapshotTimes, snapshot.MonotonicNanoseconds);
+        for (var index = at; index >= 0 && _snapshotTimes[index] == snapshot.MonotonicNanoseconds; index--)
+        {
+            if (_snapshots[index].Event.EventId == snapshot.EventId)
+            {
+                at = index;
+                break;
+            }
+        }
+
+        return TakenFrom(at, windowId);
+    }
+
+    /// <summary>
+    /// The snapshot whose items for a window the tree view shows at a time:
+    /// null when the latest snapshot does not list the window, or none took
+    /// its items.
+    /// </summary>
+    public SessionTimelineEvent? TakenAt(long time, int windowId)
+    {
+        var latest = LastAtOrBefore(_snapshotTimes, time);
+        return latest >= 0 && _snapshots[latest].Windows.Any(entry => entry.Id == windowId)
+            ? TakenFrom(latest, windowId)
+            : null;
+    }
+
+    private SessionTimelineEvent? TakenFrom(int latest, int windowId)
+    {
+        for (var index = latest; index >= 0; index--)
+        {
+            if (_snapshots[index].Windows.FirstOrDefault(entry => entry.Id == windowId) is { Taken: true })
+            {
+                return _snapshots[index].Event;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// The tree at a time; null before the first snapshot. The windows'
     /// items are read from <paramref name="source"/>; without one, each
     /// window says so.
