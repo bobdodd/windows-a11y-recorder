@@ -803,6 +803,22 @@ shown." The row reads, after "line 2 of 2,", "'Update your goals',
 video's frames; if one differs a little, that is a result; send the
 screenshots either way.
 
+## Results of test 21 (2026-11-12)
+
+- Test 21 passed, with the seventh build (the label colour fix). The
+  labels "AA (WCAG 1.4.3)" and "AAA (WCAG 1.4.6)" were light grey and
+  readable. The line read "Text contrast at AA (WCAG 1.4.3): 10
+  findings (4 errors, 6 warnings), from 110 lines of text measured, 99
+  passed, on 5 settled snapshots (0 from the phone's screenshots, 5
+  from the video), in 1.3 seconds. The text was found with Windows OCR,
+  en-US." Choosing the "Update your goals" row went to 00:00:42.594, and
+  the row's numbers were as worked out from the frames.
+- The Checks window covered the phone's picture in the first
+  screenshots, as the test did not say to keep the picture in view;
+  with the window moved, the cyan outline surrounded "Update your goals"
+  only. Seen at that size, the outline's thickness covers the line
+  above, "Sleep Goals".
+
 ## Test 22: the AAA level, kept after a restart
 
 The recording from test 21 is open.
