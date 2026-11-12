@@ -17,7 +17,9 @@ the text contrast check with its AA or AAA setting and its findings (4c,
 see "As built: step 4c", tests 19 to 21 passed;
 findings are since listed under each visit, tests 23 and 24 passed);
 loading screens and screens with no fixed text follow decision 10,
-tests 25 to 27 passed; non-text contrast is next. The owner's
+tests 25 to 27 passed. Non-text contrast is being measured first (see
+"Step 5: measuring non-text contrast first"), and its rules wait for
+the owner's decisions. The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -413,6 +415,9 @@ the recording is opened and nothing is kept.
    findings list.
 4. **The approximate contrast checks** from the video, measured first
    against screenshots taken on the phone at the same moments.
+5. **Non-text contrast** (WCAG 2.2's 1.4.11), measured first on the
+   recordings to hand, with its rules decided by the owner from the
+   measurement (see "Step 5: measuring non-text contrast first").
 
 ## As built: step 1
 
@@ -1257,6 +1262,112 @@ recorder):
 - **Limits.** As in step 4b; and the reader in the recorder, and the
   setting and the rows, are first checked on the PC in tests 19 to 22
   of the validation plan.
+
+## Step 5: measuring non-text contrast first
+
+The owner chose on 2026-11-12 to measure the recordings before deciding
+the rules for non-text contrast, as was done for text contrast. WCAG
+2.2's 1.4.11, Non-text Contrast, is level AA only, with no AAA level, so
+the AA or AAA setting does not apply to it.
+
+### What 1.4.11 asks (checked in a cited document)
+
+From W3C's Understanding document
+(https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html):
+
+- 3:1 against adjacent colours for the visual information required to
+  identify user interface components and their states, and for the parts
+  of graphics required to understand the content. Inactive components
+  are excepted. The ratio is not rounded: 2.999:1 does not meet 3:1.
+- A control needs a visible boundary only when nothing else shows that
+  it is there: "If a control has visible content (such as text or a
+  sufficiently contrasting icon) ... a border or other indication of the
+  overall boundary of the hit area is not required".
+- Visual information that indicates a state, such as selected, has to
+  meet 3:1 with the adjacent colours. But "the change of background
+  within the component is not in scope of non-text contrast. However,
+  this would not pass Use of color" (Figure 15). Pale yellow stars on
+  white, 1.2:1, fail (Figure 7).
+- Colours should be taken from the source, not from the anti-aliased
+  rendering, which makes thin lines fainter.
+- Focus indicators have to contrast too; they need the focus moved,
+  which these recordings do not do (TalkBack is off in them).
+
+### How it was measured
+
+A throwaway program on the development PC (not in the repository) ran
+the recorder's own code on each settled snapshot of test 16's recording
+(5 screens, measured on the video frames and on the phone's lossless
+screenshots taken at the same moments) and test 18's (3 settled
+snapshots, the phone's screenshots). For every visible item that is
+clickable, checkable or editable, or an image: on each side, along its
+middle half (to miss rounded corners), the adjacent colour is the
+commonest colour 5 to 8 pixels outside the bounds; scanning from 4
+pixels outside to 16 inside, the first colour 3 or more Delta E from it
+starts the drawn shape (a border or a fill), and the shape's colour is
+the one of highest contrast with the adjacent colour in that pixel and
+the next 3, so that the anti-aliased edge is passed over. The pictures
+were then looked at to check what the numbers meant.
+
+### What was found (measured, test 16 session 20261112-154851-32c7b61a5552453bbf5febffcca978c7, test 18 session 20261112-171107-88cfc05214a34a3682222e7fb25d840d)
+
+- **The tree.** 38 items on 4 of test 16's 5 screens (the loading
+  screen has none; 50 counting both Welcome visits), 28 on test 18's 3. No item has text of its own: all the words
+  are in content descriptions (Compose). No item is checkable, and none
+  is marked selected: the bottom tabs and the CALENDAR and WEEK VIEW pair
+  have no selected state in the tree. There are no items for the icons,
+  the chevrons, the progress bars on Learn, the weekly recap chart or
+  the illustrations; the Learn cards are each one image item.
+- **Drawn boundaries that meet 3:1.** The Learn cards, the Good morning
+  card, the CALENDAR and WEEK VIEW pair and the Profile screen's list
+  buttons have a 2 to 3 pixel border, #003B3D, on the item's edge
+  against the page (#F6F6E2), the list (#FFFFFF) or a progress track
+  (#DDE0BC): 9.13:1 to 13.21:1.
+  OPEN BEDTIME MODE is white on the dark card, 12.4:1. Sleep Goals'
+  outline, #A6BABB, is drawn 6 pixels inside its bounds, 6.12:1 against
+  the dark card.
+- **Controls with text and a pale boundary (not required by 1.4.11).**
+  The emoji tiles, #E25825, #4A90D9, #A2D297, #F1AE53 and #F3CB51 on the
+  page, are 3.39:1, 3.06:1, 1.57:1, 1.76:1 and 1.43:1; each has its word
+  under it. The "Start your streak" card's edge is 1.21:1. These have
+  visible text, so their boundaries are not required.
+- **The selected tab.** The bottom bar shows which tab is selected only
+  by a pale pill, #F5E19A on the bar's #F3CB51: 1.2:1 on every visit
+  (HOME, LEARN, DIARY, PROFILE). The other tabs have no shape. The tab's
+  icon and word, black, are 13.47:1 on the bar and 16.12:1 on the pill.
+- **The selected segment.** WEEK VIEW, selected, is filled #81C4C1, and
+  CALENDAR is white: 1.98:1 between them, 1.81:1 against the page; the
+  pair's border is 11.34:1.
+- **Icons.** The bell is black on the bar's yellow, 13.47:1; its badge,
+  #E25825, is 2.38:1 on the bar (its "3" is text and already a text
+  contrast finding). ATF's way of measuring an image, one foreground
+  against the commonest colour, gives the bell button 2.38:1, because
+  the badge's orange outweighs the bell's black; measuring the icon
+  needs the most contrasting colour with enough pixels instead.
+- **Progress bars on Learn** (picture only, not in the tree): the fill,
+  #003B3D, is 9.13:1 on the track, #DDE0BC, and the track is 1.24:1 on
+  the page, so the bar's full length is hard to see.
+- **The video against the screenshots.** The smallest ratio of each
+  item's sides from the video was within 7.3% of the screenshot's (most
+  within 2%), inside the 12% margin used for text.
+
+### Questions for the owner
+
+1. Which controls need a boundary: only those with no visible text and
+   no icon of 3:1 or more (as 1.4.11 says), with every other boundary
+   below 3:1 noted as info or not listed?
+2. A selected state shown only by a pale fill or pill below 3:1 (the
+   tabs, 1.2:1; WEEK VIEW, 1.98:1): an error under 1.4.11 (as a state
+   indicator, like Figure 7), or a note that it is out of 1.4.11's scope
+   (Figure 15) but fails Use of color (1.4.1)? The tree does not say
+   which tab is selected, so it would be found from the pictures: among
+   controls of one class and size in a row, the one drawn differently.
+3. Graphics with no item in the tree (progress bars, charts, icons
+   inside cards): left out, found from the pictures by fixed rules, or
+   left for the vision model?
+4. How an icon is measured: the most contrasting colour inside the
+   control with at least a set number of pixels, against the control's
+   background?
 
 ## Decisions on the open questions (2026-11-11)
 

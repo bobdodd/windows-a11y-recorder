@@ -1101,3 +1101,11 @@ screen with "Bob Dodd" at the top at 00:00:47.633; its row ended "seen
 once, at 00:00:47.633", and the cyan outline was drawn at the bottom of
 the list, just above the bottom bar, where the item is cut off by the
 list, as the finding says. Decision 10 is checked on the PC.
+
+## Step 5: non-text contrast, measured first (2026-11-12)
+
+No test on the PC or the phone yet. Tests 16 and 18's recordings were
+measured on the development PC with a throwaway program running the
+recorder's code; what it measured, and the owner's questions, are in
+the architecture document's "Step 5: measuring non-text contrast
+first". The rules, and then the tests, follow the owner's answers.
