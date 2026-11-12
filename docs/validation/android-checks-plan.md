@@ -900,6 +900,25 @@ step 4 the row ends "seen once, at 00:01:06.223", the time starts
 and 4 "Previous time" and "Next time" are greyed out. Send the three
 screenshots.
 
+## Results of test 23 (2026-11-12)
+
+Passed on the development PC with the build of 90da2c0. The owner sent the
+screenshots of steps 3 and 4; the one of step 3 also shows the rows of
+step 2. The line under "Show current visit" included "Text contrast at
+AA (WCAG 1.4.3): 11 findings (5 errors, 6 warnings), from 110 lines of
+text measured, 99 passed". Below the Visit 1 row came "No findings from
+the checks of the tree in this visit." and "Text contrast at AA (WCAG
+1.4.3): 1 error, from 29 lines measured", both in bold, then the error
+for the badge "3", 2.41:1, #E15926 on #F5CC53, ending "seen once, at
+00:00:02.655". Choosing it showed the Home screen at 00:00:02.655 with
+the cyan outline around the badge, and the line ended "Showing time 1 of
+1 of the chosen finding, outlined on the phone's picture while its items
+are shown." Under Visit 6 the same rows ended "seen once, at
+00:01:06.223", and choosing it showed the Home screen at 00:01:06.223
+with the outline around the badge. "Previous time" and "Next time" were
+greyed out in both. The row of the visit at the playhead is in bold
+(Visit 6 in step 4), as before.
+
 ## Test 24: changing the level, and keeping it after a restart
 
 The recording from test 23 is open, with AA chosen.
