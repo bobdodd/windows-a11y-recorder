@@ -1090,3 +1090,14 @@ space.". In step 3 the row ends "seen once, at 00:00:47.633", the time
 starts "00:00:47.633", and the picture shows the Profile screen with
 "Bob Dodd" at the top. Send the three screenshots.
 
+## Results of test 27 (2026-11-12)
+
+Passed on the development PC with the build of 707c1ce, AAA chosen.
+Choosing Visit 4 showed the Sleep Diary screen, not the loading screen,
+at 00:00:42.154. Choosing Visit 3 showed the sun and moon over "Loading
+your personal sleep learning space." at 00:00:31.322. Choosing the
+touch target finding for "Help & FAQ Get Support" showed the Profile
+screen with "Bob Dodd" at the top at 00:00:47.633; its row ended "seen
+once, at 00:00:47.633", and the cyan outline was drawn at the bottom of
+the list, just above the bottom bar, where the item is cut off by the
+list, as the finding says. Decision 10 is checked on the PC.

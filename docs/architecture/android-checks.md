@@ -17,7 +17,7 @@ the text contrast check with its AA or AAA setting and its findings (4c,
 see "As built: step 4c", tests 19 to 21 passed;
 findings are since listed under each visit, tests 23 and 24 passed);
 loading screens and screens with no fixed text follow decision 10,
-awaiting tests 25 and 26; non-text contrast is next. The owner's
+tests 25 to 27 passed; non-text contrast is next. The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
