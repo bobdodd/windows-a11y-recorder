@@ -6,7 +6,7 @@ Proposed 2026-11-11. Step 1 of "Build order", screens and visits, is
 built (see "As built: step 1"), with rules added on 2026-11-12 for
 screens drawn in one window, measured in the client's app. Step 2, the
 display density and each app's version, is built (see "As built: step
-2") and not yet checked on the phone. No check is built yet. The owner's
+2") and was checked on the phone on 2026-11-12. No check is built yet. The owner's
 decisions of 2026-11-11 are in "Decisions (2026-11-11)" and "Decisions
 on the open questions (2026-11-11)". Before any check is assigned a
 result, the recording has to say which app and which screen each moment
@@ -494,11 +494,10 @@ Not yet known:
 Built 2026-11-12 in `src/Recorder.Collectors.Android/AndroidDeviceCollector.cs`
 (records in `src/Recorder.Contracts/AndroidDeviceRecords.cs`, channel
 `device.android`) and `src/Recorder.Session/PhoneDeviceTimeline.cs`, with
-tests in `tests/Recorder.Tests/AndroidDeviceTests.cs`. Not yet checked on
-the phone: what `wm density` and `dumpsys package` print below is
-checked in AOSP's source (main branch, read 2026-11-12), not measured
-on the Pixel 10 Pro XL, so the formats are inference until the test in
-the validation plan.
+tests in `tests/Recorder.Tests/AndroidDeviceTests.cs`. What `wm density`
+and `dumpsys package` print was first read in AOSP's source (main
+branch, read 2026-11-12), then measured on the Pixel 10 Pro XL in tests
+7 to 9 of the validation plan, as listed at the end of this section.
 
 - **The density.** `adb -s <serial> shell wm density` is run when the
   recording starts (in the background, so the start does not wait) and
@@ -554,6 +553,20 @@ the validation plan.
   settings" filter.
 - **The playback index** is version 27, so recordings indexed before are
   indexed again, and keeps the `device.android` records whole.
+
+Measured on the Pixel 10 Pro XL (Android 17), 2026-11-12, in tests 7 to
+9 of the validation plan:
+
+- `wm density` printed "Physical density: 390", and with Display size
+  one step larger also "Override density: 440".
+- Nova SleepCare is version 1.0.5, version code 65, targeting API 36,
+  matching the version on the phone's App info page; 3 of 3 packages
+  seen were read.
+- Display size one step smaller, back to the phone's own, wrote an empty
+  `display_density_forced`, as the source says; one step larger wrote
+  "440".
+- Each Display size change gave the Settings page a new window, so a new
+  visit to the same screen.
 
 Measured before step 2, in the client's recording (session
 `20261112-005243-5528d67531dd4441a50b2c2985350c59`): "Display size" was

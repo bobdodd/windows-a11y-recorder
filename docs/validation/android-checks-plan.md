@@ -283,3 +283,48 @@ time to a time about 5 seconds later; the third with test 7's number
 again and "the phone's own density", from that time to the recording's
 end. One density row only, or a row with "found only by the read at the
 stop", is a failure; send the screenshot as it is.
+
+## Results of the third build (2026-11-12)
+
+Run on the development PC with commit efdc2fd.
+
+- Test 7 passed: "android.device: Running, Healthy. Phone: density 390
+  dpi at the start." `wm density` on the Pixel 10 Pro XL printed
+  "Physical density: 390", the format read from AOSP's source.
+- Test 8 passed (session
+  `20261112-030333-009c95699b2d4296a2737858af3f1a5e`): "Phone density
+  390 dpi, so 1 dp is 2.438 pixels, the phone's own density,
+  00:00:00.000 to 00:00:45.754" and "App com.pss.novasleepcare, version
+  1.0.5 (code 65), targets API 36: 2 screens, 2 visits". The phone's App
+  info showed version 1.0.5. The collector read 3 of 3 apps' versions.
+- Test 9 (session `20261112-031136-99159de7fe1843c7bd920047ecea5ade`)
+  showed two density rows, not three: "Phone density 390 dpi ... the
+  phone's own density, 00:00:00.000 to 00:00:17.105" and "Phone density
+  440 dpi, so 1 dp is 2.75 pixels, set by Display size, 00:00:17.105 to
+  00:00:37.484". Measured in the recording's export: two touches, a
+  scroll from 10.746 to 12.059 s and a tap at x 948, y 1616 from 16.495
+  to 16.670 s (the plus button's side); one `display_density_forced`
+  change, to "440", by notice at 17.106 s; and the read at the stop
+  printed "Physical density: 390" and "Override density: 440". So the
+  phone was still at 440 dpi when the recording stopped, and no touch was
+  recorded for step 3; the two rows match what the phone did.
+- Test 9 again, the other way round, starting at 440 dpi (session
+  `20261112-031508-262e4d97af4847dca17d45d0131b4814`): passed, with three
+  rows: "Phone density 440 dpi, so 1 dp is 2.75 pixels, set by Display
+  size, 00:00:00.000 to 00:00:12.661", "Phone density 390 dpi, so 1 dp is
+  2.438 pixels, the phone's own density, 00:00:12.661 to 00:00:20.152"
+  and "Phone density 440 dpi ... set by Display size, 00:00:20.152 to
+  00:00:38.320". Measured in the export: the reads at the start and the
+  stop printed "Physical density: 390" and "Override density: 440"; a tap
+  at x 136, y 1770 (the minus side) at 12.07 s, then
+  `display_density_forced` changed from "440" to an empty value by notice
+  at 12.661 s; a tap at x 967, y 1535 (the plus side) at 19.51 s, then it
+  changed from empty to "440" at 20.152 s. So the Pixel writes an empty
+  value when Display size returns to the phone's own, as read in AOSP's
+  `DisplayWindowSettings.setForcedDensity`. Each change gave the page a
+  new window and a new visit (3 visits).
+- In test 9 the change of density gave the Settings page a new window:
+  Visit 2 of "Display size & text" starts at 00:00:17.328, "started by a
+  new window, a return". This density change started a new visit to the
+  same screen; whether other configuration changes, such as turning the
+  phone, do the same is inference until tested.
