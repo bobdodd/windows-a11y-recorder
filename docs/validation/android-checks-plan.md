@@ -662,3 +662,10 @@ the recording's name, "Screenshots:" with a number of at least 3, and a
 line for each file, from "0000000001.png", each "1080 x 2404" and a
 number of KB. Red error lines are a failure. Send both screenshots; the
 screenshots are then read from the PC for step 4b.
+
+## Results of the fifth build (2026-11-12)
+
+- Test 17 passed: the companion line read "Companion app: installed, on,
+  and answering (version 1.1.0, version code 782, protocol 6)." The
+  service stayed on after the companion app was installed again, and
+  the panel's note ends with the sentence about the phone's screenshots.
