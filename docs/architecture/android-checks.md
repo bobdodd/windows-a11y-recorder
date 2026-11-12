@@ -11,8 +11,11 @@ the tree and the findings list, is built (see "As built: step 3") and
 was checked on the development PC on 2026-11-12 with recordings already
 made (tests 11 to 13 of the validation plan). Step 4, contrast, is being
 built: the phone's own screenshots (4a, checked on the phone on
-2026-11-12) and the colour measurement with the text found by OCR (4b,
-checked on the development PC with tests 16 and 18's recordings). The owner's
+2026-11-12), the colour measurement with the text found by OCR (4b,
+checked on the development PC with tests 16 and 18's recordings), and
+the text contrast check with its AA or AAA setting and its findings (4c,
+see "As built: step 4c", built and awaiting tests 19 to 22); non-text
+contrast is next. The owner's
 decisions of 2026-11-11 are in "Decisions (2026-11-11)" and "Decisions
 on the open questions (2026-11-11)". Before any check is assigned a
 result, the recording has to say which app and which screen each moment
@@ -1044,6 +1047,123 @@ Measured with test 16's recording and 20 screenshots taken with
   phone.
 - **Limits.** As in the measurement: one app, one light theme, five
   screens, held still, one phone, and one OCR language.
+
+### As built: step 4c, the text contrast check
+
+Step 4c turns step 4b's measurements into findings in the Checks tab.
+
+- **When it runs.** When a phone recording is opened, after the checks
+  of the tree, in the background: step 4b's measurement, with Windows'
+  OCR (`WindowsPhoneTextReader`) reading each picture once, then the
+  check (`PhoneTextContrastRun`). If Windows has no OCR language for the
+  user, or OCR cannot be started, the app's text is measured on its
+  items' bounds only, and the tab says so.
+- **The setting.** "Text contrast level:" in the Checks tab, with "AA
+  (WCAG 1.4.3)" and "AAA (WCAG 1.4.6)", kept per Windows user in
+  `check-settings.json` beside the player's layout (`PhoneCheckSettings`);
+  a missing or unreadable file is AA. It is shown as the window opens, and
+  can be changed before a recording is open. Changing it works the findings out
+  again from the same measurement, without measuring or reading again.
+  The check is named for the level: "Text contrast at AA (WCAG 1.4.3)"
+  or "Text contrast at AAA (WCAG 1.4.6)".
+- **The limits.** AA: 4.5:1, or 3:1 for large text; AAA: 7:1, or 4.5:1
+  for large text (decision 3). The ratio compared is worked out again
+  from the two colours, unrounded, as WCAG's limits are minimums and
+  WCAG says a ratio is not rounded to meet one ("Contrast (Minimum)",
+  https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html);
+  ATF lets a ratio fall 0.01 below its limit (`CONTRAST_TOLERANCE` in
+  `TextContrastCheck`, checked in the source at `c65cab0`), which is
+  not followed, as decided ("Text is text, whatever ATF counts"). A
+  ratio is shown to two places, or three when two would round it up to
+  a limit it is below, such as 4.496:1.
+- **The text's size: not known.** The design used the app's size where
+  Android gives it, but the companion does not send `AccessibilityNodeInfo`'s
+  rendering information, so the size is never known from the app; adding
+  it is a change to the companion, left for later. The height of OCR's
+  box round the words is given in dp (pixels over the density when the
+  items were taken), but it runs from the tallest letter to the lowest,
+  and the font is not known, so it is not taken as the text's size, and
+  boldness is not known either. So the size decides nothing: a line
+  below the large text limit is an error, and one between the two
+  limits is a warning, "fails unless the text is large", with the words'
+  height to help the person reviewing it decide.
+- **From the video.** A frame's ratio could be up to 12% higher or lower
+  than the screenshot's would be (`VideoMargin`; the measurement found
+  11.2% at most on whole items, and step 4b 6.5% on OCR's lines), so the
+  level is the one the highest ratio it could be would have, and a line
+  it could put on the other side of a limit says so: "near the 4.5:1
+  limit, so it may fail, as the video's colours are approximate" for a
+  ratio that would pass, and "and it may be below 3:1" added to the
+  warning for one between the limits. An error from the video is below
+  the large text limit even 12% higher.
+- **One colour.** A box with one colour after joining has no text to
+  measure in it; it is "not run", saying so, not a 1:1 error.
+- **What a finding says**, after its level and label: the ratio and the
+  colours, the verdict, the words' height or "the text's size and
+  weight are not known" for a line on an item's bounds, "from the
+  phone's screenshot" or "approximate, from the video", and how the text
+  was found (decision 5): "the app's text, placed on the screen by OCR
+  (Windows OCR, en-US)", "text found by OCR (Windows OCR, en-US), in no
+  item's text", or, with nothing about OCR, "measured on the item's
+  bounds". For example, from test 16's video: "Warning: View described
+  as "RECENT SLEEP ENTRIES", 3.51:1, #798587 on #F7F7E3; fails unless
+  the text is large: 4.5:1 is needed, 3:1 for large text; the words are
+  11.1 dp tall in OCR's box; the text's size and weight are not known;
+  approximate, from the video; the app's text, placed on the screen by
+  OCR (Windows OCR, en-US); seen once, at 00:00:31.488".
+- **Which line a finding is.** As a tree check's finding is one item's,
+  a contrast finding is one line's, merged on each screen by level and
+  line across the snapshots measured: an item's line is the item's
+  identity and the line's number from the top, the label naming the
+  line ("line 2 of 2, 'Update your goals'") when the item has more than
+  one; text found by OCR is the item it is in and the words as matched
+  (`PhoneTextMatching.Spelling`), labelled with OCR's words, so the same
+  words read differently by OCR at another time are another finding.
+- **The rows.** After each screen's tree findings, a row for the check
+  with how many findings at each level and how many lines were
+  measured on the screen, or that it found nothing, or that no text was
+  measured on the screen; then a row for each finding. Choosing one
+  moves the playhead to the settled snapshot, selects the item, or the
+  item the words are in, in the "Accessibility tree" tab, and outlines
+  the line's box, not the whole item, on the phone's picture. The
+  status line under the buttons adds the check's totals: findings, lines
+  measured, how many passed, the settled snapshots measured and how
+  many from screenshots and from the video, the time taken, and the OCR
+  engine.
+
+Run on the development PC, with test 16's recording and the words
+Windows' OCR read on the PC for step 4b (not yet the reader in the
+recorder):
+
+- **At AA**, 110 lines on 5 settled snapshots, all from the video: 99
+  pass; 4 errors, the badge "3" (2.41:1, on 2 visits, so 1 finding of 2
+  times) and "0" (1.55:1), "0%" (1.98:1) and "0.0" (1.94:1) on the
+  PROFILE screen; 6 warnings, the grey second lines of the PROFILE
+  screen's 5 buttons (3.81:1 to 3.83:1) and "RECENT SLEEP ENTRIES"
+  (3.51:1). These are the lines step 4b found below 3:1 and between the
+  limits on the screenshots, so the 12% margin moved none of them. Making
+  the findings took 17 ms; the measurement 1.2 seconds, without OCR.
+- **At AAA**, the same lines: 98 pass; the 10 above are errors, and
+  "WEEK VIEW" (6.20:1) is a warning, between 4.5:1 and 7:1.
+- **Test 18's recording**, with the words Windows' OCR read on the PC
+  from its 5 screenshots: 57 lines on 3 settled snapshots, all from the
+  phone's screenshots, 55 pass; the badge "3" (2.38:1) is an error, and
+  "RECENT SLEEP ENTRIES" (3.49:1) a warning. Without OCR the same
+  snapshots give 43 lines, and the emoji tiles "Terrible" and "Poor",
+  measured on the tiles' bounds with the emoji, are warnings too, as in
+  the measurement; with OCR they are measured on their words and pass.
+- **Checked before any Pixel test:** the solution builds with no
+  warnings, and the tests pass, 2,347 of them, with the 10 that need
+  Windows failing as before. The new tests cover the levels at AA and AAA from a
+  screenshot, the unrounded ratio and its third place, the video's
+  margin on both sides of each limit, one colour, the wording of where
+  the colours and the text came from, the words' height without a
+  density, the setting kept and an unreadable one, the words' height
+  from the matching, and the findings merged across snapshots at each
+  level.
+- **Limits.** As in step 4b; and the reader in the recorder, and the
+  setting and the rows, are first checked on the PC in tests 19 to 22
+  of the validation plan.
 
 ## Decisions on the open questions (2026-11-11)
 

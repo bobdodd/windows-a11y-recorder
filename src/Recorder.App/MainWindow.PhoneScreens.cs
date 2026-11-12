@@ -6,6 +6,7 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
+using Recorder.Analysis;
 using Recorder.Session;
 
 namespace Recorder.App;
@@ -24,6 +25,12 @@ namespace Recorder.App;
 // it was seen, shows the item in the "Accessibility tree" tab and outlines
 // it on the phone's picture; "Previous time" and "Next time" step through
 // the other times.
+//
+// Step 4c: the text contrast check runs in the background too, after the
+// checks of the tree: the colours of each line of text measured on the
+// phone's screenshot or the video's frame (step 4b), held to AA or AAA as
+// chosen in the tab. Changing the level works the findings out again from
+// the same measurement.
 public partial class MainWindow
 {
     private readonly ObservableCollection<PhoneScreenRowView> _phoneScreenRows = [];
@@ -36,9 +43,25 @@ public partial class MainWindow
     private PhoneCheckRun? _phoneChecks;
     private string? _phoneChecksProblem;
 
+    // The contrast measurement of the open recording, and its findings at
+    // the chosen level.
+    private PhoneContrastRun? _phoneContrast;
+    private string? _phoneContrastProblem;
+    private PhoneTextContrastRun? _phoneTextContrast;
+    private PhoneCheckSettings? _checkSettings;
+
     // The finding chosen in the list, and which of its times is shown.
     private PhoneFinding? _shownFinding;
     private int _shownFindingTime;
+
+    // The level chosen last time, shown as the window opens, so it can be
+    // seen and changed before a recording is open.
+    private void LoadCheckSettings()
+    {
+        _checkSettings = PhoneCheckSettings.Load(PhoneCheckSettings.DefaultPath);
+        ContrastAaRadioButton.IsChecked = _checkSettings.ContrastLevel == PhoneContrastLevel.AA;
+        ContrastAaaRadioButton.IsChecked = _checkSettings.ContrastLevel == PhoneContrastLevel.AAA;
+    }
 
     private void BindPhoneScreens()
     {
@@ -56,10 +79,15 @@ public partial class MainWindow
             _phoneChecksArchive = _playbackArchive;
             _phoneChecks = null;
             _phoneChecksProblem = null;
+            _phoneContrast = null;
+            _phoneContrastProblem = null;
+            _phoneTextContrast = null;
             _shownFinding = null;
             if (_playbackArchive is { PhoneScreens.Recorded: true } opened)
             {
-                _ = RunPhoneChecksAsync(opened);
+                var cancellation = new CancellationTokenSource();
+                _phoneChecksCancellation = cancellation;
+                _ = RunPhoneChecksAsync(opened, cancellation.Token);
             }
         }
 
@@ -69,11 +97,8 @@ public partial class MainWindow
     // Runs the checks from the tree away from the window's thread, and
     // lists their findings when they are done, if the recording is still
     // open.
-    private async Task RunPhoneChecksAsync(SessionPlaybackArchive archive)
+    private async Task RunPhoneChecksAsync(SessionPlaybackArchive archive, CancellationToken token)
     {
-        var cancellation = new CancellationTokenSource();
-        _phoneChecksCancellation = cancellation;
-        var token = cancellation.Token;
         PhoneCheckRun? run = null;
         string? problem = null;
         try
@@ -100,6 +125,82 @@ public partial class MainWindow
 
         _phoneChecks = run;
         _phoneChecksProblem = problem;
+        ShowPhoneScreenRows();
+        await RunPhoneContrastAsync(archive, token);
+    }
+
+    // Measures the colours of the text on each settled snapshot's picture,
+    // with Windows' OCR finding the text (android-checks.md, steps 4b and
+    // 4c), away from the window's thread.
+    private async Task RunPhoneContrastAsync(SessionPlaybackArchive archive, CancellationToken token)
+    {
+        PhoneContrastRun? run = null;
+        string? problem = null;
+        try
+        {
+            run = await Task.Run(
+                () => PhoneContrastRun.Run(archive, PhonePictures.Load, new WindowsPhoneTextReader(), token),
+                token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception exception) when (
+            exception is IOException or InvalidDataException or InvalidOperationException or
+                JsonException or UnauthorizedAccessException or DbException)
+        {
+            problem = exception.Message;
+        }
+
+        if (!ReferenceEquals(_playbackArchive, archive) || token.IsCancellationRequested)
+        {
+            return;
+        }
+
+        _phoneContrast = run;
+        _phoneContrastProblem = problem;
+        JudgeTextContrast();
+        ShowPhoneScreenRows();
+    }
+
+    // The text contrast findings at the chosen level, from the measurement.
+    private void JudgeTextContrast()
+    {
+        _phoneTextContrast = _phoneContrast is { } measured && _playbackArchive is { } archive
+            ? PhoneTextContrastRun.Run(measured, archive.PhoneScreens, archive.PhoneDevice, ContrastLevel)
+            : null;
+    }
+
+    private PhoneContrastLevel ContrastLevel => _checkSettings?.ContrastLevel ?? PhoneContrastLevel.AA;
+
+    private void ContrastLevelRadioButton_Checked(object sender, RoutedEventArgs e)
+    {
+        // Setting the buttons from the saved level, as the window opens.
+        if (_checkSettings is null)
+        {
+            return;
+        }
+
+        var level = ReferenceEquals(sender, ContrastAaaRadioButton) ? PhoneContrastLevel.AAA : PhoneContrastLevel.AA;
+        if (level == ContrastLevel)
+        {
+            return;
+        }
+
+        _checkSettings = (_checkSettings ?? PhoneCheckSettings.Default) with { ContrastLevel = level };
+        _checkSettings.TrySave(PhoneCheckSettings.DefaultPath);
+        if (!_phoneScreensBound)
+        {
+            return;
+        }
+
+        if (_shownFinding is { Check: PhoneCheckNames.TextContrastAa or PhoneCheckNames.TextContrastAaa })
+        {
+            _shownFinding = null;
+        }
+
+        JudgeTextContrast();
         ShowPhoneScreenRows();
     }
 
@@ -196,26 +297,57 @@ public partial class MainWindow
     // finding.
     private void AddFindingRows(PhoneScreen screen)
     {
-        if (_phoneChecks is not { } run)
+        if (_phoneChecks is { } run)
         {
-            return;
-        }
-
-        var findings = run.For(screen);
-        if (findings.Count == 0)
-        {
-            _phoneScreenRows.Add(new PhoneScreenRowView(2, "No findings from the checks of the tree on this screen.", screen.Visits[0].Start, null)
+            var findings = run.For(screen);
+            if (findings.Count == 0)
             {
-                IsCheck = true,
-            });
-            return;
+                _phoneScreenRows.Add(new PhoneScreenRowView(2, "No findings from the checks of the tree on this screen.", screen.Visits[0].Start, null)
+                {
+                    IsCheck = true,
+                });
+            }
+            else
+            {
+                AddCheckRows(findings);
+            }
         }
 
+        if (_phoneTextContrast is { } contrast)
+        {
+            var findings = contrast.For(screen);
+            var title = PhoneCheckNames.Title(contrast.Check);
+            var lines = contrast.LinesOn(screen);
+            if (lines == 0)
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(2, $"{title}: no text was measured on this screen.", screen.Visits[0].Start, null)
+                {
+                    IsCheck = true,
+                });
+            }
+            else if (findings.Count == 0)
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(2, $"{title}: no findings, from {Count(lines, "line")} measured.", screen.Visits[0].Start, null)
+                {
+                    IsCheck = true,
+                });
+            }
+            else
+            {
+                AddCheckRows(findings, $", from {Count(lines, "line")} measured");
+            }
+        }
+    }
+
+    // A row for each check of the findings, saying how many at each level,
+    // then a row for each finding.
+    private void AddCheckRows(IReadOnlyList<PhoneFinding> findings, string measured = "")
+    {
         foreach (var check in findings.GroupBy(finding => finding.Check))
         {
             _phoneScreenRows.Add(new PhoneScreenRowView(
                 2,
-                $"{PhoneCheckNames.Title(check.Key)}: {Levels(check)}",
+                $"{PhoneCheckNames.Title(check.Key)}: {Levels(check)}{measured}",
                 check.First().Times[0].Time,
                 null)
             {
@@ -284,7 +416,7 @@ public partial class MainWindow
     {
         if (_phoneChecksProblem is { } problem)
         {
-            return $"The checks of the tree could not be run: {problem}";
+            return $"The checks of the tree could not be run: {problem} {ContrastSummary()}";
         }
 
         if (_phoneChecks is not { } run)
@@ -313,11 +445,44 @@ public partial class MainWindow
             summary += $" {Count(run.Problems.Count, "snapshot")} could not be checked: {string.Join("; ", run.Problems.Take(3))}{(run.Problems.Count > 3 ? "; and more" : string.Empty)}.";
         }
 
+        summary += " " + ContrastSummary();
         if (_shownFinding is { } shown)
         {
             summary += string.Create(
                 CultureInfo.CurrentCulture,
                 $" Showing time {_shownFindingTime + 1:N0} of {shown.Times.Count:N0} of the chosen finding, outlined on the phone's picture while its items are shown.");
+        }
+
+        return summary;
+    }
+
+    // What the text contrast check found, or why it has not.
+    private string ContrastSummary()
+    {
+        if (_phoneContrastProblem is { } problem)
+        {
+            return $"The text contrast check could not be run: {problem}";
+        }
+
+        if (_phoneContrast is not { } measured || _phoneTextContrast is not { } contrast)
+        {
+            return "Measuring the text contrast.";
+        }
+
+        var title = PhoneCheckNames.Title(contrast.Check);
+        var findings = contrast.Findings.Count == 0
+            ? "no findings"
+            : $"{Count(contrast.Findings.Count, "finding")} ({Levels(contrast.Findings)})";
+        var summary = string.Create(
+            CultureInfo.CurrentCulture,
+            $"{title}: {findings}, from {Count(contrast.Lines, "line")} of text measured, {contrast.Passed:N0} passed, on {Count(measured.Snapshots.Count, "settled snapshot")} ({measured.FromScreenshots:N0} from the phone's screenshots, {measured.FromFrames:N0} from the video), in {measured.Elapsed.TotalSeconds:0.0} seconds.");
+        var engine = measured.Snapshots.Select(snapshot => snapshot.Engine).FirstOrDefault(name => !string.IsNullOrEmpty(name));
+        summary += measured.OcrUnavailable is { } unavailable
+            ? $" OCR was not used, as {unavailable}, so only the app's text was measured, on its items' bounds."
+            : engine is null ? string.Empty : $" The text was found with {engine}.";
+        if (measured.Problems.Count > 0)
+        {
+            summary += $" {Count(measured.Problems.Count, "snapshot")} could not be measured: {string.Join("; ", measured.Problems.Take(3))}{(measured.Problems.Count > 3 ? "; and more" : string.Empty)}.";
         }
 
         return summary;

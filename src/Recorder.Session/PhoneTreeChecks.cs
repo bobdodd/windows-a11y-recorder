@@ -54,6 +54,10 @@ public static class PhoneCheckNames
     public const string ClassName = "class-name";
     public const string TraversalOrder = "traversal-order";
 
+    /// <summary>The text contrast check (step 4c), at AA or at AAA; not one of the tree's checks.</summary>
+    public const string TextContrastAa = "text-contrast-aa";
+    public const string TextContrastAaa = "text-contrast-aaa";
+
     /// <summary>The checks in the order the Checks tab lists them.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
@@ -73,6 +77,8 @@ public static class PhoneCheckNames
         RedundantDescription => "Redundant description (ATF)",
         ClassName => "Class name (ATF)",
         TraversalOrder => "Traversal order (ATF)",
+        TextContrastAa => "Text contrast at AA (WCAG 1.4.3)",
+        TextContrastAaa => "Text contrast at AAA (WCAG 1.4.6)",
         _ => check,
     };
 

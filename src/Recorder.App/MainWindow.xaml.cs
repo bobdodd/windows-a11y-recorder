@@ -129,6 +129,7 @@ public partial class MainWindow : Window
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
             "Windows A11y Recorder");
         ChromiumPathTextBox.Text = GetDefaultChromiumExecutablePath();
+        LoadCheckSettings();
         _statusTimer = new DispatcherTimer(
             TimeSpan.FromMilliseconds(250),
             DispatcherPriority.Background,

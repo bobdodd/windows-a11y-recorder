@@ -270,7 +270,7 @@ public sealed class PhoneCheckRun
 
     // The state of the screen at a time: one in the app's window, as a pane,
     // or a window over it, whose items are not checked with the app's.
-    private static string? StateAt(PhoneVisit visit, long time)
+    internal static string? StateAt(PhoneVisit visit, long time)
     {
         foreach (var state in visit.States)
         {

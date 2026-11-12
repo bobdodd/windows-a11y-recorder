@@ -695,3 +695,112 @@ nothing yet, so it has no test on the phone. It was checked on the
 development PC with test 16's recording and its 20 `screencap`
 screenshots, and with test 18's recording; the results are in that
 section. Step 4c's tests check the findings on the phone.
+
+## Step 4c: the text contrast check
+
+Step 4c of [Android checks](../architecture/android-checks.md), "As
+built: step 4c, the text contrast check", holds each line of text step
+4b measures to WCAG's limits, at AA (1.4.3) or AAA (1.4.6) as chosen in
+the Checks tab, and lists what fails under each screen.
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings, and the tests pass, 2,347 of
+them, with the 10 that need Windows failing as before. A throwaway
+program ran the check on test 16's and test 18's recordings, with the
+words Windows' OCR read from their pictures on the development PC, and
+gave the numbers these tests expect. None of that shows the recorder
+running Windows' OCR itself, or the setting and the rows. Tests 19 to
+22 do. The companion app has not changed, and TalkBack is not needed;
+leave it off.
+
+## Test 19: build and install the sixth build (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Start the recorder from the Start menu.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the recorder
+opens.
+
+## Test 20: the text contrast findings of test 18's recording
+
+1. Choose "Open recording...", and open
+   `20261112-171107-88cfc05214a34a3682222e7fb25d840d` (test 18).
+2. If the Checks window is closed, click the "Checks" tab.
+3. Wait 10 seconds, then take a screenshot of the whole recorder window.
+4. Scroll the list to the row starting "Text contrast at AA" under
+   Screen 1, and take a screenshot; then do the same under Screen 2 and
+   Screen 3.
+
+**On screen:** in step 3, above the list, "Text contrast level:" is
+followed by "AA (WCAG 1.4.3)", chosen, and "AAA (WCAG 1.4.6)". The line
+under "Show current visit" includes "Text contrast at AA (WCAG 1.4.3):
+2 findings (1 error, 1 warning), from 57 lines of text measured, 55
+passed, on 3 settled snapshots (3 from the phone's screenshots, 0 from
+the video), in", a number, "seconds. The text was found with Windows
+OCR, en-US." In step 4: under Screen 1, the bold row "Text contrast at
+AA (WCAG 1.4.3): 1 error, from 29 lines measured", then a row starting
+"Error: Button described as "3", 2.38:1, #E25825 on #F3CB51; below 3:1,
+the limit for large text"; under Screen 2, the row "Text contrast at AA
+(WCAG 1.4.3): no findings, from 15 lines measured."; under Screen 3,
+the bold row "Text contrast at AA (WCAG 1.4.3): 1 warning, from 13
+lines measured", then a row starting "Warning: View described as
+"RECENT SLEEP ENTRIES", 3.49:1, #778588 on #F6F6E2; fails unless the
+text is large". Long rows wrap; there is no horizontal scrollbar. A
+line saying "OCR was not used" is a result too; send the screenshots
+either way.
+
+## Test 21: choosing a line of a contrast finding
+
+1. Choose "Open recording...", and open
+   `20261112-154851-32c7b61a5552453bbf5febffcca978c7` (test 16), then,
+   if the Checks window is closed, click the "Checks" tab, and wait 10
+   seconds.
+2. Take a screenshot of the whole recorder window.
+3. Scroll the list to the row starting "Warning: Button described as
+   "Sleep Goals Update your goals", line 2 of 2", and click it.
+4. Take a screenshot of the whole recorder window.
+
+**On screen:** in step 2 the line under "Show current visit" includes
+"Text contrast at AA (WCAG 1.4.3): 10 findings (4 errors, 6 warnings),
+from 110 lines of text measured, 99 passed, on 5 settled snapshots (0
+from the phone's screenshots, 5 from the video), in", a number,
+"seconds. The text was found with Windows OCR, en-US." In step 4 the
+time under the phone's picture starts "00:00:42.594". On the phone's
+picture, in the Profile screen's list, a thick cyan rectangle with
+black on both sides surrounds the grey words "Update your goals" only,
+not "Sleep Goals" above them. The line ends "Showing time 1 of 1 of the
+chosen finding, outlined on the phone's picture while its items are
+shown." The row reads, after "line 2 of 2,", "'Update your goals',
+3.83:1, #7F8385 on #FFFFFF". The numbers in this test come from the
+video's frames; if one differs a little, that is a result; send the
+screenshots either way.
+
+## Test 22: the AAA level, kept after a restart
+
+The recording from test 21 is open.
+
+1. Above the list, click "AAA (WCAG 1.4.6)", wait 5 seconds, and take a
+   screenshot of the whole recorder window.
+2. Close the recorder, and start it again from the Start menu.
+3. Choose "Open recording...", and open
+   `20261112-154851-32c7b61a5552453bbf5febffcca978c7` again, then, if
+   the Checks window is closed, click the "Checks" tab.
+4. Wait 10 seconds, and take a screenshot of the whole recorder window.
+
+**On screen:** in steps 1 and 4 "AAA (WCAG 1.4.6)" is chosen, and the
+line under "Show current visit" includes "Text contrast at AAA (WCAG
+1.4.6): 11 findings (10 errors, 1 warning), from 110 lines of text
+measured, 98 passed, on 5 settled snapshots (0 from the phone's
+screenshots, 5 from the video)", and does not end with "Showing time".
+Send both screenshots.

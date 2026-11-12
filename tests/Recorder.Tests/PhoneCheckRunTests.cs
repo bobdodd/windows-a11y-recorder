@@ -178,6 +178,67 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Equal(0, run.SnapshotsChecked);
     }
 
+    // Step 4c: the text contrast check, from a measurement of the same
+    // recording's settled snapshots at 1 and 3 seconds, made up: "Save" in
+    // #777777 on white, 4.48:1, on both, and "Sale 50%" drawn in a picture
+    // in #959595, 2.995:1, and black text, on the first.
+    [Fact]
+    public void TextContrast_MergesALinesFindingsAcrossSnapshots_AtTheChosenLevel()
+    {
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var window = new PhoneCheckWindow(512, 1, Items(0).Deserialize<AndroidTreeNode[]>(JsonSerializerOptions.Web)!);
+        var save = window.Items[1];
+        var page = window.Items[0];
+        PhoneTextLine Line(PhoneCheckItem? item, PhoneTextPlace place, string ocr, uint foreground, int top) =>
+            new(item, item ?? page, place, item?.Text, ocr, new PhoneBounds(110, top, 190, top + 55),
+                new PhoneSwatch(0xFFFFFF, foreground, 0, 2, 2), 39);
+        PhoneContrastSnapshot Snapshot(int settled, params PhoneTextLine[] lines)
+        {
+            var at = visit.SettledSnapshots[settled];
+            return new PhoneContrastSnapshot(
+                visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                new PhoneContrastPicture(PhonePictureKind.Screenshot, at.MonotonicNanoseconds, "p.png", "p.png"),
+                "Windows OCR, en-US", lines);
+        }
+
+        var measured = PhoneContrastRun.Of(
+        [
+            Snapshot(0,
+                Line(save, PhoneTextPlace.AppTextPlacedByOcr, "Save", 0x777777, 220),
+                Line(null, PhoneTextPlace.FoundByOcr, "Sale 50%", 0x959595, 600),
+                Line(null, PhoneTextPlace.FoundByOcr, "Open", 0x000000, 700)),
+            Snapshot(1, Line(save, PhoneTextPlace.AppTextPlacedByOcr, "Save", 0x777777, 230)),
+        ]);
+
+        var aa = PhoneTextContrastRun.Run(measured, archive.PhoneScreens, Device(), PhoneContrastLevel.AA);
+
+        Assert.Equal((4, 1), (aa.Lines, aa.Passed));
+        Assert.Equal(4, aa.LinesOn(visit.Screen));
+        Assert.Equal(PhoneCheckNames.TextContrastAa, aa.Check);
+        Assert.Equal([PhoneCheckLevel.Error, PhoneCheckLevel.Warning], aa.Findings.Select(finding => finding.Level));
+        var found = aa.Findings[0];
+        Assert.StartsWith("'Sale 50%' in ", found.Label, StringComparison.Ordinal);
+        Assert.Contains("text found by OCR (Windows OCR, en-US), in no item's text", found.Times[0].Measured, StringComparison.Ordinal);
+        var line = aa.Findings[1];
+        Assert.Equal(save.Identity + "\u001Fline 1", line.Identity);
+        Assert.Equal([220, 230], line.Times.Select(time => time.Bounds.Top));
+        Assert.All(line.Times, time => Assert.Equal(save.TreeKey, time.TreeKey));
+        Assert.Equal(
+            "Warning: Button \"Save\", 4.48:1, #777777 on #FFFFFF; fails unless the text is large: 4.5:1 is needed, 3:1 for large text; " +
+            "the words are 16 dp tall in OCR's box; the text's size and weight are not known; from the phone's screenshot; " +
+            "the app's text, placed on the screen by OCR (Windows OCR, en-US); seen 2 times on 1 visit, first at 00:00:01.000",
+            line.Text);
+
+        // At AAA the same measurement is two errors.
+        var aaa = PhoneTextContrastRun.Run(measured, archive.PhoneScreens, Device(), PhoneContrastLevel.AAA);
+
+        Assert.Equal(PhoneCheckNames.TextContrastAaa, aaa.Check);
+        Assert.All(aaa.Findings, finding => Assert.Equal(PhoneCheckLevel.Error, finding.Level));
+        Assert.Equal(2, aaa.Findings.Count);
+        Assert.Contains("below 4.5:1, the limit for large text", aaa.Findings[1].Times[0].Measured, StringComparison.Ordinal);
+    }
+
     // The recording's records, as the player reads one from the file.
     private sealed class FakeRecords : ISessionEventRecordSource
     {

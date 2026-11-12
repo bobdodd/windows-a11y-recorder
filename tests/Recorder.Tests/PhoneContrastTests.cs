@@ -197,6 +197,8 @@ public sealed class PhoneContrastTests
         Assert.Equal("Okay", line.OcrText);
         // 20% of the 50-pixel height on each side, but not past the item's left.
         Assert.Equal(new PhoneBounds(95, 470, 210, 540), line.Box);
+        // The words' own height, before widening, for the text contrast check.
+        Assert.Equal(50, line.WordsHeight);
     }
 
     [Fact]

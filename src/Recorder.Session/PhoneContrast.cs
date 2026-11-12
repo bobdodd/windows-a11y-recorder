@@ -53,7 +53,9 @@ public sealed record PhoneContrastPicture(PhonePictureKind Kind, long Time, stri
 /// <summary>
 /// A line of text measured: the item whose text it is (null for words in
 /// no item's text), the smallest item it is in, how it was found, the
-/// app's text and OCR's, its box in the screen's pixels, and its colours.
+/// app's text and OCR's, its box in the screen's pixels, its colours, and
+/// the height of OCR's box round its words in the screen's pixels before
+/// the box was widened (0 when measured on an item's bounds).
 /// </summary>
 public sealed record PhoneTextLine(
     PhoneCheckItem? Item,
@@ -62,7 +64,8 @@ public sealed record PhoneTextLine(
     string? AppText,
     string? OcrText,
     PhoneBounds Box,
-    PhoneSwatch? Colours);
+    PhoneSwatch? Colours,
+    int WordsHeight = 0);
 
 /// <summary>A settled snapshot's measurement: its picture, and the lines measured on it.</summary>
 public sealed record PhoneContrastSnapshot(
@@ -87,6 +90,9 @@ public sealed class PhoneContrastRun
     }
 
     public static PhoneContrastRun Empty { get; } = new();
+
+    /// <summary>A measurement of the given snapshots, for tests of what is made of it.</summary>
+    internal static PhoneContrastRun Of(IReadOnlyList<PhoneContrastSnapshot> snapshots) => new() { Snapshots = snapshots };
 
     public IReadOnlyList<PhoneContrastSnapshot> Snapshots { get; private set; } = [];
 
@@ -396,7 +402,8 @@ public static class PhoneTextMatching
                 group.Owner is null ? null : AppText(group.Owner),
                 group.Words,
                 Widened(group.Box, group.Container?.Bounds ?? windowBounds),
-                null))
+                null,
+                group.Box.Height))
             .ToList();
         foreach (var (item, _, text) in visible)
         {
