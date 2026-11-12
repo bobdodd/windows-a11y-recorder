@@ -750,6 +750,55 @@ are from the colours on the phone.
   Pixel. The results and the choice go to the owner before the check is
   built.
 
+### Step 4: what the measurement found (2026-11-12)
+
+Test 16's recording, `20261112-154851-32c7b61a5552453bbf5febffcca978c7`,
+of Nova SleepCare's Home, LEARN, DIARY and PROFILE tabs and Home again,
+with 20 screenshots from `screencap -p`. All of this is measured on those
+files unless it says otherwise.
+
+- **Sizes.** The screenshots and the frames are both 1080 by 2404, so an
+  item's bounds are the same pixels in both.
+- **The whole picture.** Below the status bar, a held frame differs from
+  its screenshot by 1.1 to 1.5 levels in 255 on average. Right after a
+  change of screen the stream is still sharpening: on LEARN the frame at
+  the settled snapshot, 22.602 s, differed by 4.6, and the frames 0.03 s
+  later by 1.4. So the frame to measure is the last one before the next
+  change of picture, not the first after the snapshot.
+- **What ATF counts as text.** ATF's text contrast check runs only on
+  items of the class TextView, or a subclass, with text or a hint
+  (`TextContrastCheck.java`, checked in the source at `c65cab0`). In
+  this app no item has text: every word on the screen is the content
+  description of an `android.view.View`. ATF as written would check no
+  text in it. For the measurement, every item with no children and a
+  content description was taken as text, with every ImageView as an
+  image: 125 items over 6 settled snapshots, 57 distinct.
+- **ATF's colour swatch on the video as it is.** ATF's default, one
+  text colour (`separateColorsUsingSingleForegroundMethod`), counts
+  exact colours. On the screenshots an item has 2 to 3552 colours, on
+  the frames 35 to 9878, as the stream turns each smooth edge into many
+  near shades. For 109 of the 125 the ratios agreed within 10%, the
+  median difference 1.3%; for 16 the swatch chose another colour as the
+  text's, and the result would have been 13 false errors (for example
+  "Sleep Goals, Update your goals": 2.86 from the frame, 12.40 from the
+  screenshot), 1 false warning and 1 false pass (the badge "3": 13.64
+  from the frame, 2.38 from the screenshot). ATF's other method, several
+  text colours, found no second colour in most frames and gave 1.00.
+- **The same swatch after joining near colours.** Joining colours
+  closer than a Delta E of 3 (ATF's own measure, `colorDifference`),
+  most common first, before the swatch: 122 of the 125 have the
+  screenshot's level, with no false pass; the 3 left are one tile, an
+  emoji with "Good" under it, where the frame's text colour came out as
+  the emoji's. Of the 122, the frame's ratio was within 4% of the
+  screenshot's for 90% of them, and within 11.2% for all; it was the
+  lower in 25. With a Delta E of 10 all 125 had the screenshot's level.
+- **What a screenshot costs.** Taking one and copying it to the PC took
+  565 to 989 ms (`times.txt`), with adb started afresh each time. Whether
+  taking one disturbs the phone's picture was not measured.
+- **Limits.** One app, one light theme, five screens, held still, one
+  phone. Dark themes, gradients, pictures behind text and motion were
+  not in it.
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A

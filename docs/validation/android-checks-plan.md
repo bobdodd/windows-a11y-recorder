@@ -573,3 +573,8 @@ at" to "Shot 20 saved at", each with a time and "took" a number of ms,
 then "DONE: 20 screenshots in" and the folder. Red error lines are a
 failure; send them as they are. Send the screenshot; the recording and
 the screenshots are then read from the PC for the comparison.
+
+Result, 2026-11-12: test 16 passed; 20 screenshots, 565 to 989 ms each
+(screenshot f13). The recording is
+`20261112-154851-32c7b61a5552453bbf5febffcca978c7`; what the comparison
+found is in android-checks.md, "Step 4: what the measurement found".
