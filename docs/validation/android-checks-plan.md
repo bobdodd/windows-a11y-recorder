@@ -989,6 +989,78 @@ shows it, read with the throwaway program:
   frame then is the loading screen's, from 00:00:31.323; the first frame
   with "Sleep Diary" is from 00:00:31.341.
 
-Nothing is changed yet; the owner is asked how loading screens should be
-treated.
+The owner chose "Its own screen" for the loading screen, and "Its
+first text" for a screen whose every text is in a scrolling list
+(decision 10 in [Android checks](../architecture/android-checks.md)).
+
+## Decision 10: loading screens and screens with no fixed text
+
+Built as in "When a visit starts" (rule 5) and "What names a screen" in
+[Android checks](../architecture/android-checks.md): when the first
+fixed text goes away for half a second or more and the window still has
+text, a visit starts, named by its first text. Visits, and the findings
+from the tree, are shown at the picture of their settled snapshot. The
+playback index is now version 29, so a recording opened again is read
+again. Checked in the Linux build environment: the solution builds with
+no warnings, three new tests pass with the other tests of screens,
+checks and contrast, and the throwaway program gives the rows below
+from test 16's recording, with a frame from each visit's time showing
+its screen.
+
+## Test 25: build and install the seventh build (development PC)
+
+As test 19: close the recorder, run the PowerShell of test 19's step 1,
+run the newest installer with "Start the recorder and set up the
+analysis models" unchecked, and start the recorder from the Start menu.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the recorder
+opens.
+
+## Test 26: the loading screen and the Profile screen are separate screens
+
+1. Choose "Open recording...", and open
+   `20261112-154851-32c7b61a5552453bbf5febffcca978c7` (test 16). If the
+   Checks window is closed, click the "Checks" tab, then move it so the
+   phone's picture is fully in view. Wait 10 seconds, and take a
+   screenshot of the whole screen.
+2. Scroll the list so the row starting "Screen 3:" is at the top, and
+   take a screenshot of the whole screen.
+3. Scroll the list so the row starting "Screen 5:" is at the top, and
+   take a screenshot of the whole screen.
+
+**On screen:** in step 1 the line under "Show current visit" begins "1
+app, 5 screens, 7 visits." In step 2 the Screen 3 row starts "Screen 3:"
+followed by the sun and moon symbols and "(com.pss.novasleepcare),
+named by its first fixed text, as 5 screens share the title 'Nova
+SleepCare'", and ends "2 visits". Below it, the row starting "Visit 3,
+00:00:31.048 to 00:00:31.326, started by a change of first fixed text;"
+and, under it, "Not checked, as no snapshot of this visit settled.";
+then the row starting "Visit 5, 00:00:42.155 to 00:00:42.502, started
+by a change of first fixed text, a return;" and the same "Not checked"
+row. In step 3 the Screen 5 row starts "Screen 5: Bob Dodd
+(com.pss.novasleepcare), named by its first text, as it has no fixed
+text and 5 screens share the title 'Nova SleepCare'" and ends "1
+visit"; below it is the row "Visit 6, 00:00:42.502 to 00:00:54.359,
+started by the first fixed text going away; 9 snapshots, 1 settled".
+Send the three screenshots.
+
+## Test 27: a visit is shown at its picture
+
+The recording from test 26 is open. Keep the phone's picture in view.
+
+1. Scroll the list to the row starting "Visit 4, 00:00:31.326", click
+   it, and take a screenshot of the whole screen.
+2. Scroll to the row starting "Visit 3, 00:00:31.048", click it, and
+   take a screenshot of the whole screen.
+3. Scroll to the row starting "Not run: Button described as "Help & FAQ
+   Get Support"" (under Visit 6), click it, and take a screenshot of the
+   whole screen.
+
+**On screen:** in step 1 the time under the phone's picture starts
+"00:00:42.155", and the picture shows "Sleep Diary" at the top, not the
+sun and moon. In step 2 the time starts "00:00:31.323", and the picture
+shows the sun and moon over "Loading your personal sleep learning
+space.". In step 3 the row ends "seen once, at 00:00:47.633", the time
+starts "00:00:47.633", and the picture shows the Profile screen with
+"Bob Dodd" at the top. Send the three screenshots.
 

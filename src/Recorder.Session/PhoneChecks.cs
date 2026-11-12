@@ -6,7 +6,9 @@ using Recorder.Contracts;
 namespace Recorder.Session;
 
 /// <summary>
-/// One time a finding was seen: a settled snapshot of the visit, the
+/// One time a finding was seen: when it is shown (the settled snapshot's
+/// picture, PhoneSnapshotPictures, or the snapshot's time when no picture
+/// shows it), a settled snapshot of the visit, the
 /// snapshot that took the window's items it was checked on, the item's
 /// bounds and row key there, what was measured, and the state of the
 /// screen, such as "in dialog 'Delete entry'", or null.
@@ -135,9 +137,11 @@ public sealed class PhoneCheckRun
         PhoneAccessibilityTimeline trees,
         PhoneDeviceTimeline device,
         ISessionEventRecordSource? source,
+        PhoneSnapshotPictures? pictures = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(screens);
+        pictures ??= PhoneSnapshotPictures.Empty;
         ArgumentNullException.ThrowIfNull(trees);
         ArgumentNullException.ThrowIfNull(device);
         var run = new PhoneCheckRun();
@@ -232,6 +236,10 @@ public sealed class PhoneCheckRun
 
                 run.SnapshotsChecked++;
                 var state = StateAt(visit, time);
+
+                // Shown at the snapshot's picture, as the video can lag the
+                // tree (PhoneSnapshotPictures).
+                var shownAt = pictures.Of(visit, settled)?.Time ?? time;
                 var items = done.Window.Items.GroupBy(item => item.Node.Index).ToDictionary(group => group.Key, group => group.First());
                 foreach (var result in done.Results)
                 {
@@ -246,7 +254,7 @@ public sealed class PhoneCheckRun
                         findings[findingKey] = finding = new PhoneFinding(result.Check, result.Level, visit, item.Identity, item.Label);
                     }
 
-                    finding._times.Add(new PhoneFindingTime(time, visit, settled, taking, visit.WindowId, item.Bounds, item.TreeKey, result.Measured, state));
+                    finding._times.Add(new PhoneFindingTime(shownAt, visit, settled, taking, visit.WindowId, item.Bounds, item.TreeKey, result.Measured, state));
                 }
             }
         }

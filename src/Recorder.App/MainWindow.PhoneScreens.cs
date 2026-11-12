@@ -104,7 +104,7 @@ public partial class MainWindow
         try
         {
             run = await Task.Run(
-                () => PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, archive.PhoneDevice, archive.RecordSource, token),
+                () => PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, archive.PhoneDevice, archive.RecordSource, PhoneSnapshotPictures.Of(archive), token),
                 token);
         }
         catch (OperationCanceledException)
@@ -217,6 +217,9 @@ public partial class MainWindow
         _currentVisitRow = null;
         var screens = _playbackArchive?.PhoneScreens ?? PhoneScreenTimeline.Empty;
         var device = _playbackArchive?.PhoneDevice ?? PhoneDeviceTimeline.Empty;
+        // A visit's rows go to its first settled snapshot's picture, as
+        // the video can lag the tree (PhoneSnapshotPictures).
+        var pictures = _playbackArchive is { } archive ? PhoneSnapshotPictures.Of(archive) : PhoneSnapshotPictures.Empty;
         TimelineControl.SetPhoneVisits(screens.Visits);
 
         // The density first (android-checks.md, step 2): the checks turn
@@ -254,7 +257,7 @@ public partial class MainWindow
             _phoneScreenRows.Add(new PhoneScreenRowView(
                 0,
                 $"App {app.Package}, {device.DescribeVersion(app.Package)}: {Count(app.Screens.Count, "screen")}, {Count(visits, "visit")}",
-                app.Screens[0].Visits[0].Start,
+                pictures.TimeOf(app.Screens[0].Visits[0]),
                 null));
             foreach (var screen in app.Screens)
             {
@@ -264,16 +267,17 @@ public partial class MainWindow
                 _phoneScreenRows.Add(new PhoneScreenRowView(
                     1,
                     $"Screen {screen.Number}: {screen.Label}, {screen.NamedBy}, {activity}, {Count(screen.Visits.Count, "visit")}",
-                    screen.Visits[0].Start,
+                    pictures.TimeOf(screen.Visits[0]),
                     null));
                 foreach (var visit in screen.Visits)
                 {
                     var settled = visit.SettledSnapshots.Count;
+                    var shownAt = pictures.TimeOf(visit);
                     _phoneScreenRows.Add(new PhoneScreenRowView(
                         2,
                         $"Visit {visit.Number}, {visit.When}, started by {visit.CauseText}{(visit.IsReturn ? ", a return" : string.Empty)}; " +
                         $"{Count(visit.Snapshots.Count, "snapshot")}, {settled.ToString("N0", CultureInfo.CurrentCulture)} settled",
-                        visit.Start,
+                        shownAt,
                         visit));
                     foreach (var state in visit.States)
                     {
@@ -289,7 +293,7 @@ public partial class MainWindow
                             null));
                     }
 
-                    AddFindingRows(visit);
+                    AddFindingRows(visit, shownAt);
                 }
             }
         }
@@ -304,13 +308,13 @@ public partial class MainWindow
     // check that found something, saying how many at each level, then a
     // row for each finding. A visit with no settled snapshot is not
     // checked, as both checks run only on settled snapshots.
-    private void AddFindingRows(PhoneVisit visit)
+    private void AddFindingRows(PhoneVisit visit, long shownAt)
     {
         if (visit.SettledSnapshots.Count == 0)
         {
             if (_phoneChecks is not null || _phoneTextContrast is not null)
             {
-                _phoneScreenRows.Add(new PhoneScreenRowView(3, "Not checked, as no snapshot of this visit settled.", visit.Start, null)
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, "Not checked, as no snapshot of this visit settled.", shownAt, null)
                 {
                     IsCheck = true,
                 });
@@ -324,7 +328,7 @@ public partial class MainWindow
             var findings = run.For(visit);
             if (findings.Count == 0)
             {
-                _phoneScreenRows.Add(new PhoneScreenRowView(3, "No findings from the checks of the tree in this visit.", visit.Start, null)
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, "No findings from the checks of the tree in this visit.", shownAt, null)
                 {
                     IsCheck = true,
                 });
@@ -342,14 +346,14 @@ public partial class MainWindow
             var lines = contrast.LinesIn(visit);
             if (lines == 0)
             {
-                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{title}: no text was measured in this visit.", visit.Start, null)
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{title}: no text was measured in this visit.", shownAt, null)
                 {
                     IsCheck = true,
                 });
             }
             else if (findings.Count == 0)
             {
-                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{title}: no findings, from {Count(lines, "line")} measured.", visit.Start, null)
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{title}: no findings, from {Count(lines, "line")} measured.", shownAt, null)
                 {
                     IsCheck = true,
                 });

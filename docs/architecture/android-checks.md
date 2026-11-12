@@ -15,10 +15,12 @@ built: the phone's own screenshots (4a, checked on the phone on
 checked on the development PC with tests 16 and 18's recordings), and
 the text contrast check with its AA or AAA setting and its findings (4c,
 see "As built: step 4c", tests 19 to 21 passed;
-findings are since listed under each visit, awaiting tests 23 and 24); non-text
-contrast is next. The owner's
-decisions of 2026-11-11 are in "Decisions (2026-11-11)" and "Decisions
-on the open questions (2026-11-11)". Before any check is assigned a
+findings are since listed under each visit, tests 23 and 24 passed);
+loading screens and screens with no fixed text follow decision 10,
+awaiting tests 25 and 26; non-text contrast is next. The owner's
+decisions are in "Decisions (2026-11-11)", "Decisions on loading
+screens (2026-11-12)" and "Decisions on the open questions
+(2026-11-11)". Before any check is assigned a
 result, the recording has to say which app and which screen each moment
 belongs to, so that comes first in "Build order".
 
@@ -78,6 +80,26 @@ them.
    "Under each visit" over one finding per screen naming its visits.
    This replaces the merging across visits first planned in "Items and
    findings".
+
+## Decisions on loading screens (2026-11-12)
+
+Found in test 24 (see the validation plan): the client's app shows a
+loading screen, a sun and a moon over "Loading your personal sleep
+learning space.", before the Diary and Profile tabs, and every text on
+its Profile screen is inside a scrolling container, so the Profile
+screen had no first fixed text and was counted as the loading screen.
+
+10. **A loading screen is its own screen, and a screen with no fixed
+    text is named by its first text.** The owner chose "Its own screen"
+    for the loading screen, and "Its first text" for a screen whose
+    every text is in a scrolling list: when the first fixed text goes
+    away and the window still has text, a new visit starts, named by its
+    first text ("Bob Dodd" for Profile). Scrolling never starts a visit.
+    As the video lags the tree (the tree shows "Sleep Diary" at
+    00:00:31.326, the frame then is still the loading screen's, and the
+    first frame with "Sleep Diary" is from 00:00:31.341, measured in
+    test 16's recording), a visit, and a finding from the tree, is shown
+    at the picture of its settled snapshot, not at the snapshot's time.
 
 ## What a recording holds
 
@@ -199,11 +221,17 @@ A new visit starts when, in the app on screen:
    visible text or content description of an item that is not
    clickable, has no clickable or scrollable item around it, and is in
    no titled pane. A snapshot with no fixed text, as while a screen is
-   drawn, changes nothing.
+   drawn, changes nothing by this rule.
+5. **The first fixed text goes away and stays away** for half a second
+   or more while the window still has text (decision 10). The visit
+   starts when it went away. A fixed text gone for less than half a
+   second, as while a screen is redrawn, changes nothing. A fixed text
+   seen after such a visit starts another visit, by rule 4.
 
 Scrolling, focus moving, text typed, items changing, and content changes
 that keep the window, its class name, its title and its first fixed text
-do not start a visit.
+do not start a visit. Scrolling a screen with no fixed text changes its
+first text, but starts no visit.
 
 ### What names a screen
 
@@ -228,6 +256,15 @@ matched, by their first fixed text, and the player says how many
 screens share the title. A screen with none of the three titles but a
 first fixed text is named by that text. (Added 2026-11-12, for the
 client's app below.)
+
+A screen with no first fixed text is named, and matched, by its **first
+text**: in the tree's order, the first visible text or content
+description of an item that is not clickable, has no clickable item
+around it and is in no titled pane, inside a scrolling container or not.
+The player says "named by its first text, as it has no fixed text and 5
+screens share the title 'Nova SleepCare'", or "named by its first text,
+as it has no title and no fixed text". The first text is that of the
+visit's first snapshot (decision 10).
 
 When none of the three gives a title, the screen is named by its
 activity and a number in order of first visit, such as "SubSettings,
@@ -411,7 +448,12 @@ above, it is what the code does.
   window (16.51 s against 16.57 s in test 64); otherwise at the
   snapshot. A new window from the same app is "a new window"; from
   another package, "another app". A change of first fixed text starts a
-  visit at the snapshot that shows it. A visit whose window, app,
+  visit at the snapshot that shows it. A first fixed text gone for
+  500 ms or more, with text left in the window, starts a visit at the
+  snapshot where it went (the cause "the first fixed text going away"),
+  and the snapshots from then on move to it; it is decided at the next
+  snapshot 500 ms or more later, at a window-state event, or at the end
+  of the recording (decision 10, index version 29). A visit whose window, app,
   activity, title, window-state text and first fixed text are all
   unchanged goes on.
 - **Screens.** Visits are matched to screens once the recording is
@@ -437,7 +479,11 @@ above, it is what the code does.
   times, what started them, whether they are a return and how many of
   their snapshots are settled, and each visit's states. A row moves the
   playhead to the start of its visit or state, or of the first visit for
-  a screen or an app. The visit at the playhead is marked; "Show current
+  a screen or an app. (Since decision 10, a visit's row, and a screen's
+  or an app's, moves it to the picture of the visit's first settled
+  snapshot, or, with none settled, to the first screenshot in the visit
+  or else the last frame before it ended; a state's row still moves it to
+  the state's start.) The visit at the playhead is marked; "Show current
   visit" scrolls to it. The timeline has a fifth strip, under the
   TalkBack said strip, with each visit in brown and its screen's name
   where it fits (white on `#99601A` is 5.2 to 1; the brown against the
@@ -508,7 +554,29 @@ Not yet known:
 - whether dialogs, menus and bottom sheets in other apps are their own
   windows, and what class names their window-state events carry;
 - whether turning the phone gives the app's window a new ID, which
-  would start a new visit to the same screen.
+  would start a new visit to the same screen;
+- moving between two screens that both have no fixed text, as from one
+  scrolling list to another with no fixed heading; no visit starts, as
+  scrolling changes the first text too (decision 10).
+
+With decision 10, test 16's recording
+(`20261112-154851-32c7b61a5552453bbf5febffcca978c7`) gives, with the
+throwaway program, 1 app, 5 screens and 7 visits: "Welcome, Bob Dodd"
+(Visits 1 and 7), "Sleep Learning Library" (Visit 2), the loading
+screen "\u2600\uFE0F\U0001F319" (Visits 3 and 5, from 00:00:31.048 to
+00:00:31.326 and from 00:00:42.155 to 00:00:42.502, neither with a
+settled snapshot), "Sleep Diary" (Visit 4) and "Bob Dodd" (Visit 6, from
+00:00:42.502 to 00:00:54.359, started by the first fixed text going
+away, named by its first text). The visits are shown at 00:00:02.655,
+00:00:28.203, 00:00:31.323, 00:00:42.155, 00:00:42.489, 00:00:47.633 and
+00:01:06.223, and a frame from each, looked at, shows its screen: Home,
+Learn, the loading screen, Sleep Diary, the loading screen, Profile and
+Home. Four other recordings, among them the one above
+(`20261112-005243`) and test 18's, give the same visits as before. The
+findings are the same: at AA 11, from 110 lines, 99 passed; at AAA 12.
+The touch target finding for "Help & FAQ Get Support" is now shown at
+00:00:47.633, the picture of its snapshot, not at 00:00:42.594, the
+snapshot's time.
 
 ## As built: step 2
 

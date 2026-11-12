@@ -51,6 +51,82 @@ public enum PhonePictureKind
 public sealed record PhoneContrastPicture(PhonePictureKind Kind, long Time, string Path, string AbsolutePath);
 
 /// <summary>
+/// The pictures of a recording's settled snapshots, by one rule for every
+/// check (PhoneContrastRun.PictureOf): the companion's screenshot taken
+/// from the snapshot until the window was next listed, else the last frame
+/// of the video before then. The tree can change before the video does: in
+/// test 16's recording the tree showed "Sleep Diary" at 00:00:31.326, but
+/// the frame then, from 00:00:31.323, still showed the loading screen, and
+/// the first with "Sleep Diary" was from 00:00:31.341 (measured). So a
+/// visit and a finding of the tree are shown at their snapshot's picture,
+/// not at the snapshot's time.
+/// </summary>
+public sealed class PhoneSnapshotPictures
+{
+    private readonly IReadOnlyList<PhoneContrastPicture> _screenshots;
+    private readonly IReadOnlyList<SessionVideoFrame> _frames;
+    private readonly long[] _frameTimes;
+    private readonly PhoneAccessibilityTimeline _trees;
+    private readonly string _sessionDirectory;
+
+    private PhoneSnapshotPictures(
+        IReadOnlyList<PhoneContrastPicture> screenshots,
+        IReadOnlyList<SessionVideoFrame> frames,
+        PhoneAccessibilityTimeline trees,
+        string sessionDirectory)
+    {
+        _screenshots = screenshots;
+        _frames = frames;
+        _frameTimes = frames.Select(frame => frame.MonotonicNanoseconds).ToArray();
+        _trees = trees;
+        _sessionDirectory = sessionDirectory;
+    }
+
+    /// <summary>No pictures: every snapshot is shown at its own time.</summary>
+    public static PhoneSnapshotPictures Empty { get; } = new([], [], PhoneAccessibilityTimeline.Empty, string.Empty);
+
+    public static PhoneSnapshotPictures Of(SessionPlaybackArchive archive)
+    {
+        ArgumentNullException.ThrowIfNull(archive);
+        var screenshots = archive.PhoneScreenshots
+            .Select(shot => new PhoneContrastPicture(PhonePictureKind.Screenshot, shot.MonotonicNanoseconds, shot.Path, shot.AbsolutePath))
+            .ToList();
+        var frames = archive.FrameSource == SessionFrameSource.Phone ? archive.Frames : [];
+        return new PhoneSnapshotPictures(screenshots, frames, archive.PhoneAccessibility, archive.SessionDirectory);
+    }
+
+    /// <summary>The picture of a settled snapshot of a visit; null when none shows it.</summary>
+    public PhoneContrastPicture? Of(PhoneVisit visit, SessionTimelineEvent settled)
+    {
+        ArgumentNullException.ThrowIfNull(visit);
+        ArgumentNullException.ThrowIfNull(settled);
+        var time = settled.MonotonicNanoseconds;
+        var end = Math.Min(_trees.NextListing(time, visit.WindowId) ?? long.MaxValue, visit.End);
+        return PhoneContrastRun.PictureOf(_screenshots, _frames, _frameTimes, visit.Start, time, end, _sessionDirectory);
+    }
+
+    /// <summary>
+    /// The time to show a visit at: its first settled snapshot's picture;
+    /// else, with none settled, the first screenshot in the visit or the
+    /// last frame before it ended; else its start.
+    /// </summary>
+    public long TimeOf(PhoneVisit visit)
+    {
+        ArgumentNullException.ThrowIfNull(visit);
+        foreach (var settled in visit.SettledSnapshots)
+        {
+            if (Of(visit, settled) is { } picture)
+            {
+                return picture.Time;
+            }
+        }
+
+        return PhoneContrastRun.PictureOf(_screenshots, _frames, _frameTimes, visit.Start, visit.Start, visit.End, _sessionDirectory)?.Time
+            ?? visit.Start;
+    }
+}
+
+/// <summary>
 /// A line of text measured: the item whose text it is (null for words in
 /// no item's text), the smallest item it is in, how it was found, the
 /// app's text and OCR's, its box in the screen's pixels, its colours, and
@@ -137,11 +213,7 @@ public sealed class PhoneContrastRun
             run.OcrUnavailable = "no OCR was given";
         }
 
-        var screenshots = archive.PhoneScreenshots
-            .Select(shot => new PhoneContrastPicture(PhonePictureKind.Screenshot, shot.MonotonicNanoseconds, shot.Path, shot.AbsolutePath))
-            .ToList();
-        var frames = archive.FrameSource == SessionFrameSource.Phone ? archive.Frames : [];
-        var frameTimes = frames.Select(frame => frame.MonotonicNanoseconds).ToArray();
+        var snapshotPictures = PhoneSnapshotPictures.Of(archive);
         var pictures = new Dictionary<string, PhonePixels?>(StringComparer.Ordinal);
         var readings = new Dictionary<string, PhoneOcrReading?>(StringComparer.Ordinal);
         var problems = new List<string>();
@@ -159,8 +231,7 @@ public sealed class PhoneContrastRun
 
                 var time = settled.MonotonicNanoseconds;
                 var clock = WindowsPreferenceTimeline.Clock(time);
-                var end = Math.Min(trees.NextListing(time, visit.WindowId) ?? long.MaxValue, visit.End);
-                var picture = PictureOf(screenshots, frames, frameTimes, visit.Start, time, end, archive.SessionDirectory);
+                var picture = snapshotPictures.Of(visit, settled);
                 if (picture is null)
                 {
                     problems.Add($"{clock}: no screenshot or frame of the video shows the screen");

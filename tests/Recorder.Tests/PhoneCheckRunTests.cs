@@ -148,7 +148,7 @@ public sealed class PhoneCheckRunTests : IDisposable
     {
         var archive = Archive(out var recording);
 
-        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording, TestContext.Current.CancellationToken);
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(run.Problems);
         Assert.Equal((3, 2, 0), (run.SnapshotsChecked, run.WindowsChecked, run.WithoutDensity));
@@ -181,7 +181,7 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Equal(2, settings.Count);
         Assert.Same(settings[0].Screen, settings[1].Screen);
 
-        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording, TestContext.Current.CancellationToken);
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording, cancellationToken: TestContext.Current.CancellationToken);
 
         var findings = run.Findings.Where(finding => finding.Screen == settings[0].Screen).ToList();
         Assert.Equal(2, findings.Count);
@@ -210,7 +210,7 @@ public sealed class PhoneCheckRunTests : IDisposable
                 JsonSerializerOptions.Web))],
             10 * Second);
 
-        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, device, recording, TestContext.Current.CancellationToken);
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, device, recording, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal((0, 2), (run.WithoutDensity, run.DensityChanged));
         var finding = Assert.Single(run.Findings);
@@ -222,7 +222,7 @@ public sealed class PhoneCheckRunTests : IDisposable
     {
         var archive = Archive(out var recording);
 
-        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, PhoneDeviceTimeline.Empty, recording, TestContext.Current.CancellationToken);
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, PhoneDeviceTimeline.Empty, recording, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(run.Findings);
         Assert.Equal(3, run.WithoutDensity);
@@ -233,7 +233,7 @@ public sealed class PhoneCheckRunTests : IDisposable
     {
         var archive = Archive(out _);
 
-        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), null, TestContext.Current.CancellationToken);
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), null, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(run.Findings);
         Assert.Equal(0, run.SnapshotsChecked);

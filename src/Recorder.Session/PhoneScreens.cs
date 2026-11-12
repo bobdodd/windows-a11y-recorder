@@ -32,6 +32,12 @@ public enum PhoneTitleSource
     /// </summary>
     FirstFixedText,
 
+    /// <summary>
+    /// The window's first text, for a screen with no first fixed text, as
+    /// when every text is in a scrolling container (decision 10).
+    /// </summary>
+    FirstText,
+
     /// <summary>A pane's title, for a state.</summary>
     PaneTitle,
 
@@ -56,6 +62,13 @@ public enum PhoneVisitCause
 
     /// <summary>The first fixed text of the app's window changed, in the same window with the same title.</summary>
     FixedTextChanged,
+
+    /// <summary>
+    /// The first fixed text of the app's window went away for at least
+    /// half a second, in the same window with the same title, while the
+    /// window still had text (decision 10).
+    /// </summary>
+    FixedTextGone,
 
     /// <summary>Another app's window came to the front.</summary>
     AnotherApp,
@@ -138,6 +151,9 @@ public sealed class PhoneScreen
         PhoneTitleSource.FirstFixedText when SharedTitle is { } shared => string.Create(CultureInfo.InvariantCulture,
             $"named by its first fixed text, as {SharedBy} screens share the title '{shared}'"),
         PhoneTitleSource.FirstFixedText => "named by its first fixed text, as it has no title",
+        PhoneTitleSource.FirstText when SharedTitle is { } shared => string.Create(CultureInfo.InvariantCulture,
+            $"named by its first text, as it has no fixed text and {SharedBy} screens share the title '{shared}'"),
+        PhoneTitleSource.FirstText => "named by its first text, as it has no title and no fixed text",
         _ when ViewIdSignature is null => "untitled, and with no view IDs, so every untitled visit to this activity is counted as this screen",
         _ => "untitled, kept apart by its view IDs",
     };
@@ -194,6 +210,12 @@ public sealed class PhoneVisit
     /// <summary>The first fixed text of the app's window in the visit: the one that started it, or else the first seen.</summary>
     public string? FixedText { get; internal set; }
 
+    /// <summary>
+    /// For a visit with no first fixed text, the window's first text when
+    /// the visit started, or else when first seen (decision 10).
+    /// </summary>
+    public string? FirstText { get; internal set; }
+
     public PhoneScreen Screen { get; internal set; } = null!;
 
     /// <summary>Whether this is a return: the screen was visited before.</summary>
@@ -225,6 +247,7 @@ public sealed class PhoneVisit
         PhoneVisitCause.WindowStateChanged => "a window-state event",
         PhoneVisitCause.WindowTitleChanged => "a change of window title",
         PhoneVisitCause.FixedTextChanged => "a change of first fixed text",
+        PhoneVisitCause.FixedTextGone => "the first fixed text going away",
         _ => "another app coming to the front",
     };
 }
@@ -254,6 +277,18 @@ public sealed record PhoneScreenEvidence(string? Package, string? FirstHeading, 
     /// text of its own on each screen.
     /// </summary>
     public string? FixedText { get; init; }
+
+    /// <summary>
+    /// For a window with no first fixed text, its first text: in the
+    /// tree's order, the first visible text or content description of an
+    /// item that is not clickable, with no clickable item around it, and in
+    /// no titled pane, though inside a scrolling container. Measured on the
+    /// client's app (20261112-154851): its Profile screen has every text
+    /// inside an android.widget.ScrollView, so no first fixed text, and
+    /// its first text is "Bob Dodd". Null when the window has a first
+    /// fixed text.
+    /// </summary>
+    public string? FirstText { get; init; }
 
     /// <summary>Each titled pane's first fixed text, by pane title, for panes that have one.</summary>
     public IReadOnlyDictionary<string, string> PaneFixedTexts { get; init; } = new Dictionary<string, string>();
@@ -310,17 +345,20 @@ public sealed record PhoneScreenEvidence(string? Package, string? FirstHeading, 
         // Each item's parent, whether it is a control or a scrolling
         // container (a barrier: no text inside is fixed), and its pane title.
         var barriers = new Dictionary<int, bool>();
+        var controls = new Dictionary<int, bool>();
         var paneOf = new Dictionary<int, string?>();
         foreach (var item in list)
         {
             if (ReadInt32(item, "index") is { } index)
             {
-                barriers[index] = ReadBoolean(item, "clickable") || ReadBoolean(item, "scrollable");
+                controls[index] = ReadBoolean(item, "clickable");
+                barriers[index] = controls[index] || ReadBoolean(item, "scrollable");
                 paneOf[index] = Clean(ReadString(item, "paneTitle"));
             }
         }
 
         string? fixedText = null;
+        string? firstText = null;
         var paneFixedTexts = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var item in list)
         {
@@ -333,15 +371,27 @@ public sealed record PhoneScreenEvidence(string? Package, string? FirstHeading, 
             }
 
             // The nearest titled pane around the item, and whether a
-            // control or a scrolling container is around it.
+            // control, or a scrolling container, is around it.
             string? pane = paneOf.GetValueOrDefault(index);
+            var inControl = false;
             var blocked = false;
             var current = parents.GetValueOrDefault(index);
-            for (var steps = 0; current is { } ancestor && steps < 500 && !blocked; steps++)
+            for (var steps = 0; current is { } ancestor && steps < 500 && !inControl; steps++)
             {
-                blocked = barriers.GetValueOrDefault(ancestor);
+                inControl = controls.GetValueOrDefault(ancestor);
+                blocked |= barriers.GetValueOrDefault(ancestor);
                 pane ??= paneOf.GetValueOrDefault(ancestor);
                 current = parents.GetValueOrDefault(ancestor);
+            }
+
+            if (inControl)
+            {
+                continue;
+            }
+
+            if (pane is null)
+            {
+                firstText ??= text;
             }
 
             if (blocked)
@@ -377,6 +427,7 @@ public sealed record PhoneScreenEvidence(string? Package, string? FirstHeading, 
         return new PhoneScreenEvidence(package, heading, panes, signature, viewIds.Length)
         {
             FixedText = fixedText,
+            FirstText = fixedText is null ? firstText : null,
             PaneFixedTexts = paneFixedTexts,
         };
     }
@@ -400,6 +451,7 @@ public sealed record PhoneScreenEvidence(string? Package, string? FirstHeading, 
             ["package"] = Package,
             ["firstHeading"] = FirstHeading,
             ["fixedText"] = FixedText,
+            ["firstText"] = FirstText,
             ["paneTitles"] = panes,
             ["paneFixedTexts"] = paneTexts,
             ["viewIdSignature"] = ViewIdSignature,
@@ -439,6 +491,7 @@ public sealed record PhoneScreenEvidence(string? Package, string? FirstHeading, 
             ReadInt32(evidence, "viewIdCount") ?? 0)
         {
             FixedText = ReadString(evidence, "fixedText"),
+            FirstText = ReadString(evidence, "firstText"),
             PaneFixedTexts = paneTexts,
         };
     }
@@ -734,6 +787,11 @@ public sealed class PhoneScreenTimeline
 
         private int _currentLayer;
 
+        // When the current visit's first fixed text went away while the
+        // window still had text, and its first text then: a visit starts
+        // there if it stays away for QuietNanoseconds (decision 10).
+        private (long Start, string FirstText)? _gone;
+
         public void Add(SessionTimelineEvent item, WindowState state)
         {
             if (state.Pane)
@@ -754,6 +812,7 @@ public sealed class PhoneScreenTimeline
                 (state.ClassName != visit.Activity || state.Text != visit.StateText) &&
                 !IsStateClass(state.ClassName))
             {
+                EndGone(time);
                 Begin(time, PhoneVisitCause.WindowStateChanged, state.WindowId, visit.Package, visit.WindowTitle, null, _currentLayer);
             }
         }
@@ -781,6 +840,18 @@ public sealed class PhoneScreenTimeline
                 ?? _current?.Package
                 ?? "unknown app";
             var fixedText = _evidence.GetValueOrDefault(app.Id)?.FixedText;
+            var firstText = _evidence.GetValueOrDefault(app.Id)?.FirstText;
+            if (_gone is { } gone && _current is { } goneFrom)
+            {
+                // The fixed text came back, another came, the window
+                // changed, or it has stayed away long enough.
+                if (fixedText is not null || app.Id != goneFrom.WindowId || app.Title != goneFrom.WindowTitle ||
+                    time - gone.Start >= QuietNanoseconds)
+                {
+                    EndGone(time);
+                }
+            }
+
             if (_current is not { } visit)
             {
                 Begin(StartOf(app.Id, time), PhoneVisitCause.FirstWindow, app.Id, package, app.Title, fixedText, app.Layer);
@@ -803,9 +874,33 @@ public sealed class PhoneScreenTimeline
                 // window, as a dialog, changes nothing.
                 Begin(time, PhoneVisitCause.FixedTextChanged, app.Id, package, app.Title, fixedText, app.Layer);
             }
+            else if (fixedText is not null && visit.FixedText is null && visit.Cause == PhoneVisitCause.FixedTextGone)
+            {
+                // A fixed text again after a visit with none.
+                Begin(time, PhoneVisitCause.FixedTextChanged, app.Id, package, app.Title, fixedText, app.Layer);
+            }
+            else if (fixedText is null && firstText is not null && visit.FixedText is not null && _gone is null)
+            {
+                // The fixed text went away but the window still has text,
+                // as when every text of the next screen is in a scrolling
+                // container (the client's Profile screen, 20261112-154851).
+                // A visit starts here only if it stays away for
+                // QuietNanoseconds, as a screen being drawn can lose its
+                // fixed text for a moment.
+                _gone = (time, firstText);
+            }
 
             _currentLayer = app.Layer;
-            _current!.FixedText ??= fixedText;
+            if (_current!.FixedText is null && _current.Cause != PhoneVisitCause.FixedTextGone)
+            {
+                _current.FixedText = fixedText;
+            }
+
+            if (_current.FixedText is null)
+            {
+                _current.FirstText ??= firstText;
+            }
+
             _current._listings.Add((item, app.Bounds, app.TransitionTime, _evidence.GetValueOrDefault(app.Id)));
             if (!_listingTimes.TryGetValue(app.Id, out var times))
             {
@@ -819,6 +914,7 @@ public sealed class PhoneScreenTimeline
 
         public (IReadOnlyList<PhoneVisit>, IReadOnlyList<PhoneScreen>, IReadOnlyList<PhoneApp>) Finish()
         {
+            EndGone(duration);
             End(duration);
             foreach (var visit in _visits)
             {
@@ -833,10 +929,11 @@ public sealed class PhoneScreenTimeline
                 : visit.StateText is { } stateText ? (stateText, PhoneTitleSource.WindowStateText)
                 : visit.FirstHeading is { } heading ? (heading, PhoneTitleSource.FirstHeading)
                 : (null, PhoneTitleSource.Untitled);
+            static string? TextOf(PhoneVisit visit) => visit.FixedText ?? visit.FirstText;
             var fixedTexts = _visits
-                .Where(visit => visit.FixedText is not null)
+                .Where(visit => TextOf(visit) is not null)
                 .GroupBy(visit => (visit.Package, BaseTitle(visit).Title))
-                .ToDictionary(group => group.Key, group => group.Select(visit => visit.FixedText!).Distinct(StringComparer.Ordinal).Count());
+                .ToDictionary(group => group.Key, group => group.Select(visit => TextOf(visit)!).Distinct(StringComparer.Ordinal).Count());
 
             var screens = new List<PhoneScreen>();
             var apps = new List<PhoneApp>();
@@ -847,12 +944,12 @@ public sealed class PhoneScreenTimeline
                 var (title, source) = BaseTitle(visit);
                 string? sharedTitle = null;
                 var sharedBy = 0;
-                if (visit.FixedText is { } fixedText &&
+                if (TextOf(visit) is { } fixedText &&
                     (title is null || fixedTexts.GetValueOrDefault((visit.Package, title)) > 1))
                 {
                     sharedTitle = title;
                     sharedBy = title is null ? 0 : fixedTexts[(visit.Package, title)];
-                    (title, source) = (fixedText, PhoneTitleSource.FirstFixedText);
+                    (title, source) = (fixedText, visit.FixedText is null ? PhoneTitleSource.FirstText : PhoneTitleSource.FirstFixedText);
                 }
 
                 var signature = title is null ? visit.ViewIdSignature : null;
@@ -940,7 +1037,9 @@ public sealed class PhoneScreenTimeline
             if (_current is { } current &&
                 current.WindowId == windowId && current.Package == package &&
                 current.Activity == activity && current.StateText == text && current.WindowTitle == windowTitle &&
-                (fixedText is null || current.FixedText is null || current.FixedText == fixedText))
+                cause != PhoneVisitCause.FixedTextGone &&
+                (fixedText is null || current.FixedText == fixedText ||
+                 (current.FixedText is null && current.Cause != PhoneVisitCause.FixedTextGone)))
             {
                 return;
             }
@@ -952,6 +1051,50 @@ public sealed class PhoneScreenTimeline
             };
             _currentLayer = layer;
             _visits.Add(_current);
+        }
+
+        // Ends a wait for the fixed text to come back (_gone): when it was
+        // away for QuietNanoseconds until a time, a visit to the window
+        // with no fixed text starts where it went away, and takes the
+        // snapshots, listings and states of the current visit from then.
+        private void EndGone(long time)
+        {
+            if (_gone is not { } gone || _current is not { } from)
+            {
+                _gone = null;
+                return;
+            }
+
+            _gone = null;
+            if (time - gone.Start < QuietNanoseconds)
+            {
+                return;
+            }
+
+            var start = gone.Start;
+            var snapshots = from._snapshots.Where(item => item.MonotonicNanoseconds >= start).ToList();
+            from._snapshots.RemoveAll(item => item.MonotonicNanoseconds >= start);
+            var listings = from._listings.Where(listing => listing.Event.MonotonicNanoseconds >= start).ToList();
+            from._listings.RemoveAll(listing => listing.Event.MonotonicNanoseconds >= start);
+            var states = from._states.Where(state => state.Start >= start).ToList();
+            from._states.RemoveAll(state => state.Start >= start);
+            var open = _open.Where(pair => pair.Value.Start >= start).ToList();
+            foreach (var (key, _) in open)
+            {
+                _open.Remove(key);
+            }
+
+            var layer = _currentLayer;
+            Begin(start, PhoneVisitCause.FixedTextGone, from.WindowId, from.Package, from.WindowTitle, null, layer);
+            var visit = _current!;
+            visit.FirstText = gone.FirstText;
+            visit._snapshots.AddRange(snapshots);
+            visit._listings.AddRange(listings);
+            visit._states.AddRange(states);
+            foreach (var (key, state) in open)
+            {
+                _open[key] = state;
+            }
         }
 
         // Closes the current visit and its open states.

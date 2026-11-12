@@ -47,7 +47,7 @@ public sealed class PhoneScreenTimelineTests : IDisposable
         int id, string? title, int left = 0, int top = 0, int right = 1080, int bottom = 2404,
         int layer = 0, bool active = true, string typeName = "TYPE_APPLICATION",
         string? package = Settings, string? heading = null, string[]? panes = null, string? signature = null,
-        long? transition = null, string? fixedText = null, Dictionary<string, string>? paneTexts = null)
+        long? transition = null, string? fixedText = null, Dictionary<string, string>? paneTexts = null, string? firstText = null)
     {
         var window = new JsonObject
         {
@@ -67,6 +67,7 @@ public sealed class PhoneScreenTimelineTests : IDisposable
             window[PhoneScreenEvidence.Field] = new PhoneScreenEvidence(package, heading, panes ?? [], signature, signature is null ? 0 : 4)
             {
                 FixedText = fixedText,
+                FirstText = firstText,
                 PaneFixedTexts = paneTexts ?? [],
             }.ToJson();
         }
@@ -152,8 +153,73 @@ public sealed class PhoneScreenTimelineTests : IDisposable
 
     private const string Launcher = "com.google.android.apps.nexuslauncher";
 
-    private static JsonObject NovaWindow(string? fixedText, string[]? panes = null, Dictionary<string, string>? paneTexts = null) =>
-        Window(264, "Nova SleepCare", package: Nova, transition: 51734729, fixedText: fixedText, panes: panes, paneTexts: paneTexts);
+    private static JsonObject NovaWindow(string? fixedText, string[]? panes = null, Dictionary<string, string>? paneTexts = null, string? firstText = null) =>
+        Window(264, "Nova SleepCare", package: Nova, transition: 51734729, fixedText: fixedText, panes: panes, paneTexts: paneTexts, firstText: firstText);
+
+    [Fact]
+    public void TheClientsLoadingScreen_IsItsOwnScreen_AndAScreenWithNoFixedText_IsAVisitNamedByItsFirstText()
+    {
+        // As in test 16's recording (20261112-154851): the loading screen
+        // before Diary and before Profile, and Profile with every text in
+        // a scrolling container.
+        Snapshot(1.61, NovaWindow("Welcome, Bob Dodd"));
+        Snapshot(31.05, NovaWindow("\u2600\uFE0F\U0001F319"));
+        Snapshot(31.21, NovaWindow("\u2600\uFE0F\U0001F319"));
+        Snapshot(31.33, NovaWindow("Sleep Diary"));
+        Snapshot(42.16, NovaWindow("\u2600\uFE0F\U0001F319"));
+        Snapshot(42.30, NovaWindow("\u2600\uFE0F\U0001F319"));
+        Snapshot(42.50, NovaWindow(null, firstText: "Bob Dodd"));
+        Snapshot(42.59, NovaWindow(null, firstText: "Bob Dodd"));
+        // Scrolling Profile changes its first text, but starts no visit.
+        Snapshot(47.00, NovaWindow(null, firstText: "Days Logged"));
+        Snapshot(54.36, NovaWindow("Welcome, Bob Dodd"));
+
+        var screens = Screens(83.37);
+
+        Assert.Equal(
+            ["Welcome, Bob Dodd", "\u2600\uFE0F\U0001F319", "Sleep Diary", "Bob Dodd"],
+            screens.Screens.Select(screen => screen.Name));
+        Assert.Equal(
+            [PhoneVisitCause.FirstWindow, PhoneVisitCause.FixedTextChanged, PhoneVisitCause.FixedTextChanged,
+             PhoneVisitCause.FixedTextChanged, PhoneVisitCause.FixedTextGone, PhoneVisitCause.FixedTextChanged],
+            screens.Visits.Select(visit => visit.Cause));
+        Assert.Equal([At(1.61), At(31.05), At(31.33), At(42.16), At(42.50), At(54.36)], screens.Visits.Select(visit => visit.Start));
+        Assert.Equal([2, 4], screens.Screens[1].Visits.Select(visit => visit.Number));
+        var profile = screens.Screens[3];
+        Assert.Equal(PhoneTitleSource.FirstText, profile.TitleSource);
+        Assert.Equal("named by its first text, as it has no fixed text and 4 screens share the title 'Nova SleepCare'", profile.NamedBy);
+        Assert.Equal("the first fixed text going away", screens.Visits[4].CauseText);
+        // Profile's snapshots, taken from the loading screen's visit.
+        Assert.Equal([At(42.50), At(42.59), At(47.00)], screens.Visits[4].Snapshots.Select(item => item.MonotonicNanoseconds));
+        Assert.Equal([At(42.16), At(42.30)], screens.Visits[3].Snapshots.Select(item => item.MonotonicNanoseconds));
+        Assert.Equal(At(42.50), screens.Visits[3].End);
+        Assert.Equal("Welcome, Bob Dodd", screens.Visits[5].Screen.Name);
+        // With no pictures, a visit is shown at its start.
+        Assert.Equal(At(42.50), PhoneSnapshotPictures.Empty.TimeOf(screens.Visits[4]));
+    }
+
+    [Fact]
+    public void AFixedTextGoneForLessThanHalfASecond_StartsNoVisit_AndOneGoneUntilTheEnd_Does()
+    {
+        Snapshot(1.0, NovaWindow("Sleep Diary"));
+        // Redrawn: the fixed text away for 0.2 s, then back.
+        Snapshot(5.0, NovaWindow(null, firstText: "No entries found yet."));
+        Snapshot(5.2, NovaWindow("Sleep Diary"));
+        // Away for 0.3 s, then another screen's.
+        Snapshot(8.0, NovaWindow(null, firstText: "Understanding Melatonin"));
+        Snapshot(8.3, NovaWindow("Sleep Learning Library"));
+        // Away to the end of the recording, with no later snapshot.
+        Snapshot(12.0, NovaWindow(null, firstText: "Bob Dodd"));
+
+        var screens = Screens(20);
+
+        Assert.Equal(
+            [PhoneVisitCause.FirstWindow, PhoneVisitCause.FixedTextChanged, PhoneVisitCause.FixedTextGone],
+            screens.Visits.Select(visit => visit.Cause));
+        Assert.Equal([At(1.0), At(8.3), At(12.0)], screens.Visits.Select(visit => visit.Start));
+        Assert.Equal(["Sleep Diary", "Sleep Learning Library", "Bob Dodd"], screens.Visits.Select(visit => visit.Screen.Name));
+        Assert.Equal(4, screens.Visits[0].Snapshots.Count);
+    }
 
     [Fact]
     public void TheClientsApp_ScreensInOneWindowWithOneTitle_AreVisitsByTheirFirstFixedText()
@@ -424,11 +490,47 @@ public sealed class PhoneScreenTimelineTests : IDisposable
         var evidence = PhoneScreenEvidence.Of(items);
         var read = PhoneScreenEvidence.Read(new JsonObject { [PhoneScreenEvidence.Field] = evidence.ToJson() }.Deserialize<JsonElement>())!;
 
-        Assert.Equal("Sleep Diary", evidence.FixedText);
+        Assert.Null(evidence.FirstText);
         Assert.Equal(["Dialog"], evidence.PaneTitles);
         Assert.Equal("Last Night's Sleep", evidence.PaneFixedTexts["Dialog"]);
         Assert.Equal("Sleep Diary", read.FixedText);
         Assert.Equal("Last Night's Sleep", read.PaneFixedTexts["Dialog"]);
+    }
+
+    [Fact]
+    public void Evidence_FirstText_ForAWindowWithNoFixedText_IsInsideAScrollingContainer_ButNotAControlOrATitledPane()
+    {
+        static JsonObject Item(int index, int? parent, string? text = null, bool clickable = false, bool scrollable = false, string? pane = null) => new()
+        {
+            ["index"] = index,
+            ["parent"] = parent,
+            ["packageName"] = "com.pss.novasleepcare",
+            ["className"] = scrollable ? "android.widget.ScrollView" : "android.view.View",
+            ["contentDescription"] = text,
+            ["paneTitle"] = pane,
+            ["clickable"] = clickable,
+            ["scrollable"] = scrollable,
+            ["visibleToUser"] = true,
+        };
+
+        // As measured on the client's Profile screen: every text inside an
+        // android.widget.ScrollView, under a root pane titled " ".
+        var items = JsonSerializer.SerializeToElement(new JsonArray(
+            Item(0, null, pane: " "),
+            Item(1, 0, pane: "Dialog"),
+            Item(2, 1, "In a pane"),
+            Item(3, 0, scrollable: true),
+            Item(4, 3, clickable: true),
+            Item(5, 4, "Sleep Goals"),
+            Item(6, 3, "Bob Dodd"),
+            Item(7, 3, "bob.dodd@cnib-accesslabs.ca")));
+
+        var evidence = PhoneScreenEvidence.Of(items);
+        var read = PhoneScreenEvidence.Read(new JsonObject { [PhoneScreenEvidence.Field] = evidence.ToJson() }.Deserialize<JsonElement>())!;
+
+        Assert.Null(evidence.FixedText);
+        Assert.Equal("Bob Dodd", evidence.FirstText);
+        Assert.Equal("Bob Dodd", read.FirstText);
     }
 
     [Fact]

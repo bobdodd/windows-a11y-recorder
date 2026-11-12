@@ -104,7 +104,11 @@ public sealed record PlaybackIndex
     // (graphics.android.screenshots, android-screenshot, android-checks.md
     // step 4a) with their path, for measuring colours on them (step 4b);
     // an older index is derived again.
-    public const int CurrentVersion = 28;
+    // Version 29 adds a window's first text, when it has no first fixed
+    // text, to that evidence, for screens whose every text is in a
+    // scrolling container (android-checks.md, decision 10); an older index
+    // is derived again.
+    public const int CurrentVersion = 29;
 
     public required int Version { get; init; }
 
