@@ -943,3 +943,25 @@ line under "Show current visit" includes "Text contrast at AAA (WCAG
 "Showing time". In step 4 "AAA (WCAG 1.4.6)" is still chosen, and the
 line includes the same "Text contrast at AAA (WCAG 1.4.6): 12 findings
 (11 errors, 1 warning)". Send the three screenshots.
+
+## Results of test 24, steps 1 and 2 (2026-11-12)
+
+Passed on the development PC with the build of 90da2c0. In step 1,
+choosing the warning for "Sleep Goals Update your goals", line 2 of 2,
+3.83:1, #7F8385 on #FFFFFF, showed the Profile screen at 00:00:47.633
+with the cyan outline around "Update your goals", and the line ended
+"Showing time 1 of 1 of the chosen finding, outlined on the phone's
+picture while its items are shown." In step 2, after "AAA (WCAG 1.4.6)"
+was chosen, there was no outline, "Previous time" and "Next time" were
+greyed out, and the line included "Text contrast at AAA (WCAG 1.4.6):
+12 findings (11 errors, 1 warning), from 110 lines of text measured, 98
+passed" and ended with the OCR sentence, not "Showing time". Visit 5
+listed "Text contrast at AAA (WCAG 1.4.6): 8 errors, from 24 lines
+measured", with the same item now an error, below 4.5:1. The screenshot
+of step 4, after the restart, is still to come.
+
+Observation, not changed: the line names Visit 5's screen, the Profile
+screen (Screen 3), by two symbols. The throwaway program gives Screen
+3's name as the emoji sun and crescent moon, "\u2600\uFE0F\U0001F319",
+its first fixed text; the recorder draws them as plain symbols.
+
