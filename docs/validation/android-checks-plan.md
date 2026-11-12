@@ -669,3 +669,16 @@ screenshots are then read from the PC for step 4b.
   and answering (version 1.1.0, version code 782, protocol 6)." The
   service stayed on after the companion app was installed again, and
   the panel's note ends with the sentence about the phone's screenshots.
+- Test 18, the files: the recording (20261112-171107) has 5 phone
+  screenshots, each 1080 x 2404, in sRGB with no conversion, all listed
+  in the manifest with their hashes, and 5 `android-screenshot` records.
+  The first was taken as the recording started (Home); the second and
+  third as LEARN and DIARY settled; the fourth and fifth only as the
+  status bar's clock changed (the images differ only there, at 12:11,
+  12:12 and 12:13), as the rule of a screenshot for each window that
+  settles gives. For all 5, Android's time fell within the call, so the
+  inference that it uses the companion's clock held on the Pixel; the
+  phone took 338 to 412 ms from asking to the PNG. No refusals.
+- Test 18, the line: the screenshot of the panel ended at
+  "android.accessibility-tree", the line before "android.screenshots",
+  so the line itself was not seen.
