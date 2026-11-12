@@ -827,6 +827,14 @@ screenshots either way.
   not drawn again when the level changed. Fixed: changing the level now
   draws the picture again and greys out the time buttons when it clears
   a contrast finding; to be checked in the next build.
+- Found by the owner with the eighth build: choosing the badge "3"
+  error ("seen 2 times on 2 visits, first at 00:00:01.608") showed no
+  picture, and its row did not say which visits. The time was when the
+  snapshot settled, before the video's first frame at 00:00:01.651; the
+  frame measured was at 00:00:02.655. Fixed: a contrast finding's times
+  are now its pictures' times (00:00:02.655 and 00:01:06.223 for the
+  badge; 00:00:47.633 for "Update your goals", not 00:00:42.594). The
+  badge was seen on visits 1 and 6.
 
 ## Test 22: the AAA level, kept after a restart
 

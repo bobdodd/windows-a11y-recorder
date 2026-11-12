@@ -207,9 +207,12 @@ public sealed class PhoneTextContrastRun
                     continue;
                 }
 
+                // The time is the picture's, so the player shows what was
+                // measured: the snapshot can settle before the video's
+                // first frame, or the frame be taken later in the visit.
                 var treeKey = (line.Item ?? line.Container)?.TreeKey ?? string.Empty;
                 finding._times.Add(new PhoneFindingTime(
-                    time, visit, snapshot.Settled, snapshot.TakenBy, visit.WindowId, line.Box, treeKey, result.Measured, state));
+                    snapshot.Picture.Time, visit, snapshot.Settled, snapshot.TakenBy, visit.WindowId, line.Box, treeKey, result.Measured, state));
             }
         }
 

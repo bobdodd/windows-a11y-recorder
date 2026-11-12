@@ -1110,7 +1110,7 @@ Step 4c turns step 4b's measurements into findings in the Checks tab.
   the text is large: 4.5:1 is needed, 3:1 for large text; the words are
   11.1 dp tall in OCR's box; the text's size and weight are not known;
   approximate, from the video; the app's text, placed on the screen by
-  OCR (Windows OCR, en-US); seen once, at 00:00:31.488".
+  OCR (Windows OCR, en-US); seen once, at 00:00:42.154".
 - **Which line a finding is.** As a tree check's finding is one item's,
   a contrast finding is one line's, merged on each screen by level and
   line across the snapshots measured: an item's line is the item's
@@ -1123,13 +1123,26 @@ Step 4c turns step 4b's measurements into findings in the Checks tab.
   with how many findings at each level and how many lines were
   measured on the screen, or that it found nothing, or that no text was
   measured on the screen; then a row for each finding. Choosing one
-  moves the playhead to the settled snapshot, selects the item, or the
+  moves the playhead to the picture the line was measured on, selects
+  the item, or the
   item the words are in, in the "Accessibility tree" tab, and outlines
   the line's box, not the whole item, on the phone's picture. The
   status line under the buttons adds the check's totals: findings, lines
   measured, how many passed, the settled snapshots measured and how
   many from screenshots and from the video, the time taken, and the OCR
   engine.
+- **A finding's times are its pictures'.** Each time a contrast finding
+  was seen is the time of the screenshot or frame measured, not the
+  time the snapshot settled, so the player shows the picture the
+  colours came from. In test 16's recording the first visit's snapshot
+  settled at 00:00:01.608, before the video's first frame at
+  00:00:01.651, so the player showed no picture there (found by the
+  owner after test 22); the frame measured was at 00:00:02.655. The
+  frame is the last before the window was next listed, which can be
+  late in the visit: "RECENT SLEEP ENTRIES" is at 00:00:42.154, in a
+  visit that ends at 00:00:42.155. For each of the 8 snapshots of tests
+  16 and 18, the items the snapshot took are still the latest at the
+  picture's time, so the outline is drawn there.
 
 Run on the development PC, with test 16's recording and the words
 Windows' OCR read on the PC for step 4b (not yet the reader in the

@@ -193,12 +193,13 @@ public sealed class PhoneCheckRunTests : IDisposable
         PhoneTextLine Line(PhoneCheckItem? item, PhoneTextPlace place, string ocr, uint foreground, int top) =>
             new(item, item ?? page, place, item?.Text, ocr, new PhoneBounds(110, top, 190, top + 55),
                 new PhoneSwatch(0xFFFFFF, foreground, 0, 2, 2), 39);
+        // Each picture is taken 250 ms after its snapshot settled.
         PhoneContrastSnapshot Snapshot(int settled, params PhoneTextLine[] lines)
         {
             var at = visit.SettledSnapshots[settled];
             return new PhoneContrastSnapshot(
                 visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
-                new PhoneContrastPicture(PhonePictureKind.Screenshot, at.MonotonicNanoseconds, "p.png", "p.png"),
+                new PhoneContrastPicture(PhonePictureKind.Screenshot, at.MonotonicNanoseconds + 250_000_000, "p.png", "p.png"),
                 "Windows OCR, en-US", lines);
         }
 
@@ -224,10 +225,15 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Equal(save.Identity + "\u001Fline 1", line.Identity);
         Assert.Equal([220, 230], line.Times.Select(time => time.Bounds.Top));
         Assert.All(line.Times, time => Assert.Equal(save.TreeKey, time.TreeKey));
+
+        // A finding's times are its pictures', so the player shows what was measured.
+        Assert.Equal(
+            visit.SettledSnapshots.Take(2).Select(at => at.MonotonicNanoseconds + 250_000_000),
+            line.Times.Select(time => time.Time));
         Assert.Equal(
             "Warning: Button \"Save\", 4.48:1, #777777 on #FFFFFF; fails unless the text is large: 4.5:1 is needed, 3:1 for large text; " +
             "the words are 16 dp tall in OCR's box; the text's size and weight are not known; from the phone's screenshot; " +
-            "the app's text, placed on the screen by OCR (Windows OCR, en-US); seen 2 times on 1 visit, first at 00:00:01.000",
+            "the app's text, placed on the screen by OCR (Windows OCR, en-US); seen 2 times on 1 visit, first at 00:00:01.250",
             line.Text);
 
         // At AAA the same measurement is two errors.
