@@ -162,3 +162,13 @@ The recording from test 4 is open, with the Checks list showing.
 "00:00:13.925". The "Visit 3" row has the purple bar on its left, and the line
 beside "Show current visit" ends "Visit 3, to Sleep Learning
 (com.pss.novasleepcare), at the playhead." Send the screenshot.
+
+## Results of the second build (2026-11-12)
+
+Tests 4 and 5 passed on the development PC with commit fa342f1. In test
+4 every row matched, in order; the status line named Visit 6, as the
+playhead was at 00:00:57.020; the timeline strip's last two blocks were
+behind the Checks window. In test 5, at 00:00:13.925 the phone's
+picture still showed Sleep Learning Library while the accessibility
+tree already held the module's items (seen in the screenshot); the
+picture was not one of the test's checks.
