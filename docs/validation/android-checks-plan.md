@@ -464,4 +464,9 @@ Run on the development PC with commit 5006d0c.
   contrast of 3:1, I suggest a darker border on the highlight"). Both
   changed: the outline as "As built: step 3" says, and the tree's
   selected row as player-contrast.md says.
+- Test 12, third run (commit 57a45be): passed. The app's logo beside
+  "Sleep Learning" had the thick cyan outline with black on both sides
+  and a gap from the logo, and the tree's row "View with no text", in
+  the window "Nova SleepCare" with items taken at 00:00:14.354, had its
+  dark border (owner: "Both are much clearer now").
 
