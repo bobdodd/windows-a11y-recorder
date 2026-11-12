@@ -495,3 +495,6 @@ Built with the commit after 2a01d5e. Any recording can be open.
 player's window. In step 4 the Checks window went down with the player
 and came back with it, in front of it.
 
+Result, 2026-11-12, commit 4a37d75: test 14 passed (owner: "those
+smaller windows stay in front").
+

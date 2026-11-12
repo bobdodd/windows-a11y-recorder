@@ -8,7 +8,8 @@ screens drawn in one window, measured in the client's app. Step 2, the
 display density and each app's version, is built (see "As built: step
 2") and was checked on the phone on 2026-11-12. Step 3, the checks from
 the tree and the findings list, is built (see "As built: step 3") and
-not yet checked on the phone. The owner's
+was checked on the development PC on 2026-11-12 with recordings already
+made (tests 11 to 13 of the validation plan). The owner's
 decisions of 2026-11-11 are in "Decisions (2026-11-11)" and "Decisions
 on the open questions (2026-11-11)". Before any check is assigned a
 result, the recording has to say which app and which screen each moment
