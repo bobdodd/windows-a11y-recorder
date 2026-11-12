@@ -1463,6 +1463,15 @@
                                     Background="Transparent"
                                     BorderBrush="Transparent"
                                     BorderThickness="3,0,0,0">
+                              <!-- The selected row's border: its background
+                                   is 1.29:1 against the tree's white, so a
+                                   border of 9.4:1 on it and 12.2:1 on white
+                                   shows which row is selected (owner,
+                                   2026-11-12: "it fails non-text contrast of
+                                   3:1"). -->
+                              <Border x:Name="SelectionBorder"
+                                      BorderBrush="Transparent"
+                                      BorderThickness="2">
                               <DockPanel>
                                 <ToggleButton x:Name="Expander"
                                               DockPanel.Dock="Left"
@@ -1478,6 +1487,7 @@
                                                   Margin="6,4"
                                                   VerticalAlignment="Center" />
                               </DockPanel>
+                              </Border>
                             </Border>
                             <ItemsPresenter x:Name="ItemsHost" Margin="22,0,0,0" />
                           </StackPanel>
@@ -1493,6 +1503,7 @@
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
                               <Setter TargetName="RowBorder" Property="Background" Value="#E6E0F0" />
+                              <Setter TargetName="SelectionBorder" Property="BorderBrush" Value="#3D2D5C" />
                             </Trigger>
                             <DataTrigger Binding="{Binding IsReading}" Value="True">
                               <Setter TargetName="RowBorder" Property="BorderBrush" Value="#6A4C93" />

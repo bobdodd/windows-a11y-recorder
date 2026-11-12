@@ -40,6 +40,7 @@ documented behaviour, not measured here; the colours are measured.
 | Text in the white lists, tree, properties grid | #CDCCCA on white | 1.6 | Windows' text colour, black on white: 21 |
 | The tree's second lines | #4A4945 on white | 9.0 | unchanged |
 | A selected row in the tree | black on #E6E0F0 | 16.3 | unchanged |
+| A selected row in the tree, against the rows round it | #E6E0F0 on white, no edge | 1.29 | an edge of #3D2D5C, 2 wide: 9.4 on #E6E0F0, 12.2 on white (2026-11-12, owner: "it fails non-text contrast of 3:1") |
 | The purple bar of the reading position and accessibility focus rows | #6A4C93 on white | 6.9 | unchanged |
 | Text on the window and panels | #CDCCCA on #171614, #1C1B19 | 11.3, 10.7 | unchanged |
 | Muted text (notes, help lines) | #A09F9B on #1C1B19, #171614 | 6.5, 6.8 | unchanged |

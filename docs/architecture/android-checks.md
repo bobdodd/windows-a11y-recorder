@@ -679,9 +679,18 @@ The player:
   settled snapshots checked and the time taken.
 - Choosing a finding's row pauses playback, moves the playhead to the
   first time it was seen, selects its item in the "Accessibility tree"
-  tab, and outlines the item on the phone's picture with a dashed cyan
-  rectangle over black, told apart from the solid yellow outline of
-  accessibility focus. The outline is shown while the tree shows the
+  tab, and outlines the item on the phone's picture. The outline is set
+  back 2 pixels of this PC's screen from the item, so the item's own edge
+  shows, and is a cyan band 4 wide between black bands 2 wide, so it
+  stands out on light and dark content; a side that would leave the
+  picture is drawn just inside its edge. The first build drew it dashed,
+  1.5 times the touch line's width, on the item's edge; on the client's
+  app's logo, 59 by 58 pixels on the phone, it was about 12 pixels
+  across on the PC and its dashes ran together (owner, 2026-11-12: "It
+  needs to be thick and 2 color to make it stand out from the
+  background, and 1-2 pixels pushed back from the item"). The
+  accessibility focus's outline stays yellow over black on the item's
+  edge. The outline is shown while the tree shows the
   items the finding was checked on, until the window's items are taken
   again. "Previous time" and "Next time" step through the other times.
 

@@ -23,7 +23,12 @@ public partial class MainWindow
 
     private static readonly Brush TouchFillBrush = Frozen(new SolidColorBrush(Color.FromArgb(0x66, 0x00, 0x00, 0x00)));
 
-    // The chosen finding's outline (android-checks.md, step 3).
+    // The chosen finding's outline (android-checks.md, step 3), in this
+    // PC's pixels: the gap from the item, each black band and the cyan one.
+    private const double FindingGap = 2;
+    private const double FindingBlack = 2;
+    private const double FindingCyan = 4;
+
     private static readonly Brush FindingOutlineBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x00, 0xE5, 0xFF)));
 
     // The frame as shown without touches, and the words its help text has.
@@ -179,8 +184,9 @@ public partial class MainWindow
     // positions are in the pixels of the screen size their report gives,
     // and are scaled to the frame's. The outline of the item with
     // accessibility focus, and of the chosen finding's item, already in the
-    // frame's pixels, are drawn under the fingers: the finding's dashed in
-    // cyan over black, so it is told from the focus's solid yellow.
+    // frame's pixels, are drawn under the fingers: the focus's in yellow over
+    // black on its bounds, the finding's as a thick cyan band between black
+    // ones, set back from the item (AddFindingOutline).
     private static ImageSource WithTouches(ImageSource frameImage, int width, int height, double shown, PhoneTouches? touches, Rect? focus, Rect? finding)
     {
         var whole = new Rect(0, 0, width, height);
@@ -208,14 +214,7 @@ public partial class MainWindow
 
         if (finding is { } findingOutline)
         {
-            var box = new RectangleGeometry(findingOutline);
-            box.Freeze();
-            var dashed = Frozen(new Pen(FindingOutlineBrush, thickness * 1.5)
-            {
-                DashStyle = Frozen(new DashStyle([3, 2], 0)),
-            });
-            group.Children.Add(new GeometryDrawing(null, Frozen(new Pen(Brushes.Black, thickness * 2.5)), box));
-            group.Children.Add(new GeometryDrawing(null, dashed, box));
+            AddFindingOutline(group, findingOutline, whole, shown);
         }
 
         // The paths first, so that no path crosses a circle.
@@ -268,5 +267,32 @@ public partial class MainWindow
         var image = new DrawingImage(group);
         image.Freeze();
         return image;
+    }
+
+    // The chosen finding's outline, in this PC's pixels: a gap of 2 between
+    // the item and the outline, so the item's own edge shows, then black 2,
+    // cyan 4 and black 2, so the cyan stands out from light and dark
+    // content (owner, 2026-11-12: "thick and 2 color to make it stand out
+    // from the background, and 1-2 pixels pushed back from the item"). A
+    // side that would leave the picture, as for an item as wide as the
+    // screen, is drawn just inside the picture's edge instead.
+    private static void AddFindingOutline(DrawingGroup group, Rect item, Rect whole, double shown)
+    {
+        var scale = shown > 0 ? 1 / shown : 1;
+        var gap = FindingGap * scale;
+        var band = (FindingBlack * 2 + FindingCyan) * scale;
+        var outer = Rect.Inflate(item, gap + band, gap + band);
+        outer.Intersect(whole);
+        if (outer.IsEmpty || outer.Width <= band || outer.Height <= band)
+        {
+            return;
+        }
+
+        // Both strokes are centred on the band's middle line.
+        var middle = Rect.Inflate(outer, -band / 2, -band / 2);
+        var box = new RectangleGeometry(middle);
+        box.Freeze();
+        group.Children.Add(new GeometryDrawing(null, Frozen(new Pen(Brushes.Black, band) { LineJoin = PenLineJoin.Miter }), box));
+        group.Children.Add(new GeometryDrawing(null, Frozen(new Pen(FindingOutlineBrush, FindingCyan * scale) { LineJoin = PenLineJoin.Miter }), box));
     }
 }

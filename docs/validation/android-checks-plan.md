@@ -399,8 +399,9 @@ The recording from test 11 is open, with the list as step 4 left it.
 2. Take a screenshot of the whole recorder window.
 
 **On screen:** the time under the phone's picture starts
-"00:00:14.354". On the phone's picture a dashed cyan rectangle outlines
-an item. The line under "Show current visit" ends "Showing time 1 of 1
+"00:00:14.354". On the phone's picture a thick cyan rectangle with
+black on both sides surrounds an item, with a thin gap between it and
+the item. The line under "Show current visit" ends "Showing time 1 of 1
 of the chosen finding, outlined on the phone's picture while its items
 are shown." "Previous time" and "Next time" are both greyed out, as the
 finding was seen once. In the "Accessibility tree" tab, or its window, a
@@ -423,7 +424,7 @@ and no row in the list starts "Error". In steps 2, 3 and 4 the time
 under the phone's picture starts "00:00:02.933", "00:00:12.887" and
 "00:00:20.419", the line ends "Showing time 1 of 3", "2 of 3" and "3 of
 3" followed by "of the chosen finding, outlined on the phone's picture
-while its items are shown.", and a dashed cyan rectangle about as wide
+while its items are shown.", and a thick cyan rectangle with black on both sides, about as wide
 as the screen and short outlines the item. In step 4 "Next time" is
 greyed out and "Previous time" is not. Send the three screenshots.
 
@@ -451,4 +452,16 @@ Run on the development PC with commit 5006d0c.
   `SelectableText.cs` (see player-layout.md, "Selecting and copying
   text"); the same fix applies to every list and tree whose rows hold
   selectable text, such as the reading steps and the accessibility tree.
+- Test 12, second run (commit 98ee439): a click on the words chose the
+  row. The line ended "Showing time 1 of 1 of the chosen finding,
+  outlined on the phone's picture while its items are shown.", the
+  time was 00:00:14.354, and both buttons were greyed out. The item is
+  the app's logo beside "Sleep Learning", 68 to 127 by 154 to 212 on the
+  phone: measured in the screenshot, the outline's #00E5FF ran round it,
+  about 12 pixels across, too small to find. The "Accessibility tree"
+  window showed the row "View with no text" selected, on #E6E0F0, 1.29
+  to 1 against the white rows round it (owner: "it fails non-text
+  contrast of 3:1, I suggest a darker border on the highlight"). Both
+  changed: the outline as "As built: step 3" says, and the tree's
+  selected row as player-contrast.md says.
 
