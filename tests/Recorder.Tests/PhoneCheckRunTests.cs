@@ -306,6 +306,36 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Contains("below 4.5:1, the limit for large text", aaa.Findings[1].Times[0].Measured, StringComparison.Ordinal);
     }
 
+    // Step 5: the non-text contrast check, from the same measurement of the
+    // bottom bar's tabs on two settled snapshots of the visit.
+    [Fact]
+    public void NonTextContrast_MergesAControlsFindingsInAVisit_AndCountsTheControls()
+    {
+        var (lines, measures) = PhoneNonTextContrastTests.TabsMeasured();
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        PhoneContrastSnapshot Snapshot(int settled)
+        {
+            var at = visit.SettledSnapshots[settled];
+            return new PhoneContrastSnapshot(
+                visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                new PhoneContrastPicture(PhonePictureKind.Screenshot, at.MonotonicNanoseconds + 250_000_000, "p.png", "p.png"),
+                "Windows OCR, en-US", lines, measures);
+        }
+
+        var run = PhoneNonTextContrastRun.Run(PhoneContrastRun.Of([Snapshot(0), Snapshot(1)]), archive.PhoneScreens);
+
+        Assert.Equal((8, 0), (run.Controls, run.Passed));
+        Assert.Equal(8, run.ControlsIn(visit));
+        Assert.Equal(4, run.Findings.Count);
+        Assert.All(run.Findings, finding => Assert.Equal(PhoneCheckNames.NonTextContrast, finding.Check));
+        var home = run.Findings[0];
+        Assert.Equal(PhoneCheckLevel.Error, home.Level);
+        Assert.Equal(2, home.Times.Count);
+        Assert.EndsWith("; a state needs 3:1; from the phone's screenshot", home.Times[0].Measured, StringComparison.Ordinal);
+        Assert.Equal("Non-text contrast (WCAG 1.4.11)", PhoneCheckNames.Title(home.Check));
+    }
+
     // The recording's records, as the player reads one from the file.
     private sealed class FakeRecords : ISessionEventRecordSource
     {

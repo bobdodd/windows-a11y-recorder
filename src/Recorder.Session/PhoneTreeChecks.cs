@@ -58,6 +58,9 @@ public static class PhoneCheckNames
     public const string TextContrastAa = "text-contrast-aa";
     public const string TextContrastAaa = "text-contrast-aaa";
 
+    /// <summary>The non-text contrast check (step 5), WCAG 2.2's 1.4.11, at AA only; not one of the tree's checks.</summary>
+    public const string NonTextContrast = "non-text-contrast";
+
     /// <summary>The checks in the order the Checks tab lists them.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
@@ -79,6 +82,7 @@ public static class PhoneCheckNames
         TraversalOrder => "Traversal order (ATF)",
         TextContrastAa => "Text contrast at AA (WCAG 1.4.3)",
         TextContrastAaa => "Text contrast at AAA (WCAG 1.4.6)",
+        NonTextContrast => "Non-text contrast (WCAG 1.4.11)",
         _ => check,
     };
 

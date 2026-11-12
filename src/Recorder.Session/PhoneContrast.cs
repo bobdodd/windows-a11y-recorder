@@ -143,14 +143,19 @@ public sealed record PhoneTextLine(
     PhoneSwatch? Colours,
     int WordsHeight = 0);
 
-/// <summary>A settled snapshot's measurement: its picture, and the lines measured on it.</summary>
+/// <summary>A settled snapshot's measurement: its picture, the lines of text measured on it, and its controls.</summary>
 public sealed record PhoneContrastSnapshot(
     PhoneVisit Visit,
     SessionTimelineEvent Settled,
     SessionTimelineEvent TakenBy,
     PhoneContrastPicture Picture,
     string? Engine,
-    IReadOnlyList<PhoneTextLine> Lines);
+    IReadOnlyList<PhoneTextLine> Lines,
+    IReadOnlyList<PhoneControlMeasure>? MeasuredControls = null)
+{
+    /// <summary>The controls measured for non-text contrast (step 5).</summary>
+    public IReadOnlyList<PhoneControlMeasure> Controls => MeasuredControls ?? [];
+}
 
 /// <summary>
 /// Step 4b of android-checks.md: for each visit's settled snapshots, the
@@ -276,7 +281,8 @@ public sealed class PhoneContrastRun
                     var lines = PhoneTextMatching.Lines(window, app.Bounds, above, reading?.Words, scale)
                         .Select(line => line with { Colours = PhoneColours.Measure(pixels, scale.ToPicture(line.Box)) })
                         .ToList();
-                    measured.Add(new PhoneContrastSnapshot(visit, settled, taking, picture, reading?.Engine, lines));
+                    var controls = PhoneControlMeasuring.Measure(window, app.Bounds, above, lines, reading is not null, pixels, scale);
+                    measured.Add(new PhoneContrastSnapshot(visit, settled, taking, picture, reading?.Engine, lines, controls));
                 }
                 catch (Exception exception) when (
                     exception is IOException or InvalidDataException or InvalidOperationException or

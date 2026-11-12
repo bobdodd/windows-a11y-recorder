@@ -48,6 +48,7 @@ public partial class MainWindow
     private PhoneContrastRun? _phoneContrast;
     private string? _phoneContrastProblem;
     private PhoneTextContrastRun? _phoneTextContrast;
+    private PhoneNonTextContrastRun? _phoneNonTextContrast;
     private PhoneCheckSettings? _checkSettings;
 
     // The finding chosen in the list, and which of its times is shown.
@@ -82,6 +83,7 @@ public partial class MainWindow
             _phoneContrast = null;
             _phoneContrastProblem = null;
             _phoneTextContrast = null;
+            _phoneNonTextContrast = null;
             _shownFinding = null;
             if (_playbackArchive is { PhoneScreens.Recorded: true } opened)
             {
@@ -161,6 +163,10 @@ public partial class MainWindow
         _phoneContrast = run;
         _phoneContrastProblem = problem;
         JudgeTextContrast();
+
+        // Non-text contrast has one level, AA (WCAG 2.2's 1.4.11), so is
+        // judged once, not again when the text's level changes.
+        _phoneNonTextContrast = run is null ? null : PhoneNonTextContrastRun.Run(run, archive.PhoneScreens);
         ShowPhoneScreenRows();
     }
 
@@ -312,7 +318,7 @@ public partial class MainWindow
     {
         if (visit.SettledSnapshots.Count == 0)
         {
-            if (_phoneChecks is not null || _phoneTextContrast is not null)
+            if (_phoneChecks is not null || _phoneTextContrast is not null || _phoneNonTextContrast is not null)
             {
                 _phoneScreenRows.Add(new PhoneScreenRowView(3, "Not checked, as no snapshot of this visit settled.", shownAt, null)
                 {
@@ -361,6 +367,31 @@ public partial class MainWindow
             else
             {
                 AddCheckRows(findings, $", from {Count(lines, "line")} measured");
+            }
+        }
+
+        if (_phoneNonTextContrast is { } nonText)
+        {
+            var findings = nonText.For(visit);
+            var title = PhoneCheckNames.Title(PhoneCheckNames.NonTextContrast);
+            var controls = nonText.ControlsIn(visit);
+            if (controls == 0)
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{title}: no control was measured in this visit.", shownAt, null)
+                {
+                    IsCheck = true,
+                });
+            }
+            else if (findings.Count == 0)
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{title}: no findings, from {Count(controls, "control")} measured.", shownAt, null)
+                {
+                    IsCheck = true,
+                });
+            }
+            else
+            {
+                AddCheckRows(findings, $", from {Count(controls, "control")} measured");
             }
         }
     }
@@ -482,17 +513,17 @@ public partial class MainWindow
         return summary;
     }
 
-    // What the text contrast check found, or why it has not.
+    // What the contrast checks found, of text and non-text, or why they have not.
     private string ContrastSummary()
     {
         if (_phoneContrastProblem is { } problem)
         {
-            return $"The text contrast check could not be run: {problem}";
+            return $"The contrast checks, of text and non-text, could not be run: {problem}";
         }
 
         if (_phoneContrast is not { } measured || _phoneTextContrast is not { } contrast)
         {
-            return "Measuring the text contrast.";
+            return "Measuring the contrast of text and non-text.";
         }
 
         var title = PhoneCheckNames.Title(contrast.Check);
@@ -502,6 +533,16 @@ public partial class MainWindow
         var summary = string.Create(
             CultureInfo.CurrentCulture,
             $"{title}: {findings}, from {Count(contrast.Lines, "line")} of text measured, {contrast.Passed:N0} passed, on {Count(measured.Snapshots.Count, "settled snapshot")} ({measured.FromScreenshots:N0} from the phone's screenshots, {measured.FromFrames:N0} from the video), in {measured.Elapsed.TotalSeconds:0.0} seconds.");
+        if (_phoneNonTextContrast is { } nonText)
+        {
+            var nonTextFindings = nonText.Findings.Count == 0
+                ? "no findings"
+                : $"{Count(nonText.Findings.Count, "finding")} ({Levels(nonText.Findings)})";
+            summary += string.Create(
+                CultureInfo.CurrentCulture,
+                $" {PhoneCheckNames.Title(PhoneCheckNames.NonTextContrast)}, at AA, its only level: {nonTextFindings}, from {Count(nonText.Controls, "control")} measured, {nonText.Passed:N0} passed; graphics with no item in the tree are not checked.");
+        }
+
         var engine = measured.Snapshots.Select(snapshot => snapshot.Engine).FirstOrDefault(name => !string.IsNullOrEmpty(name));
         summary += measured.OcrUnavailable is { } unavailable
             ? $" OCR was not used, as {unavailable}, so only the app's text was measured, on its items' bounds."

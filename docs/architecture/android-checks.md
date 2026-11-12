@@ -17,9 +17,11 @@ the text contrast check with its AA or AAA setting and its findings (4c,
 see "As built: step 4c", tests 19 to 21 passed;
 findings are since listed under each visit, tests 23 and 24 passed);
 loading screens and screens with no fixed text follow decision 10,
-tests 25 to 27 passed. Non-text contrast is being measured first (see
-"Step 5: measuring non-text contrast first"), and its rules wait for
-the owner's decisions. The owner's
+tests 25 to 27 passed. Non-text contrast was measured first (see
+"Step 5: measuring non-text contrast first"), and its check is built to
+the owner's decisions (see "Step 5: the owner's decisions" and "As
+built: step 5"), checked so far in the Linux build environment and with
+tests 16 and 18's recordings on the development PC. The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -417,7 +419,8 @@ the recording is opened and nothing is kept.
    against screenshots taken on the phone at the same moments.
 5. **Non-text contrast** (WCAG 2.2's 1.4.11), measured first on the
    recordings to hand, with its rules decided by the owner from the
-   measurement (see "Step 5: measuring non-text contrast first").
+   measurement (see "Step 5: measuring non-text contrast first"). Built
+   (see "As built: step 5").
 
 ## As built: step 1
 
@@ -1368,6 +1371,96 @@ were then looked at to check what the numbers meant.
 4. How an icon is measured: the most contrasting colour inside the
    control with at least a set number of pixels, against the control's
    background?
+
+### Step 5: the owner's decisions (2026-11-12)
+
+1. **Boundaries.** A control needs a boundary of 3:1 only when it has no
+   visible text and no icon of 3:1 or more, as 1.4.11 says. Every other
+   boundary below 3:1 is listed as info, so it can be seen, not as a
+   failure (owner: "Same, but list others as info").
+2. **A state shown only by a pale fill is an error under 1.4.11**
+   (owner). The selected tab's pill, 1.2:1, and WEEK VIEW's fill, 1.98:1,
+   are errors.
+3. **Graphics with no item in the tree are left for the vision model**
+   (owner): progress bars, charts, illustrations and icons drawn inside
+   cards are not checked by this check.
+4. **How an icon is measured** (inference, chosen when building, as the
+   owner did not answer question 4 separately): the colours inside the
+   control, 2 pixels in from its bounds, are counted, with colours less
+   than 3 Delta E apart joined; the control's fill is the commonest, and
+   its icon is the colour of highest contrast with the fill that covers
+   at least 0.5% of the control and at least 9 pixels. This is what found
+   the bell black, 13.47:1, where ATF's way gave 2.38:1.
+
+### As built: step 5, the non-text contrast check
+
+- **Files.** `PhoneNonTextContrast.cs` in `Recorder.Session` measures
+  the controls (`PhoneControlMeasuring`) and judges them
+  (`PhoneNonTextContrastRun`). The measurement is made with step 4b's,
+  on the same settled snapshots and the same pictures, and kept with
+  each snapshot (`PhoneContrastSnapshot.Controls`), so the pictures are
+  read once.
+- **What is measured.** Each item of the app's window that is visible,
+  enabled, not empty, and clickable, long-clickable, checkable or
+  editable. Inactive controls are left out, as 1.4.11 excepts them.
+- **Each side.** As in the measurement: along the side's middle half,
+  the adjacent colour is the commonest 5 to 8 pixels outside the bounds;
+  from 4 pixels outside to 16 inside, the first colour 3 or more Delta E
+  from it starts the drawn shape, whose colour is the one of highest
+  contrast in that pixel and the next 3. If nothing is drawn, the side
+  has a ratio of 1:1 ("no boundary is drawn"). A side is not measured
+  when the pixels outside it are not in the app's window, are under a
+  window above it (a dialog or the keyboard), or are where a list cuts
+  the control off (the edge of a scrollable item it is in).
+- **Visible text.** A line OCR read whose middle is inside the control;
+  without OCR, the control's text or description when it has a letter
+  or digit. The finding says which.
+- **The rules.** A control with visible text, or with an icon of 3:1 or
+  more, needs no boundary: a boundary below 3:1 is info (decision 1). A
+  control with neither needs an icon or a boundary of 3:1: below it is
+  an error. A state (decision 2) is found from the tree when it marks
+  exactly one control of a group selected or checked; otherwise from
+  the picture, among controls of one parent and class in a row (the
+  same top and height, within 10%): the one filled differently from all
+  the others, or, of two that touch, the one less like the colour round
+  them. Its fill below 3:1 against the others' fill or the colour around
+  it is an error. Controls stacked in a column (cards) are not taken to
+  show a state. From the video, a ratio within 12% of 3:1 is a warning,
+  as for text. The ratio is compared unrounded, and shown to three
+  places when two would round it up to 3:1.
+- **Findings.** Under each visit, as for text, with the controls
+  measured in it; and in the summary line, "at AA, its only level", with
+  "graphics with no item in the tree are not checked".
+- **Run on the development PC** with tests 16 and 18's recordings and
+  the words Windows' OCR read on the PC (measured, test 16 session
+  20261112-154851-32c7b61a5552453bbf5febffcca978c7, test 18 session
+  20261112-171107-88cfc05214a34a3682222e7fb25d840d):
+  - Test 16, from the video: 50 controls, 13 passed, 37 findings, 6
+    errors and 31 info, made in 26 ms. The errors are the selected tab
+    on each visit, HOME (visits 1 and 7), LEARN (visit 2), DIARY (visit
+    4) and PROFILE (visit 6), filled #F6E19B on the bar's #F5CC53,
+    1.18:1, and WEEK VIEW (visit 4), #82C4C0, 1.98:1 against CALENDAR's
+    white and 1.83:1 against the page. The info are the other tabs (no
+    boundary), the emoji tiles, Sleep Goals, the bell (its icon 13.64:1,
+    no boundary), "Start your streak" (1.21:1) and the Emotion card. The
+    loading screen's visits have no settled snapshot, so no control.
+  - Test 18, from the phone's screenshots: 28 controls, 6 passed, 22
+    findings, 5 errors: the selected tab, 1.20:1 (#F5E19A on #F3CB51),
+    on each of the 3 visits, and WEEK VIEW, 1.98:1 and 1.81:1 (#81C4C1).
+- **Checked before any PC test:** the solution builds with no warnings,
+  and the tests pass, 2,363 of them, with the 10 that need Windows
+  failing as before. The new tests cover a border found on the edge,
+  the selected tab from the picture and from the tree, two segments that
+  touch, cards in a column and two apart, a control with no text needing
+  an icon or a boundary, the video's margin, inactive controls and a
+  side cut off by a list, and the findings merged across snapshots.
+- **Limits.** The drawn shape has to be within 16 pixels of the bounds,
+  so a shape drawn further in, or bounds that include a gap (the Learn
+  cards' bounds include the progress bar under them), are not measured
+  as the shape. Graphics with no item are not checked (decision 3).
+  Focus indicators are not checked, as they need the focus moved. A
+  state is found only in rows of controls; one shown by an outline, an
+  underline or a change of the icon, not a fill, is not found.
 
 ## Decisions on the open questions (2026-11-11)
 

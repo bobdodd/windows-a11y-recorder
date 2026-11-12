@@ -1104,8 +1104,55 @@ list, as the finding says. Decision 10 is checked on the PC.
 
 ## Step 5: non-text contrast, measured first (2026-11-12)
 
-No test on the PC or the phone yet. Tests 16 and 18's recordings were
-measured on the development PC with a throwaway program running the
-recorder's code; what it measured, and the owner's questions, are in
-the architecture document's "Step 5: measuring non-text contrast
-first". The rules, and then the tests, follow the owner's answers.
+Tests 16 and 18's recordings were measured on the development PC with
+a throwaway program running the recorder's code; what it measured, and
+the owner's questions, are in the architecture document's "Step 5:
+measuring non-text contrast first". The owner's answers are in its
+"Step 5: the owner's decisions", and the check built to them in "As
+built: step 5". Checked in the Linux build environment: the solution
+builds with no warnings, and the new tests pass with the others. The
+throwaway program, run with the check, gives the rows below from test
+16's recording.
+
+## Test 28: build and install the eighth build (development PC)
+
+As test 19: close the recorder, run the PowerShell of test 19's step 1,
+run the newest installer with "Start the recorder and set up the
+analysis models" unchecked, and start the recorder from the Start menu.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the recorder
+opens.
+
+## Test 29: the non-text contrast findings of test 16's recording
+
+Keep the phone's picture in view throughout.
+
+1. Choose "Open recording...", and open
+   `20261112-154851-32c7b61a5552453bbf5febffcca978c7` (test 16). If the
+   Checks window is closed, click the "Checks" tab, then move it so the
+   phone's picture is fully in view. Wait 10 seconds, and take a
+   screenshot of the whole screen.
+2. Scroll the list so the row starting "Visit 2," is at the top, and
+   take a screenshot of the whole screen.
+3. Click the row starting "Error: View described as "LEARN", taken to
+   show its state" below it, and take a screenshot of the whole screen.
+4. Scroll the list to the row starting "Visit 4, 00:00:31.326", click
+   the row starting "Error: View described as "WEEK VIEW", taken to show
+   its state" below it, and take a screenshot of the whole screen.
+
+**On screen:** in step 1 the line under "Show current visit" includes
+"Non-text contrast (WCAG 1.4.11), at AA, its only level: 37 findings (6
+errors, 31 info), from 50 controls measured, 13 passed; graphics with
+no item in the tree are not checked." In step 2, below the Visit 2 row,
+the bold row "Non-text contrast (WCAG 1.4.11): 1 error, 4 info, from 8
+controls measured", then a row starting "Error: View described as
+"LEARN", taken to show its state, as it is filled #F6E19B and the 3
+others in its row are not: 1.18:1 against #F5CC53" and ending "seen
+once, at 00:00:28.202". In step 3 the time under the phone's picture
+starts "00:00:28.202", and a cyan outline surrounds the LEARN tab at the
+bottom. In step 4 the bold row above it reads "Non-text contrast (WCAG
+1.4.11): 2 errors, 4 info, from 8 controls measured", the WEEK VIEW row
+includes "1.98:1 against #FFFFFF, the other's fill, and 1.83:1 against
+#F7F7E3 around it", the time starts "00:00:42.154", and the outline
+surrounds WEEK VIEW. Long rows wrap; there is no horizontal scrollbar.
+Send the four screenshots.
