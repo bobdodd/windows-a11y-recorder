@@ -957,11 +957,38 @@ greyed out, and the line included "Text contrast at AAA (WCAG 1.4.6):
 12 findings (11 errors, 1 warning), from 110 lines of text measured, 98
 passed" and ended with the OCR sentence, not "Showing time". Visit 5
 listed "Text contrast at AAA (WCAG 1.4.6): 8 errors, from 24 lines
-measured", with the same item now an error, below 4.5:1. The screenshot
-of step 4, after the restart, is still to come.
+measured", with the same item now an error, below 4.5:1. In step 4, after
+the restart, "AAA (WCAG 1.4.6)" was still chosen and the line included
+"Text contrast at AAA (WCAG 1.4.6): 12 findings (11 errors, 1 warning)".
+Test 24 passed.
 
-Observation, not changed: the line names Visit 5's screen, the Profile
-screen (Screen 3), by two symbols. The throwaway program gives Screen
-3's name as the emoji sun and crescent moon, "\u2600\uFE0F\U0001F319",
-its first fixed text; the recorder draws them as plain symbols.
+## Found in test 24: the app's loading screen names a screen
+
+The line in step 1 named Visit 5's screen by two symbols. The owner
+pointed out that they are the sun and moon of the app's loading screen
+("Loading your personal sleep learning space."). The recording's tree
+shows it, read with the throwaway program:
+
+- At 00:00:31.049, on the way from the Learn tab to the Diary tab, the
+  app's window shows the loading screen, with the content descriptions
+  "\u2600\uFE0F\U0001F319" (sun and crescent moon), "Loading your
+  personal sleep learning space." and "Version 1.2". Its first fixed
+  text is the sun and moon, so a visit starts (Visit 3) and the screen
+  is named by them (Screen 3). At 00:00:31.326 the tree shows "Sleep
+  Diary" and Visit 4 starts. Visit 3 has no settled snapshot.
+- At 00:00:42.156, on the way to the Profile tab, the loading screen
+  comes again, and Visit 5 starts as a return to Screen 3. At
+  00:00:42.502 the tree shows the Profile screen, but every text on it
+  ("Bob Dodd", the email address, "0 DAY STREAK" and so on) is inside an
+  android.widget.ScrollView, so it has no first fixed text. A snapshot
+  with no first fixed text starts no visit (a rule meant for screens
+  half drawn), so the Profile screen stays in Visit 5, named by the
+  loading screen's symbols.
+- Choosing Screen 4's Visit 4 shows the loading screen, as the owner
+  saw: the tree shows "Sleep Diary" at 00:00:31.326, but the video's
+  frame then is the loading screen's, from 00:00:31.323; the first frame
+  with "Sleep Diary" is from 00:00:31.341.
+
+Nothing is changed yet; the owner is asked how loading screens should be
+treated.
 
