@@ -760,6 +760,23 @@ text is large". Long rows wrap; there is no horizontal scrollbar. A
 line saying "OCR was not used" is a result too; send the screenshots
 either way.
 
+## Results of the sixth build, tests 19 and 20 (2026-11-12)
+
+- Test 19 passed: the recorder was built, installed and opened.
+- Test 20 passed: the line under "Show current visit" read "Text
+  contrast at AA (WCAG 1.4.3): 2 findings (1 error, 1 warning), from 57
+  lines of text measured, 55 passed, on 3 settled snapshots (3 from the
+  phone's screenshots, 0 from the video), in 0.8 seconds. The text was
+  found with Windows OCR, en-US." Each screen's rows were as expected,
+  and long rows wrapped with no horizontal scrollbar. Windows' OCR in
+  the recorder read the same lines as the PowerShell OCR the numbers
+  were worked out from.
+- Fault found: the labels "AA (WCAG 1.4.3)" and "AAA (WCAG 1.4.6)" were
+  drawn in near-black on the dark panel, as these two buttons did not
+  set their text colour as the recorder's other radio buttons do. Fixed
+  by giving them the same colour, #CDCCCA; to be checked in the next
+  build.
+
 ## Test 21: choosing a line of a contrast finding
 
 1. Choose "Open recording...", and open
