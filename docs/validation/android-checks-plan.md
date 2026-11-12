@@ -679,6 +679,9 @@ screenshots are then read from the PC for step 4b.
   settles gives. For all 5, Android's time fell within the call, so the
   inference that it uses the companion's clock held on the Pixel; the
   phone took 338 to 412 ms from asking to the PNG. No refusals.
-- Test 18, the line: the screenshot of the panel ended at
-  "android.accessibility-tree", the line before "android.screenshots",
-  so the line itself was not seen.
+- Test 18 passed. With the panel scrolled down, after the stop, the
+  line read "android.screenshots: Disposed, Healthy. Phone screenshots:
+  5 (1 at the start, 4 as a window settled), a median 126 KB each, in
+  sRGB IEC61966-2.1, the phone took a median 376 ms from asking to the
+  PNG, median delay from PNG to recorder 24 ms." The 376 ms agrees with
+  the companion's times in the records.
