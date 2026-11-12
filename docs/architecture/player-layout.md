@@ -167,7 +167,12 @@ ever affect clickable lists (because they are never clicked)".
 - **In a list or tree row**, only a press and drag selects text. A click
   that selects nothing goes to the row, which is selected and does what a
   click on it did before, for example moving the playhead to a reading
-  step.
+  step. The text box's own mouse handling marks the button's release as
+  handled, so until 2026-11-12 a row heard a click only on its
+  background, not on its text (owner, in the Checks tab: "it has to be
+  the background, not the text"). The text now listens for the release
+  with handled events too, and passes a click that selects nothing to
+  its row once.
 - **Not selectable:** tab names, since a press there drags the tab out;
   buttons, menus, check boxes, and the labels of fields, since a click
   there acts or moves to the field; and the timeline's names and times,

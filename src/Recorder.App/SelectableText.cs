@@ -31,28 +31,45 @@ public class SelectableText : TextBox
         IsUndoEnabledProperty.OverrideMetadata(typeof(SelectableText), new FrameworkPropertyMetadata(false));
     }
 
+    public SelectableText()
+    {
+        // The text box's own mouse handling marks the button's release
+        // handled, so a row's MouseLeftButtonUp handlers never heard a
+        // click on its text, only on the row's background (owner,
+        // 2026-11-12, the Checks tab: "it has to be the background, not
+        // the text"). Listening with handled events too sees every
+        // release.
+        AddHandler(Mouse.MouseUpEvent, new MouseButtonEventHandler(OnTextMouseUp), handledEventsToo: true);
+    }
+
     protected override AutomationPeer OnCreateAutomationPeer() => new SelectableTextAutomationPeer(this);
 
-    protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
+    private void OnTextMouseUp(object sender, MouseButtonEventArgs e)
     {
-        base.OnMouseLeftButtonUp(e);
-        if (SelectionLength == 0 && ItemContainer() is { } container)
+        if (e.ChangedButton != MouseButton.Left || SelectionLength != 0 || ItemContainer() is not { } container)
         {
-            // A click, not a selection: the row takes it, as it did before
-            // its text could be selected.
-            switch (container)
-            {
-                case TreeViewItem item:
-                    item.IsSelected = true;
-                    break;
-                case ListBoxItem item:
-                    item.IsSelected = true;
-                    break;
-            }
-
-            container.Focus();
-            e.Handled = false;
+            return;
         }
+
+        // A click, not a selection: the row takes it, as it did before its
+        // text could be selected. The release stops here, and the row
+        // hears it once, as a click on its background gives it.
+        switch (container)
+        {
+            case TreeViewItem item:
+                item.IsSelected = true;
+                break;
+            case ListBoxItem item:
+                item.IsSelected = true;
+                break;
+        }
+
+        container.Focus();
+        e.Handled = true;
+        container.RaiseEvent(new MouseButtonEventArgs(e.MouseDevice, e.Timestamp, MouseButton.Left, e.StylusDevice)
+        {
+            RoutedEvent = MouseLeftButtonUpEvent,
+        });
     }
 
     // The list or tree row this text is in, if any.

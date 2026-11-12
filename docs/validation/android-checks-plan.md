@@ -427,3 +427,28 @@ while its items are shown.", and a dashed cyan rectangle about as wide
 as the screen and short outlines the item. In step 4 "Next time" is
 greyed out and "Previous time" is not. Send the three screenshots.
 
+## Results of the fourth build (2026-11-12)
+
+Run on the development PC with commit 5006d0c.
+
+- Test 11 passed: the line read "2 apps, 5 screens, 6 visits. Before
+  the first visit. Checks of the tree: 4 findings (2 errors, 1 warning,
+  1 info), from 11 settled snapshots, in 0.1 seconds. The touch target
+  checks did not run on 11 settled snapshots, as no density was
+  recorded for them."; Screens 1 and 2 had "No findings from the checks
+  of the tree on this screen."; Screen 3's rows were as expected, in
+  bold and indented; Screen 4 had the Button with no text in pane
+  'Dialog' and Screen 5 the launcher widget's class warning, the four
+  findings the throwaway program gave. No horizontal scrollbar.
+- Test 12, first run: a click on a row's text did nothing; only a
+  click on its background chose it (owner: "The lines are hard to click
+  on. it has to be the background, not the text"). Chosen that way, the
+  line ended "Showing time 1 of 1 of the chosen finding, outlined on the
+  phone's picture while its items are shown.", the time was
+  00:00:14.354, and "Previous time" and "Next time" were greyed out. The
+  Checks window covered the phone's picture and the "Accessibility tree"
+  tab, so the outline and the tree row were not seen. Fixed in
+  `SelectableText.cs` (see player-layout.md, "Selecting and copying
+  text"); the same fix applies to every list and tree whose rows hold
+  selectable text, such as the reading steps and the accessibility tree.
+
