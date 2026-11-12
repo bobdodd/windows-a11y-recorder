@@ -515,6 +515,10 @@ Built with the commit after 9562de8.
 a pale purple background with a dark purple edge round it, 2 pixels
 wide. A pale grey row with no edge is a failure. Send the screenshot.
 
+Result, 2026-11-12, commit c3c9066: test 15 passed. With the focus on
+"Show current visit", the row kept its pale purple background and dark
+edge (screenshot f12).
+
 ## Step 4: measuring the video against the phone's screenshots
 
 Before any contrast check is built, the colours of the recorder's frames
