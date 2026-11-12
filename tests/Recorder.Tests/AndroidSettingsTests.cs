@@ -79,6 +79,7 @@ public sealed class AndroidSettingsTests
     [InlineData("system/font_scale", "1.15", "115 percent")]
     [InlineData("secure/font_weight_adjustment", "300", "bold (300)")]
     [InlineData("secure/display_density_forced", null, "the phone's own size (not set)")]
+    [InlineData("secure/display_density_forced", "", "the phone's own size (reset)")]
     [InlineData("secure/display_density_forced", "480", "480 dpi")]
     [InlineData("secure/accessibility_interactive_ui_timeout_ms", "10000", "10000 ms")]
     [InlineData("global/window_animation_scale", "0", "off (0 times)")]

@@ -555,7 +555,7 @@ public sealed class AccessibilityRequestTests
         }
 
         var index = builder.Build();
-        Assert.Equal(26, index.Version);
+        Assert.Equal(27, index.Version);
         var kept = Assert.Single(index.Events, item => item.EventType == BrowserEvidenceEventTypes.AccessibilityHitTest);
         Assert.True(kept.Payload.TryGetProperty("answer", out var answer) && answer.TryGetProperty("bounds", out _));
 

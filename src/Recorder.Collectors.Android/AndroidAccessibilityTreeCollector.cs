@@ -24,7 +24,7 @@ namespace Recorder.Collectors.Android;
 /// recording: the collector records why, reports itself degraded, and the
 /// recording goes on.
 /// </summary>
-public sealed class AndroidAccessibilityTreeCollector : ICaptureCollector
+public sealed class AndroidAccessibilityTreeCollector : ICaptureCollector, IPhonePackagesSeen
 {
     public const string Type = "android.accessibility-tree";
 
@@ -37,6 +37,8 @@ public sealed class AndroidAccessibilityTreeCollector : ICaptureCollector
     private readonly List<long> _delays = [];
     private readonly List<long> _takeTimes = [];
     private readonly Queue<long> _lastSecond = new();
+    private readonly List<string> _packages = [];
+    private readonly HashSet<string> _packageSet = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _closing = new();
 
     private CollectorInitializationContext? _context;
@@ -88,6 +90,23 @@ public sealed class AndroidAccessibilityTreeCollector : ICaptureCollector
     public CollectorHealthState HealthState { get; private set; } = CollectorHealthState.Unknown;
 
     public string? HealthReason => _unavailable;
+
+    /// <summary>
+    /// The package of each window whose items a snapshot held, in the order
+    /// first seen, from the window's first item that names one, for the
+    /// device collector to read their versions at the stop
+    /// (android-checks.md, step 2).
+    /// </summary>
+    public IReadOnlyList<string> PackagesSeen
+    {
+        get
+        {
+            lock (_packages)
+            {
+                return [.. _packages];
+            }
+        }
+    }
 
     public string? Summary
     {
@@ -381,6 +400,7 @@ public sealed class AndroidAccessibilityTreeCollector : ICaptureCollector
         }
 
         Count(tree, taking);
+        NotePackages(tree);
         Emit(
             Hold(time, ref flags),
             AndroidAccessibilityRecords.TreeEventType,
@@ -389,6 +409,25 @@ public sealed class AndroidAccessibilityTreeCollector : ICaptureCollector
             uncertainty,
             mapping is null ? null : AndroidCompanionRecords.FittedClockMapping,
             flags);
+    }
+
+    private void NotePackages(AndroidAccessibilityTree tree)
+    {
+        foreach (var window in tree.Windows)
+        {
+            if (window.Items?.FirstOrDefault(item => !string.IsNullOrEmpty(item.PackageName))?.PackageName is not { } package)
+            {
+                continue;
+            }
+
+            lock (_packages)
+            {
+                if (_packageSet.Add(package))
+                {
+                    _packages.Add(package);
+                }
+            }
+        }
     }
 
     private void Count(AndroidAccessibilityTree tree, long taking)

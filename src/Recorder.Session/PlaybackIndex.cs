@@ -97,7 +97,10 @@ public sealed record PlaybackIndex
     // Version 26 adds each window's first fixed text, and each titled
     // pane's, to that evidence, for screens of one window that share its
     // title, as in the client's app measured on 2026-11-12.
-    public const int CurrentVersion = 26;
+    // Version 27 keeps the phone's density and app version records
+    // (device.android, android-checks.md step 2) whole, for the Checks
+    // tab's phone row and each app's version.
+    public const int CurrentVersion = 27;
 
     public required int Version { get; init; }
 
@@ -326,6 +329,7 @@ public sealed class PlaybackIndexBuilder
             channel == Recorder.Contracts.BrowserPreferenceSettings.Channel ||
             channel == Recorder.Contracts.AssistiveTechnologyRecords.Channel ||
             channel == Recorder.Contracts.AndroidSettingsRecords.Channel ||
+            channel == Recorder.Contracts.AndroidDeviceRecords.Channel ||
             IsInputRecordabilityRecord(channel, record.EventType) ||
             (channel == "window.foreground" && record.EventType == "foreground-window") ||
             (channel == "accessibility.uia.events" && record.EventType == "focus-changed") ||
@@ -468,6 +472,7 @@ public sealed class PlaybackIndexBuilder
              record.Channel == Recorder.Contracts.BrowserPreferenceSettings.Channel ||
              record.Channel == Recorder.Contracts.AssistiveTechnologyRecords.Channel ||
              record.Channel == Recorder.Contracts.AndroidSettingsRecords.Channel ||
+             record.Channel == Recorder.Contracts.AndroidDeviceRecords.Channel ||
              IsInputRecordabilityRecord(record.Channel, record.EventType) ||
              (record.Channel == "window.foreground" && record.EventType == "foreground-window") ||
              (record.Channel == "accessibility.uia.events" && record.EventType == "focus-changed") ||

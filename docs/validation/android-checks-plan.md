@@ -1,4 +1,4 @@
-# Validation plan: Android checks, step 1 (screens and visits)
+# Validation plan: Android checks, steps 1 and 2 (screens and visits; density and versions)
 
 These tests are step 1 of [Android checks](../architecture/android-checks.md),
 "Build order": the player dividing a phone recording into apps, screens,
@@ -172,3 +172,114 @@ behind the Checks window. In test 5, at 00:00:13.925 the phone's
 picture still showed Sleep Learning Library while the accessibility
 tree already held the module's items (seen in the screenshot); the
 picture was not one of the test's checks.
+
+## Step 2: the display density and the apps' versions
+
+These tests are step 2 of [Android checks](../architecture/android-checks.md),
+"As built: step 2": the phone's display density, read as a recording
+starts and stops and followed through "Display size" changes, and the
+version of each app seen, read as the recording stops. Recordings made
+before step 2 hold neither, so tests 7 to 9 make new ones. From this
+build, the Checks list of an older recording, such as those of tests 2
+and 4, starts with the row "Phone density not recorded: the recording
+was made before the recorder read it.", and each app row reads "App",
+the package, ", version not recorded:" and the screens and visits;
+tests 2 and 4 give the rows as they were before step 2.
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings and the new tests pass, with
+`wm density` and `dumpsys package` output written from AOSP's source.
+What the Pixel prints has not been seen yet; these tests are the first
+time.
+
+TalkBack is not needed for these tests; leave it off.
+
+## Test 6: build and install the third build (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Connect the Pixel by USB, unlocked. Start the recorder from the Start
+   menu, and in "Recording target" choose "Android device".
+4. Wait until the panel shows "Companion app: installed, on, and
+   answering", and read the note under "Android device checks".
+
+**On screen:** the build ends with `INSTALLER BUILT`. In step 4 the note
+ends "It reads the phone's display density as the recording starts and
+stops, and the version of each app it saw as the recording stops, and
+the Checks tab shows them." Send a screenshot of the panel.
+
+## Test 7: a short recording of the client's app
+
+Before the test, open the client's app, Nova SleepCare, on the phone, on
+its Home screen. Leave the recorder open from test 6, with "Android
+device" chosen. Test 8 uses the recording this test makes.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. On the phone, tap the LEARN tab at the bottom of the app, and wait 5
+   seconds.
+3. While it is still recording, take a screenshot of "Collector status"
+   under "Current session".
+4. Choose "Stop recording", and wait until the recording has opened in
+   the player.
+
+**On screen:** in step 3 "Collector status" has a line reading
+"android.device: Running, Healthy. Phone: density" then a number, then
+"dpi at the start." No "android.device" line, or Degraded, is a failure;
+send the line as it is. Send the screenshot.
+
+## Test 8: the density and the app's version in the Checks tab
+
+The recording from test 7 is open in the player.
+
+1. If the Checks window is closed, click the "Checks" tab, and take a
+   screenshot of the whole recorder window.
+2. On the phone, open Settings, then Apps, then the line starting "See
+   all", then Nova SleepCare.
+3. Scroll to the bottom of the app's page, and take a screenshot of the
+   phone showing the version line.
+
+**On screen:** in step 1 the list's first row reads "Phone density",
+then the number test 7 showed, then "dpi, so 1 dp is", then that number
+divided by 160 (3 for 480), then "pixels, the phone's own density,
+00:00:00.000 to" the recording's end time. The next row starts "App
+com.pss.novasleepcare, version", then a version and "(code" with a
+number, then "), targets API" with a number, then ":" and the screens
+and visits. "version not recorded", "version not read" or "not found at
+the stop" is a failure. In step 3 the version on the phone is the same
+as the one in the Checks row. Send both screenshots.
+
+## Test 9: a Display size change during a recording
+
+Before the test, on the phone, open Settings, then Display, then
+"Display size and text", so that the "Display size" slider is on the
+screen. Leave the recorder open, with "Android device" chosen.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. On the phone, tap the plus button at the right end of the "Display
+   size" slider once, and wait 5 seconds.
+3. Tap the minus button at the left end of the same slider once, and
+   wait 5 seconds.
+4. Choose "Stop recording", and wait until the recording has opened in
+   the player.
+5. If the Checks window is closed, click the "Checks" tab, and take a
+   screenshot of the whole recorder window.
+
+**On screen:** in step 2 everything on the phone's screen gets larger,
+and in step 3 it returns to its size before. In step 5 the list's first
+three rows start "Phone density": the first with test 7's number and
+"the phone's own density, 00:00:00.000 to" a time about 5 seconds in;
+the second with a larger number and "set by Display size", from that
+time to a time about 5 seconds later; the third with test 7's number
+again and "the phone's own density", from that time to the recording's
+end. One density row only, or a row with "found only by the read at the
+stop", is a failure; send the screenshot as it is.

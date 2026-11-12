@@ -144,6 +144,13 @@ public sealed record SessionPlaybackArchive(
     /// </summary>
     public PhoneSettingsTimeline PhoneSettings { get; init; } = PhoneSettingsTimeline.Empty;
 
+    /// <summary>
+    /// The phone's display density through the recording and its apps'
+    /// versions (android-checks.md, step 2); empty for a recording without
+    /// them.
+    /// </summary>
+    public PhoneDeviceTimeline PhoneDevice { get; init; } = PhoneDeviceTimeline.Empty;
+
     private ISessionTimeline? _timeline;
 
     /// <summary>

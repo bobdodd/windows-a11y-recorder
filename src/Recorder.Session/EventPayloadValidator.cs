@@ -51,7 +51,8 @@ internal static class EventPayloadValidator
         Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel,
         Recorder.Contracts.AndroidAccessibilityRecords.EventsChannel,
         Recorder.Contracts.AndroidAccessibilityRecords.TreeChannel,
-        Recorder.Contracts.AndroidSettingsRecords.Channel
+        Recorder.Contracts.AndroidSettingsRecords.Channel,
+        Recorder.Contracts.AndroidDeviceRecords.Channel
     ];
 
     /// <summary>Whether the recorder defines the channel.</summary>
@@ -255,6 +256,30 @@ internal static class EventPayloadValidator
                 break;
             case (Recorder.Contracts.AndroidSettingsRecords.Channel, Recorder.Contracts.AndroidSettingsRecords.UnavailableEventType):
                 ValidateAndroidCompanionUnavailable(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidDeviceRecords.Channel, Recorder.Contracts.AndroidDeviceRecords.DensityEventType):
+                ValidateShape(
+                    payload,
+                    [
+                        RequiredString("serial"),
+                        RequiredEnum(
+                            "reason",
+                            Recorder.Contracts.AndroidDeviceRecords.StartReason,
+                            Recorder.Contracts.AndroidDeviceRecords.StopReason),
+                        NullableInteger("physicalDpi", positive: true),
+                        NullableInteger("overrideDpi", positive: true),
+                        RequiredTextArray("lines"),
+                        NullableText("problem"),
+                        RequiredInteger("readStartedAtNanoseconds"),
+                        RequiredInteger("readEndedAtNanoseconds")
+                    ],
+                    issues);
+                break;
+            case (Recorder.Contracts.AndroidDeviceRecords.Channel, Recorder.Contracts.AndroidDeviceRecords.AppVersionsEventType):
+                ValidateAndroidAppVersions(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidDeviceRecords.Channel, Recorder.Contracts.AndroidDeviceRecords.UnavailableEventType):
+                ValidateShape(payload, [RequiredString("serial"), RequiredString("reason")], issues);
                 break;
             case (Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel, Recorder.Contracts.AndroidTalkBackRecords.UtteranceStartedEventType):
             case (Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel, Recorder.Contracts.AndroidTalkBackRecords.FragmentStartedEventType):
@@ -9949,6 +9974,45 @@ internal static class EventPayloadValidator
                     $"{path}/{property.Name}",
                     $"Payload property '{property.Name}' {rule.Expectation}.");
             }
+        }
+    }
+
+    private static void ValidateAndroidAppVersions(JsonElement payload, ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredString("serial"),
+                RequiredObjectArray("apps"),
+                RequiredTextArray("problems"),
+                RequiredInteger("readStartedAtNanoseconds"),
+                RequiredInteger("readEndedAtNanoseconds")
+            ],
+            issues);
+        if (!payload.TryGetProperty("apps", out var apps) || apps.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        var index = 0;
+        foreach (var app in apps.EnumerateArray())
+        {
+            ValidateShape(
+                app,
+                [
+                    RequiredString("package"),
+                    RequiredBoolean("found"),
+                    NullableText("versionName"),
+                    NullableInteger("versionCode"),
+                    NullableInteger("minSdk", nonnegative: true),
+                    NullableInteger("targetSdk", nonnegative: true),
+                    NullableText("lastUpdateTime"),
+                    NullableText("installer"),
+                    RequiredTextArray("lines")
+                ],
+                issues,
+                $"#/payload/apps/{index}");
+            index++;
         }
     }
 

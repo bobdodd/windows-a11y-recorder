@@ -7,10 +7,11 @@ using Recorder.Session;
 
 namespace Recorder.App;
 
-// The Checks tab (android-checks.md, "The player" and step 1): a phone
-// recording's apps, then each app's screens with how each was named, then
-// each screen's visits with their states. A visit or state row moves the
-// playhead to its start; a screen's or app's row to its first visit. The
+// The Checks tab (android-checks.md, "The player", steps 1 and 2): a phone
+// recording's display density, then its apps with their versions, then
+// each app's screens with how each was named, then each screen's visits
+// with their states. A density, visit or state row moves the playhead to
+// its start; a screen's or app's row to its first visit. The
 // visit at the playhead is marked as playback moves, but the list never
 // scrolls by itself, as the reading position steps do not.
 public partial class MainWindow
@@ -30,13 +31,44 @@ public partial class MainWindow
         _phoneScreenRows.Clear();
         _currentVisitRow = null;
         var screens = _playbackArchive?.PhoneScreens ?? PhoneScreenTimeline.Empty;
+        var device = _playbackArchive?.PhoneDevice ?? PhoneDeviceTimeline.Empty;
         TimelineControl.SetPhoneVisits(screens.Visits);
+
+        // The density first (android-checks.md, step 2): the checks turn
+        // pixels into dp with it.
+        if (screens.Recorded || device.Densities.Count > 0)
+        {
+            if (device.Densities.Count == 0)
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(
+                    0,
+                    "Phone density not recorded: the recording was made before the recorder read it.",
+                    0,
+                    null));
+            }
+
+            foreach (var period in device.Densities)
+            {
+                var source = period.Source == PhoneDensitySource.Physical
+                    ? "the phone's own density"
+                    : "set by Display size";
+                var foundAtStop = period.FoundAtStop ? ", found only by the read at the stop" : string.Empty;
+                _phoneScreenRows.Add(new PhoneScreenRowView(
+                    0,
+                    string.Create(
+                        CultureInfo.CurrentCulture,
+                        $"Phone density {period.Dpi:N0} dpi, so 1 dp is {period.PixelsPerDp:0.###} pixels, {source}{foundAtStop}, {period.When}"),
+                    period.Start,
+                    null));
+            }
+        }
+
         foreach (var app in screens.Apps)
         {
             var visits = app.Screens.Sum(screen => screen.Visits.Count);
             _phoneScreenRows.Add(new PhoneScreenRowView(
                 0,
-                $"App {app.Package}: {Count(app.Screens.Count, "screen")}, {Count(visits, "visit")}",
+                $"App {app.Package}, {device.DescribeVersion(app.Package)}: {Count(app.Screens.Count, "screen")}, {Count(visits, "visit")}",
                 app.Screens[0].Visits[0].Start,
                 null));
             foreach (var screen in app.Screens)

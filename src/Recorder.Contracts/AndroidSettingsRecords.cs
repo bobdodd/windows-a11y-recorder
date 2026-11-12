@@ -251,7 +251,14 @@ public static class AndroidSettingValues
         var invariant = System.Globalization.CultureInfo.InvariantCulture;
         if (value.Length == 0)
         {
-            return setting.Kind is AndroidSettingKind.Components or AndroidSettingKind.Text ? "none" : "empty";
+            // Android writes "" when Display size is reset to the default
+            // (DisplayWindowSettings.setForcedDensity, android-checks.md step 2).
+            return setting.Kind switch
+            {
+                AndroidSettingKind.Density => "the phone's own size (reset)",
+                AndroidSettingKind.Components or AndroidSettingKind.Text => "none",
+                _ => "empty",
+            };
         }
 
         var isNumber = double.TryParse(value, System.Globalization.NumberStyles.Float, invariant, out var number);

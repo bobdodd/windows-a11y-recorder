@@ -1135,7 +1135,9 @@ public sealed class SessionTimelineControl : FrameworkElement
         "audio.system" or "audio.screen-reader" or Recorder.Contracts.AndroidSoundRecords.Channel => 6,
         // The phone's settings share the Windows settings lane: a recording
         // of a phone has no Windows settings (Android slice 8, step 8a).
-        "system.preferences" or Recorder.Contracts.AndroidSettingsRecords.Channel => 7,
+        // So do its density and app versions (android-checks.md, step 2).
+        "system.preferences" or Recorder.Contracts.AndroidSettingsRecords.Channel or
+            Recorder.Contracts.AndroidDeviceRecords.Channel => 7,
         "graphics.magnifier" => 8,
         "browser.preferences" => 9,
         // What TalkBack said shares the Screen reader lane: a recording of a

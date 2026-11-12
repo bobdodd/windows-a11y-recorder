@@ -204,6 +204,9 @@ public sealed class AndroidAccessibilityTreeTests
         await collector.StopAsync(new SessionBoundary(6 * Second, DateTimeOffset.UtcNow), CancellationToken.None);
 
         Assert.Equal(CollectorHealthState.Healthy, collector.HealthState);
+
+        // The Settings window's package, once; the status bar's items were not taken.
+        Assert.Equal(["com.android.settings"], collector.PackagesSeen);
         var records = sink.Records.ToList();
         var validator = new EventRecordValidator("session-1");
         foreach (var record in records)

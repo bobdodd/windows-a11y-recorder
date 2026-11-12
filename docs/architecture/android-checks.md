@@ -4,8 +4,9 @@
 
 Proposed 2026-11-11. Step 1 of "Build order", screens and visits, is
 built (see "As built: step 1"), with rules added on 2026-11-12 for
-screens drawn in one window, measured in the client's app; no check is
-built yet. The owner's
+screens drawn in one window, measured in the client's app. Step 2, the
+display density and each app's version, is built (see "As built: step
+2") and not yet checked on the phone. No check is built yet. The owner's
 decisions of 2026-11-11 are in "Decisions (2026-11-11)" and "Decisions
 on the open questions (2026-11-11)". Before any check is assigned a
 result, the recording has to say which app and which screen each moment
@@ -116,15 +117,18 @@ TalkBack on), exported with `tests/RecordingEventExport`:
   which is how a screen that replaces its content inside one window can
   be seen.
 
+Not recorded before step 2, and recorded since (see "As built: step 2"):
+
+- **Density.** Bounds are in pixels; dp needs the display density.
+  Before step 2 only a forced "Display size" setting was recorded
+  (checked in source: `AndroidSettingsRecords`, `display_density_forced`),
+  not the density in use.
+- **The app's version.** Before step 2 only the companion app's version
+  was recorded (checked in source: `RecorderLink`). A client report
+  needs the version of the app under test.
+
 Not recorded, and needed:
 
-- **Density.** Bounds are in pixels; dp needs the display density. Only
-  a forced "Display size" setting is recorded (checked in source:
-  `AndroidSettingsRecords`, `display_density_forced`), not the density
-  in use.
-- **The app's version.** Only the companion app's version is recorded
-  (checked in source: `RecorderLink`). A client report needs the
-  version of the app under test.
 - **Text size and link spans.** The tree has no text size, and an
   item's text is recorded as plain text, without the links inside it
   (checked in source: `AccessibilityTrees.java`).
@@ -143,9 +147,11 @@ screen, a share sheet from another package) a new visit starts, to that
 app's screen.
 
 The app's version is recorded at the end of the recording, for each
-package seen, with `adb shell dumpsys package <package>`, which prints
-`versionName` and `versionCode` (inference: the command's output is not
-documented as an interface, so the recorder keeps the lines it read).
+package with a window in the tree snapshots, with `adb shell dumpsys
+package <package>`, which prints `versionName` and `versionCode`
+(checked in source: `Settings.dumpPackageLPr` in AOSP; the command's
+output is not documented as an interface, so the recorder keeps the
+lines it read). See "As built: step 2".
 
 ## Screens and visits
 
@@ -358,7 +364,8 @@ Built 2026-11-11 in `src/Recorder.Session/PhoneScreens.cs`
 applied as follows; where this section is more exact than the sections
 above, it is what the code does.
 
-- **What it reads.** The playback index (version 26) keeps every
+- **What it reads.** The playback index (version 26 when step 1 was
+  built; 27 since step 2) keeps every
   `TYPE_WINDOW_STATE_CHANGED` event whole, and each compact tree
   snapshot keeps, for every window whose items were taken, what the
   items say about the screen (`PhoneScreenEvidence`): the root item's
@@ -481,6 +488,77 @@ Not yet known:
   windows, and what class names their window-state events carry;
 - whether turning the phone gives the app's window a new ID, which
   would start a new visit to the same screen.
+
+## As built: step 2
+
+Built 2026-11-12 in `src/Recorder.Collectors.Android/AndroidDeviceCollector.cs`
+(records in `src/Recorder.Contracts/AndroidDeviceRecords.cs`, channel
+`device.android`) and `src/Recorder.Session/PhoneDeviceTimeline.cs`, with
+tests in `tests/Recorder.Tests/AndroidDeviceTests.cs`. Not yet checked on
+the phone: what `wm density` and `dumpsys package` print below is
+checked in AOSP's source (main branch, read 2026-11-12), not measured
+on the Pixel 10 Pro XL, so the formats are inference until the test in
+the validation plan.
+
+- **The density.** `adb -s <serial> shell wm density` is run when the
+  recording starts (in the background, so the start does not wait) and
+  when it stops. It prints "Physical density: N", and "Override density:
+  N" when the density in use differs (checked in source:
+  `WindowManagerShellCommand.printInitialDisplayDensity`,
+  [WindowManagerShellCommand.java](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/wm/WindowManagerShellCommand.java)).
+  The density in use is the override when there is one, else the
+  physical density; 1 dp is that density over 160 pixels (checked in a
+  cited document:
+  [DisplayMetrics.DENSITY_DEFAULT](https://developer.android.com/reference/android/util/DisplayMetrics#DENSITY_DEFAULT)).
+  The lines printed are kept in the record.
+- **Changes during the recording.** The settings collector already
+  records each change of `display_density_forced` ("Display size"). A
+  number starts a period with that density; an empty value, no value or
+  the physical density's own number returns to the physical density, as
+  Android writes an empty value when the density is reset (checked in source:
+  `DisplayWindowSettings.setForcedDensity`,
+  [DisplayWindowSettings.java](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/wm/DisplayWindowSettings.java)).
+  The properties panel now shows an empty value as "the phone's own size
+  (reset)". A density read at the stop that differs from the last period
+  starts one more period at the stop, marked as found only by the read at
+  the stop.
+- **The versions.** The accessibility tree collector notes the package
+  of each window whose items it took, from the window's first item with
+  a package name, in the order first seen. When the recording stops,
+  after the tree collector has stopped, `adb -s <serial> shell dumpsys
+  package <package>` is run for each one, with a 15 second limit each. A
+  package name is checked against Android's letters, digits, underscores
+  and dots before it is put in the command. The version is read from the
+  first "Package [name]" block under the "Packages:" heading, up to the
+  next package or heading, so an older copy under "Hidden system
+  packages:" (an updated system app's factory version) is not taken
+  (checked in source: `Settings.dumpPackagesLPr` and `dumpPackageLPr`,
+  [Settings.java](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/Settings.java)).
+  From the block it keeps `versionCode`, `minSdk`, `targetSdk`,
+  `versionName`, `lastUpdateTime` and `installerPackageName`, and the
+  lines it read. A package with no block is "not found at the stop", as
+  an app uninstalled during the recording would be.
+- **When adb fails.** A density or version not read is recorded with
+  adb's reason, the collector reports itself degraded, and the recording
+  goes on.
+- **The player.** The "Checks" tab's first rows give the density, one
+  row per period, such as "Phone density 480 dpi, so 1 dp is 3 pixels,
+  the phone's own density, 00:00:00.000 to 00:01:00.793"; a recording
+  made before step 2 shows "Phone density not recorded: the recording
+  was made before the recorder read it." Each app's row gives its
+  version, such as "App com.pss.novasleepcare, version 1.2.0 (code 34),
+  targets API 35: 4 screens, 5 visits" (the numbers here are made up),
+  or "version not recorded" for an older recording, "version not read"
+  when adb failed, and "not found at the stop". The density and version
+  records are on the timeline's settings strip, shown by the "Phone
+  settings" filter.
+- **The playback index** is version 27, so recordings indexed before are
+  indexed again, and keeps the `device.android` records whole.
+
+Measured before step 2, in the client's recording (session
+`20261112-005243-5528d67531dd4441a50b2c2985350c59`): "Display size" was
+not set (`display_density_forced` null) and the display mode was 1080 by
+2404 pixels. The physical density was not recorded then.
 
 ## Decisions on the open questions (2026-11-11)
 

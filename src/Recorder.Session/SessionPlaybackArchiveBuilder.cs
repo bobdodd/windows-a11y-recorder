@@ -1,3 +1,4 @@
+using System.Globalization;
 using Recorder.Contracts;
 using System.Text.Json;
 
@@ -119,6 +120,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _phoneWindowStates = [];
     private readonly List<(long Time, JsonElement Payload)> _phoneDisplays = [];
     private readonly List<(long Time, string EventType, JsonElement Payload)> _phoneSettings = [];
+    private readonly List<(long Time, string EventType, JsonElement Payload)> _phoneDevice = [];
     private readonly List<KeyEvidenceRecord> _accessibilityRequests = [];
     private readonly List<BrowserPageCommit> _pageCommits = [];
     private readonly List<(string EventId, long Time, JsonElement Payload)> _pageFocus = [];
@@ -338,6 +340,13 @@ public sealed class SessionPlaybackArchiveBuilder
             payload.ValueKind == JsonValueKind.Object)
         {
             _phoneSettings.Add((timestamp, timelineEvent.EventType, payload.Clone()));
+        }
+
+        // The phone's density and app versions (android-checks.md, step 2).
+        if (timelineEvent.Channel == AndroidDeviceRecords.Channel &&
+            payload.ValueKind == JsonValueKind.Object)
+        {
+            _phoneDevice.Add((timestamp, timelineEvent.EventType, payload.Clone()));
         }
 
         if (timelineEvent.Channel == WindowsPreferenceSettings.Channel &&
@@ -589,6 +598,9 @@ public sealed class SessionPlaybackArchiveBuilder
             PhoneSettings = _phoneSettings.Count == 0
                 ? PhoneSettingsTimeline.Empty
                 : new PhoneSettingsTimeline(_phoneSettings),
+            PhoneDevice = _phoneDevice.Count == 0
+                ? PhoneDeviceTimeline.Empty
+                : new PhoneDeviceTimeline(_phoneDevice, _phoneSettings, duration),
             WindowsPreferences = _preferences.Count == 0
                 ? WindowsPreferenceTimeline.Empty
                 : new WindowsPreferenceTimeline(_preferences),
@@ -894,6 +906,11 @@ public sealed class SessionPlaybackArchiveBuilder
         if (channel == AndroidSettingsRecords.Channel)
         {
             return PhoneSettingSummary(eventType, payload);
+        }
+
+        if (channel == AndroidDeviceRecords.Channel)
+        {
+            return PhoneDeviceSummary(eventType, payload);
         }
 
         if (channel == BrowserPreferenceSettings.Channel)
@@ -1292,6 +1309,36 @@ public sealed class SessionPlaybackArchiveBuilder
                     : null),
             _ => eventType
         };
+    }
+
+    // "display-density: 480 dpi at the start", "app-versions: 3 apps".
+    private static string PhoneDeviceSummary(string eventType, JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            return eventType;
+        }
+
+        if (eventType == AndroidDeviceRecords.DensityEventType)
+        {
+            int? Dpi(string name) =>
+                payload.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var dpi) ? dpi : null;
+            var inUse = Dpi("overrideDpi") ?? Dpi("physicalDpi");
+            return JoinSummary(
+                eventType,
+                inUse is { } dpi
+                    ? string.Create(CultureInfo.InvariantCulture, $"{eventType}: {dpi} dpi at the {ReadString(payload, "reason")}")
+                    : ReadString(payload, "problem"));
+        }
+
+        if (eventType == AndroidDeviceRecords.AppVersionsEventType &&
+            payload.TryGetProperty("apps", out var apps) && apps.ValueKind == JsonValueKind.Array)
+        {
+            var count = apps.GetArrayLength();
+            return string.Create(CultureInfo.InvariantCulture, $"{eventType}: {count} {(count == 1 ? "app" : "apps")}");
+        }
+
+        return JoinSummary(eventType, ReadString(payload, "reason"));
     }
 
     private static string JoinSummary(string fallback, params string?[] values)

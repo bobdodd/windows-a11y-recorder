@@ -331,7 +331,11 @@ public partial class MainWindow : Window
     // by the same clock fit (slice 7, step 7a); it comes after the companion
     // collector and so stops before it. The settings collector reads the
     // phone's settings with adb at the start and the stop, and again each
-    // time the companion app reports one changed (slice 8, step 8a).
+    // time the companion app reports one changed (slice 8, step 8a). The
+    // device collector reads the display density at the start and the
+    // stop, and the version of each app the tree collector saw at the stop
+    // (android-checks.md, step 2); it comes before the tree collector, and
+    // so stops after it.
     private Recorder.Contracts.ICaptureCollector[] AndroidCollectors(string serial)
     {
         var adb = new AdbProcess(AndroidTools.Adb(AndroidTools.DataFolder));
@@ -342,6 +346,7 @@ public partial class MainWindow : Window
         var server = Path.Combine(AndroidTools.BundledFolder(AppContext.BaseDirectory), AndroidTools.ScrcpyServer.Name);
         var screen = new AndroidScreenCollector(adb, serial, server, companion);
         _talkBack = new AndroidTalkBackCollector(adb, serial, companion);
+        var trees = new AndroidAccessibilityTreeCollector(serial, companion, companion);
         return
         [
             companion,
@@ -350,7 +355,8 @@ public partial class MainWindow : Window
             new AndroidTouchCollector(adb, serial, companion, companion),
             _talkBack,
             new AndroidAccessibilityCollector(serial, companion, companion),
-            new AndroidAccessibilityTreeCollector(serial, companion, companion),
+            new AndroidDeviceCollector(adb, serial, trees),
+            trees,
             new AndroidSettingsCollector(adb, serial, companion, companion),
             new Recorder.Collectors.Audio.AudioCollector(new Recorder.Collectors.Audio.AudioCaptureOptions(true, false))
         ];
@@ -1561,6 +1567,7 @@ public partial class MainWindow : Window
         AddVisibleChannel(FilterWindowCheckBox, "window.foreground", visibleChannels);
         AddVisibleChannel(FilterPreferencesCheckBox, "system.preferences", visibleChannels);
         AddVisibleChannel(FilterPreferencesCheckBox, Recorder.Contracts.AndroidSettingsRecords.Channel, visibleChannels);
+        AddVisibleChannel(FilterPreferencesCheckBox, Recorder.Contracts.AndroidDeviceRecords.Channel, visibleChannels);
         AddVisibleChannel(FilterMagnifierCheckBox, "graphics.magnifier", visibleChannels);
         AddVisibleChannel(FilterBrowserSettingsCheckBox, "browser.preferences", visibleChannels);
         AddVisibleChannel(FilterAssistiveTechnologyCheckBox, "system.assistive-technology", visibleChannels);
