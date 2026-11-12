@@ -97,7 +97,7 @@ screen had no first fixed text and was counted as the loading screen.
     first text ("Bob Dodd" for Profile). Scrolling never starts a visit.
     As the video lags the tree (the tree shows "Sleep Diary" at
     00:00:31.326, the frame then is still the loading screen's, and the
-    first frame with "Sleep Diary" is from 00:00:31.341, measured in
+    first frame with "Sleep Diary" is from 00:00:31.340, measured in
     test 16's recording), a visit, and a finding from the tree, is shown
     at the picture of its settled snapshot, not at the snapshot's time.
 
@@ -568,7 +568,7 @@ screen "\u2600\uFE0F\U0001F319" (Visits 3 and 5, from 00:00:31.048 to
 settled snapshot), "Sleep Diary" (Visit 4) and "Bob Dodd" (Visit 6, from
 00:00:42.502 to 00:00:54.359, started by the first fixed text going
 away, named by its first text). The visits are shown at 00:00:02.655,
-00:00:28.203, 00:00:31.323, 00:00:42.155, 00:00:42.489, 00:00:47.633 and
+00:00:28.202, 00:00:31.322, 00:00:42.154, 00:00:42.489, 00:00:47.633 and
 00:01:06.223, and a frame from each, looked at, shows its screen: Home,
 Learn, the loading screen, Sleep Diary, the loading screen, Profile and
 Home. Four other recordings, among them the one above

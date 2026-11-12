@@ -56,8 +56,8 @@ public sealed record PhoneContrastPicture(PhonePictureKind Kind, long Time, stri
 /// from the snapshot until the window was next listed, else the last frame
 /// of the video before then. The tree can change before the video does: in
 /// test 16's recording the tree showed "Sleep Diary" at 00:00:31.326, but
-/// the frame then, from 00:00:31.323, still showed the loading screen, and
-/// the first with "Sleep Diary" was from 00:00:31.341 (measured). So a
+/// the frame then, from 00:00:31.322, still showed the loading screen, and
+/// the first with "Sleep Diary" was from 00:00:31.340 (measured). So a
 /// visit and a finding of the tree are shown at their snapshot's picture,
 /// not at the snapshot's time.
 /// </summary>

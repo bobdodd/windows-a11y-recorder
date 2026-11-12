@@ -986,8 +986,9 @@ shows it, read with the throwaway program:
   loading screen's symbols.
 - Choosing Screen 4's Visit 4 shows the loading screen, as the owner
   saw: the tree shows "Sleep Diary" at 00:00:31.326, but the video's
-  frame then is the loading screen's, from 00:00:31.323; the first frame
-  with "Sleep Diary" is from 00:00:31.341.
+  frame then is the loading screen's, from 00:00:31.322; the first frame
+  with "Sleep Diary" is from 00:00:31.340 (times as the player shows
+  them, which cuts off, not rounds, below a millisecond).
 
 The owner chose "Its own screen" for the loading screen, and "Its
 first text" for a screen whose every text is in a scrolling list
@@ -1044,6 +1045,31 @@ visit"; below it is the row "Visit 6, 00:00:42.502 to 00:00:54.359,
 started by the first fixed text going away; 9 snapshots, 1 settled".
 Send the three screenshots.
 
+## Results of tests 25 and 26 (2026-11-12)
+
+Passed on the development PC with the build of 707c1ce, with AAA still
+chosen from test 24 (the level does not change these rows). The line
+under "Show current visit" began "1 app, 5 screens, 7 visits." The
+Screen 3 row read "Screen 3:", the sun and moon, "(com.pss.novasleepcare),
+named by its first fixed text, as 5 screens share the title 'Nova
+SleepCare', activity not given by a window-state event, 2 visits", with
+Visit 3 (00:00:31.048 to 00:00:31.326, 27 snapshots, 0 settled) and
+Visit 5 (00:00:42.155 to 00:00:42.502, a return, 37 snapshots, 0
+settled), each with "Not checked, as no snapshot of this visit
+settled." The Screen 5 row read "Screen 5: Bob Dodd
+(com.pss.novasleepcare), named by its first text, as it has no fixed
+text and 5 screens share the title 'Nova SleepCare', activity not given
+by a window-state event, 1 visit", and below it "Visit 6, 00:00:42.502
+to 00:00:54.359, started by the first fixed text going away; 9
+snapshots, 1 settled". The touch target finding for "Help & FAQ Get
+Support" under it ended "seen once, at 00:00:47.633".
+
+The screenshot of step 2 showed the time 00:00:31.322, where the
+expected rows of test 27 said 00:00:31.323: the player cuts off times
+below a millisecond, and the throwaway program had rounded them (the
+frame is at 31.322606502 s). Test 27's times were corrected before it
+was run: 00:00:42.154 (frame at 42.154903473 s) and 00:00:31.322.
+
 ## Test 27: a visit is shown at its picture
 
 The recording from test 26 is open. Keep the phone's picture in view.
@@ -1057,8 +1083,8 @@ The recording from test 26 is open. Keep the phone's picture in view.
    whole screen.
 
 **On screen:** in step 1 the time under the phone's picture starts
-"00:00:42.155", and the picture shows "Sleep Diary" at the top, not the
-sun and moon. In step 2 the time starts "00:00:31.323", and the picture
+"00:00:42.154", and the picture shows "Sleep Diary" at the top, not the
+sun and moon. In step 2 the time starts "00:00:31.322", and the picture
 shows the sun and moon over "Loading your personal sleep learning
 space.". In step 3 the row ends "seen once, at 00:00:47.633", the time
 starts "00:00:47.633", and the picture shows the Profile screen with
