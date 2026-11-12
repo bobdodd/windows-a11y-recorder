@@ -71,14 +71,20 @@ import java.util.concurrent.RejectedExecutionException;
  * that connection a "setting-changed" message, with the namespace, the
  * name and its System.nanoTime() when the notice came, each time one is
  * written. It sends no value: some of the settings cannot be read by an
- * app, so the recorder reads them with adb. See
- * docs/architecture/android-implementation-plan.md, slices 2, 4, 7 and 8, and
+ * app, so the recorder reads them with adb. From protocol 6 it answers a
+ * "screenshots" request by sending that connection a screenshot of the
+ * display at once, and another each time a window settles, each as a
+ * "screenshot" message with the PNG in base64, or a "screenshot-failed"
+ * message with Android's code when one is refused, each with its own
+ * "index" counting from 1 on that connection (see {@link Screenshots}).
+ * See docs/architecture/android-implementation-plan.md, slices 2, 4, 7
+ * and 8, docs/architecture/android-checks.md, step 4a, and
  * src/Recorder.Collectors.Android/CompanionProtocol.cs, which must agree
  * with this file.
  */
 final class RecorderLink {
     static final String SOCKET_NAME = "a11yrecorder_companion";
-    static final int PROTOCOL = 5;
+    static final int PROTOCOL = 6;
     private static final String TAG = "A11yRecorderCompanion";
 
     private final Context context;
@@ -88,9 +94,14 @@ final class RecorderLink {
     // they are sent from this one, so a slow connection never holds up the
     // service.
     private final ExecutorService sender = Executors.newSingleThreadExecutor();
+    // Screenshots are large, so they are sent from their own thread, and
+    // the other messages do not wait behind them on this side.
+    private final ExecutorService screenshotSender = Executors.newSingleThreadExecutor();
     private volatile boolean stopping;
     // Asks for a snapshot of every window; set before start().
     private volatile Runnable treeRequests;
+    // Asks for a screenshot at once; set before start().
+    private volatile Runnable screenshotRequests;
     private LocalServerSocket server;
     private Thread acceptThread;
     private DisplayManager displayManager;
@@ -162,6 +173,7 @@ final class RecorderLink {
             accessibilityManager.removeAccessibilityServicesStateChangeListener(servicesListener);
         }
         sender.shutdownNow();
+        screenshotSender.shutdownNow();
         for (Client client : clients) {
             client.close();
         }
@@ -240,6 +252,40 @@ final class RecorderLink {
             sender.execute(() -> {
                 for (Client client : clients) {
                     client.sendTree(message);
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            // The link stopped meanwhile.
+        }
+    }
+
+    /** What to run when a connection asks for screenshots; set before start(). */
+    void setScreenshotRequests(Runnable requests) {
+        screenshotRequests = requests;
+    }
+
+    /** True when a connection has asked for screenshots. */
+    boolean wantsScreenshots() {
+        for (Client client : clients) {
+            if (client.screenshotsWanted) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Sends a screenshot's line, a JSON object without its index, to each
+     * connection that asked for them.
+     */
+    void sendScreenshot(String line) {
+        if (stopping) {
+            return;
+        }
+        try {
+            screenshotSender.execute(() -> {
+                for (Client client : clients) {
+                    client.sendScreenshot(line);
                 }
             });
         } catch (RejectedExecutionException ignored) {
@@ -408,6 +454,11 @@ final class RecorderLink {
         volatile boolean treesWanted;
         // The snapshots sent on this connection; used on the sender thread only.
         private long treeIndex;
+        // True once this connection has asked for screenshots.
+        volatile boolean screenshotsWanted;
+        // The screenshots sent on this connection; used on the screenshot
+        // sender's thread only.
+        private long screenshotIndex;
         // The settings this connection asked to be told of; used under
         // itself only.
         private final List<ContentObserver> settingObservers = new ArrayList<>();
@@ -480,6 +531,12 @@ final class RecorderLink {
             } else if ("accessibility-trees".equals(type)) {
                 treesWanted = true;
                 Runnable requests = treeRequests;
+                if (requests != null) {
+                    requests.run();
+                }
+            } else if ("screenshots".equals(type)) {
+                screenshotsWanted = true;
+                Runnable requests = screenshotRequests;
                 if (requests != null) {
                     requests.run();
                 }
@@ -605,6 +662,27 @@ final class RecorderLink {
                 message.put("index", treeIndex);
                 send(message);
             } catch (IOException | JSONException exception) {
+                close();
+            }
+        }
+
+        // On the screenshot sender's thread, which alone adds the index.
+        // The line is a JSON object; the index goes first.
+        void sendScreenshot(String line) {
+            if (!screenshotsWanted) {
+                return;
+            }
+            try {
+                screenshotIndex++;
+                String indexed = "{\"index\":" + screenshotIndex + "," + line.substring(1);
+                synchronized (writeLock) {
+                    if (output == null) {
+                        return;
+                    }
+                    output.write((indexed + "\n").getBytes(StandardCharsets.UTF_8));
+                    output.flush();
+                }
+            } catch (IOException exception) {
                 close();
             }
         }

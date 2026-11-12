@@ -51,6 +51,7 @@ internal static class EventPayloadValidator
         Recorder.Contracts.AndroidTalkBackRecords.SpeechChannel,
         Recorder.Contracts.AndroidAccessibilityRecords.EventsChannel,
         Recorder.Contracts.AndroidAccessibilityRecords.TreeChannel,
+        Recorder.Contracts.AndroidScreenshotRecords.Channel,
         Recorder.Contracts.AndroidSettingsRecords.Channel,
         Recorder.Contracts.AndroidDeviceRecords.Channel
     ];
@@ -208,6 +209,25 @@ internal static class EventPayloadValidator
             case (Recorder.Contracts.AndroidAccessibilityRecords.TreeChannel, Recorder.Contracts.AndroidAccessibilityRecords.TreeEventType):
                 ValidateAndroidAccessibilityTree(payload, issues);
                 break;
+            case (Recorder.Contracts.AndroidScreenshotRecords.Channel, Recorder.Contracts.AndroidScreenshotRecords.ScreenshotEventType):
+                ValidateAndroidScreenshot(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidScreenshotRecords.Channel, Recorder.Contracts.AndroidScreenshotRecords.RefusedEventType):
+                ValidateShape(
+                    payload,
+                    [
+                        RequiredString("serial"),
+                        RequiredInteger("index", positive: true),
+                        RequiredEnum("reason", [.. Recorder.Contracts.AndroidScreenshotRecords.Reasons]),
+                        RequiredInteger("code"),
+                        RequiredString("codeName"),
+                        RequiredString("explanation"),
+                        RequiredInteger("requestedPhoneNanoseconds"),
+                        RequiredInteger("failedPhoneNanoseconds")
+                    ],
+                    issues);
+                break;
+            case (Recorder.Contracts.AndroidScreenshotRecords.Channel, Recorder.Contracts.AndroidScreenshotRecords.UnavailableEventType):
             case (Recorder.Contracts.AndroidAccessibilityRecords.TreeChannel, Recorder.Contracts.AndroidAccessibilityRecords.UnavailableTreeEventType):
             case (Recorder.Contracts.AndroidAccessibilityRecords.EventsChannel, Recorder.Contracts.AndroidAccessibilityRecords.UnavailableEventType):
             case (Recorder.Contracts.AndroidTalkBackRecords.LogChannel, Recorder.Contracts.AndroidTalkBackRecords.UnavailableEventType):
@@ -2831,6 +2851,53 @@ internal static class EventPayloadValidator
                 "android-device-frame-size",
                 "#/payload/width",
                 "A phone frame is cut from the decoded picture, so it is no larger than it.");
+        }
+    }
+
+    // A screenshot from the companion app (android-checks.md, step 4a).
+    private static void ValidateAndroidScreenshot(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredString("serial"),
+                RequiredInteger("index", positive: true),
+                RequiredString("path"),
+                RequiredEnum("reason", [.. Recorder.Contracts.AndroidScreenshotRecords.Reasons]),
+                RequiredInteger("width", positive: true),
+                RequiredInteger("height", positive: true),
+                RequiredInteger("byteLength", positive: true),
+                RequiredString("sha256"),
+                RequiredString("colourSpace"),
+                RequiredBoolean("converted"),
+                RequiredInteger("phoneTimestampMilliseconds"),
+                RequiredInteger("requestedPhoneNanoseconds"),
+                RequiredInteger("capturedPhoneNanoseconds"),
+                RequiredInteger("encodedPhoneNanoseconds"),
+                NullableInteger("lastChangePhoneMilliseconds", nonnegative: true),
+                RequiredInteger("receivedAtNanoseconds")
+            ],
+            issues);
+        if (payload.TryGetProperty("path", out var path) && path.ValueKind == JsonValueKind.String &&
+            !System.Text.RegularExpressions.Regex.IsMatch(path.GetString()!, "^screenshots/android/[0-9]{10}[.]png$"))
+        {
+            AddError(
+                issues,
+                "android-screenshot-path",
+                "#/payload/path",
+                "A phone screenshot is a PNG file named by its number under screenshots/android.");
+        }
+
+        if (payload.TryGetProperty("sha256", out var sha) && sha.ValueKind == JsonValueKind.String &&
+            !System.Text.RegularExpressions.Regex.IsMatch(sha.GetString()!, "^[0-9a-f]{64}$"))
+        {
+            AddError(
+                issues,
+                "android-screenshot-hash",
+                "#/payload/sha256",
+                "A phone screenshot's hash is SHA-256 in lowercase hexadecimal.");
         }
     }
 

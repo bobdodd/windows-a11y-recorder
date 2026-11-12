@@ -30,6 +30,9 @@ public sealed record ReceivedAccessibilityEvent(
 /// <summary>A snapshot's line, still to be read, and the session time the recorder read it.</summary>
 public sealed record ReceivedAccessibilityTree(string Line, long ReceivedAt);
 
+/// <summary>A screenshot's line, still to be read, and the session time the recorder read it.</summary>
+public sealed record ReceivedScreenshot(string Line, long ReceivedAt);
+
 /// <summary>A notice that a setting was written, and the session time the recorder read it.</summary>
 public sealed record ReceivedSettingChange(CompanionSettingChanged Change, long ReceivedAt);
 
@@ -55,6 +58,8 @@ public sealed class CompanionConnection : IAsyncDisposable
     private readonly Channel<ReceivedAccessibilityEvent> _events = Channel.CreateUnbounded<ReceivedAccessibilityEvent>(
         new UnboundedChannelOptions { SingleReader = true });
     private readonly Channel<ReceivedAccessibilityTree> _trees = Channel.CreateUnbounded<ReceivedAccessibilityTree>(
+        new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<ReceivedScreenshot> _screenshots = Channel.CreateUnbounded<ReceivedScreenshot>(
         new UnboundedChannelOptions { SingleReader = true });
     private readonly Channel<ReceivedSettingChange> _settings = Channel.CreateUnbounded<ReceivedSettingChange>(
         new UnboundedChannelOptions { SingleReader = true });
@@ -93,6 +98,12 @@ public sealed class CompanionConnection : IAsyncDisposable
     /// asked for with <see cref="RequestAccessibilityTreesAsync"/>; completes when the connection ends.
     /// </summary>
     public ChannelReader<ReceivedAccessibilityTree> AccessibilityTrees => _trees.Reader;
+
+    /// <summary>
+    /// Screenshots and refusals, in the order they arrived, once asked for
+    /// with <see cref="RequestScreenshotsAsync"/>; completes when the connection ends.
+    /// </summary>
+    public ChannelReader<ReceivedScreenshot> Screenshots => _screenshots.Reader;
 
     /// <summary>
     /// Notices that a setting was written, in the order they arrived, once
@@ -253,6 +264,13 @@ public sealed class CompanionConnection : IAsyncDisposable
         SendAsync(CompanionProtocol.AccessibilityTreesRequest, cancellation);
 
     /// <summary>
+    /// Asks the app for a screenshot now and one each time a window
+    /// settles; they come on <see cref="Screenshots"/>.
+    /// </summary>
+    public Task RequestScreenshotsAsync(CancellationToken cancellation) =>
+        SendAsync(CompanionProtocol.ScreenshotsRequest, cancellation);
+
+    /// <summary>
     /// Asks the app to say each time one of the settings is written; the
     /// notices come on <see cref="SettingChanges"/>.
     /// </summary>
@@ -327,6 +345,9 @@ public sealed class CompanionConnection : IAsyncDisposable
                     case CompanionAccessibilityTreeLine tree:
                         _trees.Writer.TryWrite(new ReceivedAccessibilityTree(tree.Line, at));
                         break;
+                    case CompanionScreenshotLine screenshot:
+                        _screenshots.Writer.TryWrite(new ReceivedScreenshot(screenshot.Line, at));
+                        break;
                     case CompanionSettingChanged setting:
                         _settings.Writer.TryWrite(new ReceivedSettingChange(setting, at));
                         break;
@@ -350,6 +371,7 @@ public sealed class CompanionConnection : IAsyncDisposable
             _volumes.Writer.TryComplete();
             _events.Writer.TryComplete();
             _trees.Writer.TryComplete();
+            _screenshots.Writer.TryComplete();
             _settings.Writer.TryComplete();
             foreach (var waiting in _pending.Values)
             {
@@ -386,6 +408,7 @@ public sealed class CompanionConnection : IAsyncDisposable
         _volumes.Writer.TryComplete();
         _events.Writer.TryComplete();
         _trees.Writer.TryComplete();
+        _screenshots.Writer.TryComplete();
         _settings.Writer.TryComplete();
         _reader.Dispose();
         _closing.Dispose();

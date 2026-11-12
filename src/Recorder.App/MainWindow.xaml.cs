@@ -54,6 +54,7 @@ public partial class MainWindow : Window
         "system.preferences",
         "graphics.desktop.frames",
         Recorder.Contracts.AndroidFrameRecords.FramesChannel,
+        Recorder.Contracts.AndroidScreenshotRecords.Channel,
         "graphics.magnifier",
         "browser.preferences",
         "system.assistive-technology",
@@ -335,7 +336,9 @@ public partial class MainWindow : Window
     // device collector reads the display density at the start and the
     // stop, and the version of each app the tree collector saw at the stop
     // (android-checks.md, step 2); it comes before the tree collector, and
-    // so stops after it.
+    // so stops after it. The screenshot collector asks the companion app for
+    // a screenshot at the start and each time a window settles, and writes
+    // each as a PNG (android-checks.md, step 4a).
     private Recorder.Contracts.ICaptureCollector[] AndroidCollectors(string serial)
     {
         var adb = new AdbProcess(AndroidTools.Adb(AndroidTools.DataFolder));
@@ -357,6 +360,7 @@ public partial class MainWindow : Window
             new AndroidAccessibilityCollector(serial, companion, companion),
             new AndroidDeviceCollector(adb, serial, trees),
             trees,
+            new AndroidScreenshotCollector(serial, companion, companion),
             new AndroidSettingsCollector(adb, serial, companion, companion),
             new Recorder.Collectors.Audio.AudioCollector(new Recorder.Collectors.Audio.AudioCaptureOptions(true, false))
         ];
@@ -1584,6 +1588,11 @@ public partial class MainWindow : Window
         AddVisibleChannel(
             FilterFramesCheckBox,
             Recorder.Contracts.AndroidFrameRecords.FramesChannel,
+            visibleChannels);
+        // The phone's screenshots go with its frames (android-checks.md, step 4a).
+        AddVisibleChannel(
+            FilterFramesCheckBox,
+            Recorder.Contracts.AndroidScreenshotRecords.Channel,
             visibleChannels);
         AddVisibleChannel(FilterMicrophoneCheckBox, "audio.microphone", visibleChannels);
         AddVisibleChannel(FilterSystemAudioCheckBox, "audio.system", visibleChannels);

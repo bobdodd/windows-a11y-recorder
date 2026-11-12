@@ -32,6 +32,21 @@ public interface IPhoneAccessibilityTrees
 }
 
 /// <summary>
+/// Screenshots of the phone's display, through the companion app's
+/// connection (android-checks.md, step 4a).
+/// </summary>
+public interface IPhoneScreenshots
+{
+    /// <summary>
+    /// Asks the companion app for a screenshot now and one each time a
+    /// window settles. The screenshots and refusals come in the order they
+    /// arrived, and the reader completes when the connection ends. Null
+    /// when there is no connection to ask.
+    /// </summary>
+    Task<ChannelReader<ReceivedScreenshot>?> RequestScreenshotsAsync(CancellationToken cancellation);
+}
+
+/// <summary>
 /// Notices that a phone setting was written, through the companion app's
 /// connection (android-implementation-plan.md, slice 8, step 8a).
 /// </summary>

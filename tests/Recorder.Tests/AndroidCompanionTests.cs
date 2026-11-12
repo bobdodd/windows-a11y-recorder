@@ -200,12 +200,12 @@ public sealed class AndroidCompanionTests
     [Fact]
     public async Task Connection_OtherProtocol_IsRefused()
     {
-        // The companion app from before slice 8, step 8a.
-        await using var app = new FakeApp(greeting: FakeApp.Hello(protocol: 4));
+        // The companion app from before android-checks.md, step 4a.
+        await using var app = new FakeApp(greeting: FakeApp.Hello(protocol: 5));
 
         var exception = await Assert.ThrowsAsync<CompanionUnavailableException>(() => app.ConnectAsync());
 
-        Assert.Contains("speaks protocol 4; this recorder speaks 5", exception.Message);
+        Assert.Contains("speaks protocol 5; this recorder speaks 6", exception.Message);
     }
 
     [Fact]

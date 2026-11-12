@@ -818,6 +818,11 @@ files unless it says otherwise.
    Non-text Contrast, level AA: 3:1 for the parts of controls needed to
    identify them and their states, and for parts of graphics needed to
    understand them, https://www.w3.org/TR/WCAG22/#non-text-contrast).
+5. **OCR is used as well as the text the app gives, and every finding
+   says when it was.** A finding whose text was found or placed by OCR
+   says so, as does one whose text the app gave but whose place on the
+   screen OCR found; a finding from the app's text and bounds alone
+   says nothing about OCR.
 
 ### Step 4: the design
 
@@ -888,6 +893,54 @@ Build order: 4a, the companion's screenshots and their storage; 4b, the
 colour measurement and the OCR matching, run on test 16's recording and
 screenshots against the measurement above; 4c, the text contrast check
 with the setting and its findings; then non-text contrast.
+
+### As built: step 4a, the phone's screenshots
+
+- **The companion app** (`Screenshots.java`, protocol 6) declares
+  `canTakeScreenshot` and, for a connection that sends a "screenshots"
+  request, takes a screenshot at once and another each time a window has
+  had no change for half a second. A change is a window change, a
+  content change or a scroll, counted against the window it came from,
+  so a status bar clock does not hold up the app's window. Windows that
+  settle while one is being taken get another as soon as it ends. Calls
+  are kept at least 350 ms apart, above Android's 333 ms, and one refused
+  as too soon is taken again; any other refusal is sent with Android's
+  code. The screenshot is copied out of Android's hardware buffer,
+  converted to sRGB if Android gave another colour space (it says which
+  it gave), written as PNG on its own thread and sent from another, so
+  the events and the other messages do not wait behind it. The PNG goes
+  in the line as base64, put in by hand, as Android's `org.json` writes
+  each "/" as "\/". Nothing is kept on the phone.
+- **The time.** Android's time for a screenshot,
+  `ScreenshotResult.getTimestamp()`, is `SystemClock.uptimeMillis()`
+  (checked in AOSP's `AccessibilityService.java`), the same clock as the
+  companion's `System.nanoTime()` (inference, as for the events' times,
+  which the recorder already places this way); the companion also sends
+  its own times for asking, for Android's answer and for the PNG. The
+  recorder uses Android's time when it falls within the call, to the
+  millisecond, and otherwise the middle of the call, and the record says
+  which.
+- **The recorder** has a new collector, `android.screenshots`, with its
+  line under "Collector status". It writes each screenshot as
+  `screenshots/android/NNNNNNNNNN.png`, numbered from 1, checks that the
+  PNG's header has the size the companion gave, gives its SHA-256 to the
+  manifest, and records it on `graphics.android.screenshots`
+  (`android-screenshot`), with refusals (`android-screenshot-refused`,
+  with Android's code in words) and what could not be read or was
+  missing. The records are on the player's Frames lane and filter. A
+  recording made before this, or with an older companion app, has none,
+  and the checks use the video as decided. No database table was added:
+  a recording with a recording file does not fill the evidence tables,
+  as for the tree snapshots.
+- **Checked before the Pixel tests:** the solution builds with no
+  warnings, the companion app compiles with warnings as errors and
+  converts to Android byte code, and the tests pass, 2,309 of them, with
+  the 10 that need Windows failing as before. The new tests cover the
+  request, reading a screenshot and a refusal, a PNG of the wrong size,
+  the placing by Android's time and by the call, a missing one, no phone
+  clock, no companion connection, and the connection ending. None of
+  that shows Android taking them on the Pixel; tests 17 and 18 of the
+  validation plan do.
 
 ## Decisions on the open questions (2026-11-11)
 

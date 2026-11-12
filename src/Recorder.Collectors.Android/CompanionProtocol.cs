@@ -18,9 +18,10 @@ public static class CompanionProtocol
     /// 2 from slice 4, step 4c, which added the Accessibility volume
     /// request; 3 from slice 7, step 7a, which added accessibility events;
     /// 4 from step 7b, which added snapshots of the accessibility tree; 5
-    /// from slice 8, step 8a, which added notices of settings changes.
+    /// from slice 8, step 8a, which added notices of settings changes; 6
+    /// from android-checks.md, step 4a, which added screenshots.
     /// </summary>
-    public const int Version = 5;
+    public const int Version = 6;
 
     /// <summary>The companion app's socket, in Linux's abstract namespace.</summary>
     public const string SocketName = "a11yrecorder_companion";
@@ -59,6 +60,14 @@ public static class CompanionProtocol
     /// "accessibility-tree" line.
     /// </summary>
     public const string AccessibilityTreesRequest = "{\"type\":\"accessibility-trees\"}\n";
+
+    /// <summary>
+    /// Asks the app for a screenshot of the display now, and another each
+    /// time a window has had no change for half a second, each as a
+    /// "screenshot" line, or a "screenshot-failed" line when Android
+    /// refuses one.
+    /// </summary>
+    public const string ScreenshotsRequest = "{\"type\":\"screenshots\"}\n";
 
     /// <summary>
     /// Asks the app to tell this connection, from now on, each time one of
@@ -141,6 +150,9 @@ public static class CompanionProtocol
                 // a snapshot can be large, and the clock replies behind it
                 // are timed as they are read.
                 "accessibility-tree" => new CompanionAccessibilityTreeLine(line),
+                // Read later, off the connection's reading, by
+                // ReadScreenshot, as for a snapshot: a screenshot is large.
+                "screenshot" or "screenshot-failed" => new CompanionScreenshotLine(line),
                 "setting-changed" => new CompanionSettingChanged(
                     String(root, "namespace"),
                     String(root, "name"),
@@ -181,6 +193,57 @@ public static class CompanionProtocol
                 : (null, "the snapshot is empty");
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException or InvalidOperationException)
+        {
+            return (null, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Reads a screenshot's line: a screenshot, with its PNG, or a refusal.
+    /// One that cannot be read is told, not thrown, as for an event.
+    /// </summary>
+    public static (CompanionScreenshotMessage? Message, string? Problem) ReadScreenshot(string line)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return (null, "the line is not a JSON object");
+            }
+
+            var index = Long(root, "index");
+            var reason = String(root, "reason");
+            var requested = Long(root, "requested");
+            if (String(root, "type") == "screenshot-failed")
+            {
+                return (new CompanionScreenshotRefusal(index, reason, requested, Int(root, "code"), Long(root, "failed")), null);
+            }
+
+            var png = Member(root, "png");
+            if (png.ValueKind != JsonValueKind.String || !png.TryGetBytesFromBase64(out var bytes) || bytes.Length == 0)
+            {
+                return (null, "its PNG is not base64");
+            }
+
+            var lastChange = Long(root, "lastChangeMillis");
+            return (new CompanionScreenshot(
+                index,
+                reason,
+                requested,
+                Long(root, "timestampMillis"),
+                Long(root, "captured"),
+                Long(root, "encoded"),
+                lastChange < 0 ? null : lastChange,
+                Int(root, "width"),
+                Int(root, "height"),
+                String(root, "colourSpace"),
+                Bool(root, "converted"),
+                bytes), null);
+        }
+        catch (Exception ex) when (ex is JsonException or FormatException)
         {
             return (null, ex.Message);
         }
@@ -310,6 +373,49 @@ public sealed record CompanionAccessibilityEvent(AndroidAccessibilityEvent? Even
 /// <see cref="CompanionProtocol.ReadTree"/>.
 /// </summary>
 public sealed record CompanionAccessibilityTreeLine(string Line) : CompanionMessage;
+
+/// <summary>
+/// A screenshot or a refusal, sent to a connection that asked for them
+/// (android-checks.md, step 4a), as the line the app sent; read it with
+/// <see cref="CompanionProtocol.ReadScreenshot"/>.
+/// </summary>
+public sealed record CompanionScreenshotLine(string Line) : CompanionMessage;
+
+/// <summary>A screenshot or a refusal, as read from its line.</summary>
+/// <param name="Index">The app's count of screenshots and refusals on the connection, from 1.</param>
+/// <param name="Reason">"requested" or "settled".</param>
+/// <param name="Requested">The phone's CLOCK_MONOTONIC when the app asked, in nanoseconds.</param>
+public abstract record CompanionScreenshotMessage(long Index, string Reason, long Requested);
+
+/// <summary>A screenshot, with its PNG, sRGB.</summary>
+/// <param name="TimestampMillis">Android's time for it, SystemClock.uptimeMillis().</param>
+/// <param name="Captured">The phone's CLOCK_MONOTONIC when Android answered, in nanoseconds.</param>
+/// <param name="Encoded">The phone's CLOCK_MONOTONIC when the PNG was written, in nanoseconds.</param>
+/// <param name="LastChangeMillis">The last change the app saw before it asked, SystemClock.uptimeMillis(); null before any.</param>
+/// <param name="ColourSpace">The colour space Android gave it.</param>
+/// <param name="Converted">True when the app converted it to sRGB.</param>
+public sealed record CompanionScreenshot(
+    long Index,
+    string Reason,
+    long Requested,
+    long TimestampMillis,
+    long Captured,
+    long Encoded,
+    long? LastChangeMillis,
+    int Width,
+    int Height,
+    string ColourSpace,
+    bool Converted,
+    byte[] Png) : CompanionScreenshotMessage(Index, Reason, Requested);
+
+/// <summary>A screenshot Android refused, with its code (AccessibilityService, ERROR_TAKE_SCREENSHOT_*).</summary>
+/// <param name="Failed">The phone's CLOCK_MONOTONIC when Android refused, in nanoseconds.</param>
+public sealed record CompanionScreenshotRefusal(
+    long Index,
+    string Reason,
+    long Requested,
+    int Code,
+    long Failed) : CompanionScreenshotMessage(Index, Reason, Requested);
 
 /// <summary>
 /// A setting the connection asked about was written (slice 8, step 8a),

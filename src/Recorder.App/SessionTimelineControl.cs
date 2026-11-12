@@ -1126,8 +1126,10 @@ public sealed class SessionTimelineControl : FrameworkElement
             Recorder.Contracts.AndroidAccessibilityRecords.TreeChannel => 2,
         "window.foreground" => 3,
         // The phone's frames share the desktop frames' lane: a recording
-        // has one or the other (Android slice 3c).
-        "graphics.desktop.frames" or Recorder.Contracts.AndroidFrameRecords.FramesChannel => 4,
+        // has one or the other (Android slice 3c). So do its screenshots
+        // (android-checks.md, step 4a).
+        "graphics.desktop.frames" or Recorder.Contracts.AndroidFrameRecords.FramesChannel or
+            Recorder.Contracts.AndroidScreenshotRecords.Channel => 4,
         "audio.microphone" => 5,
         // The screen reader's sound shares the system sound's lane, and so
         // does the phone's sound: a recording of a phone has no system

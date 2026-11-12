@@ -9,7 +9,9 @@
   - isAccessibilityTool, as the app exists to support accessibility work
     (decided 2026-11-07);
   - no request for explore by touch, so turning the service on does not
-    change how the phone responds to touch.
+    change how the phone responds to touch;
+  - canTakeScreenshot, so the service can take screenshots of the display
+    for measuring colours (docs/architecture/android-checks.md, step 4a).
 
   The service performs no actions.
 -->
@@ -20,4 +22,5 @@
     android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds|flagIncludeNotImportantViews"
     android:notificationTimeout="0"
     android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
     android:isAccessibilityTool="true" />

@@ -1,4 +1,4 @@
-# Validation plan: Android checks, steps 1 to 4 (screens and visits; density and versions; checks of the tree; measuring the video)
+# Validation plan: Android checks, steps 1 to 4 (screens and visits; density and versions; checks of the tree; measuring the video; the phone's screenshots)
 
 These tests are step 1 of [Android checks](../architecture/android-checks.md),
 "Build order": the player dividing a phone recording into apps, screens,
@@ -578,3 +578,87 @@ Result, 2026-11-12: test 16 passed; 20 screenshots, 565 to 989 ms each
 (screenshot f13). The recording is
 `20261112-154851-32c7b61a5552453bbf5febffcca978c7`; what the comparison
 found is in android-checks.md, "Step 4: what the measurement found".
+
+## Step 4a: the phone's own screenshots
+
+These tests are step 4a of [Android checks](../architecture/android-checks.md),
+"As built: step 4a, the phone's screenshots": the companion app takes a
+screenshot of the phone's screen as the recording starts and each time a
+window has had no change for half a second, and the recorder saves each
+as a PNG beside the frames. The companion app now speaks protocol 6, so
+it has to be installed again.
+
+What was checked before these tests, in the Linux build environment:
+the solution builds with no warnings, the companion app compiles with
+warnings as errors, and the tests pass, 2,309 of them, with the 10 that
+need Windows failing as before. None of that shows Android taking the
+screenshots on the Pixel. Tests 17 and 18 do.
+
+## Test 17: build and install the fifth build (development PC)
+
+1. Close the recorder. Open PowerShell and run:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   ```
+
+2. Run the newest installer in `artifacts\installer\output` and go
+   through its pages. On the last page, uncheck "Start the recorder and
+   set up the analysis models", then choose Finish.
+3. Connect the Pixel by USB, unlocked. Start the recorder from the Start
+   menu, and in "Recording target" choose "Android device".
+4. The panel offers "Install companion app". Choose it, and wait until
+   the companion line stops changing.
+5. Take a screenshot of the panel.
+
+**On screen:** the build ends with `INSTALLER BUILT`. In step 5 the
+companion line reads "Companion app: installed, on, and answering
+(version 1.1.0, version code" with a number, and ends "protocol 6)."
+"protocol 5" is a failure. If the line says the service is off instead,
+that is a result too: Android may ask for the service to be turned on
+again because its configuration changed. Send the screenshot either way.
+
+## Test 18: screenshots while recording
+
+Before the test, open Nova SleepCare on the phone, on its Home screen,
+with TalkBack off, and leave the recorder open with "Android device"
+chosen, as test 17 left it.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. On the phone, tap LEARN and wait 5 seconds, then tap DIARY and wait
+   5 seconds.
+3. Take a screenshot of the recorder window with the line starting
+   "android.screenshots" under "Collector status" in view.
+4. Choose "Stop recording", and wait until the recording has opened in
+   the player.
+5. Open PowerShell and run the script below, then take a screenshot of
+   the PowerShell window.
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+Add-Type -AssemblyName System.Drawing
+$root = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "Windows A11y Recorder"
+$latest = Get-ChildItem -LiteralPath $root -Directory | Sort-Object Name | Select-Object -Last 1
+$folder = Join-Path $latest.FullName "screenshots\android"
+$shots = @(Get-ChildItem -LiteralPath $folder -Filter "*.png" | Sort-Object Name)
+"Recording: $($latest.Name)"
+"Screenshots: $($shots.Count)"
+foreach ($shot in $shots) {
+    $image = [System.Drawing.Image]::FromFile($shot.FullName)
+    "$($shot.Name): $($image.Width) x $($image.Height), $([math]::Round($shot.Length / 1KB)) KB"
+    $image.Dispose()
+}
+```
+
+**On screen:** in step 3 the line reads "android.screenshots: Running,
+Healthy. Phone screenshots:" followed by a number of at least 3, then
+"(1 at the start," and, further on, "the phone took a median", a number,
+"ms from asking to the PNG". A line with "refused by Android" or "could
+not be read" is a failure; send it as it is. In step 5 PowerShell shows
+the recording's name, "Screenshots:" with a number of at least 3, and a
+line for each file, from "0000000001.png", each "1080 x 2404" and a
+number of KB. Red error lines are a failure. Send both screenshots; the
+screenshots are then read from the PC for step 4b.

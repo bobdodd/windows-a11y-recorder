@@ -28,9 +28,11 @@ namespace Recorder.Collectors.Android;
 /// tree collector calls <see cref="RequestAccessibilityTreesAsync"/>.
 /// From slice 8, step 8a, it asks for notices of settings changes when the
 /// settings collector calls <see cref="RequestSettingChangesAsync"/>.
+/// From android-checks.md, step 4a, it asks for screenshots when the
+/// screenshot collector calls <see cref="RequestScreenshotsAsync"/>.
 /// </summary>
 public sealed class AndroidCompanionCollector :
-    ICaptureCollector, IPhoneClock, IPhoneDisplay, IPhoneAccessibilityEvents, IPhoneAccessibilityTrees, IPhoneSettingChanges
+    ICaptureCollector, IPhoneClock, IPhoneDisplay, IPhoneAccessibilityEvents, IPhoneAccessibilityTrees, IPhoneScreenshots, IPhoneSettingChanges
 {
     public const string Type = "android.companion";
 
@@ -490,6 +492,26 @@ public sealed class AndroidCompanionCollector :
         }
 
         return connection.AccessibilityTrees;
+    }
+
+    public async Task<ChannelReader<ReceivedScreenshot>?> RequestScreenshotsAsync(CancellationToken cancellation)
+    {
+        if (_connection is not { } connection || connection.Closed.IsCompleted || _stopping)
+        {
+            return null;
+        }
+
+        try
+        {
+            await connection.RequestScreenshotsAsync(cancellation).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is CompanionUnavailableException or ObjectDisposedException)
+        {
+            // WatchAsync records the connection's end.
+            return null;
+        }
+
+        return connection.Screenshots;
     }
 
     public async Task<ChannelReader<ReceivedSettingChange>?> RequestSettingChangesAsync(

@@ -16,7 +16,9 @@ import org.json.JSONObject;
  * asked for them (see {@link AccessibilityEventJson}); with none asking,
  * the events are not read. From step 7b, it takes snapshots of the
  * accessibility tree for each connection that asked for them (see
- * {@link AccessibilityTrees}).
+ * {@link AccessibilityTrees}). From step 4a of
+ * docs/architecture/android-checks.md, it takes screenshots of the display
+ * for each connection that asked for them (see {@link Screenshots}).
  *
  * The service performs no actions, has no internet permission and stores
  * nothing on the phone.
@@ -26,6 +28,7 @@ public final class RecorderAccessibilityService extends AccessibilityService {
 
     private RecorderLink link;
     private AccessibilityTrees trees;
+    private Screenshots screenshots;
 
     @Override
     protected void onServiceConnected() {
@@ -34,6 +37,8 @@ public final class RecorderAccessibilityService extends AccessibilityService {
             link = new RecorderLink(this);
             trees = new AccessibilityTrees(this, link);
             link.setTreeRequests(trees::requested);
+            screenshots = new Screenshots(this, link);
+            link.setScreenshotRequests(screenshots::requested);
             link.start();
         }
     }
@@ -49,6 +54,10 @@ public final class RecorderAccessibilityService extends AccessibilityService {
         AccessibilityTrees currentTrees = trees;
         if (currentTrees != null && current.wantsTrees()) {
             currentTrees.eventArrived(event);
+        }
+        Screenshots currentScreenshots = screenshots;
+        if (currentScreenshots != null && current.wantsScreenshots()) {
+            currentScreenshots.eventArrived(event);
         }
         if (!current.wantsEvents()) {
             return;
@@ -76,6 +85,10 @@ public final class RecorderAccessibilityService extends AccessibilityService {
         if (trees != null) {
             trees.stop();
             trees = null;
+        }
+        if (screenshots != null) {
+            screenshots.stop();
+            screenshots = null;
         }
         if (link != null) {
             link.stop();
