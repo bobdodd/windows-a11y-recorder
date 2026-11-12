@@ -195,13 +195,20 @@ public partial class MainWindow
             return;
         }
 
-        if (_shownFinding is { Check: PhoneCheckNames.TextContrastAa or PhoneCheckNames.TextContrastAaa })
+        var cleared = _shownFinding is { Check: PhoneCheckNames.TextContrastAa or PhoneCheckNames.TextContrastAaa };
+        if (cleared)
         {
             _shownFinding = null;
         }
 
         JudgeTextContrast();
         ShowPhoneScreenRows();
+        if (cleared)
+        {
+            // The finding's outline goes with it, and its time buttons.
+            ShowFindingButtons();
+            DisplayTouchesAt(_playbackPositionNanoseconds);
+        }
     }
 
     private void ShowPhoneScreenRows()

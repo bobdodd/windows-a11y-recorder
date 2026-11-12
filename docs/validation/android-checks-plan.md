@@ -818,6 +818,15 @@ screenshots either way.
   with the window moved, the cyan outline surrounded "Update your goals"
   only. Seen at that size, the outline's thickness covers the line
   above, "Sleep Goals".
+- Test 22, step 1: choosing "AAA (WCAG 1.4.6)" gave "Text contrast at
+  AAA (WCAG 1.4.6): 11 findings (10 errors, 1 warning), from 110 lines
+  of text measured, 98 passed, on 5 settled snapshots (0 from the
+  phone's screenshots, 5 from the video), in 1.3 seconds.", and the line
+  no longer ended with "Showing time". Fault found: the cyan outline of
+  the cleared finding stayed on the phone's picture, as the picture was
+  not drawn again when the level changed. Fixed: changing the level now
+  draws the picture again and greys out the time buttons when it clears
+  a contrast finding; to be checked in the next build.
 
 ## Test 22: the AAA level, kept after a restart
 
