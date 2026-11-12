@@ -137,6 +137,14 @@ NVDA had to announce, added on 2026-10-12 (screen-reader-activity.md,
   the player's dark panels and styles, and keeps its place for the rest of
   the session. Closing it puts the tab back in its place in the panel and
   selects it. The windows close with the player.
+- A tab's window stays in front of the player's window: the player owns
+  it, so clicking the player does not hide it behind, and it is
+  minimised and restored with the player. Other programs' windows can
+  still come in front of both; it is not "always on top" of everything.
+  The owner, 2026-11-12: "The pop-out dialogs checks, tree etc need to be
+  permanently on top of the main window, they keep getting lost behind".
+  Until then each was a window of its own, which a click on the player
+  put behind it.
 - With every tab torn out, the panel says "Each of these tabs is in its
   own window. Close a window to put its tab back here."
 - The player's keyboard commands, such as playback and zoom, work in the

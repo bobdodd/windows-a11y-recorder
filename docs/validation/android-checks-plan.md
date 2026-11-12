@@ -469,4 +469,29 @@ Run on the development PC with commit 5006d0c.
   and a gap from the logo, and the tree's row "View with no text", in
   the window "Nova SleepCare" with items taken at 00:00:14.354, had its
   dark border (owner: "Both are much clearer now").
+- Test 13 (commit 57a45be): passed. The line included "Checks of the
+  tree: 3 findings (3 not run), from 6 settled snapshots, in 0.0
+  seconds"; the times were 00:00:02.933, 00:00:12.887 and 00:00:20.419
+  with "Showing time 1 of 3", "2 of 3" and "3 of 3"; the outline ran
+  the screen's width round the "Outline text" row at the bottom of the
+  list; at 3 of 3 "Next time" was greyed out and "Previous time" was
+  not. The tree selected the row "LinearLayout containing "Outline
+  text"" with its dark border. At 00:00:20.419 the phone's picture was
+  mid-way through the change of Display size, two layouts blended.
+
+## Test 14: tab windows stay in front of the player
+
+Built with the commit after 2a01d5e. Any recording can be open.
+
+1. Tear out the "Checks" tab with the button beside its name, and move
+   its window so it overlaps the player's window.
+2. Click on the player's window, on the empty space beside "Timeline
+   zoom".
+3. Take a screenshot of the whole screen.
+4. Minimise the player's window, then restore it from the taskbar, and
+   take another screenshot.
+
+**On screen:** in step 3 the Checks window is still in front of the
+player's window. In step 4 the Checks window went down with the player
+and came back with it, in front of it.
 

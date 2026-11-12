@@ -176,7 +176,13 @@ public partial class MainWindow
             Top = bounds.Top,
             Width = bounds.Width,
             Height = bounds.Height,
-            ShowInTaskbar = true
+            ShowInTaskbar = true,
+
+            // Owned by the player, so it stays in front of the player's
+            // window, and is minimised and restored with it (owner,
+            // 2026-11-12: "they keep getting lost behind"). Other
+            // programs' windows can still come in front of both.
+            Owner = this
         };
 
         // The player's styles and brushes, so the content keeps its look
