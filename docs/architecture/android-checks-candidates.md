@@ -131,7 +131,8 @@ tree does not give.
   gesture, with no double tap, touch or key, is an error; and within 1.5
   seconds of a setting changing (typing, checking, choosing or moving a
   slider), with no further touch or key, is a warning (see "Step 14:
-  changes of context" in `android-checks.md`).
+  changes of context" in `android-checks.md`); checked on the PC (test
+  50).
 - **1.3.4 Orientation:** the display's rotation is recorded, so if a
   test turns the phone and the app's window does not turn, the app is
   locked. WCAG2ICT applies it except to software never shown on

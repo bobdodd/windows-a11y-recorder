@@ -46,7 +46,8 @@ timing (WCAG 2.2.1 and 2.2.2), is built to the owner's decisions (see
 "Step 13: timing"), and was checked on the development PC on
 2026-11-13 (tests 44 and 45 passed). Step 14, changes of context (WCAG
 3.2.1 and 3.2.2), is built to the owner's decisions (see "Step 14:
-changes of context"); it is not yet checked on the PC. The owner's
+changes of context"), and was checked on the development PC on
+2026-11-13 (test 50 passed, on test 48's recording, after a fix). The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -468,8 +469,8 @@ the recording is opened and nothing is kept.
    phone's settings and the phone's video (see "Step 13: timing").
    Built, and checked on the PC.
 14. **Changes of context** (WCAG 3.2.1 and 3.2.2), from the tree,
-   touches, keys and events (see "Step 14: changes of context"). Built;
-   not yet checked on the PC.
+   touches, keys and events (see "Step 14: changes of context"). Built,
+   and checked on the PC.
 
 ## As built: step 1
 
@@ -2697,7 +2698,9 @@ untitled, and not the Settings window under it, so the dialog was not a
 state of the visit, and the first build found no change of context. As
 built since, a window of an app's that appears and takes the focus is a
 change of context whether or not the window under it is listed, and
-the recording gives one warning.
+the recording gives one warning. On the PC (test 50) it is shown at
+00:00:09.203, the phone's screenshot showing the dialog, as a finding is
+shown at the first picture between the action and the change.
 
 ### As built
 

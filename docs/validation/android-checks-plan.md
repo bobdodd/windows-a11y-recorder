@@ -1893,5 +1893,32 @@ a tap changed its setting (it was not checked), and 0.23 seconds later,
 with no further touch or key, an untitled window appeared and took the
 focus, a change of context on input, which is allowed only when the
 user was told of it before using the item; look for such advice; seen
-once, at 00:00:08.983". Long rows wrap; there is no horizontal
+once, at" a time from 00:00:08.983 to 00:00:09.209 (the first picture
+between the tap and the dialog). Long rows wrap; there is no horizontal
 scrollbar. Send the screenshot.
+
+## Results of tests 49 and 50 (2026-11-13)
+
+Test 50 passed on the development PC with the build of e67814e, as
+recorded by the owner (with AA chosen; 3.2.1 and 3.2.2 are level A, so
+they run at both levels). The line under "Show current visit" included
+"Changes of context (WCAG 3.2.1 and 3.2.2), three checks: 1 finding (1
+warning); 0 focus moves by a key or a tap on a field, 0 TalkBack focus
+moves after a gesture or key, and 1 setting change (typing, checking,
+choosing or moving a slider); 1 change of context (a new screen or app,
+a window that took the focus, a pane, or the focus moving by itself)
+within 1.5 seconds of one, with nothing touched, pressed or clicked
+between." The row "Change of context on input (WCAG 3.2.2): 1 warning"
+was followed by "Warning: Switch described as "Shortcut settings", a tap
+changed its setting (it was not checked), and 0.23 seconds later, with
+no further touch or key, an untitled window appeared and took the
+focus, a change of context on input, which is allowed only when the
+user was told of it before using the item; look for such advice; seen
+once, at 00:00:09.203", with the phone's picture showing the "Quick
+Settings shortcut" dialog. The test as first written expected
+00:00:08.983, the tap's time; the player shows a finding at the first
+picture between the action and the change, the phone's screenshot of
+the dialog, so the test's text is corrected and the result is a pass.
+Long rows wrapped, with no horizontal scrollbar. Test 49's build is
+taken as passed, as the recorder ran it. Test 47's screenshot was not
+sent. The changes of context checks are checked on the PC.
