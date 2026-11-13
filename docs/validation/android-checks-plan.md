@@ -1294,3 +1294,23 @@ described as "Help & FAQ Get Support", 345.4 by 23 dp, too short; WCAG
 from 7 settled snapshots", and there is no row starting "Touch target
 under 44dp" below the Visit 6 row. Long rows wrap; there is no
 horizontal scrollbar. Send the three screenshots.
+
+## Results of tests 32 and 33 (2026-11-12)
+
+Passed on the development PC with the build of 4cacc70, as recorded by
+the owner. At AAA the line under "Show current visit" included "Audit
+level AAA: text contrast is held to WCAG 1.4.6, and targets to 44 by 44
+dp (WCAG 2.5.5) as well as 2.5.8; 2.5.5's exceptions (an equivalent
+target, a target in text, one sized by Android, an essential
+presentation) are not judged." and "Checks of the tree: 12 findings (10
+errors, 2 not run), from 7 settled snapshots"; below the Visit 6 row
+were "Touch target under 44dp (WCAG 2.5.5, AAA): 1 not run" and the row
+starting "Not run: Button described as "Help & FAQ Get Support", 345.4
+by 23 dp, too short; WCAG 2.5.5 needs 44 by 44 dp". At AA the line
+included "Audit level AA: text contrast is held to WCAG 1.4.3, and
+targets to 2.5.8." and "11 findings (10 errors, 1 not run)", with no
+44dp row under Visit 6. Text contrast gave 11 findings at AA and 12 at
+AAA, as in test 24. Long rows wrapped, with no horizontal scrollbar. The
+screenshots show "AA" chosen when the recording was first opened, where
+"AAA" was expected from the earlier setting; the owner recorded the test
+as passed. The audit level is checked on the PC.
