@@ -133,12 +133,15 @@ tree does not give.
   slider), with no further touch or key, is a warning (see "Step 14:
   changes of context" in `android-checks.md`); checked on the PC (test
   50).
-- **1.3.4 Orientation:** the display's rotation is recorded, so if a
-  test turns the phone and the app's window does not turn, the app is
-  locked. WCAG2ICT applies it except to software never shown on
-  hardware that is turned in typical use
-  ([WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/)). Needs a step in the
-  test procedure.
+- **1.3.4 Orientation:** built on 2026-11-13, to the owner's
+  decisions: the companion app's own sensor shows how the phone was
+  held (protocol 7), and a screen that did not turn with the phone, held
+  turned with Auto-rotate on for the time set in the Checks tab (2
+  seconds by default), is a warning (see "Step 15: orientation" in
+  `android-checks.md`). WCAG2ICT applies it except to software never
+  shown on hardware that is turned in typical use
+  ([WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/)). Recordings need a
+  step that turns the phone; not yet checked on the PC.
 - **1.3.2 Meaningful Sequence:** the screen reader's order against the
   order on the screen, top to bottom and left to right; layouts in
   columns would give false findings.

@@ -119,7 +119,11 @@ public sealed record PlaybackIndex
     // hardware keys (input.android.key) whole, for the change of context
     // checks of android-checks.md step 14 (PhoneInputTimeline); an older
     // index is derived again.
-    public const int CurrentVersion = 31;
+    // Version 32 keeps how the phone is held (android.orientation,
+    // phone-orientation) whole, for the orientation check of
+    // android-checks.md step 15 (PhoneOrientationTimeline); an older index
+    // is derived again.
+    public const int CurrentVersion = 32;
 
     public required int Version { get; init; }
 
@@ -325,7 +329,8 @@ public sealed class PlaybackIndexBuilder
             PhoneScreenTimeline.IsWindowStateRecord(channel, record.EventType, payload) ||
             PhoneAnnouncementTimeline.IsAnnouncementRecord(channel, record.EventType, payload) ||
             PhoneInputTimeline.IsInputRecord(channel, record.EventType, payload) ||
-            PhoneAccessibilityTimeline.IsDisplayRecord(channel, record.EventType))
+            PhoneAccessibilityTimeline.IsDisplayRecord(channel, record.EventType) ||
+            PhoneOrientationTimeline.IsOrientationRecord(channel, record.EventType))
         {
             Keep(eventKey, record);
             return;
@@ -509,7 +514,8 @@ public sealed class PlaybackIndexBuilder
              PhoneScreenTimeline.IsWindowStateRecord(record.Channel, record.EventType, record.Payload) ||
              PhoneAnnouncementTimeline.IsAnnouncementRecord(record.Channel, record.EventType, record.Payload) ||
              PhoneInputTimeline.IsInputRecord(record.Channel, record.EventType, record.Payload) ||
-             PhoneAccessibilityTimeline.IsDisplayRecord(record.Channel, record.EventType)) &&
+             PhoneAccessibilityTimeline.IsDisplayRecord(record.Channel, record.EventType) ||
+             PhoneOrientationTimeline.IsOrientationRecord(record.Channel, record.EventType)) &&
             record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()
                 : PhoneAccessibilityTimeline.IsTreeRecord(record.Channel, record.EventType)

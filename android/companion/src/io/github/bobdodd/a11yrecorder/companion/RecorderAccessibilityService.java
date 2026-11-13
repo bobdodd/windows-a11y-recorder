@@ -18,7 +18,9 @@ import org.json.JSONObject;
  * accessibility tree for each connection that asked for them (see
  * {@link AccessibilityTrees}). From step 4a of
  * docs/architecture/android-checks.md, it takes screenshots of the display
- * for each connection that asked for them (see {@link Screenshots}).
+ * for each connection that asked for them (see {@link Screenshots}). From
+ * step 15, it reads how the phone itself is held, from its accelerometer,
+ * for each connection that asked (see {@link PhoneOrientation}).
  *
  * The service performs no actions, has no internet permission and stores
  * nothing on the phone.
@@ -39,6 +41,8 @@ public final class RecorderAccessibilityService extends AccessibilityService {
             link.setTreeRequests(trees::requested);
             screenshots = new Screenshots(this, link);
             link.setScreenshotRequests(screenshots::requested);
+            RecorderLink started = link;
+            link.setOrientation(new PhoneOrientation(this, started::sendOrientation));
             link.start();
         }
     }

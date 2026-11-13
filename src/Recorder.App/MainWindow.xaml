@@ -397,7 +397,7 @@
                 <local:SelectableText Margin="0,8,0,0"
                            Foreground="{StaticResource MutedText}"
                            TextWrapping="Wrap"
-                           Text="A recording of the phone records the companion app's connection, the phone's clock, its display's rotation and size, and the phone's screen as a video stream and as a picture for each change, which the player shows and an MP4 export saves. It also records the phone's sound, shows its level while recording and plays it on this PC, and records this PC's microphone. When TalkBack is on, the companion app raises the phone's Accessibility volume to at least 80% as the recording starts and leaves it there. The player shows and plays the phone's sound as &quot;Phone sound&quot;, in the system sound's place, and an MP4 export saves it. It records every touch on the phone's screen and every hardware key, such as volume and power, with each finger's position in screen pixels. The player draws each finger on the phone's picture as a yellow circle, numbered when there is more than one, with its path, and shows the touches and keys as &quot;Touches&quot; and &quot;Phone keys&quot; in the mouse's and keyboard's places. It records every line TalkBack writes to the phone's log, and what TalkBack said, read from those lines, when TalkBack's log output level is Verbose. The player shows what TalkBack said as &quot;TalkBack said&quot; in the screen reader's place, with each utterance's text in a strip under the Screen reader lane, interrupted ones marked, and its words in the properties panel. It also records every accessibility event the phone sends to accessibility services, with the item each one came from, and snapshots of the phone's accessibility tree: every window's items as the recording starts and when a window changes, and a window's items again when its content changes. The player shows the events and the snapshots as &quot;Accessibility events&quot; in UI Automation's place, draws a yellow outline on the phone's picture around the item with accessibility focus, and shows the tree at the playhead in the Accessibility tree tab, with that item marked &quot;accessibility focus&quot;. It records the phone's accessibility settings, such as color inversion, magnification, font size and the services on, as the recording starts and stops and each time one changes, and the properties panel shows them at the playhead, in the Windows settings' place, with &quot;Phone settings&quot; as their filter. It reads the phone's display density as the recording starts and stops, and the version of each app it saw as the recording stops, and the Checks tab shows them. It saves a screenshot the companion app takes of the phone's screen as the recording starts and each time a window has had no change for half a second, for measuring colours without the video's compression." />
+                           Text="A recording of the phone records the companion app's connection, the phone's clock, its display's rotation and size, and the phone's screen as a video stream and as a picture for each change, which the player shows and an MP4 export saves. It also records the phone's sound, shows its level while recording and plays it on this PC, and records this PC's microphone. When TalkBack is on, the companion app raises the phone's Accessibility volume to at least 80% as the recording starts and leaves it there. The player shows and plays the phone's sound as &quot;Phone sound&quot;, in the system sound's place, and an MP4 export saves it. It records every touch on the phone's screen and every hardware key, such as volume and power, with each finger's position in screen pixels. The player draws each finger on the phone's picture as a yellow circle, numbered when there is more than one, with its path, and shows the touches and keys as &quot;Touches&quot; and &quot;Phone keys&quot; in the mouse's and keyboard's places. It records every line TalkBack writes to the phone's log, and what TalkBack said, read from those lines, when TalkBack's log output level is Verbose. The player shows what TalkBack said as &quot;TalkBack said&quot; in the screen reader's place, with each utterance's text in a strip under the Screen reader lane, interrupted ones marked, and its words in the properties panel. It also records every accessibility event the phone sends to accessibility services, with the item each one came from, and snapshots of the phone's accessibility tree: every window's items as the recording starts and when a window changes, and a window's items again when its content changes. The player shows the events and the snapshots as &quot;Accessibility events&quot; in UI Automation's place, draws a yellow outline on the phone's picture around the item with accessibility focus, and shows the tree at the playhead in the Accessibility tree tab, with that item marked &quot;accessibility focus&quot;. It records the phone's accessibility settings, such as color inversion, magnification, font size and the services on, as the recording starts and stops and each time one changes, and the properties panel shows them at the playhead, in the Windows settings' place, with &quot;Phone settings&quot; as their filter. It reads the phone's display density as the recording starts and stops, and the version of each app it saw as the recording stops, and the Checks tab shows them. It saves a screenshot the companion app takes of the phone's screen as the recording starts and each time a window has had no change for half a second, for measuring colours without the video's compression. It records how the phone itself is held, upright, sideways or flat, from the companion app's own sensor, for the orientation check." />
               </StackPanel>
             </GroupBox>
 
@@ -1618,6 +1618,30 @@
                                AutomationProperties.Name="Audit level: AAA"
                                AutomationProperties.HelpText="Checks to level AAA as well: text contrast to 1.4.6 in place of 1.4.3, and target size to 2.5.5, 44 by 44 dp."
                                Checked="AuditLevelRadioButton_Checked" />
+                </StackPanel>
+                <!-- How long the phone must be held turned before a screen
+                     that did not turn with it is a finding (WCAG 1.3.4,
+                     android-checks.md step 15, owner 2026-11-13: a
+                     setting); kept between runs, and changing it runs the
+                     tree's checks again. -->
+                <StackPanel Orientation="Horizontal"
+                            Margin="16,0,0,0">
+                  <Label x:Name="OrientationHoldLabel"
+                         VerticalAlignment="Center"
+                         Margin="0,0,8,0"
+                         Padding="0"
+                         Foreground="#CDCCCA"
+                         Target="{Binding ElementName=OrientationHoldComboBox}"
+                         Content="Phone turned for:" />
+                  <ComboBox x:Name="OrientationHoldComboBox"
+                            MinWidth="120"
+                            MinHeight="44"
+                            VerticalContentAlignment="Center"
+                            DisplayMemberPath="Text"
+                            SelectedValuePath="Seconds"
+                            AutomationProperties.Name="Phone turned for"
+                            AutomationProperties.HelpText="How long the phone must be held turned, with Auto-rotate on, before a screen that did not turn with it is an orientation finding (WCAG 1.3.4)."
+                            SelectionChanged="OrientationHoldComboBox_SelectionChanged" />
                 </StackPanel>
               </WrapPanel>
               <local:SelectableText x:Name="ChecksStatusTextBlock"

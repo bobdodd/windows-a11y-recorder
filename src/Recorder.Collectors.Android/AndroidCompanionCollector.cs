@@ -30,6 +30,9 @@ namespace Recorder.Collectors.Android;
 /// settings collector calls <see cref="RequestSettingChangesAsync"/>.
 /// From android-checks.md, step 4a, it asks for screenshots when the
 /// screenshot collector calls <see cref="RequestScreenshotsAsync"/>.
+/// From step 15, it asks how the phone itself is held, from its
+/// accelerometer, as soon as it connects, and records each answer on
+/// <see cref="AndroidCompanionRecords.OrientationChannel"/>.
 /// </summary>
 public sealed class AndroidCompanionCollector :
     ICaptureCollector, IPhoneClock, IPhoneDisplay, IPhoneAccessibilityEvents, IPhoneAccessibilityTrees, IPhoneScreenshots, IPhoneSettingChanges
@@ -61,6 +64,7 @@ public sealed class AndroidCompanionCollector :
     private CancellationTokenSource? _running;
     private Task? _sampling;
     private Task? _displays;
+    private Task? _orientations;
     private Task? _watching;
     private Task? _volumes;
     private Task? _volumeRequest;
@@ -68,6 +72,8 @@ public sealed class AndroidCompanionCollector :
     private ulong _companionSequence;
     private ulong _clockSequence;
     private ulong _displaySequence;
+    private ulong _orientationSequence;
+    private long _lastOrientationTime = long.MinValue;
     private ulong _lifecycleSequence;
     private long _lastDisplayTime = long.MinValue;
     private int _missedSamples;
@@ -100,7 +106,7 @@ public sealed class AndroidCompanionCollector :
             Type,
             nameof(AndroidCompanionCollector),
             typeof(AndroidCompanionCollector).Assembly.GetName().Version?.ToString() ?? "0.0.0",
-            [AndroidCompanionRecords.CompanionChannel, AndroidCompanionRecords.ClockChannel, AndroidCompanionRecords.DisplayChannel],
+            [AndroidCompanionRecords.CompanionChannel, AndroidCompanionRecords.ClockChannel, AndroidCompanionRecords.DisplayChannel, AndroidCompanionRecords.OrientationChannel],
             "adb-forward-localabstract");
     }
 
@@ -239,6 +245,7 @@ public sealed class AndroidCompanionCollector :
         var connection = _connection;
         _sampling = Task.Run(() => SampleAsync(connection, token), CancellationToken.None);
         _displays = Task.Run(() => DisplaysAsync(connection, token), CancellationToken.None);
+        _orientations = Task.Run(() => OrientationsAsync(connection), CancellationToken.None);
         _watching = Task.Run(() => WatchAsync(connection), CancellationToken.None);
         _volumes = Task.Run(() => VolumesAsync(connection), CancellationToken.None);
         return CollectorTransitionResult.Success(LifecycleState);
@@ -278,6 +285,7 @@ public sealed class AndroidCompanionCollector :
 
         await WaitQuietlyAsync(_volumeRequest).ConfigureAwait(false);
         await WaitQuietlyAsync(_displays).ConfigureAwait(false);
+        await WaitQuietlyAsync(_orientations).ConfigureAwait(false);
         await WaitQuietlyAsync(_volumes).ConfigureAwait(false);
         await WaitQuietlyAsync(_watching).ConfigureAwait(false);
 
@@ -303,6 +311,7 @@ public sealed class AndroidCompanionCollector :
 
         await WaitQuietlyAsync(_volumeRequest).ConfigureAwait(false);
         await WaitQuietlyAsync(_displays).ConfigureAwait(false);
+        await WaitQuietlyAsync(_orientations).ConfigureAwait(false);
         await WaitQuietlyAsync(_volumes).ConfigureAwait(false);
         await WaitQuietlyAsync(_watching).ConfigureAwait(false);
         _running?.Dispose();
@@ -417,6 +426,63 @@ public sealed class AndroidCompanionCollector :
                 AndroidCompanionRecords.DisplayEventType,
                 payload,
                 native: display.Time,
+                uncertainty: mapped.UncertaintyNanoseconds,
+                clockMapping: AndroidCompanionRecords.FittedClockMapping,
+                qualityFlags: flags);
+        }
+    }
+
+    /// <summary>
+    /// Asks the app how the phone is held and records each answer at its
+    /// fitted phone time, as for the display (android-checks.md, step 15),
+    /// until the connection ends.
+    /// </summary>
+    private async Task OrientationsAsync(CompanionConnection connection)
+    {
+        try
+        {
+            await connection.RequestOrientationAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (CompanionUnavailableException)
+        {
+            // The connection ended; the watcher says so.
+            return;
+        }
+
+        await foreach (var received in connection.Orientations.ReadAllAsync(CancellationToken.None).ConfigureAwait(false))
+        {
+            var orientation = received.Orientation;
+            var payload = new AndroidPhoneOrientation(orientation.Reason, orientation.Orientation, orientation.Degrees);
+            var mapped = await _firstSample.Task.ConfigureAwait(false) ? _mapper.Map(orientation.Time) : null;
+            if (mapped is null)
+            {
+                Emit(
+                    AndroidCompanionRecords.OrientationChannel,
+                    ref _orientationSequence,
+                    received.ReceivedAt,
+                    AndroidCompanionRecords.OrientationEventType,
+                    payload,
+                    native: orientation.Time,
+                    qualityFlags: ["receipt-time-stamp"]);
+                continue;
+            }
+
+            var time = mapped.SessionNanoseconds;
+            string[] flags = [];
+            if (time < _lastOrientationTime)
+            {
+                time = _lastOrientationTime;
+                flags = [AndroidCompanionRecords.FitHeldFlag];
+            }
+
+            _lastOrientationTime = time;
+            Emit(
+                AndroidCompanionRecords.OrientationChannel,
+                ref _orientationSequence,
+                time,
+                AndroidCompanionRecords.OrientationEventType,
+                payload,
+                native: orientation.Time,
                 uncertainty: mapped.UncertaintyNanoseconds,
                 clockMapping: AndroidCompanionRecords.FittedClockMapping,
                 qualityFlags: flags);

@@ -45,7 +45,7 @@ public sealed class AndroidSettingsTests
     [Fact]
     public void Settings_AreKnownByIdAndByNamespaceAndName()
     {
-        Assert.Equal(34, AndroidSettingsRecords.All.Count);
+        Assert.Equal(35, AndroidSettingsRecords.All.Count);
         Assert.Equal(AndroidSettingsRecords.All.Count, AndroidSettingsRecords.All.Select(setting => setting.Id).Distinct().Count());
         Assert.Same(InversionSetting, AndroidSettingsRecords.Find("secure", "accessibility_display_inversion_enabled"));
         Assert.Equal("Color inversion", InversionSetting.Label);
@@ -133,7 +133,7 @@ public sealed class AndroidSettingsTests
         await collector.StopAsync(new SessionBoundary(6 * Second, DateTimeOffset.UtcNow), CancellationToken.None);
 
         Assert.Equal(
-            "Phone settings: 34 read at the start, 2 changes, latest Color inversion off, read again at the stop.",
+            "Phone settings: 35 read at the start, 2 changes, latest Color inversion off, read again at the stop.",
             collector.Summary);
         Assert.Equal(CollectorHealthState.Healthy, collector.HealthState);
         Assert.Null(collector.HealthReason);
@@ -151,7 +151,7 @@ public sealed class AndroidSettingsTests
         Assert.Equal(AndroidSettingsRecords.StartReason, start.Payload.GetProperty("reason").GetString());
         Assert.Equal("0", start.Payload.GetProperty("settings").GetProperty(Inversion).GetString());
         Assert.Equal(JsonValueKind.Null, start.Payload.GetProperty("settings").GetProperty("secure/display_density_forced").ValueKind);
-        Assert.Equal(34, start.Payload.GetProperty("settings").EnumerateObject().Count());
+        Assert.Equal(35, start.Payload.GetProperty("settings").EnumerateObject().Count());
 
         var on = records[1];
         Assert.Equal(2 * Second, on.MonotonicNanoseconds);
@@ -203,7 +203,7 @@ public sealed class AndroidSettingsTests
         await collector.StopAsync(new SessionBoundary(3 * Second, DateTimeOffset.UtcNow), CancellationToken.None);
 
         Assert.Equal(
-            "Phone settings: 34 read at the start, 0 changes, 1 notice with no change, read again at the stop.",
+            "Phone settings: 35 read at the start, 0 changes, 1 notice with no change, read again at the stop.",
             collector.Summary);
         Assert.DoesNotContain(sink.Records, record => record.EventType == AndroidSettingsRecords.ChangeEventType);
     }

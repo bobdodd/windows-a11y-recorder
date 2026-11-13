@@ -1542,6 +1542,85 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Equal((ran, 0, focus, reader, settings), (run.ContextRun, run.ContextChanges, run.FocusMoves, run.ScreenReaderFocusMoves, run.SettingChanges));
     }
 
+    // Step 15, orientation (WCAG 1.3.4): the phone, upright, is turned
+    // sideways at 3 seconds and back at 6. With the screen staying portrait
+    // and Auto-rotate on, that is a warning, at the turn; a screen that
+    // turns half a second after the phone is not, nor is any turn with
+    // Auto-rotate off, or one shorter than the hold time.
+    [Theory]
+    [InlineData(false, "1", 2, true)]
+    [InlineData(true, "1", 2, false)]
+    [InlineData(false, "0", 2, false)]
+    [InlineData(false, "1", 5, false)]
+    public void Orientation_PhoneTurnedAndScreenNot_IsRestricted(bool screenTurns, string autoRotate, int hold, bool found)
+    {
+        static AndroidDisplayState Display(int rotation) =>
+            new(rotation == 0 ? AndroidCompanionRecords.InitialReason : AndroidCompanionRecords.ChangedReason, rotation, 1080, 2404);
+        List<(long Time, string Channel, string EventType, object Payload)> records =
+        [
+            (At(0.1), AndroidSettingsRecords.Channel, AndroidSettingsRecords.SnapshotEventType,
+                new AndroidSettingsSnapshot("58191FDCQ00ABZ", AndroidSettingsRecords.StartReason,
+                    new Dictionary<string, string?> { [PhoneOrientationChecks.AutoRotateSetting] = autoRotate }, [], At(0.05), At(0.1))),
+            (At(0.5), AndroidCompanionRecords.DisplayChannel, AndroidCompanionRecords.DisplayEventType, Display(0)),
+            (At(0.6), AndroidCompanionRecords.OrientationChannel, AndroidCompanionRecords.OrientationEventType,
+                new AndroidPhoneOrientation("first", 0, 3)),
+            (At(1), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(1, Items(0))),
+            (At(3), AndroidCompanionRecords.OrientationChannel, AndroidCompanionRecords.OrientationEventType,
+                new AndroidPhoneOrientation("changed", 90, 72)),
+            (At(6), AndroidCompanionRecords.OrientationChannel, AndroidCompanionRecords.OrientationEventType,
+                new AndroidPhoneOrientation("changed", 0, 21)),
+            (At(9), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(2, null)),
+            .. screenTurns
+                ? new[]
+                {
+                    (At(3.5), AndroidCompanionRecords.DisplayChannel, AndroidCompanionRecords.DisplayEventType, (object)Display(90)),
+                    (At(6.5), AndroidCompanionRecords.DisplayChannel, AndroidCompanionRecords.DisplayEventType, (object)Display(0)),
+                }
+                : [],
+        ];
+        var archive = ArchiveOf([.. records.OrderBy(record => record.Time)], out var recording);
+
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording,
+            cancellationToken: TestContext.Current.CancellationToken, settings: archive.PhoneSettings,
+            orientation: archive.PhoneOrientation, orientationHoldSeconds: hold);
+
+        Assert.Empty(run.Problems);
+        Assert.True(run.OrientationRun);
+        Assert.Equal((2, hold), (run.OrientationTurns, run.OrientationHoldSeconds));
+        var restricted = run.Findings.Where(finding => finding.Check == PhoneCheckNames.OrientationRestricted).ToList();
+        Assert.Equal(found ? 1 : 0, restricted.Count);
+        Assert.Equal(found ? 1 : 0, run.OrientationNotFollowed);
+        if (found)
+        {
+            var finding = restricted[0];
+            Assert.Equal(PhoneCheckLevel.Warning, finding.Level);
+            var time = Assert.Single(finding.Times);
+            Assert.Equal(At(3), time.Time);
+            Assert.Equal("window:512/0", time.TreeKey);
+            Assert.Equal(
+                $"the phone was held sideways for {3.0.ToString("0.0", CultureInfo.CurrentCulture)} seconds with Auto-rotate on, and the screen stayed portrait, " +
+                "as when the app restricts its display to one orientation; look for whether that orientation is essential, as for a piano or a bank cheque",
+                time.Measured);
+        }
+
+        Assert.Equal("Orientation restricted (WCAG 1.3.4)", PhoneCheckNames.Title(PhoneCheckNames.OrientationRestricted));
+    }
+
+    // Without how the phone was held, from a companion app older than
+    // protocol 7, the orientation check is not looked for, and says why.
+    [Fact]
+    public void Orientation_NotRecorded_IsNotLookedFor()
+    {
+        var archive = Archive(out var recording);
+
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording,
+            cancellationToken: TestContext.Current.CancellationToken, settings: archive.PhoneSettings, orientation: archive.PhoneOrientation);
+
+        Assert.False(run.OrientationRun);
+        Assert.Contains("older than protocol 7", run.OrientationNotRun, StringComparison.Ordinal);
+        Assert.DoesNotContain(run.Findings, finding => finding.Check == PhoneCheckNames.OrientationRestricted);
+    }
+
     // The recording's records, as the player reads one from the file.
     private sealed class FakeRecords : ISessionEventRecordSource
     {

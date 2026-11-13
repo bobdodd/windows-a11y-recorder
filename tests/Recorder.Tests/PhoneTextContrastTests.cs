@@ -134,4 +134,20 @@ public sealed class PhoneTextContrastTests : IDisposable
         File.WriteAllText(path, "not json");
         Assert.Equal(PhoneAuditLevel.AA, PhoneCheckSettings.Load(path).AuditLevel);
     }
+
+    // How long the phone is held turned before the orientation check counts
+    // it (android-checks.md, step 15): 1 to 5 seconds, 2 by default.
+    [Fact]
+    public void Settings_OrientationHold_SavedAndChecked()
+    {
+        var path = Path.Combine(_folder, "settings", "check-settings.json");
+
+        Assert.Equal(2, PhoneCheckSettings.Load(path).OrientationHoldSeconds);
+        Assert.True(new PhoneCheckSettings { AuditLevel = PhoneAuditLevel.AAA, OrientationHoldSeconds = 4 }.TrySave(path));
+        Assert.Equal((PhoneAuditLevel.AAA, 4), (PhoneCheckSettings.Load(path).AuditLevel, PhoneCheckSettings.Load(path).OrientationHoldSeconds));
+
+        File.WriteAllText(path, "{\"auditLevel\": 1, \"orientationHoldSeconds\": 9}");
+        Assert.Equal((PhoneAuditLevel.AAA, 2), (PhoneCheckSettings.Load(path).AuditLevel, PhoneCheckSettings.Load(path).OrientationHoldSeconds));
+        Assert.Equal([1, 2, 3, 4, 5], PhoneOrientationChecks.HoldChoices);
+    }
 }

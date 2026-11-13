@@ -40,9 +40,9 @@ public sealed class AndroidScreenshotTests : IDisposable
     // The protocol
 
     [Fact]
-    public void Protocol_IsVersion6_AndAsksForScreenshots()
+    public void Protocol_AsksForScreenshots()
     {
-        Assert.Equal(6, CompanionProtocol.Version);
+        Assert.True(CompanionProtocol.Version >= 6);
         Assert.Equal("{\"type\":\"screenshots\"}\n", CompanionProtocol.ScreenshotsRequest);
     }
 

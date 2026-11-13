@@ -1922,3 +1922,104 @@ the dialog, so the test's text is corrected and the result is a pass.
 Long rows wrapped, with no horizontal scrollbar. Test 49's build is
 taken as passed, as the recorder ran it. Test 47's screenshot was not
 sent. The changes of context checks are checked on the PC.
+
+## Step 15: orientation (2026-11-13)
+
+The owner's decisions, what the standard and Android say, and the check
+built to them are in the architecture document's "Step 15:
+orientation". One check, a warning at both audit levels: the phone held
+turned, with Auto-rotate on, for at least the time set in the Checks
+tab's "Phone turned for:" (2 seconds by default), with the screen not
+turning with it. How the phone is held comes from a new companion app,
+protocol 7, which reads the phone's own sensor, so the companion app
+must be installed again (test 52), and the recordings to hand, made
+without it, give "not looked for". Checked in the Linux build
+environment: the solution builds with no warnings, and the new tests
+pass with the others. The companion app's Java cannot be built there;
+it is built by the installer's build on the PC.
+
+Tests 53 and 54 are the first to turn the phone. They need Auto-rotate
+on: with it off, the check is not looked for.
+
+## Test 51: build and install the nineteenth build (development PC)
+
+As test 19: close the recorder, run the PowerShell of test 19's step 1,
+run the newest installer with "Start the recorder and set up the
+analysis models" unchecked, and start the recorder from the Start menu.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the recorder
+opens.
+
+## Test 52: install the companion app for protocol 7
+
+1. Connect the Pixel by USB, unlocked. In the recorder, in "Recording
+   target", choose "Android device".
+2. The panel offers "Install companion app". Choose it, and wait until
+   the companion line stops changing.
+3. Take a screenshot of the panel.
+
+**On screen:** in step 3 the companion line reads "Companion app:
+installed, on, and answering (version 1.1.0, version code" with a
+number, and ends "protocol 7)." "protocol 6" is a failure. If the line
+says the service is off instead, that is a result too; send the
+screenshot either way.
+
+## Test 53: the phone turned on the home screen
+
+Keep the phone's picture in view throughout.
+
+Before the test, make sure TalkBack is off. On the phone, swipe down
+twice from the top of the screen and make sure the "Auto-rotate" tile is
+on, then go to the home screen. Hold the phone upright. Leave the
+recorder open from test 52, with "Android device" chosen.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. Turn the phone a quarter turn onto its side, hold it still on its
+   side for 5 seconds, then turn it back upright and wait 5 seconds.
+3. Choose "Stop recording", and wait until the recording has opened in
+   the player.
+4. If the Checks window is closed, click the "Checks" tab, then move it
+   so the phone's picture is fully in view. Wait 10 seconds, scroll the
+   list until the row starting "Orientation restricted" is in view, and
+   take a screenshot of the whole screen.
+
+**On screen:** in step 2, note whether the home screen turned with the
+phone; Pixel's home screen may stay upright, which is what this test
+expects. In step 4 "Phone turned for:" shows "2 seconds", and the line
+under "Show current visit" includes "Orientation (WCAG 1.3.4), one
+check: 1 finding (1 warning); the phone was turned between upright and
+sideways 2 times, from the companion app's own sensor". The list has
+the row "Orientation restricted (WCAG 1.3.4): 1 warning", and below it
+a row starting "Warning:" that includes "the phone was held sideways
+for" and "seconds with Auto-rotate on, and the screen stayed portrait".
+If the home screen turned in step 2, there is no such row; say so and
+send the screenshot as it is. "not looked for" on the line is a
+failure; send the screenshot with the line in view. Long rows wrap;
+there is no horizontal scrollbar. Send the screenshot.
+
+## Test 54: the phone turned in Settings
+
+Keep the phone's picture in view throughout.
+
+Before the test, make sure TalkBack is off and the "Auto-rotate" tile is
+on, as in test 53. On the phone, open Settings, on its first screen.
+Hold the phone upright. Leave the recorder open from test 53.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. Turn the phone a quarter turn onto its side, hold it still on its
+   side for 5 seconds, then turn it back upright and wait 5 seconds.
+3. Choose "Stop recording", and wait until the recording has opened in
+   the player.
+4. If the Checks window is closed, click the "Checks" tab, then move it
+   so the phone's picture is fully in view. Wait 10 seconds, and take a
+   screenshot of the whole screen.
+
+**On screen:** in step 2 Settings turns sideways with the phone, and
+upright again. In step 4 the line under "Show current visit" includes
+"Orientation (WCAG 1.3.4), one check: no findings; the phone was turned
+between upright and sideways 2 times, from the companion app's own
+sensor, and the screen stayed as it was, with Auto-rotate on, for 2
+seconds or more after 0 turns within a visit; it is looked for only
+while Auto-rotate is on." The list has no row starting "Orientation
+restricted". Long rows wrap; there is no horizontal scrollbar. Send the
+screenshot.

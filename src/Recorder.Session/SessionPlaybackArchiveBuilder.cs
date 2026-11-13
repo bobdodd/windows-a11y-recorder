@@ -121,6 +121,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<(long Time, JsonElement Payload)> _phoneAnnouncements = [];
     private readonly List<(long Time, JsonElement Payload)> _phoneInputs = [];
     private readonly List<(long Time, JsonElement Payload)> _phoneDisplays = [];
+    private readonly List<(long Time, JsonElement Payload)> _phoneOrientations = [];
     private readonly List<PhoneScreenshot> _phoneScreenshots = [];
     private readonly List<(long Time, string EventType, JsonElement Payload)> _phoneSettings = [];
     private readonly List<(long Time, string EventType, JsonElement Payload)> _phoneDevice = [];
@@ -351,6 +352,14 @@ public sealed class SessionPlaybackArchiveBuilder
             payload.ValueKind == JsonValueKind.Object)
         {
             _phoneDisplays.Add((timestamp, payload.Clone()));
+        }
+
+        // How the phone was held, for the orientation check
+        // (android-checks.md, step 15).
+        if (PhoneOrientationTimeline.IsOrientationRecord(timelineEvent.Channel, timelineEvent.EventType) &&
+            payload.ValueKind == JsonValueKind.Object)
+        {
+            _phoneOrientations.Add((timestamp, payload.Clone()));
         }
 
         // The companion's screenshots, for measuring colours
@@ -634,6 +643,9 @@ public sealed class SessionPlaybackArchiveBuilder
             PhoneInputs = _phoneInputs.Count == 0
                 ? PhoneInputTimeline.Empty
                 : new PhoneInputTimeline(_phoneInputs),
+            PhoneOrientation = _phoneOrientations.Count == 0
+                ? PhoneOrientationTimeline.Empty
+                : new PhoneOrientationTimeline(_phoneOrientations, _phoneDisplays),
             PhoneScreenshots = [.. _phoneScreenshots.OrderBy(shot => shot.MonotonicNanoseconds)],
             PhoneSettings = _phoneSettings.Count == 0
                 ? PhoneSettingsTimeline.Empty

@@ -2800,6 +2800,142 @@ shown at the first picture between the action and the change.
 - Of the recordings to hand, only test 48's has a finding, so the
   checks were seen finding something only there and in the tests.
 
+## Step 15: orientation
+
+### The owner's decisions (2026-11-13)
+
+1.3.4 is in "Easy wins, from the tree already recorded" in
+`android-checks-candidates.md`, needing a step in the test procedure.
+The owner asked for it after step 14, "with a rotation step". The
+recordings were looked at first (below), then the choices were put to
+the owner:
+
+- **What shows that the phone itself was turned:** "Companion's own
+  sensor". A new companion app (protocol 7) reads the accelerometer
+  while the recorder is connected. A feasibility test on the phone comes
+  first, as Android may stop sensors for apps in the background.
+- **What is reported:** "Warning, turn only": a warning, at both audit
+  levels, when the phone was held turned with Auto-rotate on and the
+  screen did not turn with it, since the recording cannot tell whether
+  an orientation is essential.
+- **How long the phone must be held turned:** "Setting decides": a
+  setting in the Checks tab, "Phone turned for:", from 1 to 5 seconds,
+  2 by default.
+
+### What the standards and Android say (checked in cited documents)
+
+- **1.3.4 Orientation (AA):** "Content does not restrict its view and
+  operation to a single display orientation, such as portrait or
+  landscape, unless a specific display orientation is essential".
+  Examples where it may be essential include a bank cheque and a piano
+  app. Its failures are F97, "locking the orientation to landscape or
+  portrait view", and F100, "showing a message asking to reorient
+  device"
+  ([Understanding 1.3.4](https://www.w3.org/WAI/WCAG22/Understanding/orientation.html)).
+- **WCAG2ICT:** applies it to software except software never shown on
+  hardware that is turned in typical use
+  ([WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/)); a phone is turned in
+  typical use.
+- **Android 16:** for apps targeting it, orientation restrictions are
+  ignored only on displays with a smallest width of at least 600 dp
+  ([Android 16 behavior changes](https://developer.android.com/about/versions/16/behavior-changes-16)).
+  The Pixel's screen, 1080 by 2404 pixels, is under that, so an app's
+  restriction still holds on it.
+- **Auto-rotate:** with it on, the window manager turns the display by
+  the sensor unless the app in front asks for a fixed orientation
+  (AOSP
+  [DisplayRotation.java](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/wm/DisplayRotation.java)),
+  so the display's rotation alone cannot show that the phone was turned:
+  an app locked to portrait leaves it at 0. The setting is
+  `Settings.System.ACCELEROMETER_ROTATION`, `system/accelerometer_rotation`.
+- **The sensor while in the background:** an accessibility service is
+  bound with `BIND_FOREGROUND_SERVICE_WHILE_AWAKE`
+  ([AccessibilityServiceConnection.java](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/accessibility/java/com/android/server/accessibility/AccessibilityServiceConnection.java)),
+  and the sensor service stops sensors only for apps it holds idle
+  ([SensorService.cpp](https://android.googlesource.com/platform/frameworks/native/+/refs/heads/main/services/sensorservice/SensorService.cpp)),
+  so the companion's service should keep its sensor; the feasibility
+  test on the phone checks this.
+- **`OrientationEventListener`:** gives the phone's angle, 0 in its
+  natural position, 90 with its left side at the top, 180 upside down
+  and 270 with its right side at the top, or `ORIENTATION_UNKNOWN` when
+  the phone is too close to flat to tell.
+
+### Looked at first (2026-11-13)
+
+On the recordings to hand (measured): every one holds the display's
+rotation, and only one has a rotation other than 0; none holds how the phone itself was held, so the
+check cannot be measured on them, and they give "not looked for".
+
+### As built
+
+- **The companion app, protocol 7.** On an "orientation" request, its
+  accessibility service starts an `OrientationEventListener` at
+  `SENSOR_DELAY_NORMAL` and sends that connection an "orientation"
+  message at once and each time the phone's quarter changes: "reason"
+  ("first", "changed", or "unavailable" when the phone has no sensor to
+  tell), "orientation" (0, 90, 180 or 270, or -1 for flat or unknown),
+  "degrees" (the angle that placed it) and the phone's time. An angle is
+  placed in a quarter only within 30 degrees of it, so a phone held
+  between two keeps the last. The sensor runs only while a connection
+  asks, and stops when none does. The recorder asks as it connects; a
+  companion app older than protocol 7 is refused, as for each protocol
+  before, so the Android device panel offers "Install companion app".
+- **The record:** `android.orientation`, event type `phone-orientation`,
+  at the phone's time fitted to the session clock, as for the display.
+  The playback index keeps the records whole (its version is now 32, so
+  older recordings are indexed again when opened). As for the phone's
+  settings and trees, the records are kept in the recording file, with
+  no evidence tables in the database.
+- **Auto-rotate** (`system/accelerometer_rotation`) is now one of the
+  phone settings read as the recording starts and stops and on each
+  change (35 settings).
+- **The check, "Orientation restricted (WCAG 1.3.4)",** a warning at
+  both audit levels: in a visit, the phone held sideways (90 or 270)
+  with the screen not turned, or held upright (0 or 180) with the screen
+  turned, with Auto-rotate on, for at least the time chosen in "Phone
+  turned for:". Held flat ends such a time. Each visit has at most one
+  finding, on the window's first item, with a time for each such turn;
+  for example "the phone was held sideways for 3.0 seconds with
+  Auto-rotate on, and the screen stayed portrait, as when the app
+  restricts its display to one orientation; look for whether that
+  orientation is essential, as for a piano or a bank cheque".
+- **Not looked for,** with the reason on the line under "Show current
+  visit", when no screens were recorded, the phone has no sensor, the
+  recording was made with a companion app older than protocol 7, the
+  screen's rotation or the phone's settings were not recorded; and no
+  finding is made while Auto-rotate is off.
+- **The line under "Show current visit"** adds, for example,
+  "Orientation (WCAG 1.3.4), one check: no findings; the phone was
+  turned between upright and sideways 2 times, from the companion app's
+  own sensor, and the screen stayed as it was, with Auto-rotate on, for
+  2 seconds or more after 0 turns within a visit; it is looked for only
+  while Auto-rotate is on."
+- **"Phone turned for:"** in the Checks tab, beside the audit level,
+  offers 1 to 5 seconds; the choice is kept with the audit level, and
+  changing it runs the tree's checks again.
+- **Checked before any PC test:** the solution builds with no warnings,
+  and the tests pass, with the Windows-only browser tests failing as
+  before. The new tests cover the message's reading, a bad orientation
+  or angle refused, the collector asking and recording, and the check:
+  a portrait screen with the phone held sideways for 3 seconds (a
+  warning, at the turn), a screen that turned half a second after the
+  phone, Auto-rotate off, a hold time of 5 seconds, and a recording
+  without the records (not looked for). The companion app's Java cannot
+  be built here, so it was reviewed by eye; it is built on the PC.
+
+### Limits
+
+- The sensor shows how the phone was held, not what the app asked
+  for: a screen that stays as it was is taken as restricted, which is
+  why the finding is a warning. A slow app, or a rotation Android held
+  back while the screen was touched, could also stay put for a time.
+- Whether an orientation is essential is not looked for.
+- F100, a message asking the user to turn the phone, is not detected.
+- A recording must include a turn: the test procedure needs a step that
+  turns the phone and holds it, with Auto-rotate on.
+- The feasibility of reading the sensor from the companion's service is
+  not yet checked on the phone.
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A

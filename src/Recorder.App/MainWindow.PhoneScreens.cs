@@ -64,6 +64,18 @@ public partial class MainWindow
         _checkSettings = PhoneCheckSettings.Load(PhoneCheckSettings.DefaultPath);
         AuditAaRadioButton.IsChecked = _checkSettings.AuditLevel == PhoneAuditLevel.AA;
         AuditAaaRadioButton.IsChecked = _checkSettings.AuditLevel == PhoneAuditLevel.AAA;
+        OrientationHoldComboBox.ItemsSource = PhoneOrientationChecks.HoldChoices
+            .Select(seconds => new OrientationHoldChoice(seconds))
+            .ToList();
+        OrientationHoldComboBox.SelectedValue = OrientationHoldSeconds;
+    }
+
+    // A choice of how long the phone must be held turned, as the list says it.
+    private sealed record OrientationHoldChoice(int Seconds)
+    {
+        public string Text => Seconds == 1 ? "1 second" : string.Create(CultureInfo.CurrentCulture, $"{Seconds:N0} seconds");
+
+        public override string ToString() => Text;
     }
 
     private void BindPhoneScreens()
@@ -119,17 +131,20 @@ public partial class MainWindow
     private async Task<bool> RunTreeChecksAsync(SessionPlaybackArchive archive, CancellationToken token)
     {
         PhoneAuditLevel level;
+        int hold;
         PhoneCheckRun? run;
         string? problem;
         do
         {
-            (level, run, problem) = (AuditLevel, null, null);
+            (level, hold, run, problem) = (AuditLevel, OrientationHoldSeconds, null, null);
             try
             {
                 var at = level;
+                var held = hold;
                 run = await Task.Run(
                     () => PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, archive.PhoneDevice, archive.RecordSource, PhoneSnapshotPictures.Of(archive), token, at,
-                        archive.PhoneTouches, archive.PhoneAnnouncements, archive.PhoneSettings, PhonePictures.Load, archive.PhoneInputs),
+                        archive.PhoneTouches, archive.PhoneAnnouncements, archive.PhoneSettings, PhonePictures.Load, archive.PhoneInputs,
+                        archive.PhoneOrientation, held),
                     token);
             }
             catch (OperationCanceledException)
@@ -148,7 +163,7 @@ public partial class MainWindow
                 return false;
             }
         }
-        while (level != AuditLevel);
+        while (level != AuditLevel || hold != OrientationHoldSeconds);
 
         _phoneChecks = run;
         _phoneChecksProblem = problem;
@@ -215,6 +230,23 @@ public partial class MainWindow
 
     private PhoneAuditLevel AuditLevel => _checkSettings?.AuditLevel ?? PhoneAuditLevel.AA;
 
+    private int OrientationHoldSeconds => _checkSettings?.OrientationHoldSeconds ?? PhoneOrientationChecks.DefaultHoldSeconds;
+
+    // How long the phone must be held turned for the orientation check
+    // (owner, 2026-11-13, a setting): changing it runs the tree's checks
+    // again, as the audit level does.
+    private void OrientationHoldComboBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_checkSettings is null || OrientationHoldComboBox.SelectedValue is not int seconds || seconds == OrientationHoldSeconds)
+        {
+            return;
+        }
+
+        _checkSettings = _checkSettings with { OrientationHoldSeconds = seconds };
+        _checkSettings.TrySave(PhoneCheckSettings.DefaultPath);
+        RerunTreeChecks();
+    }
+
     // The audit level guides the checks (owner, 2026-11-12): changing it
     // works the text contrast findings out again from the same
     // measurement, and runs the tree's checks again, as WCAG 2.5.5's runs
@@ -243,6 +275,20 @@ public partial class MainWindow
 
         _shownFinding = null;
         JudgeTextContrast();
+        RerunTreeChecks();
+    }
+
+    // Runs the tree's checks again with the settings now chosen, if they
+    // have run or failed for the open recording. The chosen finding goes,
+    // with its outline and its time buttons, as the findings are new.
+    private void RerunTreeChecks()
+    {
+        if (!_phoneScreensBound)
+        {
+            return;
+        }
+
+        _shownFinding = null;
         var rerun = _playbackArchive is { PhoneScreens.Recorded: true } archive &&
             ReferenceEquals(_phoneChecksArchive, archive) &&
             _phoneChecksCancellation is { } cancellation &&
@@ -684,6 +730,16 @@ public partial class MainWindow
                 $"{Count(run.FocusMoves, "focus move")} by a key or a tap on a field, {Count(run.ScreenReaderFocusMoves, "TalkBack focus move")} after a gesture or key, and {Count(run.SettingChanges, "setting change")} (typing, checking, choosing or moving a slider); {run.ContextChanges:N0} {(run.ContextChanges == 1 ? "change" : "changes")} of context (a new screen or app, a window that took the focus, a pane, or the focus moving by itself) within 1.5 seconds of one, with nothing touched, pressed or clicked between")
             : "not looked for, as no touches were recorded, so a tap that caused a change cannot be told from none";
         summary += $" Changes of context (WCAG 3.2.1 and 3.2.2), three checks: {contextFindings}; {context}.";
+        var orientationFound = run.Findings.Where(finding => finding.Check == PhoneCheckNames.OrientationRestricted).ToList();
+        var orientationFindings = orientationFound.Count == 0
+            ? "no findings"
+            : $"{Count(orientationFound.Count, "finding")} ({Levels(orientationFound)})";
+        var orientation = run.OrientationRun
+            ? string.Create(
+                CultureInfo.CurrentCulture,
+                $"the phone was turned between upright and sideways {Count(run.OrientationTurns, "time")}, from the companion app's own sensor, and the screen stayed as it was, with Auto-rotate on, for {Count(run.OrientationHoldSeconds, "second")} or more after {Count(run.OrientationNotFollowed, "turn")} within a visit")
+            : $"not looked for, as {run.OrientationNotRun ?? "the checks did not run"}";
+        summary += $" Orientation (WCAG 1.3.4), one check: {orientationFindings}; {orientation}; it is looked for only while Auto-rotate is on.";
         if (run.TextFocusablePackages.Count > 0)
         {
             summary += $" In {string.Join(" and ", run.TextFocusablePackages)}, every item with text is focusable, as in an app drawn with Flutter, whose tree marks focusable what a screen reader can reach, so the tree does not show which items a keyboard reaches.";

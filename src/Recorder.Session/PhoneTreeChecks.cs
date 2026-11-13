@@ -134,6 +134,13 @@ public static class PhoneCheckNames
     public const string ContextOnScreenReaderFocus = "context-change-on-screen-reader-focus";
     public const string ContextOnInput = "context-change-on-input";
 
+    /// <summary>
+    /// Orientation (step 15, PhoneOrientationChecks), WCAG 1.3.4: the phone
+    /// was turned with Auto-rotate on and the screen did not turn with it,
+    /// a warning, as the orientation may be essential (owner, 2026-11-13).
+    /// </summary>
+    public const string OrientationRestricted = "orientation-restricted";
+
     /// <summary>The checks in the order the Checks tab lists them.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
@@ -141,7 +148,7 @@ public static class PhoneCheckNames
         EditableContentDescription, RedundantDescription, ClassName, TraversalOrder, ClickableNotFocusable,
         FieldNoLabel, FieldNoName, InvalidNoError, ExpandableNoState, SliderNoRange, StatusNotAnnounced, NoLiveRegion,
         TextGoneByItself, TextGoneAsContentChanged, TextUpdatingByItself, MovingByItself,
-        ContextOnFocus, ContextOnScreenReaderFocus, ContextOnInput,
+        ContextOnFocus, ContextOnScreenReaderFocus, ContextOnInput, OrientationRestricted,
         TitleMissing, TitleShared, NoHeading, FirstHeadingLow, ManyHeadings,
     ];
 
@@ -185,6 +192,7 @@ public static class PhoneCheckNames
         ContextOnFocus => "Change of context on focus (WCAG 3.2.1)",
         ContextOnScreenReaderFocus => "Change of context on TalkBack focus (WCAG 3.2.1)",
         ContextOnInput => "Change of context on input (WCAG 3.2.2)",
+        OrientationRestricted => "Orientation restricted (WCAG 1.3.4)",
         _ => check,
     };
 

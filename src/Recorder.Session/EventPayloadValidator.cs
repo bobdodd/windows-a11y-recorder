@@ -41,6 +41,7 @@ internal static class EventPayloadValidator
         Recorder.Contracts.AndroidCompanionRecords.CompanionChannel,
         Recorder.Contracts.AndroidCompanionRecords.ClockChannel,
         Recorder.Contracts.AndroidCompanionRecords.DisplayChannel,
+        Recorder.Contracts.AndroidCompanionRecords.OrientationChannel,
         Recorder.Contracts.AndroidScreenRecords.VideoChannel,
         Recorder.Contracts.AndroidFrameRecords.FramesChannel,
         Recorder.Contracts.AndroidSoundRecords.Channel,
@@ -169,6 +170,9 @@ internal static class EventPayloadValidator
                 break;
             case (Recorder.Contracts.AndroidCompanionRecords.DisplayChannel, Recorder.Contracts.AndroidCompanionRecords.DisplayEventType):
                 ValidateAndroidDisplayState(payload, issues);
+                break;
+            case (Recorder.Contracts.AndroidCompanionRecords.OrientationChannel, Recorder.Contracts.AndroidCompanionRecords.OrientationEventType):
+                ValidateAndroidPhoneOrientation(payload, issues);
                 break;
             case (Recorder.Contracts.AndroidScreenRecords.VideoChannel, Recorder.Contracts.AndroidScreenRecords.StreamEventType):
                 ValidateAndroidVideoStream(payload, issues);
@@ -2163,6 +2167,41 @@ internal static class EventPayloadValidator
                 "android-display-rotation",
                 "#/payload/rotation",
                 "rotation must be 0, 90, 180 or 270.");
+        }
+    }
+
+    // How the phone is held, from the companion app's accelerometer
+    // (android-checks.md, step 15).
+    private static void ValidateAndroidPhoneOrientation(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredEnum("reason", [.. Recorder.Contracts.AndroidCompanionRecords.OrientationReasons]),
+                RequiredInteger("orientation"),
+                RequiredInteger("degrees")
+            ],
+            issues);
+        if (payload.TryGetProperty("orientation", out var orientation) && IsInteger(orientation) &&
+            !Recorder.Contracts.AndroidCompanionRecords.Orientations.Contains((int)orientation.GetInt64()))
+        {
+            AddError(
+                issues,
+                "android-phone-orientation",
+                "#/payload/orientation",
+                "orientation must be -1, 0, 90, 180 or 270.");
+        }
+
+        if (payload.TryGetProperty("degrees", out var degrees) && IsInteger(degrees) &&
+            degrees.GetInt64() is < -1 or > 359)
+        {
+            AddError(
+                issues,
+                "android-phone-orientation-degrees",
+                "#/payload/degrees",
+                "degrees must be from -1 to 359.");
         }
     }
 

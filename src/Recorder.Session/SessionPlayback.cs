@@ -146,6 +146,9 @@ public sealed record SessionPlaybackArchive(
     /// <summary>The phone's input events and hardware keys, for the change of context checks (android-checks.md, step 14).</summary>
     public PhoneInputTimeline PhoneInputs { get; init; } = PhoneInputTimeline.Empty;
 
+    /// <summary>How the phone was held and its screen turned, for the orientation check (android-checks.md, step 15).</summary>
+    public PhoneOrientationTimeline PhoneOrientation { get; init; } = PhoneOrientationTimeline.Empty;
+
     /// <summary>The phone's apps, screens and visits (android-checks.md, step 1).</summary>
     public PhoneScreenTimeline PhoneScreens { get; init; } = PhoneScreenTimeline.Empty;
 

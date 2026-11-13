@@ -19,9 +19,10 @@ public static class CompanionProtocol
     /// request; 3 from slice 7, step 7a, which added accessibility events;
     /// 4 from step 7b, which added snapshots of the accessibility tree; 5
     /// from slice 8, step 8a, which added notices of settings changes; 6
-    /// from android-checks.md, step 4a, which added screenshots.
+    /// from android-checks.md, step 4a, which added screenshots; 7 from
+    /// android-checks.md, step 15, which added how the phone is held.
     /// </summary>
-    public const int Version = 6;
+    public const int Version = 7;
 
     /// <summary>The companion app's socket, in Linux's abstract namespace.</summary>
     public const string SocketName = "a11yrecorder_companion";
@@ -68,6 +69,13 @@ public static class CompanionProtocol
     /// refuses one.
     /// </summary>
     public const string ScreenshotsRequest = "{\"type\":\"screenshots\"}\n";
+
+    /// <summary>
+    /// Asks the app how the phone itself is held, from its accelerometer,
+    /// now and each time that changes, each as an "orientation" line
+    /// (PhoneOrientation.java).
+    /// </summary>
+    public const string OrientationRequest = "{\"type\":\"orientation\"}\n";
 
     /// <summary>
     /// Asks the app to tell this connection, from now on, each time one of
@@ -132,6 +140,11 @@ public static class CompanionProtocol
                     Int(root, "rotation"),
                     Int(root, "modeWidth"),
                     Int(root, "modeHeight"),
+                    Long(root, "time")),
+                "orientation" => new CompanionOrientation(
+                    String(root, "reason"),
+                    Int(root, "orientation"),
+                    Int(root, "degrees"),
                     Long(root, "time")),
                 "accessibility-volume" => new CompanionAccessibilityVolume(
                     String(root, "reason"),
@@ -332,6 +345,25 @@ public sealed record CompanionDisplay(
     int Rotation,
     int ModeWidth,
     int ModeHeight,
+    long Time) : CompanionMessage;
+
+/// <summary>
+/// How the phone itself is held, from its accelerometer, sent to a
+/// connection that asked (android-checks.md, step 15) at once and each time
+/// it changes.
+/// </summary>
+/// <param name="Reason">"first", "changed", or "unavailable" when the phone cannot tell.</param>
+/// <param name="Orientation">
+/// 0 in the phone's natural position, 90 with its left side at the top, 180
+/// upside down, 270 with its right side at the top, or -1 when it is flat
+/// or the app cannot tell.
+/// </param>
+/// <param name="Degrees">The sensor's angle that placed it, or -1.</param>
+/// <param name="Time">The phone's CLOCK_MONOTONIC when the reading arrived, in nanoseconds.</param>
+public sealed record CompanionOrientation(
+    string Reason,
+    int Orientation,
+    int Degrees,
     long Time) : CompanionMessage;
 
 /// <summary>

@@ -77,14 +77,18 @@ import java.util.concurrent.RejectedExecutionException;
  * "screenshot" message with the PNG in base64, or a "screenshot-failed"
  * message with Android's code when one is refused, each with its own
  * "index" counting from 1 on that connection (see {@link Screenshots}).
+ * From protocol 7 it answers an "orientation" request by sending that
+ * connection how the phone itself is held, from its accelerometer, at once
+ * and each time it changes, each as an "orientation" message (see
+ * {@link PhoneOrientation}); the sensor runs only while a connection asks.
  * See docs/architecture/android-implementation-plan.md, slices 2, 4, 7
- * and 8, docs/architecture/android-checks.md, step 4a, and
+ * and 8, docs/architecture/android-checks.md, steps 4a and 15, and
  * src/Recorder.Collectors.Android/CompanionProtocol.cs, which must agree
  * with this file.
  */
 final class RecorderLink {
     static final String SOCKET_NAME = "a11yrecorder_companion";
-    static final int PROTOCOL = 6;
+    static final int PROTOCOL = 7;
     private static final String TAG = "A11yRecorderCompanion";
 
     private final Context context;
@@ -102,6 +106,8 @@ final class RecorderLink {
     private volatile Runnable treeRequests;
     // Asks for a screenshot at once; set before start().
     private volatile Runnable screenshotRequests;
+    // How the phone is held; set before start().
+    private volatile PhoneOrientation orientation;
     private LocalServerSocket server;
     private Thread acceptThread;
     private DisplayManager displayManager;
@@ -166,6 +172,10 @@ final class RecorderLink {
 
     void stop() {
         stopping = true;
+        PhoneOrientation held = orientation;
+        if (held != null) {
+            held.stop();
+        }
         if (displayManager != null && displayListener != null) {
             displayManager.unregisterDisplayListener(displayListener);
         }
@@ -291,6 +301,41 @@ final class RecorderLink {
         } catch (RejectedExecutionException ignored) {
             // The link stopped meanwhile.
         }
+    }
+
+    /** How the phone is held, for connections that ask; set before start(). */
+    void setOrientation(PhoneOrientation reader) {
+        orientation = reader;
+    }
+
+    /** Sends how the phone is held to each connection that asked. */
+    void sendOrientation(JSONObject message) {
+        if (stopping) {
+            return;
+        }
+        try {
+            sender.execute(() -> {
+                for (Client client : clients) {
+                    client.sendOrientation(message);
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            // The link stopped meanwhile.
+        }
+    }
+
+    // Stops the sensor when no connection still wants it.
+    private void orientationUnwanted() {
+        PhoneOrientation held = orientation;
+        if (held == null) {
+            return;
+        }
+        for (Client client : clients) {
+            if (client.orientationWanted) {
+                return;
+            }
+        }
+        held.stop();
     }
 
     /** True when a connection has asked for accessibility events. */
@@ -456,6 +501,8 @@ final class RecorderLink {
         private long treeIndex;
         // True once this connection has asked for screenshots.
         volatile boolean screenshotsWanted;
+        // True once this connection has asked how the phone is held.
+        volatile boolean orientationWanted;
         // The screenshots sent on this connection; used on the screenshot
         // sender's thread only.
         private long screenshotIndex;
@@ -496,6 +543,9 @@ final class RecorderLink {
             } finally {
                 clients.remove(this);
                 close();
+                if (orientationWanted) {
+                    orientationUnwanted();
+                }
             }
         }
 
@@ -540,6 +590,20 @@ final class RecorderLink {
                 if (requests != null) {
                     requests.run();
                 }
+            } else if ("orientation".equals(type)) {
+                PhoneOrientation reader = orientation;
+                if (reader == null) {
+                    sendError("orientation is not available");
+                    return;
+                }
+                // The flag is set first, so a reading arriving meanwhile is
+                // not missed; at worst the same quarter is sent twice.
+                orientationWanted = true;
+                JSONObject last = reader.lastAsFirst();
+                if (last != null) {
+                    send(last);
+                }
+                reader.start();
             } else if ("settings".equals(type)) {
                 watchSettings(request.optJSONArray("settings"));
             } else {
@@ -682,6 +746,18 @@ final class RecorderLink {
                     output.write((indexed + "\n").getBytes(StandardCharsets.UTF_8));
                     output.flush();
                 }
+            } catch (IOException exception) {
+                close();
+            }
+        }
+
+        // On the sender thread.
+        void sendOrientation(JSONObject message) {
+            if (!orientationWanted) {
+                return;
+            }
+            try {
+                send(message);
             } catch (IOException exception) {
                 close();
             }

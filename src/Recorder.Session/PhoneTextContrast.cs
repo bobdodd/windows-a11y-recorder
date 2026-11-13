@@ -28,7 +28,9 @@ public enum PhoneAuditLevel
 
 /// <summary>
 /// The checks' settings an auditor chose, kept per Windows user beside the
-/// player's layout: for now, the audit level. A file from before the
+/// player's layout: the audit level, and how long the phone must be held
+/// turned for the orientation check (android-checks.md, step 15). A file
+/// from before the
 /// audit level was named holds the text contrast check's level, as
 /// "contrastLevel", which is read as the audit level.
 /// </summary>
@@ -43,13 +45,24 @@ public sealed record PhoneCheckSettings
 
     public PhoneAuditLevel AuditLevel { get; init; } = PhoneAuditLevel.AA;
 
+    /// <summary>
+    /// How long the phone must be held turned, in seconds, before a screen
+    /// that did not turn with it is a finding; one of
+    /// <see cref="PhoneOrientationChecks.HoldChoices"/>.
+    /// </summary>
+    public int OrientationHoldSeconds { get; init; } = PhoneOrientationChecks.DefaultHoldSeconds;
+
     public static string DefaultPath =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Windows A11y Recorder",
             "check-settings.json");
 
-    /// <summary>Reads the settings; a missing or unreadable file, or a level that is not AA or AAA, gives AA.</summary>
+    /// <summary>
+    /// Reads the settings; a missing or unreadable file, or a level that is
+    /// not AA or AAA, gives the defaults, and a hold time that is not one of
+    /// the choices gives the default hold time.
+    /// </summary>
     public static PhoneCheckSettings Load(string path)
     {
         try
@@ -73,6 +86,11 @@ public sealed record PhoneCheckSettings
                 legacy.TryGetInt32(out var level))
             {
                 settings = settings with { AuditLevel = (PhoneAuditLevel)level };
+            }
+
+            if (!PhoneOrientationChecks.HoldChoices.Contains(settings.OrientationHoldSeconds))
+            {
+                settings = settings with { OrientationHoldSeconds = PhoneOrientationChecks.DefaultHoldSeconds };
             }
 
             return Enum.IsDefined(settings.AuditLevel) ? settings : Default;

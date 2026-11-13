@@ -205,7 +205,7 @@ public sealed class AndroidCompanionTests
 
         var exception = await Assert.ThrowsAsync<CompanionUnavailableException>(() => app.ConnectAsync());
 
-        Assert.Contains("speaks protocol 5; this recorder speaks 6", exception.Message);
+        Assert.Contains("speaks protocol 5; this recorder speaks 7", exception.Message);
     }
 
     [Fact]
@@ -387,6 +387,17 @@ public sealed class AndroidCompanionTests
         Assert.Equal(CompanionAction.None, report.Companion);
     }
 
+    [Fact]
+    public void Protocol_OrientationRequestAndMessage()
+    {
+        Assert.Equal(7, CompanionProtocol.Version);
+        Assert.Equal("{\"type\":\"orientation\"}\n", CompanionProtocol.OrientationRequest);
+        Assert.Equal(
+            new CompanionOrientation("changed", 270, 291, 123),
+            CompanionProtocol.Parse("{\"type\":\"orientation\",\"reason\":\"changed\",\"orientation\":270,\"degrees\":291,\"time\":123}"));
+        Assert.Throws<FormatException>(() => CompanionProtocol.Parse("{\"type\":\"orientation\",\"reason\":\"first\",\"time\":123}"));
+    }
+
     // The collector
 
     [Fact]
@@ -406,6 +417,9 @@ public sealed class AndroidCompanionTests
         await app.SendAsync("{\"type\":\"display\",\"reason\":\"changed\",\"rotation\":90,\"modeWidth\":1344,\"modeHeight\":2992,\"time\":" +
             (CompanionLink.StopwatchNanoseconds() + FakeApp.PhoneOffset) + "}");
         await WaitUntilAsync(() => sink.Records.Count(record => record.Channel == AndroidCompanionRecords.DisplayChannel) >= 2);
+        await app.SendAsync("{\"type\":\"orientation\",\"reason\":\"changed\",\"orientation\":90,\"degrees\":68,\"time\":" +
+            (CompanionLink.StopwatchNanoseconds() + FakeApp.PhoneOffset) + "}");
+        await WaitUntilAsync(() => sink.Records.Count(record => record.Channel == AndroidCompanionRecords.OrientationChannel) >= 2);
         await collector.StopAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
 
         Assert.Equal(CollectorHealthState.Healthy, collector.HealthState);
@@ -430,6 +444,15 @@ public sealed class AndroidCompanionTests
         var displays = records.Where(record => record.Channel == AndroidCompanionRecords.DisplayChannel).ToList();
         Assert.Equal(["initial", "changed"], displays.Select(record => record.Payload.GetProperty("reason").GetString()));
         Assert.All(displays, display => Assert.Equal(AndroidCompanionRecords.FittedClockMapping, display.ClockMappingId));
+        // How the phone is held, asked for as the collector connects
+        // (android-checks.md, step 15).
+        var held = records.Where(record => record.Channel == AndroidCompanionRecords.OrientationChannel).ToList();
+        Assert.All(held, record => Assert.Equal(AndroidCompanionRecords.OrientationEventType, record.EventType));
+        Assert.Equal(["first", "changed"], held.Select(record => record.Payload.GetProperty("reason").GetString()));
+        Assert.Equal([0, 90], held.Select(record => record.Payload.GetProperty("orientation").GetInt32()));
+        Assert.Equal(68, held[1].Payload.GetProperty("degrees").GetInt32());
+        Assert.True(held[1].MonotonicNanoseconds >= held[0].MonotonicNanoseconds);
+
         var turned = displays[1];
         Assert.Equal(90, turned.Payload.GetProperty("rotation").GetInt32());
         // The fit puts the phone time back on the session clock, within
@@ -631,6 +654,49 @@ public sealed class AndroidCompanionTests
             1,
             1_000,
             AndroidCompanionRecords.AccessibilityVolumeEventType,
+            JsonDocument.Parse(payload).RootElement,
+            []);
+
+        Assert.Contains(new EventRecordValidator("session-1").Validate(record), issue => issue.Code == code);
+    }
+
+    // How the phone is held (android-checks.md, step 15): upright, turned
+    // with its left side up, and a phone that cannot tell, are valid. Like
+    // the settings and the trees, these records are kept in the recording
+    // file and have no evidence tables.
+    [Theory]
+    [InlineData("{\"reason\":\"first\",\"orientation\":0,\"degrees\":4}")]
+    [InlineData("{\"reason\":\"changed\",\"orientation\":90,\"degrees\":71}")]
+    [InlineData("{\"reason\":\"unavailable\",\"orientation\":-1,\"degrees\":-1}")]
+    public async Task OrientationRecord_IsValid(string payload)
+    {
+        await using var collector = new AndroidCompanionCollector(new ScriptedAdb(_ => new AdbResult(1, "", "")), Serial);
+        var record = RecorderEventFactory.Create(
+            "session-1",
+            collector.Descriptor,
+            AndroidCompanionRecords.OrientationChannel,
+            1,
+            1_000,
+            AndroidCompanionRecords.OrientationEventType,
+            JsonDocument.Parse(payload).RootElement,
+            []);
+
+        Assert.Empty(new EventRecordValidator("session-1").Validate(record));
+    }
+
+    [Theory]
+    [InlineData("{\"reason\":\"changed\",\"orientation\":45,\"degrees\":45}", "android-phone-orientation")]
+    [InlineData("{\"reason\":\"changed\",\"orientation\":90,\"degrees\":360}", "android-phone-orientation-degrees")]
+    public async Task OrientationRecord_BadValues_AreRejected(string payload, string code)
+    {
+        await using var collector = new AndroidCompanionCollector(new ScriptedAdb(_ => new AdbResult(1, "", "")), Serial);
+        var record = RecorderEventFactory.Create(
+            "session-1",
+            collector.Descriptor,
+            AndroidCompanionRecords.OrientationChannel,
+            1,
+            1_000,
+            AndroidCompanionRecords.OrientationEventType,
             JsonDocument.Parse(payload).RootElement,
             []);
 
@@ -933,6 +999,12 @@ public sealed class AndroidCompanionTests
                     if (request.RootElement.GetProperty("type").GetString() == "accessibility-trees")
                     {
                         _treesAsked.TrySetResult();
+                        continue;
+                    }
+
+                    if (request.RootElement.GetProperty("type").GetString() == "orientation")
+                    {
+                        await WriteAsync(stream, $"{{\"type\":\"orientation\",\"reason\":\"first\",\"orientation\":0,\"degrees\":2,\"time\":{Now()}}}");
                         continue;
                     }
 

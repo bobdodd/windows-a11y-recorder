@@ -15,6 +15,9 @@ public sealed class CompanionUnavailableException(string message, Exception? inn
 /// <summary>A display message and the session time the recorder read it.</summary>
 public sealed record ReceivedDisplay(CompanionDisplay Display, long ReceivedAt);
 
+/// <summary>An orientation message and the session time the recorder read it.</summary>
+public sealed record ReceivedOrientation(CompanionOrientation Orientation, long ReceivedAt);
+
 /// <summary>An Accessibility volume message and the session time the recorder read it.</summary>
 public sealed record ReceivedAccessibilityVolume(CompanionAccessibilityVolume Volume, long ReceivedAt);
 
@@ -53,6 +56,8 @@ public sealed class CompanionConnection : IAsyncDisposable
     private readonly ConcurrentDictionary<long, TaskCompletionSource<(CompanionClockReply Reply, long At)>> _pending = new();
     private readonly Channel<ReceivedDisplay> _displays = Channel.CreateUnbounded<ReceivedDisplay>(
         new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<ReceivedOrientation> _orientations = Channel.CreateUnbounded<ReceivedOrientation>(
+        new UnboundedChannelOptions { SingleReader = true });
     private readonly Channel<ReceivedAccessibilityVolume> _volumes = Channel.CreateUnbounded<ReceivedAccessibilityVolume>(
         new UnboundedChannelOptions { SingleReader = true });
     private readonly Channel<ReceivedAccessibilityEvent> _events = Channel.CreateUnbounded<ReceivedAccessibilityEvent>(
@@ -83,6 +88,12 @@ public sealed class CompanionConnection : IAsyncDisposable
 
     /// <summary>Display messages, in the order they arrived; completes when the connection ends.</summary>
     public ChannelReader<ReceivedDisplay> Displays => _displays.Reader;
+
+    /// <summary>
+    /// How the phone is held, in the order the messages arrived, once asked
+    /// for with <see cref="RequestOrientationAsync"/>; completes when the connection ends.
+    /// </summary>
+    public ChannelReader<ReceivedOrientation> Orientations => _orientations.Reader;
 
     /// <summary>Accessibility volume messages, in the order they arrived; completes when the connection ends.</summary>
     public ChannelReader<ReceivedAccessibilityVolume> AccessibilityVolumes => _volumes.Reader;
@@ -271,6 +282,13 @@ public sealed class CompanionConnection : IAsyncDisposable
         SendAsync(CompanionProtocol.ScreenshotsRequest, cancellation);
 
     /// <summary>
+    /// Asks the app how the phone is held, now and each time that changes;
+    /// the messages come on <see cref="Orientations"/>.
+    /// </summary>
+    public Task RequestOrientationAsync(CancellationToken cancellation) =>
+        SendAsync(CompanionProtocol.OrientationRequest, cancellation);
+
+    /// <summary>
     /// Asks the app to say each time one of the settings is written; the
     /// notices come on <see cref="SettingChanges"/>.
     /// </summary>
@@ -336,6 +354,9 @@ public sealed class CompanionConnection : IAsyncDisposable
                     case CompanionDisplay display:
                         _displays.Writer.TryWrite(new ReceivedDisplay(display, at));
                         break;
+                    case CompanionOrientation orientation:
+                        _orientations.Writer.TryWrite(new ReceivedOrientation(orientation, at));
+                        break;
                     case CompanionAccessibilityVolume volume:
                         _volumes.Writer.TryWrite(new ReceivedAccessibilityVolume(volume, at));
                         break;
@@ -368,6 +389,7 @@ public sealed class CompanionConnection : IAsyncDisposable
         finally
         {
             _displays.Writer.TryComplete();
+            _orientations.Writer.TryComplete();
             _volumes.Writer.TryComplete();
             _events.Writer.TryComplete();
             _trees.Writer.TryComplete();
@@ -405,6 +427,7 @@ public sealed class CompanionConnection : IAsyncDisposable
 
         _closed.TrySetResult("The recorder closed the connection.");
         _displays.Writer.TryComplete();
+        _orientations.Writer.TryComplete();
         _volumes.Writer.TryComplete();
         _events.Writer.TryComplete();
         _trees.Writer.TryComplete();

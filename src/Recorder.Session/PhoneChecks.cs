@@ -211,6 +211,21 @@ public sealed class PhoneCheckRun
     /// <summary>The setting changes: text typed, a checkable item changed, a choice made or a slider moved.</summary>
     public int SettingChanges { get; private set; }
 
+    /// <summary>Whether the orientation check ran (step 15): it needs how the phone was held, its screen's rotation and its settings recorded.</summary>
+    public bool OrientationRun { get; private set; }
+
+    /// <summary>Why the orientation check did not run, or null.</summary>
+    public string? OrientationNotRun { get; private set; }
+
+    /// <summary>How long the phone had to be held turned, in seconds, for the orientation check.</summary>
+    public int OrientationHoldSeconds { get; private set; } = PhoneOrientationChecks.DefaultHoldSeconds;
+
+    /// <summary>The times the phone was turned between upright and sideways.</summary>
+    public int OrientationTurns { get; private set; }
+
+    /// <summary>The times, in visits, the screen did not turn with the phone for the hold time, with Auto-rotate on.</summary>
+    public int OrientationNotFollowed { get; private set; }
+
     /// <summary>Why a snapshot could not be checked, one for each such snapshot.</summary>
     public IReadOnlyList<string> Problems { get; private set; } = [];
 
@@ -235,7 +250,9 @@ public sealed class PhoneCheckRun
         PhoneAnnouncementTimeline? announcements = null,
         PhoneSettingsTimeline? settings = null,
         Func<string, PhonePixels?>? loadPicture = null,
-        PhoneInputTimeline? inputs = null)
+        PhoneInputTimeline? inputs = null,
+        PhoneOrientationTimeline? orientation = null,
+        int orientationHoldSeconds = PhoneOrientationChecks.DefaultHoldSeconds)
     {
         ArgumentNullException.ThrowIfNull(screens);
         pictures ??= PhoneSnapshotPictures.Empty;
@@ -386,7 +403,12 @@ public sealed class PhoneCheckRun
         // Step 14, changes of context on focus and on input.
         var contextChange = PhoneContextChecks.Run(
             screens, trees, touches ?? PhoneTouchTimeline.Empty, inputs ?? PhoneInputTimeline.Empty, source, pictures, cancellationToken);
-        foreach (var finding in status.Brief.Concat(status.Timed).Concat(status.Updating).Concat(motion.Findings).Concat(contextChange.Findings))
+        // Step 15, orientation, from how the phone was held.
+        var turned = PhoneOrientationChecks.Run(
+            screens, trees, orientation ?? PhoneOrientationTimeline.Empty, settings ?? PhoneSettingsTimeline.Empty, source,
+            orientationHoldSeconds, cancellationToken);
+        foreach (var finding in status.Brief.Concat(status.Timed).Concat(status.Updating).Concat(motion.Findings)
+            .Concat(contextChange.Findings).Concat(turned.Findings))
         {
             findings[(finding.Visit, finding.Check, finding.Level, finding.Identity)] = finding;
         }
@@ -394,6 +416,12 @@ public sealed class PhoneCheckRun
         problems.AddRange(status.Problems);
         problems.AddRange(motion.Problems);
         problems.AddRange(contextChange.Problems);
+        problems.AddRange(turned.Problems);
+        run.OrientationRun = turned.Run;
+        run.OrientationNotRun = turned.NotRun;
+        run.OrientationHoldSeconds = Math.Clamp(orientationHoldSeconds, PhoneOrientationChecks.HoldChoices[0], PhoneOrientationChecks.HoldChoices[^1]);
+        run.OrientationTurns = turned.Turns;
+        run.OrientationNotFollowed = turned.NotFollowed;
         run.ContextRun = contextChange.Run;
         run.ContextChanges = contextChange.Changes;
         run.FocusMoves = contextChange.FocusMoves;

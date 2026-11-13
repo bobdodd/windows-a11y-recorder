@@ -96,6 +96,9 @@ public static class AndroidSettingsRecords
         new(SystemNamespace, "font_scale", TextGroup, "Font size", AndroidSettingKind.ScalePercent),
         new(SecureNamespace, "font_weight_adjustment", TextGroup, "Bold text", AndroidSettingKind.FontWeight),
         new(SecureNamespace, "display_density_forced", TextGroup, "Display size", AndroidSettingKind.Density),
+        // android-checks.md, step 15: the orientation check is looked for
+        // only while the phone turns its screen with the phone.
+        new(SystemNamespace, "accelerometer_rotation", TextGroup, "Auto-rotate", AndroidSettingKind.Switch),
 
         new(GlobalNamespace, "window_animation_scale", MotionGroup, "Window animation scale", AndroidSettingKind.Times),
         new(GlobalNamespace, "transition_animation_scale", MotionGroup, "Transition animation scale", AndroidSettingKind.Times),

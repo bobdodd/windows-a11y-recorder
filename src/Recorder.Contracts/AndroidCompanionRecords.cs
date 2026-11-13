@@ -4,7 +4,8 @@ namespace Recorder.Contracts;
 /// The records of the Android companion collector, slice 2 of
 /// docs/architecture/android-implementation-plan.md: the companion app's
 /// connection, the phone clock's mapping samples, and the phone display's
-/// rotation and size.
+/// rotation and size; and, from docs/architecture/android-checks.md, step
+/// 15, how the phone itself is held, from its accelerometer.
 ///
 /// The phone's clock domain is <see cref="ClockDomain"/>, CLOCK_MONOTONIC,
 /// which the companion app reads as <c>System.nanoTime()</c>. Each clock
@@ -20,10 +21,14 @@ public static class AndroidCompanionRecords
     public const string ClockChannel = "clock.android";
     public const string DisplayChannel = "android.display";
 
+    /// <summary>How the phone itself is held (android-checks.md, step 15).</summary>
+    public const string OrientationChannel = "android.orientation";
+
     public const string ConnectedEventType = "companion-connected";
     public const string UnavailableEventType = "companion-unavailable";
     public const string ClockSampleEventType = "clock-sample";
     public const string DisplayEventType = "display-state";
+    public const string OrientationEventType = "phone-orientation";
 
     /// <summary>What the companion app found and did when asked to raise the Accessibility volume (slice 4, step 4c).</summary>
     public const string AccessibilityVolumeEventType = "accessibility-volume";
@@ -51,6 +56,15 @@ public static class AndroidCompanionRecords
     public static IReadOnlyList<string> DisplayReasons { get; } = [InitialReason, ChangedReason];
 
     public static IReadOnlyList<int> Rotations { get; } = [0, 90, 180, 270];
+
+    /// <summary>The first reading, a change, or a phone that cannot tell.</summary>
+    public static IReadOnlyList<string> OrientationReasons { get; } = ["first", "changed", "unavailable"];
+
+    /// <summary>How the phone is held: a quarter turn, or <see cref="FlatOrientation"/>.</summary>
+    public static IReadOnlyList<int> Orientations { get; } = [FlatOrientation, 0, 90, 180, 270];
+
+    /// <summary>The phone is flat, or the companion app cannot tell how it is held.</summary>
+    public const int FlatOrientation = -1;
 
     public static IReadOnlyList<string> AccessibilityVolumeReasons { get; } = ["requested", "services-changed"];
 
@@ -87,6 +101,18 @@ public sealed record AndroidClockSample(
 
 /// <summary>The phone display's rotation, in degrees, and its display mode's size in pixels.</summary>
 public sealed record AndroidDisplayState(string Reason, int Rotation, int ModeWidth, int ModeHeight);
+
+/// <summary>
+/// How the phone itself is held, from its accelerometer, as the companion
+/// app's PhoneOrientation.java places it: 0 in the phone's natural
+/// position, 90 with its left side at the top, 180 upside down, 270 with
+/// its right side at the top, or -1 when it is flat or the app cannot tell.
+/// The angle is placed in a quarter only within 30 degrees of it, so a
+/// phone held between two keeps the last.
+/// </summary>
+/// <param name="Reason">"first", "changed", or "unavailable" when the phone has no sensor to tell.</param>
+/// <param name="Degrees">The sensor's angle that placed it, from 0 to 359, or -1.</param>
+public sealed record AndroidPhoneOrientation(string Reason, int Orientation, int Degrees);
 
 /// <summary>
 /// What the companion app found and did when asked to raise the phone's
