@@ -1373,3 +1373,25 @@ AAA): 4 warnings, from 4 images read by OCR" and 4 rows starting
 "Warning: ImageView described as", each including "1.4.9 allows an
 image of text only as pure decoration or where essential". Long rows
 wrap; there is no horizontal scrollbar. Send the four screenshots.
+
+## Results of tests 34 and 35 (2026-11-12)
+
+Passed on the development PC with the build of 9be5eb0, as recorded by
+the owner. At AA the line under "Show current visit" included "Audit
+level AA: text contrast is held to WCAG 1.4.3, targets to 2.5.8, and
+images of text to 1.4.5." and "Image of text (WCAG 1.4.5): 4 findings (4
+warnings), from 4 images read by OCR, 0 passed". Below the Visit 2 row
+were the bold row "Image of text (WCAG 1.4.5): 4 warnings, from 4 images
+read by OCR" and the 4 rows for Understanding Melatonin, Sleep Hygiene,
+Sleeping Environment and Emotion, Health and Sleep, each including "of
+text inside the image:", "its description holds them" and "approximate,
+from the video", and ending "seen once, at 00:00:28.202". Clicking the
+Sleep Hygiene row showed 00:00:28.202 (read from the status bar under
+the player) with a cyan outline around that card. At AAA the line
+included "images of text to 1.4.9 as well as 1.4.5" and "Image of text
+(WCAG 1.4.5) and Image of text (WCAG 1.4.9, AAA): 8 findings (8
+warnings)", and the bold row "Image of text (WCAG 1.4.9, AAA): 4
+warnings, from 4 images read by OCR" had 4 rows, each including "1.4.9
+allows an image of text only as pure decoration or where essential".
+Long rows wrapped, with no horizontal scrollbar. Images of text are
+checked on the PC.

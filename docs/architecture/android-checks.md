@@ -29,8 +29,8 @@ level"), and was checked on the development PC on 2026-11-12 (tests 32
 and 33 passed). Further checks WCAG2ICT allows without AI, including 1.4.5 Images of
 Text measured on the recordings to hand, are recorded as options in
 `android-checks-candidates.md`. Step 8, images of text, is built (see
-"Step 8: images of text"), and waits for its check on the development
-PC (tests 34 and 35). The owner's
+"Step 8: images of text"), and was checked on the development PC on
+2026-11-12 (tests 34 and 35 passed). The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -435,7 +435,8 @@ the recording is opened and nothing is kept.
 7. **The audit level**, AA or AAA, guiding the checks and their
    reporting (see "The audit level"). Built, and checked on the PC.
 8. **Images of text** (WCAG 1.4.5, and 1.4.9 at AAA), from the words OCR
-   already reads (see "Step 8: images of text"). Built.
+   already reads (see "Step 8: images of text"). Built, and checked on
+   the PC.
 
 ## As built: step 1
 
