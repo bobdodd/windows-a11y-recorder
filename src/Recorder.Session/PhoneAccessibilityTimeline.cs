@@ -357,6 +357,21 @@ public sealed class PhoneAccessibilityTimeline
                 new PhoneListedWindow(entry.Id, entry.TypeName, entry.Title, entry.Active, entry.Focused, entry.Layer, entry.Bounds))];
     }
 
+    /// <summary>
+    /// Each snapshot's time with the windows it lists, in time order, so
+    /// the change of context checks (android-checks.md, step 14) can find
+    /// a window that appeared and took the focus.
+    /// </summary>
+    internal IEnumerable<(long Time, IReadOnlyList<PhoneListedWindow> Windows)> Listings()
+    {
+        foreach (var snapshot in _snapshots)
+        {
+            yield return (snapshot.Event.MonotonicNanoseconds,
+                [.. snapshot.Windows.Select(entry =>
+                    new PhoneListedWindow(entry.Id, entry.TypeName, entry.Title, entry.Active, entry.Focused, entry.Layer, entry.Bounds))]);
+        }
+    }
+
     /// <summary>The item with accessibility focus at a time; null when none is known to have it.</summary>
     public PhoneAccessibilityFocus? FocusAt(long time)
     {

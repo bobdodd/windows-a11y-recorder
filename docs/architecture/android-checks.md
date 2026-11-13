@@ -2685,6 +2685,20 @@ With a throwaway program, on the recordings to hand (measured):
 So no recording to hand has a finding, as expected; the checks were
 seen to find nothing on them.
 
+**Test 48's recording (2026-11-13,
+`20261113-200327-fdc058f1017a4496b2158acb591c6db4`), measured:** the
+tap on the "Select to Speak shortcut" switch lifted at 8.983 seconds,
+and the switch's click event ("ON") came 0.02 seconds later; Select to
+Speak was already allowed, so no permission message appeared, but a
+"Quick Settings shortcut" dialog (`androidx.appcompat.app.AlertDialog`,
+with "Got it") took the focus, listed at 9.209 seconds, 0.23 seconds
+after the tap. While it was up, Android listed the dialog's window,
+untitled, and not the Settings window under it, so the dialog was not a
+state of the visit, and the first build found no change of context. As
+built since, a window of an app's that appears and takes the focus is a
+change of context whether or not the window under it is listed, and
+the recording gives one warning.
+
 ### As built
 
 - **What it reads.** The phone's accessibility events (`PhoneInputTimeline`,
@@ -2715,7 +2729,10 @@ seen to find nothing on them.
   second after a change of context, which is TalkBack placing it.
 - **A change of context.** A new visit to a different screen, or another
   app coming to the front; a window that took the focus or became active
-  appearing over the app, such as a dialog; a pane appearing; or the
+  appearing over the app, such as a dialog, or any window of an app's,
+  other than a screen's own window, that appears and takes the focus
+  (as Settings' dialogs do, listed without the window under them); a
+  pane appearing; or the
   input focus moving to an item other than the one a key or tap on a
   field gave the focus to (up to half a second after it).
 - **A finding** is a focus move, TalkBack focus move or change of
@@ -2751,7 +2768,8 @@ seen to find nothing on them.
   and the tests pass, with the Windows-only browser tests failing as
   before. The new tests cover a switch tapped, with and without its
   click event, a Settings row holding a switch tapped, and text typed,
-  each followed by a dialog (and the switch by a new screen); a tap on a
+  each followed by a dialog (and the switch by a new screen, and by an
+  untitled dialog listed without the window under it); a tap on a
   field, the Tab key and TalkBack's focus moved by a gesture, each
   followed by a dialog; and, with no finding, a button tapped, with and
   without its click event, the volume key, a switch tapped 1.8 seconds
@@ -2776,8 +2794,8 @@ seen to find nothing on them.
   slider class.
 - 3.2.2's exception, advice given before the item is used, is not looked
   for, so its findings are warnings.
-- No recording to hand has a finding, so the checks were seen finding
-  something only in the tests and, once it is run, test 48.
+- Of the recordings to hand, only test 48's has a finding, so the
+  checks were seen finding something only there and in the tests.
 
 ## Decisions on the open questions (2026-11-11)
 

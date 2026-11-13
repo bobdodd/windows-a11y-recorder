@@ -1821,8 +1821,9 @@ Leave the recorder open from test 47, with "Android device" chosen.
 1. In the recorder, choose "Start recording", and wait 5 seconds.
 2. On the phone, tap the switch at the right end of the "Select to
    Speak shortcut" row once, and wait 5 seconds.
-3. In the message that appears, asking to let Select to Speak have full
-   control of the phone, tap "Deny", and wait 5 seconds.
+3. In the message that appears, tap its button ("Got it" when Select to
+   Speak is already allowed, as on the owner's phone; "Deny" if it asks
+   to let Select to Speak have full control), and wait 5 seconds.
 4. Choose "Stop recording", and wait until the recording has opened in
    the player.
 5. If the Checks window is closed, click the "Checks" tab, then move it
@@ -1830,8 +1831,7 @@ Leave the recorder open from test 47, with "Android device" chosen.
    "Change of context on input" is in view, and take a screenshot of the
    whole screen.
 
-**On screen:** in step 2 the message appears, and in step 3 it goes and
-the switch is still off. In step 5 the line under "Show current visit"
+**On screen:** in step 2 a message appears, and in step 3 it goes. In step 5 the line under "Show current visit"
 includes "Changes of context (WCAG 3.2.1 and 3.2.2), three checks: 1
 finding (1 warning);" and "1 setting change"; the list has the row
 "Change of context on input (WCAG 3.2.2): 1 warning", and below it a row
@@ -1841,3 +1841,57 @@ which is allowed only when the user was told of it before using the
 item; look for such advice". No such row is a failure; send the
 screenshot as it is. Long rows wrap; there is no horizontal scrollbar.
 Send the screenshot.
+
+## Results of test 48 (2026-11-13)
+
+Failed on the development PC with the build of 8adb57f (session
+`20261113-200327-fdc058f1017a4496b2158acb591c6db4`): the Checks window
+had no "Change of context on input" row. The test's own steps were also
+wrong for the owner's phone: Select to Speak was already allowed, so no
+permission message appeared; the switch turned on and a "Quick Settings
+shortcut" dialog with "Got it" appeared instead, and the owner tapped
+"Got it", leaving the switch on. Measured on the recording: the tap was
+seen as a change of setting, and the dialog took the focus 0.23 seconds
+after it, but Android listed the dialog's window, untitled, without the
+Settings window under it, so the dialog was not a state of the visit,
+and the first build did not count it as a change of context. Fixed: a
+window of an app's that appears and takes the focus is a change of
+context whether or not the window under it is listed (see the
+architecture document's "Step 14: changes of context"). With the fix,
+the recording gives one warning. Steps 2 and 3 above are corrected.
+
+## Test 49: build and install the eighteenth build (development PC)
+
+As test 19: close the recorder, run the PowerShell of test 19's step 1,
+run the newest installer with "Start the recorder and set up the
+analysis models" unchecked, and start the recorder from the Start menu.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the recorder
+opens.
+
+## Test 50: the change of context in test 48's recording
+
+Keep the phone's picture in view throughout.
+
+1. Choose "Open recording...", and open
+   `20261113-200327-fdc058f1017a4496b2158acb591c6db4`. If the Checks
+   window is closed, click the "Checks" tab, then move it so the phone's
+   picture is fully in view. Wait 10 seconds, scroll the list until the
+   row starting "Change of context on input" is in view, and take a
+   screenshot of the whole screen.
+
+**On screen:** the line under "Show current visit" includes "Changes of
+context (WCAG 3.2.1 and 3.2.2), three checks: 1 finding (1 warning); 0
+focus moves by a key or a tap on a field, 0 TalkBack focus moves after
+a gesture or key, and 1 setting change (typing, checking, choosing or
+moving a slider); 1 change of context (a new screen or app, a window
+that took the focus, a pane, or the focus moving by itself) within 1.5
+seconds of one, with nothing touched, pressed or clicked between." The
+list has the row "Change of context on input (WCAG 3.2.2): 1 warning",
+and below it the row "Warning: Switch described as "Shortcut settings",
+a tap changed its setting (it was not checked), and 0.23 seconds later,
+with no further touch or key, an untitled window appeared and took the
+focus, a change of context on input, which is allowed only when the
+user was told of it before using the item; look for such advice; seen
+once, at 00:00:08.983". Long rows wrap; there is no horizontal
+scrollbar. Send the screenshot.

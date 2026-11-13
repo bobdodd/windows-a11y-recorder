@@ -1300,7 +1300,10 @@ public sealed class PhoneCheckRunTests : IDisposable
         return items;
     }
 
-    private static AndroidAccessibilityTree ContextTree(long index, bool dialog, bool dialogFocused = true, string? title = null)
+    // With alone, the dialog is listed, untitled, without the window under
+    // it, as Android listed Settings' Quick Settings shortcut dialog in test
+    // 48's recording.
+    private static AndroidAccessibilityTree ContextTree(long index, bool dialog, bool dialogFocused = true, string? title = null, bool alone = false)
     {
         var tree = JsonNode.Parse(AndroidAccessibilityTreeTests.TreeLine(
             index: index,
@@ -1337,6 +1340,12 @@ public sealed class PhoneCheckRunTests : IDisposable
             windows[0]!["active"] = !dialogFocused;
             windows[0]!["focused"] = !dialogFocused;
             windows.Add(over);
+            if (alone)
+            {
+                // Untitled, as the Quick Settings shortcut dialog was.
+                over["title"] = null;
+                windows.RemoveAt(0);
+            }
         }
 
         var (read, problem) = CompanionProtocol.ReadTree(tree.ToJsonString());
@@ -1383,6 +1392,7 @@ public sealed class PhoneCheckRunTests : IDisposable
             {
                 "screen" => ContextTree(2, false, title: "Wi-Fi"),
                 "suggestions" => ContextTree(2, true, dialogFocused: false),
+                "alone" => ContextTree(2, true, alone: true),
                 _ => ContextTree(2, true),
             }),
             (At(6), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(3, null, statusBarBottom: 100)),
@@ -1390,6 +1400,16 @@ public sealed class PhoneCheckRunTests : IDisposable
         if (action != "no touches")
         {
             records.AddRange(TouchAt(0.2, 540, 1200));
+        }
+
+        if (change == "alone")
+        {
+            // The dialog's window-state event, which marks it a dialog.
+            records.Add((At(2.95), AndroidAccessibilityRecords.EventsChannel, AndroidAccessibilityRecords.EventType, new
+            {
+                eventType = PhoneScreenTimeline.WindowStateChangedEventType, eventTypeName = "TYPE_WINDOW_STATE_CHANGED",
+                packageName = Settings, className = "androidx.appcompat.app.AlertDialog", windowId = 520, text = new[] { "Quick Settings shortcut", "Got it" },
+            }));
         }
 
         const int ScreenReaderTouch = PhoneInputTimeline.TouchInteractionStartEventType;
@@ -1462,6 +1482,7 @@ public sealed class PhoneCheckRunTests : IDisposable
     [InlineData("switch", "dialog", "window:512/0/2", "a tap changed its setting (it was not checked), and 0.45 seconds later, with no further touch or key, the window 'Allow?' appeared")]
     [InlineData("switch clicked", "dialog", "window:512/0/2", "a tap changed its setting (it was not checked), and 0.45 seconds later, with no further touch or key, the window 'Allow?' appeared")]
     [InlineData("row", "dialog", "window:512/0/4", "a tap changed the setting of its Switch (it was not checked), and 0.45 seconds later, with no further touch or key, the window 'Allow?' appeared")]
+    [InlineData("switch", "alone", "window:512/0/2", "a tap changed its setting (it was not checked), and 0.45 seconds later, with no further touch or key, an untitled window appeared and took the focus")]
     [InlineData("typed", "dialog", "window:512/0/3", "text was typed in it, and 0.45 seconds later, with no further touch or key, the window 'Allow?' appeared")]
     [InlineData("switch", "screen", "window:512/0/2", "a tap changed its setting (it was not checked), and 0.45 seconds later, with no further touch or key, the screen 'Wi-Fi' opened")]
     public void Context_SettingChangedThenAChangeOfContext_IsAWarning(string action, string change, string treeKey, string said)

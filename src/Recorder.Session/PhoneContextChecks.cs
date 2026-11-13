@@ -195,6 +195,9 @@ public static class PhoneContextChecks
     /// <summary>TalkBack's focus moving this soon after a change of context is TalkBack placing it on the new content.</summary>
     public const long PlacedAfterChangeNanoseconds = 1_000_000_000;
 
+    // A window that appeared this close to a state of the visit in it is that state.
+    private const long SameChangeNanoseconds = 500_000_000;
+
     /// <summary>A click event this soon after a finger lifted is that touch's click, not another action.</summary>
     public const long ClickOfTouchNanoseconds = 500_000_000;
 
@@ -495,6 +498,28 @@ public static class PhoneContextChecks
                 var named = state.NamedBy == PhoneTitleSource.Untitled ? ", untitled," : $" '{state.Name}'";
                 changes.Add(new Change(state.Start, $"the {state.Kind}{named} appeared", false, state.WindowId, null, null));
             }
+        }
+
+        // A window of an app's that appeared and took the focus, other than
+        // a screen's own window, which the visits cover: a dialog that is
+        // not a state of the visit because, while it is up, Android does
+        // not list the window under it (seen in test 48's recording).
+        var screenWindows = visits.Select(visit => visit.WindowId).ToHashSet();
+        IReadOnlyList<PhoneListedWindow> previous = [];
+        foreach (var (time, listed) in trees.Listings())
+        {
+            foreach (var window in listed.Where(window =>
+                window.TypeName == PhoneListedWindow.ApplicationType && (window.Active || window.Focused) &&
+                !screenWindows.Contains(window.Id) && previous.All(before => before.Id != window.Id)))
+            {
+                if (!changes.Any(change => change.WindowId == window.Id && Math.Abs(change.Time - time) <= SameChangeNanoseconds))
+                {
+                    var named = string.IsNullOrWhiteSpace(window.Title) ? "an untitled window" : $"the window '{window.Title}'";
+                    changes.Add(new Change(time, $"{named} appeared and took the focus", false, window.Id, null, null));
+                }
+            }
+
+            previous = listed;
         }
 
         return [.. changes.OrderBy(change => change.Time)];
