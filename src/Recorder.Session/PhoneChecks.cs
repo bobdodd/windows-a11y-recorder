@@ -175,6 +175,27 @@ public sealed class PhoneCheckRun
     /// </summary>
     public IReadOnlyList<string> TextFocusablePackages { get; private set; } = [];
 
+    /// <summary>Step 13: texts gone within the time looked for (5 seconds, or Time to take action when set), with no touch between.</summary>
+    public int TimedMessages { get; private set; }
+
+    /// <summary>Of <see cref="TimedMessages"/>, those gone with nothing new shown as they went.</summary>
+    public int TimedAlone { get; private set; }
+
+    /// <summary>The longest Time to take action for messages in the recording, in milliseconds; null when Default throughout or not recorded.</summary>
+    public long? TimeoutMilliseconds { get; private set; }
+
+    /// <summary>Whether the phone's settings were recorded.</summary>
+    public bool SettingsRecorded { get; private set; }
+
+    /// <summary>The items whose text changed in place with no touch, at least once.</summary>
+    public int UpdatedItems { get; private set; }
+
+    /// <summary>Whether the moving picture check ran: it needs the phone's video and touches recorded.</summary>
+    public bool MotionRun { get; private set; }
+
+    /// <summary>The runs of the phone's video that kept changing for more than 5 seconds with no touch.</summary>
+    public int MovingRuns { get; private set; }
+
     /// <summary>Why a snapshot could not be checked, one for each such snapshot.</summary>
     public IReadOnlyList<string> Problems { get; private set; } = [];
 
@@ -196,7 +217,9 @@ public sealed class PhoneCheckRun
         CancellationToken cancellationToken = default,
         PhoneAuditLevel level = PhoneAuditLevel.AA,
         PhoneTouchTimeline? touches = null,
-        PhoneAnnouncementTimeline? announcements = null)
+        PhoneAnnouncementTimeline? announcements = null,
+        PhoneSettingsTimeline? settings = null,
+        Func<string, PhonePixels?>? loadPicture = null)
     {
         ArgumentNullException.ThrowIfNull(screens);
         pictures ??= PhoneSnapshotPictures.Empty;
@@ -340,13 +363,24 @@ public sealed class PhoneCheckRun
 
         // Step 12, status messages, from every snapshot of each app window.
         var status = PhoneStatusChecks.Run(
-            screens, trees, touches ?? PhoneTouchTimeline.Empty, announcements ?? PhoneAnnouncementTimeline.Empty, source, pictures, cancellationToken);
-        foreach (var finding in status.Brief)
+            screens, trees, touches ?? PhoneTouchTimeline.Empty, announcements ?? PhoneAnnouncementTimeline.Empty, source, pictures, cancellationToken, settings);
+        // Step 13, timing: 2.2.1 and 2.2.2's text from the same pass, and
+        // 2.2.2's moving picture from the phone's video.
+        var motion = PhoneMotionChecks.Run(screens, trees, touches ?? PhoneTouchTimeline.Empty, source, pictures, loadPicture, cancellationToken);
+        foreach (var finding in status.Brief.Concat(status.Timed).Concat(status.Updating).Concat(motion.Findings))
         {
             findings[(finding.Visit, finding.Check, finding.Level, finding.Identity)] = finding;
         }
 
         problems.AddRange(status.Problems);
+        problems.AddRange(motion.Problems);
+        run.TimedMessages = status.TimedMessages;
+        run.TimedAlone = status.TimedAlone;
+        run.TimeoutMilliseconds = status.TimeoutMilliseconds;
+        run.SettingsRecorded = status.SettingsRecorded;
+        run.UpdatedItems = status.UpdatedItems;
+        run.MotionRun = motion.Run;
+        run.MovingRuns = motion.Runs;
         run.AppFindings = status.Apps;
         run.StatusRun = status.BriefRun;
         run.BriefMessages = status.BriefMessages;

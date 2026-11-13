@@ -129,7 +129,7 @@ public partial class MainWindow
                 var at = level;
                 run = await Task.Run(
                     () => PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, archive.PhoneDevice, archive.RecordSource, PhoneSnapshotPictures.Of(archive), token, at,
-                        archive.PhoneTouches, archive.PhoneAnnouncements),
+                        archive.PhoneTouches, archive.PhoneAnnouncements, archive.PhoneSettings, PhonePictures.Load),
                     token);
             }
             catch (OperationCanceledException)
@@ -648,6 +648,28 @@ public partial class MainWindow
         summary += string.Create(
             CultureInfo.CurrentCulture,
             $" Status messages (WCAG 4.1.3), two checks: {statusFindings}; {brief}; {Count(run.LiveRegionItems, "item")} in a live region, {Count(run.Announcements, "announcement")} and {Count(run.Toasts, "toast")} in the recording.");
+        var timingChecks = new[]
+        {
+            PhoneCheckNames.TextGoneByItself, PhoneCheckNames.TextGoneAsContentChanged, PhoneCheckNames.TextUpdatingByItself, PhoneCheckNames.MovingByItself,
+        };
+        var timingFound = run.Findings.Where(finding => timingChecks.Contains(finding.Check)).ToList();
+        var timingFindings = timingFound.Count == 0
+            ? "no findings"
+            : $"{Count(timingFound.Count, "finding")} ({Levels(timingFound)})";
+        var timeout = !run.SettingsRecorded
+            ? "Time to take action was not recorded, so texts gone within 5 seconds were looked at"
+            : run.TimeoutMilliseconds is { } milliseconds
+                ? string.Create(CultureInfo.CurrentCulture, $"Time to take action was set, at most {milliseconds / 1000.0:0.##} seconds, so texts gone sooner than it were looked at")
+                : "Time to take action was Default, so texts gone within 5 seconds were looked at";
+        var timed = run.StatusRun
+            ? string.Create(
+                CultureInfo.CurrentCulture,
+                $"{timeout}: {Count(run.TimedMessages, "text")} with no touch between, {run.TimedAlone:N0} of them gone with nothing new shown as they went; {Count(run.UpdatedItems, "item")} whose text changed in place with no touch")
+            : "text going away or updating by itself not looked for, as no touches were recorded";
+        var moving = run.MotionRun
+            ? string.Create(CultureInfo.CurrentCulture, $"{Count(run.MovingRuns, "part")} of the phone's video that kept changing for more than 5 seconds with no touch (from the video, so approximate)")
+            : "moving content not looked for, as it needs the phone's video and touches recorded";
+        summary += $" Timing (WCAG 2.2.1 and 2.2.2), four checks: {timingFindings}; {timed}; {moving}.";
         if (run.TextFocusablePackages.Count > 0)
         {
             summary += $" In {string.Join(" and ", run.TextFocusablePackages)}, every item with text is focusable, as in an app drawn with Flutter, whose tree marks focusable what a screen reader can reach, so the tree does not show which items a keyboard reaches.";

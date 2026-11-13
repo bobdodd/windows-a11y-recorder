@@ -112,6 +112,19 @@ public static class PhoneStatusChecks
     /// <summary>An announcement this long before a message is shown is taken as its own.</summary>
     public const long AnnouncedBeforeNanoseconds = 1_000_000_000;
 
+    /// <summary>
+    /// Step 13's "Time to take action" for messages (Settings.Secure's
+    /// <c>accessibility_non_interactive_ui_timeout_ms</c>), which Android
+    /// uses for a message of text with no controls (FLAG_CONTENT_TEXT).
+    /// </summary>
+    public const string MessageTimeoutSetting = "secure/accessibility_non_interactive_ui_timeout_ms";
+
+    /// <summary>New content shown this close to a text going away means the screen changed as it went (step 13).</summary>
+    public const long ChangedNearNanoseconds = 500_000_000;
+
+    /// <summary>A change of text this soon after a touch is taken as the touch's (step 13, auto-updating).</summary>
+    public const long TouchSettleNanoseconds = 1_000_000_000;
+
     /// <summary>What the checks give: the findings and the counts the summary reports.</summary>
     public sealed record Result(
         IReadOnlyList<PhoneFinding> Brief,
@@ -123,7 +136,29 @@ public static class PhoneStatusChecks
         int LiveRegionItems,
         int Announcements,
         int Toasts,
-        IReadOnlyList<string> Problems);
+        IReadOnlyList<string> Problems)
+    {
+        /// <summary>Step 13's 2.2.1 findings, text gone by itself and text gone as new content appeared.</summary>
+        public IReadOnlyList<PhoneFinding> Timed { get; init; } = [];
+
+        /// <summary>Step 13's 2.2.2 findings, text that updated by itself.</summary>
+        public IReadOnlyList<PhoneFinding> Updating { get; init; } = [];
+
+        /// <summary>Texts gone within the time looked for (5 seconds, or Time to take action when set), with no touch between, as messages.</summary>
+        public int TimedMessages { get; init; }
+
+        /// <summary>Of <see cref="TimedMessages"/>, those gone with nothing new shown as they went.</summary>
+        public int TimedAlone { get; init; }
+
+        /// <summary>The longest Time to take action in effect during the recording, in milliseconds; null when it was Default throughout or not recorded.</summary>
+        public long? TimeoutMilliseconds { get; init; }
+
+        /// <summary>Whether the phone's settings were recorded, so Time to take action is known.</summary>
+        public bool SettingsRecorded { get; init; }
+
+        /// <summary>The items whose text changed in place with no touch, at least once.</summary>
+        public int UpdatedItems { get; init; }
+    }
 
     private sealed class Open
     {
@@ -143,7 +178,8 @@ public static class PhoneStatusChecks
         PhoneAnnouncementTimeline announcements,
         ISessionEventRecordSource source,
         PhoneSnapshotPictures pictures,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        PhoneSettingsTimeline? settings = null)
     {
         ArgumentNullException.ThrowIfNull(screens);
         ArgumentNullException.ThrowIfNull(trees);
@@ -151,13 +187,26 @@ public static class PhoneStatusChecks
         ArgumentNullException.ThrowIfNull(announcements);
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(pictures);
+        settings ??= PhoneSettingsTimeline.Empty;
         var briefRun = touches.Recorded;
         var problems = new List<string>();
         var findings = new Dictionary<(PhoneVisit, string), PhoneFinding>();
         var livePackages = new HashSet<string>(StringComparer.Ordinal);
         var readPackages = new HashSet<string>(StringComparer.Ordinal);
         var liveItems = new HashSet<(int, string)>();
-        int takings = 0, messages = 0, exposed = 0;
+        int takings = 0, messages = 0, exposed = 0, timedMessages = 0, timedAlone = 0;
+        var timed = new Dictionary<(PhoneVisit, string, string), PhoneFinding>();
+        var updating = new List<PhoneFinding>();
+        var updatedItems = 0;
+        long? longestTimeout = null;
+        foreach (var time in screens.Visits.SelectMany(visit => new[] { visit.Start, visit.End }))
+        {
+            if (TimeoutAt(settings, time) is { } set)
+            {
+                longestTimeout = Math.Max(longestTimeout ?? 0, set);
+            }
+        }
+
         foreach (var windowId in screens.Visits.Select(visit => visit.WindowId).Distinct())
         {
             var visits = screens.Visits.Where(visit => visit.WindowId == windowId).ToList();
@@ -165,6 +214,13 @@ public static class PhoneStatusChecks
             var closed = new List<(string Text, Open Message, long End)>();
             HashSet<string>? before = null;
             HashSet<string> panesBefore = new(StringComparer.Ordinal);
+            // Step 13: when new content was shown, and each item's text as
+            // last taken, by its place in the tree, for text that updates
+            // in place.
+            var newContentAt = new List<long>();
+            Dictionary<string, (string Words, PhoneCheckItem Item)>? placesBefore = null;
+            long placesTime = 0;
+            var updates = new List<(long Time, string Place, string From, string To, PhoneCheckItem Item, SessionTimelineEvent Taking)>();
             foreach (var (snapshot, listed, taken) in trees.ListingsOf(windowId))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -174,6 +230,7 @@ public static class PhoneStatusChecks
                     // going away by itself.
                     open.Clear();
                     before = null;
+                    placesBefore = null;
                     continue;
                 }
 
@@ -219,6 +276,34 @@ public static class PhoneStatusChecks
                     }
                 }
 
+                var places = new Dictionary<string, (string Words, PhoneCheckItem Item)>(StringComparer.Ordinal);
+                foreach (var item in window.Items)
+                {
+                    if (item.Node.VisibleToUser && !item.Bounds.IsEmpty && Words(item.Node).FirstOrDefault() is { } words)
+                    {
+                        places.TryAdd(item.TreeKey + "|" + item.Node.ClassName, (words, item));
+                    }
+                }
+
+                if (before is not null && places.Values.Any(place => !before.Contains(place.Words)))
+                {
+                    newContentAt.Add(time);
+                }
+
+                if (placesBefore is not null && !touches.TouchedBetween(placesTime - TouchSettleNanoseconds, time))
+                {
+                    foreach (var (place, now) in places)
+                    {
+                        if (placesBefore.TryGetValue(place, out var was) && was.Words != now.Words)
+                        {
+                            updates.Add((time, place, was.Words, now.Words, now.Item, snapshot));
+                        }
+                    }
+                }
+
+                placesBefore = places;
+                placesTime = time;
+
                 foreach (var text in open.Keys.Where(text => !shown.ContainsKey(text)).ToList())
                 {
                     closed.Add((text, open[text], time));
@@ -256,6 +341,105 @@ public static class PhoneStatusChecks
                 continue;
             }
 
+            // Step 13, 2.2.2: an item whose text changed in place twice or
+            // more, at least a second apart, each with no touch in the
+            // second before. Its text going is then not also a text gone
+            // (2.2.1), as it was replaced, not taken away.
+            var updatingPlaces = new HashSet<(PhoneVisit, string)>();
+            foreach (var place in updates.GroupBy(update => (Visit: visits.LastOrDefault(visit => visit.Start <= update.Time), update.Place)))
+            {
+                updatedItems++;
+                var changes = place.OrderBy(update => update.Time).ToList();
+                if (place.Key.Visit is not { } visitOf || changes.Count < 2 || changes[^1].Time - changes[0].Time < TouchSettleNanoseconds)
+                {
+                    continue;
+                }
+
+                var first = changes[0];
+                var finding = new PhoneFinding(PhoneCheckNames.TextUpdatingByItself, PhoneCheckLevel.Warning, visitOf, "place:" + place.Key.Place, first.Item.Label);
+                foreach (var change in changes)
+                {
+                    var shownAt = pictures.Between(change.Time, Math.Min(trees.NextListing(change.Time, windowId) ?? long.MaxValue, visitOf.End))?.Time ?? change.Time;
+                    finding._times.Add(new PhoneFindingTime(
+                        shownAt, visitOf, change.Taking, change.Taking, windowId, change.Item.Bounds, change.Item.TreeKey,
+                        string.Create(CultureInfo.CurrentCulture, $"its text changed {changes.Count:N0} times with no touch, ") +
+                            $"here from {Quote(change.From)} to {Quote(change.To)}, as auto-updating content does; " +
+                            "look for a way to pause, stop or hide it, or to set how often it updates, unless the updating is essential",
+                        PhoneCheckRun.StateAt(visitOf, shownAt)));
+                }
+
+                updating.Add(finding);
+                updatingPlaces.Add((visitOf, place.Key.Place));
+            }
+
+            // Step 13, 2.2.1: every text gone within the time looked for,
+            // exposed or not; alone, or as new content appeared.
+            foreach (var group in closed
+                .Where(entry => !touches.TouchedBetween(entry.Message.Start, entry.End))
+                .GroupBy(entry => (entry.Message.Start, entry.End)))
+            {
+                var (start, end) = group.Key;
+                var timeout = TimeoutAt(settings, start);
+
+                var limit = timeout is { } milliseconds ? milliseconds * 1_000_000 : BriefNanoseconds;
+                if (end - start > limit ||
+                    visits.LastOrDefault(visit => visit.Start <= start) is not { } visitOf)
+                {
+                    continue;
+                }
+
+                var (main, others) = Main(group.Select(entry => (entry.Text, entry.Message)));
+                if (main.Seen.Any(seen => updatingPlaces.Contains((visitOf, seen.Item.TreeKey + "|" + seen.Item.Node.ClassName))))
+                {
+                    continue;
+                }
+
+                timedMessages++;
+                // New content shown with the text itself is not its going.
+                var alone = !newContentAt.Any(at => at > start && at >= end - ChangedNearNanoseconds && at <= end + ChangedNearNanoseconds);
+                var shownAt = pictures.Between(start, end)?.Time ?? start;
+                var (taking, item) = main.Seen.LastOrDefault(seen => seen.Taking.MonotonicNanoseconds <= shownAt) is { Taking: not null } at
+                    ? at
+                    : main.Seen[0];
+                var seconds = ((end - start) / 1e9).ToString("0.00", CultureInfo.CurrentCulture);
+                string check, measured;
+                PhoneCheckLevel level;
+                if (alone)
+                {
+                    timedAlone++;
+                    check = PhoneCheckNames.TextGoneByItself;
+                    var went = $"{ShownWith(others, true)} {seconds} seconds later, with no touch between and nothing new shown as it went, as a message on a timer does";
+                    if (timeout is { } chosen)
+                    {
+                        level = PhoneCheckLevel.Error;
+                        measured = went + $", though the phone's Time to take action was {Duration(chosen)}, so the app did not keep it up for the time the user chose; " +
+                            "unless what it said can be found another way, the user cannot have more time to read it";
+                    }
+                    else
+                    {
+                        level = PhoneCheckLevel.Warning;
+                        measured = went + "; the phone's Time to take action was " + (settings.Recorded ? "Default" : "not recorded") +
+                            ", so whether the app keeps it up longer for a user who needs more time is not known; record with Time to take action set, such as 10 seconds, to tell";
+                    }
+                }
+                else
+                {
+                    check = PhoneCheckNames.TextGoneAsContentChanged;
+                    level = PhoneCheckLevel.Warning;
+                    measured = $"{ShownWith(others, false)} {seconds} seconds later, with no touch between, as new content appeared, as when loading finishes; " +
+                        "it went without warning, and the recording cannot show that it was not on a timer";
+                }
+
+                var key = (visitOf, check, item.Identity);
+                if (!timed.TryGetValue(key, out var finding))
+                {
+                    timed[key] = finding = new PhoneFinding(check, level, visitOf, item.Identity, item.Label);
+                }
+
+                finding._times.Add(new PhoneFindingTime(
+                    shownAt, visitOf, taking, taking, windowId, item.Bounds, item.TreeKey, measured, PhoneCheckRun.StateAt(visitOf, shownAt)));
+            }
+
             // Texts that came and went together are one message.
             foreach (var group in closed
                 .Where(entry => entry.End - entry.Message.Start <= BriefNanoseconds &&
@@ -279,21 +463,14 @@ public static class PhoneStatusChecks
                     continue;
                 }
 
-                var main = group.OrderByDescending(entry => entry.Text.Length).ThenBy(entry => entry.Text, StringComparer.Ordinal).First();
+                var (main, others) = Main(group.Select(entry => (entry.Text, entry.Message)));
                 var shownAt = pictures.Between(start, end)?.Time ?? start;
-                var (taking, item) = main.Message.Seen.LastOrDefault(seen => seen.Taking.MonotonicNanoseconds <= shownAt) is { Taking: not null } at
+                var (taking, item) = main.Seen.LastOrDefault(seen => seen.Taking.MonotonicNanoseconds <= shownAt) is { Taking: not null } at
                     ? at
-                    : main.Message.Seen[0];
-                // The item is named by its row's label; the texts shown with
-                // it are quoted.
-                var others = group.Where(entry => entry.Text != main.Text).Select(entry => entry.Text)
-                    .OrderByDescending(text => text.Length).ThenBy(text => text, StringComparer.Ordinal).Select(Quote).ToList();
+                    : main.Seen[0];
                 var seconds = ((end - start) / 1e9).ToString("0.00", CultureInfo.CurrentCulture);
-                var shownWith = others.Count == 0
-                    ? "it was shown and went away by itself"
-                    : $"it was shown with {(others.Count == 1 ? others[0] : string.Join(", ", others.Take(others.Count - 1)) + " and " + others[^1])} and they went away by themselves";
                 var measured =
-                    $"{shownWith} {seconds} seconds later, with no touch between, as a status message does; " +
+                    $"{ShownWith(others, true)} {seconds} seconds later, with no touch between, as a status message does; " +
                     "it is not in a live region, no announcement was made and no titled pane appeared with it, so a screen reader is not told of it";
                 var key = (visitOf, item.Identity);
                 if (!findings.TryGetValue(key, out var finding))
@@ -362,8 +539,48 @@ public static class PhoneStatusChecks
             liveItems.Count,
             announcements.All.Count(record => record.IsAnnouncement),
             announcements.All.Count(record => record.IsToast),
-            problems);
+            problems)
+        {
+            Timed = [.. timed.Values],
+            Updating = updating,
+            TimedMessages = timedMessages,
+            TimedAlone = timedAlone,
+            TimeoutMilliseconds = longestTimeout,
+            SettingsRecorded = settings.Recorded,
+            UpdatedItems = updatedItems,
+        };
     }
+
+    /// <summary>Time to take action for messages at a time, in milliseconds; null when Default (not set, or 0) or not recorded.</summary>
+    public static long? TimeoutAt(PhoneSettingsTimeline settings, long time)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        return long.TryParse(settings.ValueAt(MessageTimeoutSetting, time), NumberStyles.Integer, CultureInfo.InvariantCulture, out var milliseconds) &&
+            milliseconds > 0
+            ? milliseconds
+            : null;
+    }
+
+    // The item a message is named by, the one with the longest text; the
+    // texts shown with it are quoted.
+    private static (Open Main, List<string> Others) Main(IEnumerable<(string Text, Open Message)> texts)
+    {
+        var all = texts.ToList();
+        var main = all.OrderByDescending(entry => entry.Text.Length).ThenBy(entry => entry.Text, StringComparer.Ordinal).First();
+        var others = all.Where(entry => entry.Text != main.Text).Select(entry => entry.Text)
+            .OrderByDescending(text => text.Length).ThenBy(text => text, StringComparer.Ordinal).Select(Quote).ToList();
+        return (main.Message, others);
+    }
+
+    private static string ShownWith(List<string> others, bool byItself) => others.Count == 0
+        ? "it was shown and went away" + (byItself ? " by itself" : string.Empty)
+        : $"it was shown with {(others.Count == 1 ? others[0] : string.Join(", ", others.Take(others.Count - 1)) + " and " + others[^1])} and they went away" +
+            (byItself ? " by themselves" : string.Empty);
+
+    private static string Duration(long milliseconds) =>
+        milliseconds % 60_000 == 0
+            ? string.Create(CultureInfo.CurrentCulture, $"{milliseconds / 60_000:N0} {(milliseconds == 60_000 ? "minute" : "minutes")}")
+            : string.Create(CultureInfo.CurrentCulture, $"{milliseconds / 1000.0:0.##} seconds");
 
     // The words of an item a status message can be: shown, with text or a
     // description, and not a control.

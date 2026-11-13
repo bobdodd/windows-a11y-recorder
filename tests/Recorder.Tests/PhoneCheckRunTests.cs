@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Recorder.Collectors.Android;
@@ -20,7 +21,8 @@ public sealed class PhoneCheckRunTests : IDisposable
 
     private static readonly CollectorDescriptor Collector = CollectorDescriptor.Create(
         "android.accessibility", "AndroidAccessibilityCollector", "1",
-        [AndroidAccessibilityRecords.EventsChannel, AndroidAccessibilityRecords.TreeChannel, AndroidCompanionRecords.DisplayChannel, AndroidTouchRecords.TouchChannel],
+        [AndroidAccessibilityRecords.EventsChannel, AndroidAccessibilityRecords.TreeChannel, AndroidCompanionRecords.DisplayChannel, AndroidTouchRecords.TouchChannel,
+            AndroidSettingsRecords.Channel],
         "test");
 
     private readonly string _folder = Path.Combine(Path.GetTempPath(), "phone-checks-" + Guid.NewGuid().ToString("N"));
@@ -63,13 +65,19 @@ public sealed class PhoneCheckRunTests : IDisposable
 
     // A snapshot whose Settings window holds items, or is listed without
     // its items being taken when items is null.
-    private static AndroidAccessibilityTree Tree(long index, JsonNode? items)
+    // With statusBarBottom, the status bar window is only that tall.
+    private static AndroidAccessibilityTree Tree(long index, JsonNode? items, int? statusBarBottom = null)
     {
         var tree = JsonNode.Parse(AndroidAccessibilityTreeTests.TreeLine(
             index: index,
             everyWindow: index == 1,
             reason: index == 1 ? "requested" : "content-change"))!.AsObject();
         tree["windows"]![0]!["items"] = items;
+        if (statusBarBottom is { } bottom)
+        {
+            tree["windows"]![1]!["bounds"]!["bottom"] = bottom;
+        }
+
         var (read, problem) = CompanionProtocol.ReadTree(tree.ToJsonString());
         Assert.Null(problem);
         return read!;
@@ -903,8 +911,27 @@ public sealed class PhoneCheckRunTests : IDisposable
     // "Saving" text shown at 2 seconds and gone at 2.5, as a status message
     // is, in a live region when live; with hiddenBefore, the page's items
     // taken at 1 second already hold it, not shown.
+    // A finger down at a time and up 50 ms later.
+    private static IEnumerable<(long Time, string Channel, string EventType, object Payload)> Touch(double at)
+    {
+        static AndroidTouchReport Report(string action) =>
+            new("/dev/input/event1", 0, 0, 0, 1080, 2404, [new AndroidTouchPointer(0, 1, action, 1, 2, 540, 1200, 540, 1200, 40, 300, 200)]);
+        yield return (At(at), AndroidTouchRecords.TouchChannel, AndroidTouchRecords.TouchEventType, Report(AndroidTouchRecords.DownAction));
+        yield return (At(at + 0.05), AndroidTouchRecords.TouchChannel, AndroidTouchRecords.TouchEventType, Report(AndroidTouchRecords.UpAction));
+    }
+
+    // The phone's settings read at the start, with Time to take action for
+    // messages as given (null: Default, not set).
+    private static (long Time, string Channel, string EventType, object Payload) SettingsRead(string? timeout) =>
+        (At(0.1), AndroidSettingsRecords.Channel, AndroidSettingsRecords.SnapshotEventType,
+            new AndroidSettingsSnapshot("58191FDCQ00ABZ", AndroidSettingsRecords.StartReason,
+                new Dictionary<string, string?> { [PhoneStatusChecks.MessageTimeoutSetting] = timeout }, [], At(0.05), At(0.1)));
+
+    // With newContent, a "Saved" text is shown as "Saving" goes; with
+    // settings, the phone's settings are recorded, Time to take action for
+    // messages being timeout.
     private SessionPlaybackArchive Brief(out FakeRecords recording, bool live = false, bool hiddenBefore = false,
-        double? touchAt = 0.2, bool announced = false)
+        double? touchAt = 0.2, bool announced = false, bool newContent = false, bool settings = false, string? timeout = null)
     {
         JsonNode Page(bool saving, bool shown)
         {
@@ -924,21 +951,37 @@ public sealed class PhoneCheckRunTests : IDisposable
             return items;
         }
 
+        JsonNode Saved()
+        {
+            var items = Page(false, false).AsArray();
+            items.Add(JsonSerializer.SerializeToNode(
+                new AndroidTreeNode
+                {
+                    Index = 3, Parent = 0, Depth = 1, WindowId = 512, PackageName = Settings, ClassName = "android.widget.TextView",
+                    Text = "Saved", Bounds = new AndroidNodeBounds(100, 600, 600, 670), Checked = "unchecked",
+                    ImportantForAccessibility = true, VisibleToUser = true,
+                },
+                JsonSerializerOptions.Web));
+            return items;
+        }
+
         List<(long Time, string Channel, string EventType, object Payload)> records =
         [
             (At(0.5), AndroidCompanionRecords.DisplayChannel, AndroidCompanionRecords.DisplayEventType,
                 new AndroidDisplayState(AndroidCompanionRecords.InitialReason, 0, 1080, 2404)),
             (At(1), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(1, Page(hiddenBefore, false))),
             (At(2), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(2, Page(true, true))),
-            (At(2.5), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(3, Page(false, false))),
+            (At(2.5), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(3, newContent ? Saved() : Page(false, false))),
             (At(6), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(4, null)),
         ];
         if (touchAt is { } touch)
         {
-            static AndroidTouchReport Report(string action) =>
-                new("/dev/input/event1", 0, 0, 0, 1080, 2404, [new AndroidTouchPointer(0, 1, action, 1, 2, 540, 1200, 540, 1200, 40, 300, 200)]);
-            records.Add((At(touch), AndroidTouchRecords.TouchChannel, AndroidTouchRecords.TouchEventType, Report(AndroidTouchRecords.DownAction)));
-            records.Add((At(touch + 0.05), AndroidTouchRecords.TouchChannel, AndroidTouchRecords.TouchEventType, Report(AndroidTouchRecords.UpAction)));
+            records.AddRange(Touch(touch));
+        }
+
+        if (settings)
+        {
+            records.Add(SettingsRead(timeout));
         }
 
         if (announced)
@@ -1006,6 +1049,209 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Equal(appWarning, run.AppFindings.Count == 1);
         Assert.Equal(variant == "announced" ? 1 : 0, run.Announcements);
         Assert.Equal(variant == "live" ? 1 : 0, run.LiveRegionItems);
+    }
+
+    // Step 13, timing (WCAG 2.2.1): "Saving" goes by itself after half a
+    // second with nothing new shown, as a message on a timer does: a
+    // warning when Time to take action is Default or not recorded, as the
+    // app may keep it up longer when it is set, and an error when it was
+    // set and the app did not keep it up for that long.
+    [Theory]
+    [InlineData(false, null, PhoneCheckLevel.Warning, "; the phone's Time to take action was not recorded, so whether the app keeps it up longer")]
+    [InlineData(true, null, PhoneCheckLevel.Warning, "; the phone's Time to take action was Default, so whether the app keeps it up longer")]
+    [InlineData(true, "0", PhoneCheckLevel.Warning, "; the phone's Time to take action was Default, so whether the app keeps it up longer")]
+    [InlineData(true, "10000", PhoneCheckLevel.Error, ", though the phone's Time to take action was 10 seconds, so the app did not keep it up for the time the user chose")]
+    [InlineData(true, "60000", PhoneCheckLevel.Error, ", though the phone's Time to take action was 1 minute, so the app did not keep it up for the time the user chose")]
+    public void Timing_TextGoneByItself_IsAWarningAtDefault_AndAnErrorWhenTheAppIgnoredTimeToTakeAction(
+        bool settings, string? timeout, PhoneCheckLevel level, string said)
+    {
+        var archive = Brief(out var recording, settings: settings, timeout: timeout);
+
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording,
+            cancellationToken: TestContext.Current.CancellationToken, touches: archive.PhoneTouches, announcements: archive.PhoneAnnouncements,
+            settings: archive.PhoneSettings);
+
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var finding = Assert.Single(run.Findings, finding => finding.Check == PhoneCheckNames.TextGoneByItself);
+        Assert.Equal((level, visit), (finding.Level, finding.Visit));
+        var seen = Assert.Single(finding.Times);
+        Assert.Equal((At(2), "window:512/0/2"), (seen.Time, seen.TreeKey));
+        Assert.StartsWith(
+            "it was shown and went away by itself 0.50 seconds later, with no touch between and nothing new shown as it went, as a message on a timer does" + said,
+            seen.Measured, StringComparison.Ordinal);
+        Assert.DoesNotContain(run.Findings, finding => finding.Check == PhoneCheckNames.TextGoneAsContentChanged);
+        Assert.Equal((1, 1, settings), (run.TimedMessages, run.TimedAlone, run.SettingsRecorded));
+        Assert.Equal(timeout is "10000" or "60000" ? long.Parse(timeout, CultureInfo.InvariantCulture) : null, run.TimeoutMilliseconds);
+        Assert.Equal("Text gone by itself (WCAG 2.2.1)", PhoneCheckNames.Title(PhoneCheckNames.TextGoneByItself));
+    }
+
+    // As "Saving" goes, "Saved" is shown: it may have gone as the saving
+    // finished, but it went without warning and the recording cannot show
+    // that it was not on a timer, so a warning, even with Time to take
+    // action set.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("10000")]
+    public void Timing_TextGoneAsNewContentAppeared_IsAWarning(string? timeout)
+    {
+        var archive = Brief(out var recording, newContent: true, settings: true, timeout: timeout);
+
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording,
+            cancellationToken: TestContext.Current.CancellationToken, touches: archive.PhoneTouches, announcements: archive.PhoneAnnouncements,
+            settings: archive.PhoneSettings);
+
+        var finding = Assert.Single(run.Findings, finding => finding.Check == PhoneCheckNames.TextGoneAsContentChanged);
+        Assert.Equal(PhoneCheckLevel.Warning, finding.Level);
+        Assert.Equal(
+            "it was shown and went away 0.50 seconds later, with no touch between, as new content appeared, as when loading finishes; " +
+            "it went without warning, and the recording cannot show that it was not on a timer",
+            Assert.Single(finding.Times).Measured);
+        Assert.DoesNotContain(run.Findings, finding => finding.Check == PhoneCheckNames.TextGoneByItself);
+        Assert.Equal((1, 0), (run.TimedMessages, run.TimedAlone));
+        Assert.Equal("Text gone as new content appeared (WCAG 2.2.1)", PhoneCheckNames.Title(PhoneCheckNames.TextGoneAsContentChanged));
+    }
+
+    // Taken away by a touch, or with no touches recorded: not looked at.
+    [Theory]
+    [InlineData(2.2)]
+    [InlineData(null)]
+    public void Timing_TextTakenAwayByATouch_OrWithNoTouches_IsNotATextGone(double? touchAt)
+    {
+        var archive = Brief(out var recording, touchAt: touchAt, settings: true);
+
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording,
+            cancellationToken: TestContext.Current.CancellationToken, touches: archive.PhoneTouches, announcements: archive.PhoneAnnouncements,
+            settings: archive.PhoneSettings);
+
+        Assert.DoesNotContain(run.Findings, finding => finding.Check is PhoneCheckNames.TextGoneByItself or PhoneCheckNames.TextGoneAsContentChanged);
+        Assert.Equal(0, run.TimedMessages);
+    }
+
+    // Settings' page with a clock reading "10:00" at 2 seconds, "10:01" at 4
+    // and "10:02" at 6; a touch at touchAt.
+    private SessionPlaybackArchive Clock(out FakeRecords recording, double touchAt)
+    {
+        JsonNode Page(string time)
+        {
+            var items = Items(0).AsArray();
+            items.Add(JsonSerializer.SerializeToNode(
+                new AndroidTreeNode
+                {
+                    Index = 3, Parent = 0, Depth = 1, WindowId = 512, PackageName = Settings, ClassName = "android.widget.TextView",
+                    Text = time, Bounds = new AndroidNodeBounds(100, 400, 600, 470), Checked = "unchecked",
+                    ImportantForAccessibility = true, VisibleToUser = true,
+                },
+                JsonSerializerOptions.Web));
+            return items;
+        }
+
+        List<(long Time, string Channel, string EventType, object Payload)> records =
+        [
+            (At(0.5), AndroidCompanionRecords.DisplayChannel, AndroidCompanionRecords.DisplayEventType,
+                new AndroidDisplayState(AndroidCompanionRecords.InitialReason, 0, 1080, 2404)),
+            (At(2), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(1, Page("10:00"))),
+            (At(4), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(2, Page("10:01"))),
+            (At(6), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(3, Page("10:02"))),
+            (At(8), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(4, null)),
+            .. Touch(touchAt),
+        ];
+        return ArchiveOf([.. records.OrderBy(record => record.Time)], out recording);
+    }
+
+    // Step 13, timing (WCAG 2.2.2): text changing in place twice with no
+    // touch is auto-updating, a warning, and its old text going is not also
+    // a text gone; a touch in the second before a change makes it the
+    // touch's, leaving one change, not enough.
+    [Theory]
+    [InlineData(0.2, 2)]
+    [InlineData(5.5, 0)]
+    public void Timing_TextChangingInPlaceWithNoTouch_IsAutoUpdating(double touchAt, int times)
+    {
+        var archive = Clock(out var recording, touchAt);
+
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording,
+            cancellationToken: TestContext.Current.CancellationToken, touches: archive.PhoneTouches, announcements: archive.PhoneAnnouncements);
+
+        var found = run.Findings.Where(finding => finding.Check == PhoneCheckNames.TextUpdatingByItself).ToList();
+        Assert.Equal(times == 0 ? 0 : 1, found.Count);
+        Assert.Equal(1, run.UpdatedItems);
+        if (times > 0)
+        {
+            var finding = found[0];
+            Assert.Equal(PhoneCheckLevel.Warning, finding.Level);
+            Assert.Equal([At(4), At(6)], finding.Times.Select(time => time.Time));
+            Assert.Equal(
+                "its text changed 2 times with no touch, here from \"10:00\" to \"10:01\", as auto-updating content does; " +
+                "look for a way to pause, stop or hide it, or to set how often it updates, unless the updating is essential",
+                finding.Times[0].Measured);
+            Assert.Equal("window:512/0/2", finding.Times[0].TreeKey);
+            Assert.DoesNotContain(run.Findings, finding => finding.Check is PhoneCheckNames.TextGoneByItself or PhoneCheckNames.TextGoneAsContentChanged);
+        }
+
+        Assert.Equal("Text updating by itself (WCAG 2.2.2)", PhoneCheckNames.Title(PhoneCheckNames.TextUpdatingByItself));
+    }
+
+    // Step 13, timing (WCAG 2.2.2), from the video: frames a tenth of the
+    // screen's size every 0.1 seconds from 1.5 to 8 seconds, a box of each
+    // changing colour from one to the next, in the page, or in the status
+    // bar; a touch at 0.2 seconds, and another at extraTouch.
+    [Theory]
+    [InlineData("page", null, true)]
+    [InlineData("status bar", null, false)]
+    [InlineData("page", 4.0, false)]
+    public void Timing_PictureChangingForMoreThanFiveSecondsWithNoTouch_IsMoving(string where, double? extraTouch, bool found)
+    {
+        List<(long Time, string Channel, string EventType, object Payload)> records =
+        [
+            (At(0.5), AndroidCompanionRecords.DisplayChannel, AndroidCompanionRecords.DisplayEventType,
+                new AndroidDisplayState(AndroidCompanionRecords.InitialReason, 0, 1080, 2404)),
+            (At(1), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(1, Items(0), statusBarBottom: 100)),
+            (At(9), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(2, null, statusBarBottom: 100)),
+            .. Touch(0.2),
+            .. extraTouch is { } touch ? Touch(touch) : [],
+        ];
+        var archive = ArchiveOf([.. records.OrderBy(record => record.Time)], out var recording);
+        var frames = Enumerable.Range(0, 66)
+            .Select(index => new SessionVideoFrame(At(1.5 + index / 10.0), $"f{index}.png", $"f{index}.png", 108, 240))
+            .ToList();
+        var (top, bottom) = where == "page" ? (120, 160) : (0, 8);
+        PhonePixels Load(string path)
+        {
+            var odd = int.Parse(path.AsSpan(1, path.Length - 5), CultureInfo.InvariantCulture) % 2 == 1;
+            var rgb = new uint[108 * 240];
+            for (var y = top; y < bottom; y++)
+            {
+                for (var x = 40; x < 80; x++)
+                {
+                    rgb[y * 108 + x] = odd ? 0xFFFFFFu : 0x000000u;
+                }
+            }
+
+            return new PhonePixels(108, 240, rgb);
+        }
+
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording,
+            PhoneSnapshotPictures.OfFrames(frames, archive.PhoneAccessibility), TestContext.Current.CancellationToken,
+            touches: archive.PhoneTouches, announcements: archive.PhoneAnnouncements, loadPicture: Load);
+
+        Assert.Empty(run.Problems);
+        Assert.True(run.MotionRun);
+        var moving = run.Findings.Where(finding => finding.Check == PhoneCheckNames.MovingByItself).ToList();
+        Assert.Equal(found ? 1 : 0, moving.Count);
+        Assert.Equal(found ? 1 : 0, run.MovingRuns);
+        if (found)
+        {
+            var finding = moving[0];
+            Assert.Equal((PhoneCheckLevel.Warning, "window:512/0"), (finding.Level, finding.Times[0].TreeKey));
+            var seen = Assert.Single(finding.Times);
+            Assert.Equal(At(1.5), seen.Time);
+            Assert.Equal(new PhoneBounds(400, 1202, 761, 1563), seen.Bounds);
+            Assert.StartsWith(
+                "from the video, so approximate: the picture in the outlined box kept changing for 6.5 seconds with no touch, ",
+                seen.Measured, StringComparison.Ordinal);
+        }
+
+        Assert.Equal("Moving by itself, from the video (WCAG 2.2.2)", PhoneCheckNames.Title(PhoneCheckNames.MovingByItself));
     }
 
     // The recording's records, as the player reads one from the file.

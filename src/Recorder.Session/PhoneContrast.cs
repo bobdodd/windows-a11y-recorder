@@ -82,8 +82,15 @@ public sealed class PhoneSnapshotPictures
         _sessionDirectory = sessionDirectory;
     }
 
+    /// <summary>The phone's video frames, in time order, each written only when the picture changed; none when the video is not the phone's.</summary>
+    public IReadOnlyList<SessionVideoFrame> Frames => _frames;
+
     /// <summary>No pictures: every snapshot is shown at its own time.</summary>
     public static PhoneSnapshotPictures Empty { get; } = new([], [], PhoneAccessibilityTimeline.Empty, string.Empty);
+
+    /// <summary>Only the phone's video frames, for tests.</summary>
+    internal static PhoneSnapshotPictures OfFrames(IReadOnlyList<SessionVideoFrame> frames, PhoneAccessibilityTimeline trees) =>
+        new([], frames, trees, string.Empty);
 
     public static PhoneSnapshotPictures Of(SessionPlaybackArchive archive)
     {
@@ -348,7 +355,7 @@ public sealed class PhoneContrastRun
     }
 
     // The windows a snapshot lists, with their layers and bounds.
-    private static Dictionary<int, (int Id, int Layer, PhoneBounds Bounds)> WindowsOf(ISessionEventRecordSource source, SessionTimelineEvent snapshot)
+    internal static Dictionary<int, (int Id, int Layer, PhoneBounds Bounds)> WindowsOf(ISessionEventRecordSource source, SessionTimelineEvent snapshot)
     {
         var windows = new Dictionary<int, (int, int, PhoneBounds)>();
         using var document = JsonDocument.Parse(source.ReadEventJson(snapshot));

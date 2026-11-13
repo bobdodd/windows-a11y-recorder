@@ -8,7 +8,8 @@ measured on the recordings to hand before its rules are set, as the
 earlier checks were (see `android-checks.md`). Built so far, to the
 owner's decisions: the three easy wins (Label in Name, clickable but not
 focusable, and fields and states, steps 9 to 11), 1.4.5 Images of
-Text (step 8) and 4.1.3 Status Messages (step 12), each marked "Built"
+Text (step 8), 4.1.3 Status Messages (step 12) and 2.2.1 Timing
+Adjustable and 2.2.2 Pause, Stop, Hide (step 13), each marked "Built"
 below. Updated 2026-11-13. The owner's standing
 rule applies: testing is AI-free as far as possible, with AI kept for
 summary reports and vision-centric tests, and OCR may be used in
@@ -24,7 +25,8 @@ contrast to 1.4.3 or, at AAA, 1.4.6, non-text contrast to 1.4.11, the
 screen's title to WCAG2ICT 2.4.2, and headings to 1.3.1. From this
 document: images of text to 1.4.5 (and 1.4.9 at AAA), Label in Name to
 2.5.3, clickable but not focusable to 2.1.1, fields and states to
-3.3.2, 4.1.2 and 3.3.1, and status messages to 4.1.3.
+3.3.2, 4.1.2 and 3.3.1, status messages to 4.1.3, and timing to 2.2.1
+and 2.2.2.
 
 ## What the recordings hold
 
@@ -114,7 +116,12 @@ tree does not give.
 - **2.2.1 Timing Adjustable and 2.2.2 Pause, Stop, Hide:** screens or
   content that change with no touch, such as carousels that move on or
   time-outs; flags for a person, leading into the deferred APK and
-  timer work.
+  timer work. Built on 2026-11-13 to the owner's decisions: text gone by
+  itself with nothing new shown is a warning when the phone's "Time to
+  take action" is Default and an error when it was set and the app did
+  not keep the text up for it; text gone as new content appeared, text
+  updating in place by itself and content moving by itself (from the
+  video) are warnings (see "Step 13: timing" in `android-checks.md`).
 - **3.2.1 On Focus and 3.2.2 On Input:** a new window straight after a
   change of focus, typing or a choice, with no tap.
 - **1.3.4 Orientation:** the display's rotation is recorded, so if a

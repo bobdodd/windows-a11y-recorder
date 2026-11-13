@@ -1688,3 +1688,58 @@ appeared with it, so a screen reader is not told of it; seen once, at
 00:00:22.575", with the loading text outlined on the phone's picture
 when chosen. Long rows wrapped, with no horizontal scrollbar. The
 status message checks are checked on the PC.
+
+## Step 13: timing (2026-11-13)
+
+The owner's decisions, what the standards and Android say, and the
+checks built to them are in the architecture document's "Step 13:
+timing". Four checks, each one discrete issue: text gone by itself with
+nothing new shown (2.2.1) is a warning when the phone's "Time to take
+action" is Default and an error when it was set and the app did not
+keep the text up for it; text gone as new content appeared (2.2.1),
+text updating in place by itself (2.2.2) and content moving by itself,
+from the phone's video (2.2.2), are warnings. Checked in the Linux build
+environment: the solution builds with no warnings, and the new tests
+pass with the others. The throwaway program gives, for test 16's
+recording (`20261112-154851-32c7b61a5552453bbf5febffcca978c7`), three
+"Text gone as new content appeared" warnings, in visits 2, 3 and 5, the
+first gone 0.41 seconds after it was shown, and nothing from the other
+three checks.
+
+## Test 44: build and install the sixteenth build (development PC)
+
+As test 19: close the recorder, run the PowerShell of test 19's step 1,
+run the newest installer with "Start the recorder and set up the
+analysis models" unchecked, and start the recorder from the Start menu.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the recorder
+opens.
+
+## Test 45: timing in test 16's recording
+
+Keep the phone's picture in view throughout.
+
+1. Choose "Open recording...", and open
+   `20261112-154851-32c7b61a5552453bbf5febffcca978c7`. If the Checks
+   window is closed, click the "Checks" tab, then move it so the phone's
+   picture is fully in view. Wait 10 seconds, and take a screenshot of
+   the whole screen.
+2. Scroll the list so the row starting "Visit 2," is at the top, then
+   scroll down until the row starting "Text gone as new content
+   appeared" is in view, and take a screenshot of the whole screen.
+
+**On screen:** in step 1 the line under "Show current visit" includes
+"Timing (WCAG 2.2.1 and 2.2.2), four checks: 3 findings (3 warnings);
+Time to take action was Default, so texts gone within 5 seconds were
+looked at: 3 texts with no touch between, 0 of them gone with nothing
+new shown as they went; 0 items whose text changed in place with no
+touch; 0 parts of the phone's video that kept changing for more than 5
+seconds with no touch (from the video, so approximate)." In step 2,
+below the Visit 2 row, is the row "Text gone as new content appeared
+(WCAG 2.2.1): 1 warning", and below it a row that includes "View
+described as "Loading your personal sleep learning space.", it was shown
+with "☀️🌙" and they went away 0.41 seconds later, with no touch
+between, as new content appeared, as when loading finishes; it went
+without warning, and the recording cannot show that it was not on a
+timer". Long rows wrap; there is no horizontal scrollbar. Send the two
+screenshots.

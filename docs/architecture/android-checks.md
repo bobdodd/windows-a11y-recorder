@@ -41,7 +41,9 @@ tree alone, to the owner's decisions (see "Step 11: fields and
 states"), and was checked on the development PC on 2026-11-13 (tests 40
 and 41 passed). Step 12, status messages (WCAG 4.1.3), is built to the
 owner's decisions (see "Step 12: status messages"), and was checked on
-the development PC on 2026-11-13 (tests 42 and 43 passed). The owner's
+the development PC on 2026-11-13 (tests 42 and 43 passed). Step 13,
+timing (WCAG 2.2.1 and 2.2.2), is built to the owner's decisions (see
+"Step 13: timing"), and is not yet checked on the PC. The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -459,6 +461,9 @@ the recording is opened and nothing is kept.
    PC.
 12. **Status messages** (WCAG 4.1.3), from the tree, touches and events
    (see "Step 12: status messages"). Built, and checked on the PC.
+13. **Timing** (WCAG 2.2.1 and 2.2.2), from the tree, touches, the
+   phone's settings and the phone's video (see "Step 13: timing").
+   Built; not yet checked on the PC.
 
 ## As built: step 1
 
@@ -2402,6 +2407,211 @@ With a throwaway program, on the recordings to hand (measured):
   too; it is a warning to look, not a failure.
 - The recordings to hand have no saved, sent or error message or
   snackbar; only loading text was found.
+
+## Step 13: timing
+
+### The owner's decisions (2026-11-13)
+
+2.2.1 and 2.2.2 are the second item in "Medium, from events and touches,
+by rules that may mislead" in `android-checks-candidates.md`. The
+owner asked for them after step 12, as the loading text that step 12
+found also went away on what may be a timer. They were measured first
+(below), then put to the owner:
+
+- **When text going away is a 2.2.1 finding:** "Only if gone alone, but
+  in cases like the loading text on the site, we should provide a
+  warning that the text did disappear without warning and we can't
+  prove it wasn't a timer" (the owner). So text gone with nothing new
+  shown is one check, and text gone as new content appeared is another,
+  always a warning.
+- **The level of text gone alone:** "Setting decides". The owner's
+  reason: "2 minutes is simply too long. We are testing from a user
+  screen recording, we can't expect them to notice a message and then
+  pause for 2 minutes and see what happens." So the check uses the
+  phone's "Time to take action" setting as recorded, not a fixed wait.
+- **The level of 2.2.2's findings:** "Warning".
+- **Each issue is discrete** (the owner, as for the other checks): four
+  checks.
+
+### What the standards and Android say (checked in cited documents)
+
+- **2.2.1 Timing Adjustable (A):** "Any process that happens without
+  user initiation after a set time or on a periodic basis is a time
+  limit." A time limit can meet it by letting the user adjust it "over a
+  wide range that is at least ten times the length of the default
+  setting". Its example of a message that goes away: "the message
+  disappears after 5 seconds"; when "Users are able to identify the
+  arrival of email through other means" it passes, but "If the user has
+  no other means" of finding it, "each message would need to meet this
+  success criterion"
+  ([Understanding 2.2.1](https://www.w3.org/WAI/WCAG22/Understanding/timing-adjustable.html)).
+- **2.2.2 Pause, Stop, Hide (A):** for moving, blinking or scrolling
+  content that starts automatically, lasts more than five seconds and is
+  shown in parallel with other content, and for auto-updating content
+  that starts automatically and is shown in parallel with other content,
+  "there is a mechanism for the user to pause, stop, or hide it", unless
+  it is essential. "Auto-updating" is content that "updates or
+  disappears based on a preset time interval", and there is "no five
+  second exception for auto-updating"; a loading animation is not in
+  parallel with other content, and an animation shown while loading
+  may be essential
+  ([Understanding 2.2.2](https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html)).
+- **WCAG2ICT:** both apply to software as written, and adds, as a note
+  to 2.2.2: "Any content, even if just decorative, that is updated
+  automatically, blinks, or moves may create an accessibility barrier"
+  ([WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/)).
+- **Android's "Time to take action":** "You can choose how long to show
+  messages that ask you to take action, but are visible only
+  temporarily", with Default, 10 seconds, 30 seconds, 1 minute and 2
+  minutes; "Not all apps support this setting"
+  ([Google's Android Accessibility Help](https://support.google.com/accessibility/android/answer/9426889?hl=en)).
+  An app asks for it with `getRecommendedTimeoutMillis`: "Controls
+  should remain on the screen for at least this long to give users time
+  to react"
+  ([AccessibilityManager reference](https://developer.android.com/reference/kotlin/android/view/accessibility/AccessibilityManager?authuser=7)).
+  The system's own components and Material 3's honour it; a custom
+  component has to ask
+  ([Inclusive Android Apps #4](https://buttondown.com/inclusive-android-apps/archive/inclusive-android-apps-4-the-problem-of-time-based-actions/)).
+  The recorder already records it, as Settings.Secure's
+  `accessibility_non_interactive_ui_timeout_ms` ("Timeout for
+  messages") and `accessibility_interactive_ui_timeout_ms` ("Timeout for
+  controls").
+- **Toasts:** Android keeps a toast up for the setting itself:
+  `delay = mAccessibilityManager.getRecommendedTimeoutMillis(delay, AccessibilityManager.FLAG_CONTENT_TEXT);`
+  ([AOSP's NotificationManagerService](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/notification/NotificationManagerService.java)).
+  So toasts are not checked here.
+
+### Measured first (2026-11-13)
+
+With a throwaway program, on the recordings to hand (measured):
+
+- **"Time to take action"** was Default (not set) at the start and the
+  stop of tests 16 and 18 and of the client's recording.
+- **The loading text:** in every case (three in test 16, one in test
+  18, one in the client's recording) it was shown 0.03 to 0.04 seconds
+  after the finger lifted from the tab bar, while the tab slid across,
+  and went as the slide finished, with new content shown within 0.02
+  seconds of it going. So each went as new content appeared.
+- **Text changing in place with no touch:** only the bell button's text
+  in test 16, "Notifications" to "3", 0.47 seconds after a tap, so the
+  tap's.
+- **Moving content:** in test 16, the only recording to hand with the
+  phone's video, no stretch of the video kept changing for more than 5
+  seconds with no touch; the longest was 2.47 seconds.
+
+### As built
+
+- **What it reads.** The same pass over every taking of each window as
+  step 12 (`PhoneStatusChecks`, in `Recorder.Session`), with the
+  phone's settings; and the phone's video frames
+  (`PhoneMotionChecks`). It needs touches recorded, as step 12 does.
+- **The time looked for.** "Time to take action" for messages
+  (`accessibility_non_interactive_ui_timeout_ms`, which Android uses for
+  a message of text with no controls) when the text was shown. When it
+  is Default (not set, or 0) or not recorded, texts gone within 5
+  seconds are looked at, as in step 12; when it is set, texts gone
+  sooner than it are. Using the setting's own length when set is this
+  step's reading of "Setting decides".
+- **Text gone.** Every text shown and gone within that time with no
+  touch between, as step 12 finds them, but whether it was exposed or
+  not; texts shown and gone together are one. It went alone when no
+  text that was not in the window's last taking was shown from half a
+  second before it went to half a second after (text shown with it does
+  not count).
+- **"Text gone by itself (WCAG 2.2.1)"**, for text gone alone: a warning
+  when Time to take action was Default or not recorded, as the app may
+  keep it up longer when the setting is set, for example "it was shown
+  and went away by itself 0.50 seconds later, with no touch between and
+  nothing new shown as it went, as a message on a timer does; the
+  phone's Time to take action was Default, so whether the app keeps it
+  up longer for a user who needs more time is not known; record with
+  Time to take action set, such as 10 seconds, to tell"; an error when
+  it was set, as the app did not keep the text up for the time chosen,
+  ending "though the phone's Time to take action was 10 seconds, so the
+  app did not keep it up for the time the user chose; unless what it
+  said can be found another way, the user cannot have more time to read
+  it".
+- **"Text gone as new content appeared (WCAG 2.2.1)"**, a warning, for
+  example "View described as "Loading your personal sleep learning
+  space.", it was shown with "☀️🌙" and they went away 0.41 seconds
+  later, with no touch between, as new content appeared, as when
+  loading finishes; it went without warning, and the recording cannot
+  show that it was not on a timer".
+- **"Text updating by itself (WCAG 2.2.2)"**, a warning. An item's text
+  changed in place when the item at the same place in the window's tree,
+  of the same class, has other text than in the window's last taking,
+  with no touch from a second before that taking until this one. An
+  item whose text changed so twice or more in a visit, at least a second
+  apart, is a finding, with each change as a time, for example "its text
+  changed 2 times with no touch, here from "10:00" to "10:01", as
+  auto-updating content does; look for a way to pause, stop or hide it,
+  or to set how often it updates, unless the updating is essential". Its
+  old text going is then not also a text gone, as it was replaced.
+- **"Moving by itself, from the video (WCAG 2.2.2)"**, a warning. The
+  recorder writes a frame of the phone's video only when the picture
+  changed, so a run of frames each less than half a second after the
+  last is a picture that kept changing. A run lasting more than 5
+  seconds, with no touch in it and none in the second before it, is
+  looked at: 8 pairs of frames spread through it are compared, every
+  fourth pixel each way, a pixel changed when a colour differs by more
+  than 24. Changes outside the app's window, or under a window above it
+  such as the status bar, are left out; with fewer than 16 pixels
+  changed, it is not movement. The finding is on the smallest item
+  holding the box that changed, outlined with the box, for example "from
+  the video, so approximate: the picture in the outlined box kept
+  changing for 6.5 seconds with no touch, as moving, scrolling or
+  auto-updating content does; if it is more than a loading indicator
+  shown alone, look for a way to pause, stop or hide it, unless the
+  movement is essential". It does not run without the phone's video.
+- **Where findings go:** each under the visit the text was shown in, or
+  the change or movement started in, as for the other checks.
+- **The line under "Show current visit"** adds, for example, "Timing
+  (WCAG 2.2.1 and 2.2.2), four checks: 3 findings (3 warnings); Time to
+  take action was Default, so texts gone within 5 seconds were looked
+  at: 3 texts with no touch between, 0 of them gone with nothing new
+  shown as they went; 0 items whose text changed in place with no
+  touch; 0 parts of the phone's video that kept changing for more than 5
+  seconds with no touch (from the video, so approximate)."
+- **The same at both audit levels:** 2.2.1 and 2.2.2 are level A.
+- **On the recordings to hand** (measured, with the throwaway program):
+  each loading text is a "Text gone as new content appeared" warning,
+  in visits 2, 3 and 5 of test 16, visit 2 of test 18 and visit 2 of the
+  client's recording; no text gone alone, no text updating by itself,
+  and, in test 16, no moving content. Neither Settings recording has a
+  finding. The checks take under a second.
+- **Checked before any PC test:** the solution builds with no warnings,
+  and the tests pass, with the Windows-only browser tests failing as
+  before. The new tests cover text gone alone with the setting not
+  recorded, Default, 0, 10 seconds and 1 minute; text gone as new
+  content appeared, with the setting Default and 10 seconds; text taken
+  away by a touch and a recording with no touches; text updating twice
+  with no touch, and with a touch before the second change; and the
+  video changing for 6.5 seconds in the page, in the status bar only,
+  and with a touch partway.
+
+### Limits
+
+- Text gone alone is a warning, not an error, at Default: the recording
+  cannot tell whether the app keeps the text up longer when the setting
+  is set. Recording with it set tells.
+- Text shown for longer than the time looked for is not found, nor is a
+  time-out of a whole screen, such as a session ending; that waits for
+  the deferred APK and timer work.
+- "Gone alone" is judged from text only: new content that is a picture,
+  with no text, is not seen, so text gone as a picture appeared is
+  "gone by itself".
+- The place of an item is its position in the tree, so an item that
+  moves in the tree as others are added can look like text changing in
+  place; two changes a second apart are needed to lower this. A clock on
+  the screen, such as the home screen's, is text updating by itself.
+- Text that updates every few seconds is also, each time, a brief
+  message to step 12, which is left as it was.
+- Moving content is from the video, so approximate: a run is broken by
+  any touch, so content moving while the user touches the screen is not
+  found, and the box is everything that changed in the pairs compared.
+- The recordings to hand have no carousel, ticker, counter or
+  animation that runs by itself, so the text updating and moving
+  content checks were only seen to find nothing on them.
 
 ## Decisions on the open questions (2026-11-11)
 

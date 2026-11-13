@@ -111,12 +111,25 @@ public static class PhoneCheckNames
     public const string StatusNotAnnounced = "status-not-announced";
     public const string NoLiveRegion = "no-live-region";
 
+    /// <summary>
+    /// Timing (step 13, PhoneStatusChecks and PhoneMotionChecks), WCAG 2.2.1
+    /// and 2.2.2, each one discrete issue: text gone by itself (a warning at
+    /// Time to take action Default, an error when the app ignored the time
+    /// set), text gone as new content appeared (a warning), text updating by
+    /// itself (a warning) and the picture moving by itself (a warning).
+    /// </summary>
+    public const string TextGoneByItself = "text-gone-by-itself";
+    public const string TextGoneAsContentChanged = "text-gone-as-content-changed";
+    public const string TextUpdatingByItself = "text-updating-by-itself";
+    public const string MovingByItself = "moving-by-itself";
+
     /// <summary>The checks in the order the Checks tab lists them.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
         TouchTarget, TouchTargetWcag, TouchTargetEnhanced, SpeakableText, DuplicateSpeakableText, DuplicateClickableBounds,
         EditableContentDescription, RedundantDescription, ClassName, TraversalOrder, ClickableNotFocusable,
         FieldNoLabel, FieldNoName, InvalidNoError, ExpandableNoState, SliderNoRange, StatusNotAnnounced, NoLiveRegion,
+        TextGoneByItself, TextGoneAsContentChanged, TextUpdatingByItself, MovingByItself,
         TitleMissing, TitleShared, NoHeading, FirstHeadingLow, ManyHeadings,
     ];
 
@@ -153,6 +166,10 @@ public static class PhoneCheckNames
         ManyHeadings => "Many headings",
         StatusNotAnnounced => "Status message not announced (WCAG 4.1.3)",
         NoLiveRegion => "No live region in the app (WCAG 4.1.3)",
+        TextGoneByItself => "Text gone by itself (WCAG 2.2.1)",
+        TextGoneAsContentChanged => "Text gone as new content appeared (WCAG 2.2.1)",
+        TextUpdatingByItself => "Text updating by itself (WCAG 2.2.2)",
+        MovingByItself => "Moving by itself, from the video (WCAG 2.2.2)",
         _ => check,
     };
 
