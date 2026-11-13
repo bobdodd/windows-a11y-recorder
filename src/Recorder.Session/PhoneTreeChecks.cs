@@ -103,12 +103,20 @@ public static class PhoneCheckNames
     public const string FirstHeadingLow = "first-heading-low";
     public const string ManyHeadings = "many-headings";
 
+    /// <summary>
+    /// Status messages (step 12, PhoneStatusChecks), WCAG 4.1.3, each one
+    /// discrete issue (owner, 2026-11-13): a brief message not announced,
+    /// an error, and an app with no live region, a warning.
+    /// </summary>
+    public const string StatusNotAnnounced = "status-not-announced";
+    public const string NoLiveRegion = "no-live-region";
+
     /// <summary>The checks in the order the Checks tab lists them.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
         TouchTarget, TouchTargetWcag, TouchTargetEnhanced, SpeakableText, DuplicateSpeakableText, DuplicateClickableBounds,
         EditableContentDescription, RedundantDescription, ClassName, TraversalOrder, ClickableNotFocusable,
-        FieldNoLabel, FieldNoName, InvalidNoError, ExpandableNoState, SliderNoRange,
+        FieldNoLabel, FieldNoName, InvalidNoError, ExpandableNoState, SliderNoRange, StatusNotAnnounced, NoLiveRegion,
         TitleMissing, TitleShared, NoHeading, FirstHeadingLow, ManyHeadings,
     ];
 
@@ -143,6 +151,8 @@ public static class PhoneCheckNames
         NoHeading => "No heading (WCAG 1.3.1)",
         FirstHeadingLow => "First heading far from the top",
         ManyHeadings => "Many headings",
+        StatusNotAnnounced => "Status message not announced (WCAG 4.1.3)",
+        NoLiveRegion => "No live region in the app (WCAG 4.1.3)",
         _ => check,
     };
 

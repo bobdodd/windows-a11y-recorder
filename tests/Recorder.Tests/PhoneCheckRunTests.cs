@@ -20,7 +20,7 @@ public sealed class PhoneCheckRunTests : IDisposable
 
     private static readonly CollectorDescriptor Collector = CollectorDescriptor.Create(
         "android.accessibility", "AndroidAccessibilityCollector", "1",
-        [AndroidAccessibilityRecords.EventsChannel, AndroidAccessibilityRecords.TreeChannel, AndroidCompanionRecords.DisplayChannel],
+        [AndroidAccessibilityRecords.EventsChannel, AndroidAccessibilityRecords.TreeChannel, AndroidCompanionRecords.DisplayChannel, AndroidTouchRecords.TouchChannel],
         "test");
 
     private readonly string _folder = Path.Combine(Path.GetTempPath(), "phone-checks-" + Guid.NewGuid().ToString("N"));
@@ -897,6 +897,115 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Equal(2, run.Findings.Count(finding => finding.Check == PhoneCheckNames.NoHeading));
         Assert.DoesNotContain(run.Findings, finding => finding.Check == PhoneCheckNames.TitleMissing);
         Assert.Equal("Screen title shared with other screens (WCAG2ICT 2.4.2)", PhoneCheckNames.Title(PhoneCheckNames.TitleShared));
+    }
+
+    // Step 12, status messages (WCAG 4.1.3): Settings' page, with a
+    // "Saving" text shown at 2 seconds and gone at 2.5, as a status message
+    // is, in a live region when live; with hiddenBefore, the page's items
+    // taken at 1 second already hold it, not shown.
+    private SessionPlaybackArchive Brief(out FakeRecords recording, bool live = false, bool hiddenBefore = false,
+        double? touchAt = 0.2, bool announced = false)
+    {
+        JsonNode Page(bool saving, bool shown)
+        {
+            var items = Items(0).AsArray();
+            if (saving)
+            {
+                items.Add(JsonSerializer.SerializeToNode(
+                    new AndroidTreeNode
+                    {
+                        Index = 3, Parent = 0, Depth = 1, WindowId = 512, PackageName = Settings, ClassName = "android.widget.TextView",
+                        Text = "Saving", Bounds = new AndroidNodeBounds(100, 400, 600, 470), Checked = "unchecked",
+                        ImportantForAccessibility = true, VisibleToUser = shown, LiveRegion = live ? 1 : 0,
+                    },
+                    JsonSerializerOptions.Web));
+            }
+
+            return items;
+        }
+
+        List<(long Time, string Channel, string EventType, object Payload)> records =
+        [
+            (At(0.5), AndroidCompanionRecords.DisplayChannel, AndroidCompanionRecords.DisplayEventType,
+                new AndroidDisplayState(AndroidCompanionRecords.InitialReason, 0, 1080, 2404)),
+            (At(1), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(1, Page(hiddenBefore, false))),
+            (At(2), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(2, Page(true, true))),
+            (At(2.5), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(3, Page(false, false))),
+            (At(6), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(4, null)),
+        ];
+        if (touchAt is { } touch)
+        {
+            static AndroidTouchReport Report(string action) =>
+                new("/dev/input/event1", 0, 0, 0, 1080, 2404, [new AndroidTouchPointer(0, 1, action, 1, 2, 540, 1200, 540, 1200, 40, 300, 200)]);
+            records.Add((At(touch), AndroidTouchRecords.TouchChannel, AndroidTouchRecords.TouchEventType, Report(AndroidTouchRecords.DownAction)));
+            records.Add((At(touch + 0.05), AndroidTouchRecords.TouchChannel, AndroidTouchRecords.TouchEventType, Report(AndroidTouchRecords.UpAction)));
+        }
+
+        if (announced)
+        {
+            records.Add((At(2.1), AndroidAccessibilityRecords.EventsChannel, AndroidAccessibilityRecords.EventType, new
+            {
+                eventType = PhoneAnnouncementTimeline.AnnouncementEventType, eventTypeName = "TYPE_ANNOUNCEMENT",
+                packageName = Settings, className = "android.widget.TextView", windowId = 512, text = new[] { "Saving" },
+            }));
+        }
+
+        return ArchiveOf([.. records.OrderBy(record => record.Time)], out recording);
+    }
+
+    [Fact]
+    public void Status_TextGoneByItself_IsAnError_AndAnAppWithNoLiveRegionIsAWarning()
+    {
+        var archive = Brief(out var recording);
+
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording,
+            cancellationToken: TestContext.Current.CancellationToken, touches: archive.PhoneTouches, announcements: archive.PhoneAnnouncements);
+
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var finding = Assert.Single(run.Findings, finding => finding.Check == PhoneCheckNames.StatusNotAnnounced);
+        Assert.Equal((PhoneCheckLevel.Error, visit), (finding.Level, finding.Visit));
+        var seen = Assert.Single(finding.Times);
+        Assert.Equal((At(2), At(2), "window:512/0/2"), (seen.Time, seen.TakenBy.MonotonicNanoseconds, seen.TreeKey));
+        Assert.Equal(
+            "Error: TextView \"Saving\", it was shown and went away by itself 0.50 seconds later, with no touch between, as a status message does; " +
+            "it is not in a live region, no announcement was made and no titled pane appeared with it, so a screen reader is not told of it; seen once, at 00:00:02.000",
+            finding.Text);
+        Assert.Equal((true, 1, 0, 0), (run.StatusRun, run.BriefMessages, run.BriefExposed, run.LiveRegionItems));
+
+        // The whole app, once, shown at its first visit.
+        var app = Assert.Single(run.AppFindings);
+        Assert.Equal((PhoneCheckNames.NoLiveRegion, PhoneCheckLevel.Warning, visit), (app.Check, app.Level, app.Visit));
+        Assert.StartsWith("in its 1 visit in this recording, no item of the app was in a live region, and it made no announcement and showed no toast; look for status messages", app.Times[0].Measured, StringComparison.Ordinal);
+        Assert.DoesNotContain(run.Findings, finding => finding.Check == PhoneCheckNames.NoLiveRegion);
+        Assert.Equal("Status message not announced (WCAG 4.1.3)", PhoneCheckNames.Title(PhoneCheckNames.StatusNotAnnounced));
+        Assert.Equal("No live region in the app (WCAG 4.1.3)", PhoneCheckNames.Title(PhoneCheckNames.NoLiveRegion));
+    }
+
+    // Not an error: in a live region, or announced, which also clears the
+    // app's warning; taken away by a touch; already in the window, hidden;
+    // and with no touches recorded the brief message check does not run.
+    [Theory]
+    [InlineData("live", true, 1, 1, false)]
+    [InlineData("announced", true, 1, 1, false)]
+    [InlineData("touched", true, 0, 0, true)]
+    [InlineData("hidden before", true, 0, 0, true)]
+    [InlineData("no touches", false, 0, 0, true)]
+    public void Status_ExposedTouchedOrAlreadyThere_IsNoError(string variant, bool run_, int messages, int exposed, bool appWarning)
+    {
+        var archive = Brief(out var recording,
+            live: variant == "live",
+            hiddenBefore: variant == "hidden before",
+            touchAt: variant switch { "touched" => 2.2, "no touches" => null, _ => 0.2 },
+            announced: variant == "announced");
+
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording,
+            cancellationToken: TestContext.Current.CancellationToken, touches: archive.PhoneTouches, announcements: archive.PhoneAnnouncements);
+
+        Assert.DoesNotContain(run.Findings, finding => finding.Check == PhoneCheckNames.StatusNotAnnounced);
+        Assert.Equal((run_, messages, exposed), (run.StatusRun, run.BriefMessages, run.BriefExposed));
+        Assert.Equal(appWarning, run.AppFindings.Count == 1);
+        Assert.Equal(variant == "announced" ? 1 : 0, run.Announcements);
+        Assert.Equal(variant == "live" ? 1 : 0, run.LiveRegionItems);
     }
 
     // The recording's records, as the player reads one from the file.

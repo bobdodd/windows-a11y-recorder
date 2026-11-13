@@ -128,7 +128,8 @@ public partial class MainWindow
             {
                 var at = level;
                 run = await Task.Run(
-                    () => PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, archive.PhoneDevice, archive.RecordSource, PhoneSnapshotPictures.Of(archive), token, at),
+                    () => PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, archive.PhoneDevice, archive.RecordSource, PhoneSnapshotPictures.Of(archive), token, at,
+                        archive.PhoneTouches, archive.PhoneAnnouncements),
                     token);
             }
             catch (OperationCanceledException)
@@ -309,6 +310,14 @@ public partial class MainWindow
                 $"App {app.Package}, {device.DescribeVersion(app.Package)}: {Count(app.Screens.Count, "screen")}, {Count(visits, "visit")}",
                 pictures.TimeOf(app.Screens[0].Visits[0]),
                 null));
+
+            // Step 12's warning for an app with no live region in the whole
+            // recording, under the app, as it is about all its visits.
+            if (_phoneChecks is { } appRun && appRun.AppFindings.Where(finding => finding.Visit.Package == app.Package).ToList() is { Count: > 0 } ofApp)
+            {
+                AddCheckRows(ofApp, indent: 1);
+            }
+
             foreach (var screen in app.Screens)
             {
                 var activity = screen.Activity is null
@@ -365,10 +374,17 @@ public partial class MainWindow
             if (_phoneChecks is not null || _phoneTextContrast is not null || _phoneNonTextContrast is not null || _phoneImagesOfText is not null ||
                 _phoneLabelInName is not null)
             {
-                _phoneScreenRows.Add(new PhoneScreenRowView(3, "Not checked, as no snapshot of this visit settled.", shownAt, null)
+                // The status message check follows every snapshot, settled
+                // or not, so can find a message in a visit too brief to
+                // settle, as the client's loading message was (measured).
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, "Not checked, as no snapshot of this visit settled, except for status messages, which are looked for in every snapshot.", shownAt, null)
                 {
                     IsCheck = true,
                 });
+                if (_phoneChecks?.For(visit) is { Count: > 0 } brief)
+                {
+                    AddCheckRows(brief);
+                }
             }
 
             return;
@@ -501,12 +517,12 @@ public partial class MainWindow
 
     // A row for each check of the findings, saying how many at each level,
     // then a row for each finding.
-    private void AddCheckRows(IReadOnlyList<PhoneFinding> findings, string measured = "")
+    private void AddCheckRows(IReadOnlyList<PhoneFinding> findings, string measured = "", int indent = 3)
     {
         foreach (var check in findings.GroupBy(finding => finding.Check))
         {
             _phoneScreenRows.Add(new PhoneScreenRowView(
-                3,
+                indent,
                 $"{PhoneCheckNames.Title(check.Key)}: {Levels(check)}{measured}",
                 check.First().Times[0].Time,
                 null)
@@ -515,7 +531,7 @@ public partial class MainWindow
             });
             foreach (var finding in check)
             {
-                _phoneScreenRows.Add(new PhoneScreenRowView(4, finding.Text, finding.Times[0].Time, null)
+                _phoneScreenRows.Add(new PhoneScreenRowView(indent + 1, finding.Text, finding.Times[0].Time, null)
                 {
                     Finding = finding,
                 });
@@ -620,6 +636,18 @@ public partial class MainWindow
             summary += $" The expanded state of {Count(run.ExpandableNotRecorded, "expandable item")} was not recorded, as the phone's Android is older than 16, so they were not checked.";
         }
 
+        var statusFound = run.Findings.Where(finding => finding.Check == PhoneCheckNames.StatusNotAnnounced).Concat(run.AppFindings).ToList();
+        var statusFindings = statusFound.Count == 0
+            ? "no findings"
+            : $"{Count(statusFound.Count, "finding")} ({Levels(statusFound)})";
+        var brief = run.StatusRun
+            ? string.Create(
+                CultureInfo.CurrentCulture,
+                $"{Count(run.BriefMessages, "brief message")} (text shown and gone within 5 seconds, with no touch between), {run.BriefExposed:N0} of them in a live region, announced or in a titled pane that appeared with them")
+            : "brief messages not looked for, as no touches were recorded, so text going away by itself cannot be told from text a touch took away";
+        summary += string.Create(
+            CultureInfo.CurrentCulture,
+            $" Status messages (WCAG 4.1.3), two checks: {statusFindings}; {brief}; {Count(run.LiveRegionItems, "item")} in a live region, {Count(run.Announcements, "announcement")} and {Count(run.Toasts, "toast")} in the recording.");
         if (run.TextFocusablePackages.Count > 0)
         {
             summary += $" In {string.Join(" and ", run.TextFocusablePackages)}, every item with text is focusable, as in an app drawn with Flutter, whose tree marks focusable what a screen reader can reach, so the tree does not show which items a keyboard reaches.";

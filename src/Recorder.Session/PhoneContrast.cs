@@ -106,6 +106,14 @@ public sealed class PhoneSnapshotPictures
     }
 
     /// <summary>
+    /// The picture of a time between two: the first screenshot from the
+    /// first, else the last frame before the second, from the first; null
+    /// when none. For text shown only briefly (android-checks.md, step 12).
+    /// </summary>
+    public PhoneContrastPicture? Between(long start, long end) =>
+        PhoneContrastRun.PictureOf(_screenshots, _frames, _frameTimes, start, start, end, _sessionDirectory);
+
+    /// <summary>
     /// The time to show a visit at: its first settled snapshot's picture;
     /// else, with none settled, the first screenshot in the visit or the
     /// last frame before it ended; else its start.

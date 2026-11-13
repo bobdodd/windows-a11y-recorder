@@ -402,6 +402,20 @@ public sealed class PhoneAccessibilityTimeline
     }
 
     /// <summary>
+    /// Each snapshot in time order, with whether it lists a window and
+    /// whether it took the window's items; the status message check
+    /// (android-checks.md, step 12) follows a window's text through them.
+    /// </summary>
+    public IEnumerable<(SessionTimelineEvent Snapshot, bool Listed, bool Taken)> ListingsOf(int windowId)
+    {
+        foreach (var snapshot in _snapshots)
+        {
+            var entry = snapshot.Windows.FirstOrDefault(window => window.Id == windowId);
+            yield return (snapshot.Event, entry is not null, entry is { Taken: true });
+        }
+    }
+
+    /// <summary>
     /// The snapshot whose items for a window the tree view shows at a time:
     /// null when the latest snapshot does not list the window, or none took
     /// its items.

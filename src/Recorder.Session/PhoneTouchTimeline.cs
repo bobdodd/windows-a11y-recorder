@@ -80,6 +80,24 @@ public sealed class PhoneTouchTimeline
     /// <summary>The number of touch reports.</summary>
     public int Count => _times.Length;
 
+    /// <summary>
+    /// Whether a finger touched the screen after one time and up to
+    /// another: a report between them, or a finger down at the first. The
+    /// status message check (android-checks.md, step 12) tells text that
+    /// went away by itself from text a touch took away.
+    /// </summary>
+    public bool TouchedBetween(long from, long to)
+    {
+        var index = Array.BinarySearch(_times, from);
+        index = index < 0 ? ~index : index;
+        while (index < _times.Length && _times[index] <= from)
+        {
+            index++;
+        }
+
+        return (index < _times.Length && _times[index] <= to) || At(from) is { Fingers.Count: > 0 };
+    }
+
     public static bool IsTouchReport(string channel, string eventType) =>
         channel == AndroidTouchRecords.TouchChannel &&
         eventType == AndroidTouchRecords.TouchEventType;

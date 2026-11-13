@@ -1604,3 +1604,59 @@ when chosen, and no row starting "Field with no name". Long rows
 wrapped, with no horizontal scrollbar. The time differed from the one
 first written, which was the test's error (see the correction under
 test 41). The checks of fields and states are checked on the PC.
+
+## Step 12: status messages (2026-11-13)
+
+The owner's decisions, what the standards, Android and Flutter say, and
+the checks built to them are in the architecture document's "Step 12:
+status messages". Two checks, each one discrete issue: text shown and
+gone by itself within 5 seconds, with no touch between, that is not in
+a live region, announced or in a titled pane, is an error; an app with
+no live region, announcement or toast in the whole recording is a
+warning, listed under the app's row. Checked in the Linux build
+environment: the solution builds with no warnings, and the new tests
+pass with the others. The throwaway program gives, for test 16's
+recording (`20261112-154851-32c7b61a5552453bbf5febffcca978c7`), three
+brief messages not exposed, in visits 2, 3 and 5, the first gone 0.41
+seconds after it was shown, and the warning for `com.pss.novasleepcare`
+in its 7 visits.
+
+## Test 42: build and install the fifteenth build (development PC)
+
+As test 19: close the recorder, run the PowerShell of test 19's step 1,
+run the newest installer with "Start the recorder and set up the
+analysis models" unchecked, and start the recorder from the Start menu.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the recorder
+opens.
+
+## Test 43: status messages in test 16's recording
+
+Keep the phone's picture in view throughout.
+
+1. Choose "Open recording...", and open
+   `20261112-154851-32c7b61a5552453bbf5febffcca978c7`. If the Checks
+   window is closed, click the "Checks" tab, then move it so the phone's
+   picture is fully in view. Wait 10 seconds, and take a screenshot of
+   the whole screen.
+2. Scroll the list so the row starting "App com.pss.novasleepcare" is
+   at the top, and take a screenshot of the whole screen.
+3. Scroll the list so the row starting "Visit 2," is at the top, then
+   scroll down until the row starting "Status message not announced" is
+   in view, and take a screenshot of the whole screen.
+
+**On screen:** in step 1 the line under "Show current visit" includes
+"Status messages (WCAG 4.1.3), two checks: 4 findings (3 errors, 1
+warning); 3 brief messages (text shown and gone within 5 seconds, with
+no touch between), 0 of them in a live region, announced or in a titled
+pane that appeared with them; 0 items in a live region, 0 announcements
+and 0 toasts in the recording." In step 2, below the App row, is the
+row "No live region in the app (WCAG 4.1.3): 1 warning", and below it a
+row that includes "in its 7 visits in this recording, no item of the
+app was in a live region, and it made no announcement and showed no
+toast". In step 3, below the Visit 2 row, is the row "Status message not
+announced (WCAG 4.1.3): 1 error", and below it a row that includes
+"View described as "Loading your personal sleep learning space.", it
+was shown with "☀️🌙" and they went away by themselves 0.41 seconds
+later, with no touch between". Long rows wrap; there is no horizontal
+scrollbar. Send the three screenshots.

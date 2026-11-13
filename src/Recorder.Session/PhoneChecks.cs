@@ -145,6 +145,30 @@ public sealed class PhoneCheckRun
     public int Sliders { get; private set; }
 
     /// <summary>
+    /// Step 12's apps with no live region, announcement or toast in the
+    /// whole recording, a warning each, listed under the app, not a visit;
+    /// each is shown at the app's first visit.
+    /// </summary>
+    public IReadOnlyList<PhoneFinding> AppFindings { get; private set; } = [];
+
+    /// <summary>Whether the brief status message check ran: it needs touches recorded.</summary>
+    public bool StatusRun { get; private set; }
+
+    /// <summary>Texts shown and gone by themselves within 5 seconds, with no touch between, as messages (texts that came and went together are one).</summary>
+    public int BriefMessages { get; private set; }
+
+    /// <summary>Of <see cref="BriefMessages"/>, those in a live region, announced, or in a titled pane that appeared with them.</summary>
+    public int BriefExposed { get; private set; }
+
+    /// <summary>The distinct items in a live region, by window and identity.</summary>
+    public int LiveRegionItems { get; private set; }
+
+    /// <summary>The announcements (TYPE_ANNOUNCEMENT) and toasts in the recording.</summary>
+    public int Announcements { get; private set; }
+
+    public int Toasts { get; private set; }
+
+    /// <summary>
     /// The apps whose tree marks every item with text that is not a control
     /// as focusable, as Flutter's does, so focusable there is about a
     /// screen reader and the tree does not show what the keyboard reaches.
@@ -170,7 +194,9 @@ public sealed class PhoneCheckRun
         ISessionEventRecordSource? source,
         PhoneSnapshotPictures? pictures = null,
         CancellationToken cancellationToken = default,
-        PhoneAuditLevel level = PhoneAuditLevel.AA)
+        PhoneAuditLevel level = PhoneAuditLevel.AA,
+        PhoneTouchTimeline? touches = null,
+        PhoneAnnouncementTimeline? announcements = null)
     {
         ArgumentNullException.ThrowIfNull(screens);
         pictures ??= PhoneSnapshotPictures.Empty;
@@ -311,6 +337,23 @@ public sealed class PhoneCheckRun
         }
 
         SharedTitles(sightings, findings);
+
+        // Step 12, status messages, from every snapshot of each app window.
+        var status = PhoneStatusChecks.Run(
+            screens, trees, touches ?? PhoneTouchTimeline.Empty, announcements ?? PhoneAnnouncementTimeline.Empty, source, pictures, cancellationToken);
+        foreach (var finding in status.Brief)
+        {
+            findings[(finding.Visit, finding.Check, finding.Level, finding.Identity)] = finding;
+        }
+
+        problems.AddRange(status.Problems);
+        run.AppFindings = status.Apps;
+        run.StatusRun = status.BriefRun;
+        run.BriefMessages = status.BriefMessages;
+        run.BriefExposed = status.BriefExposed;
+        run.LiveRegionItems = status.LiveRegionItems;
+        run.Announcements = status.Announcements;
+        run.Toasts = status.Toasts;
         run.TextFocusablePackages = [.. textFocus
             .Where(pair => pair.Value.Text > 0 && pair.Value.Focusable == pair.Value.Text)
             .Select(pair => pair.Key)

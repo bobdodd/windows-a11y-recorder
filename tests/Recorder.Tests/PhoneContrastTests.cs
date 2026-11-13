@@ -347,7 +347,7 @@ public sealed class PhoneContrastTests
             new SessionRecordingConfiguration(true, true, true, false, 5, true, true),
             [], [], 1, 0, null));
 
-        Assert.Equal(29, index.Version);
+        Assert.Equal(30, index.Version);
         Assert.Equal([2_000_000_000L, 3_000_000_000L], archive.PhoneScreenshots.Select(shot => shot.MonotonicNanoseconds));
         Assert.Equal("screenshots/android/0000000001.png", archive.PhoneScreenshots[0].Path);
         Assert.Equal(Path.Combine(Path.GetFullPath(folder), "screenshots", "android", "0000000001.png"), archive.PhoneScreenshots[0].AbsolutePath);

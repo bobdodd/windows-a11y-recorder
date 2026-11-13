@@ -108,7 +108,12 @@ public sealed record PlaybackIndex
     // text, to that evidence, for screens whose every text is in a
     // scrolling container (android-checks.md, decision 10); an older index
     // is derived again.
-    public const int CurrentVersion = 29;
+    // Version 30 keeps the phone's announcement and notification events
+    // (accessibility.android.events, TYPE_ANNOUNCEMENT and
+    // TYPE_NOTIFICATION_STATE_CHANGED) whole, for the status message
+    // checks of android-checks.md step 12 (PhoneAnnouncementTimeline); an
+    // older index is derived again.
+    public const int CurrentVersion = 30;
 
     public required int Version { get; init; }
 
@@ -312,6 +317,7 @@ public sealed class PlaybackIndexBuilder
             PhoneAccessibilityTimeline.IsTreeRecord(channel, record.EventType) ||
             PhoneAccessibilityTimeline.IsFocusRecord(channel, record.EventType, payload) ||
             PhoneScreenTimeline.IsWindowStateRecord(channel, record.EventType, payload) ||
+            PhoneAnnouncementTimeline.IsAnnouncementRecord(channel, record.EventType, payload) ||
             PhoneAccessibilityTimeline.IsDisplayRecord(channel, record.EventType))
         {
             Keep(eventKey, record);
@@ -494,6 +500,7 @@ public sealed class PlaybackIndexBuilder
              TalkBackSpeechTimeline.IsSpeechRecord(record.Channel, record.EventType) ||
              PhoneAccessibilityTimeline.IsFocusRecord(record.Channel, record.EventType, record.Payload) ||
              PhoneScreenTimeline.IsWindowStateRecord(record.Channel, record.EventType, record.Payload) ||
+             PhoneAnnouncementTimeline.IsAnnouncementRecord(record.Channel, record.EventType, record.Payload) ||
              PhoneAccessibilityTimeline.IsDisplayRecord(record.Channel, record.EventType)) &&
             record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()

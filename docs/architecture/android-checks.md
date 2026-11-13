@@ -39,7 +39,9 @@ was checked on the development PC on 2026-11-13 (tests 38 and 39
 passed). Step 11, the checks of fields and states, is built from the
 tree alone, to the owner's decisions (see "Step 11: fields and
 states"), and was checked on the development PC on 2026-11-13 (tests 40
-and 41 passed). The owner's
+and 41 passed). Step 12, status messages (WCAG 4.1.3), is built to the
+owner's decisions (see "Step 12: status messages"), and is not yet
+checked on the PC. The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -455,6 +457,8 @@ the recording is opened and nothing is kept.
 11. **Fields and states** (WCAG 3.3.2, 4.1.2 and 3.3.1), from the tree
    alone (see "Step 11: fields and states"). Built, and checked on the
    PC.
+12. **Status messages** (WCAG 4.1.3), from the tree, touches and events
+   (see "Step 12: status messages"). Built.
 
 ## As built: step 1
 
@@ -2251,6 +2255,153 @@ With a throwaway program, on the recordings to hand (measured):
   is not found.
 - A slider drawn as a plain view with no set progress action is not
   found.
+
+## Step 12: status messages
+
+### The owner's decisions (2026-11-13)
+
+4.1.3 is the first check in "Medium, from events and touches, by rules
+that may mislead" in `android-checks-candidates.md`. It was measured
+first (below), then put to the owner with three rules for what counts
+as a status message:
+
+- **The rule:** option 1, text that is shown and goes away by itself,
+  with no touch between. "Option 1, but finding no live regions at all
+  is a significant find. Not necessarily an error, but a warning to go
+  look for any system messages that should be using one" (the owner).
+- **The level of a brief message not exposed:** "Error".
+- **Each issue is discrete** (the owner, as for the other checks): a
+  brief message not exposed and an app with no live region are two
+  checks.
+
+### What the standards and Android say (checked in cited documents)
+
+- **4.1.3 Status Messages (AA):** "status messages can be
+  programmatically determined through role or properties such that they
+  can be presented to the user by assistive technologies without
+  receiving focus". A status message is a "change in content that is not
+  a change of context, and that provides information to the user on the
+  success or results of an action, on the waiting state of an
+  application, on the progress of a process, or on the existence of
+  errors". Text going away can be one too: "In situations where status
+  text is entirely removed, its absence may itself convey information
+  about the status", and "For a sighted user, when this text disappears,
+  it is normally an indication that the state is now available". A
+  dialog that takes focus "is defined as a change of context and does
+  not meet the definition of a status message"
+  ([Understanding 4.1.3](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html)).
+  For software, there is "still a user need to have status messages be
+  programmatically exposed so that they can be presented to the user by
+  assistive technologies without receiving focus"
+  ([WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/)).
+- **Android's reference:** a live region tells "accessibility services
+  whether they should automatically notify the user about changes to
+  the view's content description or text, or to the content
+  descriptions or text of the view's children"; polite is to "announce
+  changes to this view's content to the user", assertive to announce
+  them "immediately". `announceForAccessibility` is a "Convenience
+  method for sending a `TYPE_ANNOUNCEMENT` event", deprecated in API
+  level 36: "Use `sendAccessibilityEvent(int)` with `TYPE_ANNOUNCEMENT`
+  instead"
+  ([View reference](https://developer.android.com/reference/android/view/View#announceForAccessibility(java.lang.CharSequence))).
+- **Flutter's tree:** an item flagged as a live region is given the
+  polite live region (`result.setLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE)`),
+  and an announcement from the app is sent with
+  `announceForAccessibility`
+  ([Flutter's BaseRoleConfigurator](https://raw.githubusercontent.com/flutter/flutter/master/engine/src/flutter/shell/platform/android/io/flutter/view/BaseRoleConfigurator.java),
+  [Flutter's AccessibilityBridge](https://raw.githubusercontent.com/flutter/flutter/master/engine/src/flutter/shell/platform/android/io/flutter/view/AccessibilityBridge.java)).
+  So the check reads an app drawn with Flutter as it reads any other.
+
+### Measured first (2026-11-13)
+
+With a throwaway program, on the recordings to hand (measured):
+
+- **No item in a live region, no announcement and no toast** in any of
+  them.
+- **Test 16** (session 20261112-154851-32c7b61a5552453bbf5febffcca978c7):
+  three brief messages in `com.pss.novasleepcare`, each the loading
+  item described as "Loading your personal sleep learning space.", with
+  "☀️🌙", gone by themselves 0.41, 0.28 and 0.35 seconds after they
+  were shown, in visits 2, 3 and 5.
+- **Test 18** (session 20261112-171107-88cfc05214a34a3682222e7fb25d840d):
+  one, in visit 2, gone 2.98 seconds after it was shown.
+- **The client's app and the home screen** (session
+  20261112-005243-5528d67531dd4441a50b2c2985350c59): one, in visit 2.
+- **Settings' "Display size & text" and "Safety and emergency"**
+  (sessions 20261112-031508-262e4d97af4847dca17d45d0131b4814 and
+  20261111-002648-06be83ce21ec47309bd4bc68b4ae1cb4): none.
+
+### As built
+
+- **What it reads.** The playback index, version 30 since this step,
+  keeps every `TYPE_ANNOUNCEMENT` event, and every
+  `TYPE_NOTIFICATION_STATE_CHANGED` event, a toast when its class names
+  one, with the touches and every taking of the tree, not only the
+  settled snapshots (`PhoneStatusChecks`, in `Recorder.Session`).
+- **"Status message not announced (WCAG 4.1.3)"**, an error. In each
+  window, every taking of its items is followed. Text shown that is not
+  a control (visible, with an area, not clickable, checkable or
+  editable) and was not in the window's last taking, shown or not, is
+  new; the window's first taking counts as new. New text gone in a later
+  taking within 5 seconds, with no touch between, is a brief message;
+  texts shown and gone together are one message. It is exposed when it,
+  or an item it is inside, is in a live region, when it is inside a
+  titled pane that was not in the last taking, or when the app made an
+  announcement from 1 second before it was shown until it went. A brief
+  message not exposed is a finding in the visit it was shown in, for
+  example "View described as "Loading your personal sleep learning
+  space.", it was shown with "☀️🌙" and they went away by themselves
+  0.41 seconds later, with no touch between, as a status message does;
+  it is not in a live region, no announcement was made and no titled
+  pane appeared with it, so a screen reader is not told of it". It is
+  shown at the first picture of the phone while it was shown. With no
+  touches recorded, this check does not run, as text going away by
+  itself cannot be told from text a touch took away.
+- **"No live region in the app (WCAG 4.1.3)"**, a warning, once for
+  each app: none of its items was in a live region in the whole
+  recording, and it made no announcement and showed no toast. It is
+  listed under the app's row, not under a visit, as it is about all its
+  visits, for example "in its 7 visits in this recording, no item of the
+  app was in a live region, and it made no announcement and showed no
+  toast; look for status messages, such as saved, sent, loading,
+  progress or error messages, that should be in a live region".
+- **Every snapshot is read,** not only settled ones, as a status message
+  is brief. A visit with no settled snapshot says "Not checked, as no
+  snapshot of this visit settled, except for status messages, which are
+  looked for in every snapshot.", with its status findings below.
+- **The line under "Show current visit"** adds, for example, "Status
+  messages (WCAG 4.1.3), two checks: 4 findings (3 errors, 1 warning); 3
+  brief messages (text shown and gone within 5 seconds, with no touch
+  between), 0 of them in a live region, announced or in a titled pane
+  that appeared with them; 0 items in a live region, 0 announcements
+  and 0 toasts in the recording."
+- **The same at both audit levels:** 4.1.3 is level AA, so it runs at
+  both.
+- **On the recordings to hand** (measured, with the throwaway program):
+  the brief messages above are each a finding; each app gets the
+  warning, as none has a live region: `com.pss.novasleepcare` in tests
+  16 and 18 and in the client's recording, where the home screen's
+  launcher, `com.google.android.apps.nexuslauncher`, gets one too, and
+  Settings in both Settings recordings. The check takes under a second.
+- **Checked before any PC test:** the solution builds with no warnings,
+  and the tests pass, with the Windows-only browser tests failing as
+  before. The new tests cover a brief text not exposed (the error and
+  the app's warning), one in a live region, one announced, one taken
+  away by a touch, one already in the window, hidden, and a recording
+  with no touches.
+
+### Limits
+
+- Content that moves on by itself, such as a carousel, is text shown
+  and gone with no touch, so may be a finding that is not a status
+  message.
+- A message shown for longer than 5 seconds, or one that stays, is not
+  found; nor is a message whose text changes in place, such as a count.
+- A message taken away by a touch elsewhere in the window is not found.
+- The home screen and other apps passed through get the app warning
+  too; it is a warning to look, not a failure.
+- The recordings to hand have no saved, sent or error message or
+  snackbar; only loading text was found.
 
 ## Decisions on the open questions (2026-11-11)
 

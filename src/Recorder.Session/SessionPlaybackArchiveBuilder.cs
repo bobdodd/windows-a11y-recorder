@@ -118,6 +118,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _phoneTrees = [];
     private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _phoneFocus = [];
     private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _phoneWindowStates = [];
+    private readonly List<(long Time, JsonElement Payload)> _phoneAnnouncements = [];
     private readonly List<(long Time, JsonElement Payload)> _phoneDisplays = [];
     private readonly List<PhoneScreenshot> _phoneScreenshots = [];
     private readonly List<(long Time, string EventType, JsonElement Payload)> _phoneSettings = [];
@@ -328,6 +329,13 @@ public sealed class SessionPlaybackArchiveBuilder
         if (PhoneScreenTimeline.IsWindowStateRecord(timelineEvent.Channel, timelineEvent.EventType, payload))
         {
             _phoneWindowStates.Add((timelineEvent, payload.Clone()));
+        }
+
+        // Its announcements and toasts, for the status message checks
+        // (android-checks.md, step 12).
+        if (PhoneAnnouncementTimeline.IsAnnouncementRecord(timelineEvent.Channel, timelineEvent.EventType, payload))
+        {
+            _phoneAnnouncements.Add((timestamp, payload.Clone()));
         }
 
         if (PhoneAccessibilityTimeline.IsDisplayRecord(timelineEvent.Channel, timelineEvent.EventType) &&
@@ -611,6 +619,9 @@ public sealed class SessionPlaybackArchiveBuilder
             PhoneScreens = _phoneTrees.Count == 0
                 ? PhoneScreenTimeline.Empty
                 : new PhoneScreenTimeline(_phoneTrees, _phoneWindowStates, phoneAccessibility.ScreenAt, duration),
+            PhoneAnnouncements = _phoneAnnouncements.Count == 0
+                ? PhoneAnnouncementTimeline.Empty
+                : new PhoneAnnouncementTimeline(_phoneAnnouncements),
             PhoneScreenshots = [.. _phoneScreenshots.OrderBy(shot => shot.MonotonicNanoseconds)],
             PhoneSettings = _phoneSettings.Count == 0
                 ? PhoneSettingsTimeline.Empty

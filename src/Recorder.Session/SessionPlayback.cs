@@ -140,6 +140,9 @@ public sealed record SessionPlaybackArchive(
     /// </summary>
     public IReadOnlyList<PhoneScreenshot> PhoneScreenshots { get; init; } = [];
 
+    /// <summary>The phone's announcements and toasts, for the status message checks (android-checks.md, step 12).</summary>
+    public PhoneAnnouncementTimeline PhoneAnnouncements { get; init; } = PhoneAnnouncementTimeline.Empty;
+
     /// <summary>The phone's apps, screens and visits (android-checks.md, step 1).</summary>
     public PhoneScreenTimeline PhoneScreens { get; init; } = PhoneScreenTimeline.Empty;
 
