@@ -36,7 +36,9 @@ checked on the development PC on 2026-11-12 (tests 36 and 37 passed).
 Step 10, clickable but not focusable, is built from the tree alone, to
 the owner's decision (see "Step 10: clickable but not focusable"), and
 was checked on the development PC on 2026-11-13 (tests 38 and 39
-passed). The owner's
+passed). Step 11, the checks of fields and states, is built from the
+tree alone, to the owner's decisions (see "Step 11: fields and
+states"). The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -449,6 +451,8 @@ the recording is opened and nothing is kept.
 10. **Clickable but not focusable** (WCAG 2.1.1), from the tree alone
    (see "Step 10: clickable but not focusable"). Built, and checked on
    the PC.
+11. **Fields and states** (WCAG 3.3.2, 4.1.2 and 3.3.1), from the tree
+   alone (see "Step 11: fields and states"). Built.
 
 ## As built: step 1
 
@@ -2093,6 +2097,154 @@ With a throwaway program, on the recordings to hand (measured):
   adb, would confirm it; that is not built.
 - Focusable in touch mode is not considered, and an item not enabled is
   not checked.
+
+## Step 11: fields and states
+
+### The owner's decisions (2026-11-13)
+
+The checks of fields and states are item 3 of the easy wins in
+`android-checks-candidates.md`. All four were measured first (below),
+then put to the owner:
+
+- **A field labelled only by its hint fails.** "Why would hint alone
+  pass? When you type in the text field the hint is no longer visible,
+  and you fail WCAG 3.3.2" (the owner).
+- **Text beside a field is not its label:** "labeledBy only", as for
+  Label in Name. A field with only a hint is an error to 3.3.2, and the
+  finding quotes the text just above it, not linked to it, as a possible
+  label.
+- **Invalid with no error text, and expandable with no state:** "Build
+  both, tree-only".
+- **A slider with no range information:** "Range info required", an
+  error whatever its text or description says.
+- **Each issue is discrete** (the owner, as for the other checks): no
+  label and no name are two findings.
+
+### What the standards and Android say (checked in cited documents)
+
+- **3.3.2 Labels or Instructions (A):** "When labels or instructions are
+  provided, they need to be persistently available to users"; a label's
+  association is 1.3.1, a name is 4.1.2
+  ([Understanding 3.3.2](https://www.w3.org/WAI/WCAG22/Understanding/labels-or-instructions.html)).
+  Both apply to software as written
+  ([WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/)).
+- **Google's advice on fields:** "To label an editable TextView or
+  EditText, use android:hint to display a descriptive text label within
+  the item when it's empty", and "If an app's user interface already
+  provides a text label for the editable item, define android:labelFor
+  on the labeling View"; a content description on an EditText "may
+  interfere"
+  ([Editable View labels](https://support.google.com/accessibility/android/answer/6378120?hl=en)).
+  The owner's decision is stricter than the first: a hint is not shown
+  once text is typed, so it is not a persistent label.
+- **Android's reference:** `setContentInvalid` "Sets if the content of
+  this node is invalid. For example, a date is not well-formed.", and
+  `setError` "Sets the error text of this node." `ACTION_EXPAND` is the
+  "Action to expand an expandable node." From API 36, `setExpandedState`
+  "Sets the expanded state of the node", and `EXPANDED_STATE_UNDEFINED`
+  (0) is the "Expanded state for a non-expandable element"; before API
+  36, an expandable item said its state only by the action it offered.
+  `RangeInfo` is the "Class with information if a node is a range."
+  ([AccessibilityNodeInfo reference](https://developer.android.com/reference/android/view/accessibility/AccessibilityNodeInfo)).
+- **Flutter's tree:** a text field's hint is its label and hint joined
+  (`result.setHintText(node.getTextFieldHint())`), no item is linked to
+  another as its label, and no item is given an error, an invalid state
+  or range information; a slider is a `SeekBar` with its value in its
+  description; expand and collapse are added only with an expanded
+  state, from API 36
+  ([Flutter's AccessibilityBridge](https://raw.githubusercontent.com/flutter/flutter/master/engine/src/flutter/shell/platform/android/io/flutter/view/AccessibilityBridge.java),
+  [Flutter's BaseRoleConfigurator](https://raw.githubusercontent.com/flutter/flutter/master/engine/src/flutter/shell/platform/android/io/flutter/view/BaseRoleConfigurator.java)).
+  So in an app drawn with Flutter no field has a label in the tree, the
+  checks of invalid and expandable items find nothing, and every slider
+  is a finding.
+
+### Measured first (2026-11-13)
+
+With a throwaway program, on the recordings to hand (measured):
+
+- **Test 16** (session 20261112-154851-32c7b61a5552453bbf5febffcca978c7)
+  and **test 18** (session 20261112-171107-88cfc05214a34a3682222e7fb25d840d):
+  no field, no item marked invalid or with error text, no expand or
+  collapse action, no slider; every item's expanded state is 0.
+- **The client's app and the home screen** (session
+  20261112-005243-5528d67531dd4441a50b2c2985350c59): one field, an
+  `EditText` in `com.pss.novasleepcare`'s "Sleep Diary" sheet (visit 4),
+  with no text or description, the hint "Fell asleep quickly, woke up
+  once...", and no item linked to it as its label. Just above it, 39
+  pixels apart, is an item described as "Notes (optional)".
+- **Settings' "Display size & text"** (session
+  20261112-031508-262e4d97af4847dca17d45d0131b4814): the "Display size"
+  and "Font size" sliders are `SeekBar`s with range information.
+- **Settings' "Safety and emergency"** (session
+  20261111-002648-06be83ce21ec47309bd4bc68b4ae1cb4): none of the four.
+
+### As built
+
+- **The rules** (`PhoneFieldChecks`, in `Recorder.Session`). On each
+  settled snapshot, in the app's window, each item shown (visible to the
+  user, with an area) is checked:
+  - **"Field with no label (WCAG 3.3.2)"**, an error: an editable item
+    with no item linked to it as its label (`labeledBy`) that is shown,
+    or one outside the window. With a hint, for example "its only label
+    is its hint, "Fell asleep quickly, woke up once...", which is not
+    shown once text is typed, and no item is linked to it as its label
+    (labeledBy)"; with none, "it has no label: no hint, and no item
+    linked to it as its label (labeledBy)". When an item with text or a
+    description, not a control, ends just above it (across from it, and
+    no further above than the field is tall, as older recordings have no
+    density), the finding adds, for example, "the text just above it,
+    "Notes (optional)", is not linked to it as its label".
+  - **"Field with no name (WCAG 4.1.2)"**, an error: such a field with
+    no hint and no content description as well, "so a screen reader can
+    say only what is typed in it".
+  - **"Marked invalid with no error text (WCAG 3.3.1)"**, a warning: an
+    item marked invalid with no error text, as the error may be shown as
+    text not linked to it.
+  - **"Expandable with no expanded state (WCAG 4.1.2)"**, a warning: an
+    item with the expand or collapse action whose expanded state is 0,
+    undefined, with no state description. Where its state was not
+    recorded (before Android 16), it is counted, not checked.
+  - **"Slider with no range information (WCAG 4.1.2)"**, an error: a
+    `SeekBar` or `RatingBar`, or an item with the set progress action,
+    with no range information; its text or description is quoted as
+    where its value may be, "but not as a range".
+- **One finding for each item in a visit**, with each settled snapshot
+  it was seen in, listed under each visit in the Checks tab after
+  "Clickable but not focusable".
+- **The line under "Show current visit"** adds, after the clickable
+  sentence, for example "Fields and states, five of them: 1 finding (1
+  error), from 1 field, 0 marked invalid, 0 expandable items and 0
+  sliders checked; a field's label is only an item linked to it as its
+  label (labeledBy), as a hint is not shown once text is typed.", and
+  says how many expandable items' state was not recorded, when any was
+  not.
+- **The same at both audit levels:** 3.3.1, 3.3.2 and 4.1.2 are level A.
+- **On the recordings to hand** (measured, with the throwaway program):
+  the client's app and home screen give one finding, the Sleep Diary
+  field's, at 00:00:23.368 in visit 4, quoting "Notes (optional)";
+  "Display size & text" gives 12 sliders checked and no findings; tests
+  16 and 18 give none.
+- **Checked before any PC test:** the solution builds with no warnings,
+  and the tests pass, with the Windows-only browser tests failing as
+  before. The new tests cover a field with a hint only and the text
+  above it quoted, one labelled, one not shown, one with nothing (two
+  findings) and text too far above, an invalid item with and without
+  error text, expandable items with an undefined state, a defined
+  state, an unrecorded state and a state description, and sliders with
+  and without range information.
+
+### Limits
+
+- A label linked only by the layout, as Material's floating label of a
+  `TextInputLayout` may be, cannot be told from the tree; such a field
+  is a finding until it is looked at. In an app drawn with Flutter no
+  field is linked to a label, so every field is a finding.
+- The error text may be shown on screen, not linked to the item; the
+  check does not read it, so it is a warning.
+- An item that expands with no expand or collapse action, only a click,
+  is not found.
+- A slider drawn as a plain view with no set progress action is not
+  found.
 
 ## Decisions on the open questions (2026-11-11)
 

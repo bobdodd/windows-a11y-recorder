@@ -603,6 +603,23 @@ public partial class MainWindow
         summary += string.Create(
             CultureInfo.CurrentCulture,
             $" {PhoneCheckNames.Title(PhoneCheckNames.ClickableNotFocusable)}, one of them: {unfocusableFindings}, from {Count(run.Clickable, "clickable item")} checked, {run.ClickableSetAside:N0} set aside inside a focusable clickable item; each is a warning, until a keyboard test confirms it.");
+        var fieldChecks = new HashSet<string>(StringComparer.Ordinal)
+        {
+            PhoneCheckNames.FieldNoLabel, PhoneCheckNames.FieldNoName, PhoneCheckNames.InvalidNoError,
+            PhoneCheckNames.ExpandableNoState, PhoneCheckNames.SliderNoRange,
+        };
+        var fieldFound = run.Findings.Where(finding => fieldChecks.Contains(finding.Check)).ToList();
+        var fieldFindings = fieldFound.Count == 0
+            ? "no findings"
+            : $"{Count(fieldFound.Count, "finding")} ({Levels(fieldFound)})";
+        summary += string.Create(
+            CultureInfo.CurrentCulture,
+            $" Fields and states, five of them: {fieldFindings}, from {Count(run.Fields, "field")}, {run.Invalid:N0} marked invalid, {Count(run.Expandable, "expandable item")} and {Count(run.Sliders, "slider")} checked; a field's label is only an item linked to it as its label (labeledBy), as a hint is not shown once text is typed.");
+        if (run.ExpandableNotRecorded > 0)
+        {
+            summary += $" The expanded state of {Count(run.ExpandableNotRecorded, "expandable item")} was not recorded, as the phone's Android is older than 16, so they were not checked.";
+        }
+
         if (run.TextFocusablePackages.Count > 0)
         {
             summary += $" In {string.Join(" and ", run.TextFocusablePackages)}, every item with text is focusable, as in an app drawn with Flutter, whose tree marks focusable what a screen reader can reach, so the tree does not show which items a keyboard reaches.";

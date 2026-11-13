@@ -1525,3 +1525,52 @@ drawn with Flutter, whose tree marks focusable what a screen reader can
 reach, so the tree does not show which items a keyboard reaches." Long
 rows wrapped, with no horizontal scrollbar. Clickable but not focusable
 is checked on the PC.
+
+## Step 11: fields and states (2026-11-13)
+
+The owner's decisions, what the standards, Android and Flutter say, and
+the checks built to them are in the architecture document's "Step 11:
+fields and states". Five checks, each one discrete issue: a field with
+no label (3.3.2), a field with no name (4.1.2), an item marked invalid
+with no error text (3.3.1), an expandable item with no expanded state
+(4.1.2) and a slider with no range information (4.1.2). Checked in the
+Linux build environment: the solution builds with no warnings, and the
+new tests pass with the others. The throwaway program gives, for the
+recording of the client's app and the home screen
+(`20261112-005243-5528d67531dd4441a50b2c2985350c59`), one finding, the
+Sleep Diary notes field's, at 00:00:23.368 in visit 4.
+
+## Test 40: build and install the fourteenth build (development PC)
+
+As test 19: close the recorder, run the PowerShell of test 19's step 1,
+run the newest installer with "Start the recorder and set up the
+analysis models" unchecked, and start the recorder from the Start menu.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the recorder
+opens.
+
+## Test 41: the field with no label in the client's Sleep Diary
+
+Keep the phone's picture in view throughout.
+
+1. Choose "Open recording...", and open
+   `20261112-005243-5528d67531dd4441a50b2c2985350c59`. If the Checks
+   window is closed, click the "Checks" tab, then move it so the phone's
+   picture is fully in view. Wait 10 seconds, and take a screenshot of
+   the whole screen.
+2. Scroll the list so the row starting "Visit 4," is at the top, then
+   scroll down until the row starting "Field with no label" is in view,
+   and take a screenshot of the whole screen.
+
+**On screen:** in step 1 the line under "Show current visit" includes
+"Fields and states, five of them: 1 finding (1 error), from 1 field, 0
+marked invalid, 0 expandable items and 0 sliders checked; a field's
+label is only an item linked to it as its label (labeledBy), as a hint
+is not shown once text is typed." In step 2, below the Visit 4 row, is
+the row "Field with no label (WCAG 3.3.2): 1 error", and below it a row
+that includes "its only label is its hint, "Fell asleep quickly, woke
+up once...", which is not shown once text is typed, and no item is
+linked to it as its label (labeledBy); the text just above it, "Notes
+(optional)", is not linked to it as its label" and "seen once, at
+00:00:23.368". There is no row starting "Field with no name". Long rows
+wrap; there is no horizontal scrollbar. Send the two screenshots.

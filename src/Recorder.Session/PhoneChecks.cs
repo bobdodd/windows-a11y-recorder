@@ -129,6 +129,21 @@ public sealed class PhoneCheckRun
     /// <summary>The enabled clickable items set aside, as they are inside a focusable clickable item.</summary>
     public int ClickableSetAside { get; private set; }
 
+    /// <summary>The shown fields (editable items) the field checks looked at, once for each distinct sight of them.</summary>
+    public int Fields { get; private set; }
+
+    /// <summary>The shown items marked invalid, once for each distinct sight of them.</summary>
+    public int Invalid { get; private set; }
+
+    /// <summary>The shown items that can be expanded or collapsed, once for each distinct sight of them.</summary>
+    public int Expandable { get; private set; }
+
+    /// <summary>Of <see cref="Expandable"/>, those whose expanded state was not recorded, as the phone's Android is older than 16.</summary>
+    public int ExpandableNotRecorded { get; private set; }
+
+    /// <summary>The shown sliders, once for each distinct sight of them.</summary>
+    public int Sliders { get; private set; }
+
     /// <summary>
     /// The apps whose tree marks every item with text that is not a control
     /// as focusable, as Flutter's does, so focusable there is about a
@@ -177,6 +192,7 @@ public sealed class PhoneCheckRun
         {
             // The results of each taking of the window's items in the visit.
             var byTaking = new Dictionary<string, (PhoneCheckWindow Window, IReadOnlyList<PhoneCheckResult> Results)?>(StringComparer.Ordinal);
+            var fieldsByTaking = new Dictionary<string, PhoneFieldChecks.Measured>(StringComparer.Ordinal);
             foreach (var settled in visit.SettledSnapshots)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -227,7 +243,9 @@ public sealed class PhoneCheckRun
                         if (ReadWindow(source, taking, visit.WindowId) is { } window)
                         {
                             var context = new PhoneCheckContext((float)(density?.PixelsPerDp ?? 0), screen?.Width, screen?.Height, level);
-                            checkedWindow = (window, [.. PhoneTreeChecks.Run(window, context), .. PhoneFocusChecks.Run(window, context), .. PhoneScreenChecks.Run(window, context)]);
+                            var fieldCheck = PhoneFieldChecks.Measure(window, context);
+                            checkedWindow = (window, [.. PhoneTreeChecks.Run(window, context), .. PhoneFocusChecks.Run(window, context), .. fieldCheck.Results, .. PhoneScreenChecks.Run(window, context)]);
+                            fieldsByTaking[key] = fieldCheck;
                             if (checkedTakings.Add(taking.EventId))
                             {
                                 run.WindowsChecked++;
@@ -263,6 +281,14 @@ public sealed class PhoneCheckRun
                 var focus = PhoneFocusChecks.Measure(done.Window);
                 run.Clickable += focus.Clickable;
                 run.ClickableSetAside += focus.SetAside;
+                if (fieldsByTaking.TryGetValue(key, out var fieldCounts))
+                {
+                    run.Fields += fieldCounts.Fields;
+                    run.Invalid += fieldCounts.Invalid;
+                    run.Expandable += fieldCounts.Expandable;
+                    run.ExpandableNotRecorded += fieldCounts.ExpandableNotRecorded;
+                    run.Sliders += fieldCounts.Sliders;
+                }
                 textFocus.TryGetValue(visit.Screen.Package, out var sofar);
                 textFocus[visit.Screen.Package] = (sofar.Text + focus.TextItems, sofar.Focusable + focus.FocusableTextItems);
                 var items = done.Window.Items.GroupBy(item => item.Node.Index).ToDictionary(group => group.Key, group => group.First());

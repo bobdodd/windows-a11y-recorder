@@ -185,6 +185,9 @@ public sealed class PhoneCheckRunTests : IDisposable
         // Settings' heading is text that is not focusable.
         Assert.Equal((2, 0), (run.Clickable, run.ClickableSetAside));
         Assert.Empty(run.TextFocusablePackages);
+
+        // Step 11: the fixture has no field, invalid item, expandable item or slider.
+        Assert.Equal((0, 0, 0, 0, 0), (run.Fields, run.Invalid, run.Expandable, run.ExpandableNotRecorded, run.Sliders));
     }
 
     // Step 10: clickable but not focusable (WCAG 2.1.1), from the tree.
@@ -243,6 +246,114 @@ public sealed class PhoneCheckRunTests : IDisposable
 
         Assert.Empty(measured.Results);
         Assert.Equal((1, 0, 1, 1), (measured.Clickable, measured.SetAside, measured.TextItems, measured.FocusableTextItems));
+    }
+
+    // Step 11: a field labelled only by its hint fails WCAG 3.3.2, as the
+    // hint is not shown once text is typed (owner, 2026-11-13); text above it
+    // is quoted, not taken as its label (labeledBy only). As the client's
+    // Sleep Diary notes field was measured: hint, no labeledBy, "Notes
+    // (optional)" 39 pixels above it.
+    [Fact]
+    public void Fields_HintOnlyIsNoLabel_AndTheTextAboveIsQuoted()
+    {
+        const string Edit = "android.widget.EditText";
+        var window = new PhoneCheckWindow(512, 1,
+        [
+            Control(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout", clickable: false),
+            Control(1, 0, (59, 2159, 365, 2215), "android.view.View", "Notes (optional)", clickable: false, focusable: true),
+            Control(2, 0, (59, 2254, 1022, 2404), Edit, editable: true, focusable: true) with { Hint = "Fell asleep quickly, woke up once..." },
+            Control(3, 0, (0, 100, 1080, 200), "android.widget.TextView", text: "Name", clickable: false),
+            Control(4, 0, (0, 200, 1080, 300), Edit, editable: true, labeledBy: [3]) with { Hint = "Your name" },
+            Control(5, 0, (0, 300, 1080, 400), Edit, editable: true, visible: false),
+        ]);
+
+        var measured = PhoneFieldChecks.Measure(window, new PhoneCheckContext(2.625f, 1080, 2400));
+
+        var result = Assert.Single(measured.Results);
+        Assert.Equal((PhoneCheckNames.FieldNoLabel, PhoneCheckLevel.Error, 2), (result.Check, result.Level, result.Item));
+        Assert.Equal(
+            "its only label is its hint, \"Fell asleep quickly, woke up once...\", which is not shown once text is typed, " +
+            "and no item is linked to it as its label (labeledBy); the text just above it, \"Notes (optional)\", is not linked to it as its label",
+            result.Measured);
+        Assert.Equal((2, 0, 0, 0, 0), (measured.Fields, measured.Invalid, measured.Expandable, measured.ExpandableNotRecorded, measured.Sliders));
+        Assert.Equal("Field with no label (WCAG 3.3.2)", PhoneCheckNames.Title(PhoneCheckNames.FieldNoLabel));
+        var order = PhoneCheckNames.All.ToList();
+        Assert.Equal(order.IndexOf(PhoneCheckNames.ClickableNotFocusable) + 1, order.IndexOf(PhoneCheckNames.FieldNoLabel));
+    }
+
+    // A field with no hint, label or description has no label (3.3.2) and
+    // no name (4.1.2): two discrete issues. Text further above it than the
+    // field is tall is not quoted.
+    [Fact]
+    public void Fields_WithNothing_HaveNoLabelAndNoName()
+    {
+        var window = new PhoneCheckWindow(512, 1,
+        [
+            Control(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout", clickable: false),
+            Control(1, 0, (0, 0, 1080, 90), "android.widget.TextView", text: "Email", clickable: false),
+            Control(2, 0, (0, 191, 1080, 291), "android.widget.EditText", editable: true),
+        ]);
+
+        var results = PhoneFieldChecks.Run(window, new PhoneCheckContext(2.625f, 1080, 2400));
+
+        Assert.Equal(
+            [(PhoneCheckNames.FieldNoLabel, PhoneCheckLevel.Error), (PhoneCheckNames.FieldNoName, PhoneCheckLevel.Error)],
+            results.Select(result => (result.Check, result.Level)));
+        Assert.Equal("it has no label: no hint, and no item linked to it as its label (labeledBy)", results[0].Measured);
+        Assert.Equal(
+            "it has no name: no item linked to it as its label, no hint and no content description, so a screen reader can say only what is typed in it",
+            results[1].Measured);
+    }
+
+    // Marked invalid with no error text is a warning (3.3.1); an expandable
+    // item whose state is undefined (API 36) and has no state description
+    // is a warning (4.1.2), and one whose state was not recorded (before
+    // Android 16) is counted, not checked; a slider with no range is an
+    // error (4.1.2), "Range info required" (owner).
+    [Fact]
+    public void States_InvalidWithNoError_ExpandableWithNoState_AndSliderWithNoRange()
+    {
+        static IReadOnlyList<AndroidNodeAction> Actions(params int[] ids) => [.. ids.Select(id => new AndroidNodeAction(id, null))];
+        var window = new PhoneCheckWindow(512, 1,
+        [
+            Control(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout", clickable: false),
+            Control(1, 0, (0, 0, 1080, 100), "android.widget.EditText", editable: true, labeledBy: [0]) with { ContentInvalid = true },
+            Control(2, 0, (0, 100, 1080, 200), "android.widget.EditText", editable: true, labeledBy: [0]) with { ContentInvalid = true, Error = "Enter a date" },
+            Control(3, 0, (0, 200, 1080, 300), "android.widget.Button", "Details") with { Actions = Actions(16, PhoneFieldChecks.ActionExpand), ExpandedState = 0 },
+            Control(4, 0, (0, 300, 1080, 400), "android.widget.Button", "More") with { Actions = Actions(PhoneFieldChecks.ActionCollapse), ExpandedState = 3 },
+            Control(5, 0, (0, 400, 1080, 500), "android.widget.Button", "Older") with { Actions = Actions(PhoneFieldChecks.ActionExpand) },
+            Control(6, 0, (0, 500, 1080, 600), "android.widget.Button", "Said") with
+            {
+                Actions = Actions(PhoneFieldChecks.ActionExpand), ExpandedState = 0, StateDescription = "Collapsed",
+            },
+            Control(7, 0, (0, 600, 1080, 700), "android.widget.SeekBar", "Volume, 50%", clickable: false, focusable: true),
+            Control(8, 0, (0, 700, 1080, 800), "android.widget.SeekBar", "Font size", clickable: false) with
+            {
+                RangeInfo = new AndroidRangeInfo(1, 0, 6, 1),
+            },
+            Control(9, 0, (0, 800, 1080, 900), "android.view.View", clickable: false) with { Actions = Actions(PhoneFieldChecks.ActionSetProgress) },
+        ]);
+
+        var measured = PhoneFieldChecks.Measure(window, new PhoneCheckContext(2.625f, 1080, 2400));
+
+        Assert.Equal(
+            [
+                (PhoneCheckNames.InvalidNoError, PhoneCheckLevel.Warning, 1),
+                (PhoneCheckNames.ExpandableNoState, PhoneCheckLevel.Warning, 3),
+                (PhoneCheckNames.SliderNoRange, PhoneCheckLevel.Error, 7),
+                (PhoneCheckNames.SliderNoRange, PhoneCheckLevel.Error, 9),
+            ],
+            measured.Results.Select(result => (result.Check, result.Level, result.Item)));
+        Assert.StartsWith("it is marked invalid, but the tree gives it no error text", measured.Results[0].Measured, StringComparison.Ordinal);
+        Assert.StartsWith("it can be expanded, but its expanded state is undefined", measured.Results[1].Measured, StringComparison.Ordinal);
+        Assert.Equal(
+            "it is a slider with no range information, so its value, minimum and maximum are not given to a screen reader; " +
+            "its value may be in its words, \"Volume, 50%\", but not as a range",
+            measured.Results[2].Measured);
+        Assert.Equal(
+            "it is a slider with no range information, so its value, minimum and maximum are not given to a screen reader",
+            measured.Results[3].Measured);
+        Assert.Equal((2, 2, 4, 1, 3), (measured.Fields, measured.Invalid, measured.Expandable, measured.ExpandableNotRecorded, measured.Sliders));
     }
 
     // The owner, 2026-11-12: a general AA or AAA audit level guides the

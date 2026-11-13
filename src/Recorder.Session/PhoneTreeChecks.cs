@@ -86,6 +86,16 @@ public static class PhoneCheckNames
     /// </summary>
     public const string ClickableNotFocusable = "clickable-not-focusable";
 
+    /// <summary>
+    /// Fields and states (step 11, PhoneFieldChecks), from the tree alone,
+    /// each one discrete issue (owner, 2026-11-13).
+    /// </summary>
+    public const string FieldNoLabel = "field-no-label";
+    public const string FieldNoName = "field-no-name";
+    public const string InvalidNoError = "invalid-no-error-text";
+    public const string ExpandableNoState = "expandable-no-state";
+    public const string SliderNoRange = "slider-no-range";
+
     /// <summary>The screen's title and headings (step 6, PhoneScreenChecks), each one discrete issue (owner, 2026-11-12).</summary>
     public const string TitleMissing = "screen-title-missing";
     public const string TitleShared = "screen-title-shared";
@@ -98,6 +108,7 @@ public static class PhoneCheckNames
     [
         TouchTarget, TouchTargetWcag, TouchTargetEnhanced, SpeakableText, DuplicateSpeakableText, DuplicateClickableBounds,
         EditableContentDescription, RedundantDescription, ClassName, TraversalOrder, ClickableNotFocusable,
+        FieldNoLabel, FieldNoName, InvalidNoError, ExpandableNoState, SliderNoRange,
         TitleMissing, TitleShared, NoHeading, FirstHeadingLow, ManyHeadings,
     ];
 
@@ -122,6 +133,11 @@ public static class PhoneCheckNames
         LabelNotInName => "Label not in name (WCAG 2.5.3)",
         LabelNotAtStart => "Label not at the start of the name (WCAG 2.5.3, best practice)",
         ClickableNotFocusable => "Clickable but not focusable (WCAG 2.1.1)",
+        FieldNoLabel => "Field with no label (WCAG 3.3.2)",
+        FieldNoName => "Field with no name (WCAG 4.1.2)",
+        InvalidNoError => "Marked invalid with no error text (WCAG 3.3.1)",
+        ExpandableNoState => "Expandable with no expanded state (WCAG 4.1.2)",
+        SliderNoRange => "Slider with no range information (WCAG 4.1.2)",
         TitleMissing => "No screen title (WCAG2ICT 2.4.2)",
         TitleShared => "Screen title shared with other screens (WCAG2ICT 2.4.2)",
         NoHeading => "No heading (WCAG 1.3.1)",

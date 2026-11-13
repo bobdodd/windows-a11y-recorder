@@ -86,6 +86,10 @@ tree does not give.
    - an item with expand or collapse actions but no expanded state
      (4.1.2);
    - a slider with no range information (4.1.2).
+   Built on 2026-11-13 from the tree alone, to the owner's decisions: a
+   hint is not a label, as it is not shown once text is typed; a label
+   is only an item linked as one (`labeledBy`); range information is
+   required (see "Step 11: fields and states" in `android-checks.md`).
 
 ## Medium, from events and touches, by rules that may mislead
 
