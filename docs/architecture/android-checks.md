@@ -40,8 +40,8 @@ passed). Step 11, the checks of fields and states, is built from the
 tree alone, to the owner's decisions (see "Step 11: fields and
 states"), and was checked on the development PC on 2026-11-13 (tests 40
 and 41 passed). Step 12, status messages (WCAG 4.1.3), is built to the
-owner's decisions (see "Step 12: status messages"), and is not yet
-checked on the PC. The owner's
+owner's decisions (see "Step 12: status messages"), and was checked on
+the development PC on 2026-11-13 (tests 42 and 43 passed). The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -458,7 +458,7 @@ the recording is opened and nothing is kept.
    alone (see "Step 11: fields and states"). Built, and checked on the
    PC.
 12. **Status messages** (WCAG 4.1.3), from the tree, touches and events
-   (see "Step 12: status messages"). Built.
+   (see "Step 12: status messages"). Built, and checked on the PC.
 
 ## As built: step 1
 

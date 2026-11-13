@@ -1660,3 +1660,31 @@ announced (WCAG 4.1.3): 1 error", and below it a row that includes
 was shown with "☀️🌙" and they went away by themselves 0.41 seconds
 later, with no touch between". Long rows wrap; there is no horizontal
 scrollbar. Send the three screenshots.
+
+## Results of tests 42 and 43 (2026-11-13)
+
+Passed on the development PC with the build of 393f268, as recorded by
+the owner, with AAA chosen (4.1.3 is level AA, so it runs at both
+levels). The line under "Show current visit" included "Status messages
+(WCAG 4.1.3), two checks: 4 findings (3 errors, 1 warning); 3 brief
+messages (text shown and gone within 5 seconds, with no touch between),
+0 of them in a live region, announced or in a titled pane that appeared
+with them; 0 items in a live region, 0 announcements and 0 toasts in the
+recording." Below the row "App com.pss.novasleepcare, version 1.0.5
+(code 65), targets API 36: 5 screens, 7 visits" was the row "No live
+region in the app (WCAG 4.1.3): 1 warning", and below it the finding
+"Warning: FrameLayout containing "Welcome, Bob Dodd", "3", "How did you
+sleep last night?", in its 7 visits in this recording, no item of the
+app was in a live region, and it made no announcement and showed no
+toast; look for status messages, such as saved, sent, loading, progress
+or error messages, that should be in a live region; seen once, at
+00:00:02.655". Under visit 2 ("45 snapshots, 1 settled") the row "Status
+message not announced (WCAG 4.1.3): 1 error" was followed by the
+finding "Error: View described as "Loading your personal sleep learning
+space.", it was shown with "☀️🌙" and they went away by themselves 0.41
+seconds later, with no touch between, as a status message does; it is
+not in a live region, no announcement was made and no titled pane
+appeared with it, so a screen reader is not told of it; seen once, at
+00:00:22.575", with the loading text outlined on the phone's picture
+when chosen. Long rows wrapped, with no horizontal scrollbar. The
+status message checks are checked on the PC.
