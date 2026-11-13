@@ -28,7 +28,9 @@ passed). The general audit level, AA or AAA, is built (see "The audit
 level"), and was checked on the development PC on 2026-11-12 (tests 32
 and 33 passed). Further checks WCAG2ICT allows without AI, including 1.4.5 Images of
 Text measured on the recordings to hand, are recorded as options in
-`android-checks-candidates.md`. The owner's
+`android-checks-candidates.md`. Step 8, images of text, is built (see
+"Step 8: images of text"), and waits for its check on the development
+PC (tests 34 and 35). The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -432,6 +434,8 @@ the recording is opened and nothing is kept.
    issue (see "Step 6: titles and headings"). Built.
 7. **The audit level**, AA or AAA, guiding the checks and their
    reporting (see "The audit level"). Built, and checked on the PC.
+8. **Images of text** (WCAG 1.4.5, and 1.4.9 at AAA), from the words OCR
+   already reads (see "Step 8: images of text"). Built.
 
 ## As built: step 1
 
@@ -1680,6 +1684,130 @@ pixels) and the standard (WCAG 2.5.5 applied directly) were accepted.
   equivalent of 44 dp, one in text, one sized by Android and one whose
   size is essential are all reported, and need a person to set aside.
   Section headings (2.4.10) and other AAA criteria are not checked.
+
+## Step 8: images of text
+
+### The owner's decision (2026-11-12)
+
+"Since we have already identified issues the images of text in the app,
+let's implement that first": the first of the candidates in
+`android-checks-candidates.md` to be built is the probable image of
+text, as measured there in the client's app. The separate finding for
+text found by OCR in no item is not part of this step.
+
+### What the standards ask (checked in cited documents)
+
+- **1.4.5 Images of Text (AA):** "If the technologies being used can
+  achieve the visual presentation, text is used to convey information
+  rather than images of text", except where the image of text can be
+  visually customized to the user's requirements, or a particular
+  presentation is essential; logotypes are considered essential.
+  WCAG2ICT applies it to software as written
+  ([WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/#sc1-4-5-images-of-text)).
+- **An image of text** is "text that has been rendered in a non-text
+  form (e.g., an image) in order to achieve a particular visual
+  effect", and does not include text that is part of a picture with
+  significant other visual content
+  ([Understanding SC 1.4.5](https://www.w3.org/WAI/WCAG22/Understanding/images-of-text.html)).
+- **1.4.9 Images of Text (No Exception) (AAA):** images of text are only
+  used for pure decoration or where a particular presentation is
+  essential ([WCAG 2.2](https://www.w3.org/TR/WCAG22/)). WCAG2ICT does
+  not cover it; it is applied here as written, at the AAA audit level
+  only.
+
+### As built
+
+- **The rule** (`PhoneImagesOfTextRun`, in `Recorder.Session`). On each
+  settled snapshot whose picture OCR read, every image in the app's
+  window is looked at: an item visible to the user, with an area, whose
+  class is `android.widget.ImageView` or a class drawn from it
+  (`ImageButton` is one). Each line OCR read goes to the smallest image
+  its centre is in, unless an item that is not an image holds it in its
+  text or hint, as a `TextView` drawn over a picture would: that is the
+  app's text. Words matched only to a description, as in the client's
+  cards, show no text of the item's own, so count as inside the image.
+  An image with at least 3 letters or digits read inside it
+  (`MinimumCharacters`, an assumption, so that a shape read as a letter
+  or two is not a finding) is a warning.
+- **Why a warning.** The exceptions are not judged: a logotype, a
+  picture with significant other visual content, such as a photograph
+  or chart, and an image that can be customized are all reported, and
+  need a person to set aside. Each finding says so.
+- **The finding** is on the image, outlined at its bounds, and says what
+  OCR read and how: for example "Warning: ImageView described as "Sleep
+  Hygiene Steps to take for a good night's sleep.", OCR (Windows OCR,
+  en-US) read 2 lines of text inside the image: "Sleep Hygiene", "Steps
+  to take for a good night's sleep."; the words are 11.9 to 17.2 dp tall
+  in OCR's box; its description holds them; a logotype, a picture with
+  significant other visual content and an image that can be customized
+  are not judged; approximate, from the video". Up to 3 lines are
+  quoted, then "and N more". The heights are the OCR boxes', in dp with
+  the display density, else in pixels; they are not the font's size.
+  Whether the image's description holds the words is "holds them",
+  "holds some of them", "holds none of them" or "it has no description",
+  as spelt for matching. "From the phone's screenshot" or "approximate,
+  from the video" says which picture OCR read.
+- **One finding for each image in a visit**, with each settled snapshot
+  it was seen in, as for the other checks; the same image on another
+  visit is another finding.
+- **At AAA** each image is also a warning to "Image of text (WCAG 1.4.9,
+  AAA)", saying "1.4.9 allows an image of text only as pure decoration
+  or where essential, as a logotype; neither is judged, nor a picture
+  with significant other visual content". The 1.4.5 findings are the
+  same at both levels.
+- **In the Checks tab**, under each visit checked, after the non-text
+  contrast rows: the bold row "Image of text (WCAG 1.4.5): 4 warnings,
+  from 4 images read by OCR" and a row for each finding; or "no
+  findings, from N images read by OCR"; or "no image in this visit"; or
+  "not checked, as OCR read no picture of this visit". With OCR not used
+  at all, there are no rows, and the line under "Show current visit"
+  says it was not checked, as it needs OCR's words.
+- **The line under "Show current visit"** adds, after non-text contrast,
+  for example "Image of text (WCAG 1.4.5): 4 findings (4 warnings), from
+  4 images read by OCR, 0 passed; the words OCR read inside an image
+  that no item's text holds are a probable image of text, a warning, as
+  the exceptions, such as a logotype, are not judged." The audit level's
+  sentence now says images of text are held to 1.4.5 at AA, and to 1.4.9
+  as well as 1.4.5 at AAA.
+- **No new reading.** The check uses the OCR words and lines the
+  contrast measurement already has; the snapshot's window is kept with
+  its measurement so its images are known. Changing the audit level
+  works the findings out again from the same measurement.
+
+### Run on the development PC's recordings (measured 2026-11-12)
+
+- **Test 16** (session 20261112-154851-32c7b61a5552453bbf5febffcca978c7,
+  from video frames): 5 settled snapshots read by OCR, 4 images, all on
+  visit 2 to Sleep Learning Library, 4 warnings, each seen once, at
+  00:00:28.202: "Understanding Melatonin" (3 lines, 9.4 to 17.2 dp),
+  "Sleep Hygiene" (2 lines, 11.9 to 17.2 dp), "Sleeping Environment" (3
+  lines, 10.7 to 17.2 dp) and "Emotion, Health and Sleep" (2 lines, 11.5
+  to 17.2 dp), each with "its description holds them". At AAA, 8
+  warnings, the 4 to 1.4.9 after the 4 to 1.4.5. No other visit has an
+  image.
+- **Test 18** (session 20261112-171107-88cfc05214a34a3682222e7fb25d840d,
+  from the phone's lossless screenshots): the same 4 warnings on visit 2,
+  at 00:00:13.452, "from the phone's screenshot", with the same lines and
+  heights.
+- **Checked before any PC test:** the solution builds with no warnings,
+  and the tests pass, 2,385 of them, with the 10 that need Windows
+  failing as before. The new tests cover a described picture of a title
+  and subtitle, a `TextView` over a picture, an icon read as two
+  letters, a picture with no description, the merge across two
+  snapshots from a frame and a screenshot, AAA, no OCR, a description
+  holding some of the words, and words going to the smaller of two
+  images.
+
+### Limits
+
+- The exceptions are not judged, as above.
+- OCR misses stylised, small or low-contrast text, so an image of text
+  can be missed; a picture drawn in a view that is not an `ImageView`
+  (a custom view, or a Compose image left out of the tree) is not
+  looked at. Text found by OCR in no item is a separate candidate, not
+  built.
+- A later AI-free confirmation is in `android-checks-candidates.md`:
+  text in an image does not grow with Android's font size.
 
 ## Decisions on the open questions (2026-11-11)
 

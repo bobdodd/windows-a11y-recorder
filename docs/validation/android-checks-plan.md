@@ -1314,3 +1314,62 @@ AAA, as in test 24. Long rows wrapped, with no horizontal scrollbar. The
 screenshots show "AA" chosen when the recording was first opened, where
 "AAA" was expected from the earlier setting; the owner recorded the test
 as passed. The audit level is checked on the PC.
+
+## Step 8: images of text (2026-11-12)
+
+The owner's decision, the standards and the check built to them are in
+the architecture document's "Step 8: images of text". An image in the
+tree with words read by OCR inside it that no item's text holds is a
+warning to "Image of text (WCAG 1.4.5)", and at AAA to "Image of text
+(WCAG 1.4.9, AAA)" as well. Checked in the Linux build environment: the
+solution builds with no warnings, and the new tests pass with the
+others. The throwaway program gives, for test 16's recording, 4
+warnings on visit 2 at AA and 8 at AAA, and none on other visits.
+
+## Test 34: build and install the eleventh build (development PC)
+
+As test 19: close the recorder, run the PowerShell of test 19's step 1,
+run the newest installer with "Start the recorder and set up the
+analysis models" unchecked, and start the recorder from the Start menu.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the recorder
+opens.
+
+## Test 35: the images of text findings of test 16's recording
+
+Keep the phone's picture in view throughout.
+
+1. Choose "Open recording...", and open
+   `20261112-154851-32c7b61a5552453bbf5febffcca978c7` (test 16). If the
+   Checks window is closed, click the "Checks" tab, then move it so the
+   phone's picture is fully in view. Above the list, click "AA", wait 10
+   seconds, and take a screenshot of the whole screen.
+2. Scroll the list so the row starting "Visit 2," is at the top, then
+   scroll down until the bold row starting "Image of text" is in view,
+   and take a screenshot of the whole screen.
+3. Click the row starting "Warning: ImageView described as "Sleep
+   Hygiene" below it, and take a screenshot of the whole screen.
+4. Above the list, click "AAA", wait 10 seconds, scroll the list so the
+   row starting "Visit 2," is at the top, then scroll down until the bold
+   row starting "Image of text (WCAG 1.4.9, AAA)" is in view, and take a
+   screenshot of the whole screen.
+
+**On screen:** in step 1 the line under "Show current visit" includes
+"Audit level AA: text contrast is held to WCAG 1.4.3, targets to 2.5.8,
+and images of text to 1.4.5." and "Image of text (WCAG 1.4.5): 4
+findings (4 warnings), from 4 images read by OCR, 0 passed". In step 2,
+below the Visit 2 row and its other checks, the bold row "Image of text
+(WCAG 1.4.5): 4 warnings, from 4 images read by OCR", then 4 rows
+starting "Warning: ImageView described as", for "Understanding
+Melatonin", "Sleep Hygiene", "Sleeping Environment" and "Emotion, Health
+and Sleep"; each includes "of text inside the image:", "its description
+holds them" and "approximate, from the video", and ends "seen once, at
+00:00:28.202". In step 3 the
+time under the phone's picture starts "00:00:28.202", and a cyan outline
+surrounds the second card, Sleep Hygiene. In step 4 the line includes
+"Audit level AAA:" and "images of text to 1.4.9 as well as 1.4.5", and
+below the 4 rows of step 2 are the bold row "Image of text (WCAG 1.4.9,
+AAA): 4 warnings, from 4 images read by OCR" and 4 rows starting
+"Warning: ImageView described as", each including "1.4.9 allows an
+image of text only as pure decoration or where essential". Long rows
+wrap; there is no horizontal scrollbar. Send the four screenshots.

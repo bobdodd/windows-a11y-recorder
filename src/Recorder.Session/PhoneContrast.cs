@@ -151,7 +151,8 @@ public sealed record PhoneContrastSnapshot(
     PhoneContrastPicture Picture,
     string? Engine,
     IReadOnlyList<PhoneTextLine> Lines,
-    IReadOnlyList<PhoneControlMeasure>? MeasuredControls = null)
+    IReadOnlyList<PhoneControlMeasure>? MeasuredControls = null,
+    PhoneCheckWindow? Window = null)
 {
     /// <summary>The controls measured for non-text contrast (step 5).</summary>
     public IReadOnlyList<PhoneControlMeasure> Controls => MeasuredControls ?? [];
@@ -282,7 +283,7 @@ public sealed class PhoneContrastRun
                         .Select(line => line with { Colours = PhoneColours.Measure(pixels, scale.ToPicture(line.Box)) })
                         .ToList();
                     var controls = PhoneControlMeasuring.Measure(window, app.Bounds, above, lines, reading is not null, pixels, scale);
-                    measured.Add(new PhoneContrastSnapshot(visit, settled, taking, picture, reading?.Engine, lines, controls));
+                    measured.Add(new PhoneContrastSnapshot(visit, settled, taking, picture, reading?.Engine, lines, controls, window));
                 }
                 catch (Exception exception) when (
                     exception is IOException or InvalidDataException or InvalidOperationException or
@@ -396,7 +397,7 @@ public readonly record struct PictureScale(double X, double Y)
 /// </summary>
 public static class PhoneTextMatching
 {
-    private const string ImageViewClass = "android.widget.ImageView";
+    internal const string ImageViewClass = "android.widget.ImageView";
 
     // A box is widened by this share of its height on each side, so the
     // background around the letters is in it, within the item.

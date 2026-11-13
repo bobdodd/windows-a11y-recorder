@@ -49,6 +49,7 @@ public partial class MainWindow
     private string? _phoneContrastProblem;
     private PhoneTextContrastRun? _phoneTextContrast;
     private PhoneNonTextContrastRun? _phoneNonTextContrast;
+    private PhoneImagesOfTextRun? _phoneImagesOfText;
     private PhoneCheckSettings? _checkSettings;
 
     // The finding chosen in the list, and which of its times is shown.
@@ -84,6 +85,7 @@ public partial class MainWindow
             _phoneContrastProblem = null;
             _phoneTextContrast = null;
             _phoneNonTextContrast = null;
+            _phoneImagesOfText = null;
             _shownFinding = null;
             if (_playbackArchive is { PhoneScreens.Recorded: true } opened)
             {
@@ -190,12 +192,19 @@ public partial class MainWindow
         ShowPhoneScreenRows();
     }
 
-    // The text contrast findings at the chosen level, from the measurement.
+    // The text contrast findings at the chosen level, from the measurement,
+    // and the images of text, which add WCAG 1.4.9's findings at AAA.
     private void JudgeTextContrast()
     {
-        _phoneTextContrast = _phoneContrast is { } measured && _playbackArchive is { } archive
-            ? PhoneTextContrastRun.Run(measured, archive.PhoneScreens, archive.PhoneDevice, AuditLevel)
-            : null;
+        if (_phoneContrast is not { } measured || _playbackArchive is not { } archive)
+        {
+            _phoneTextContrast = null;
+            _phoneImagesOfText = null;
+            return;
+        }
+
+        _phoneTextContrast = PhoneTextContrastRun.Run(measured, archive.PhoneScreens, archive.PhoneDevice, AuditLevel);
+        _phoneImagesOfText = PhoneImagesOfTextRun.Run(measured, archive.PhoneScreens, archive.PhoneDevice, AuditLevel);
     }
 
     private PhoneAuditLevel AuditLevel => _checkSettings?.AuditLevel ?? PhoneAuditLevel.AA;
@@ -348,7 +357,7 @@ public partial class MainWindow
     {
         if (visit.SettledSnapshots.Count == 0)
         {
-            if (_phoneChecks is not null || _phoneTextContrast is not null || _phoneNonTextContrast is not null)
+            if (_phoneChecks is not null || _phoneTextContrast is not null || _phoneNonTextContrast is not null || _phoneImagesOfText is not null)
             {
                 _phoneScreenRows.Add(new PhoneScreenRowView(3, "Not checked, as no snapshot of this visit settled.", shownAt, null)
                 {
@@ -422,6 +431,40 @@ public partial class MainWindow
             else
             {
                 AddCheckRows(findings, $", from {Count(controls, "control")} measured");
+            }
+        }
+
+        // Images of text need OCR's words, so say nothing of a recording OCR
+        // did not read; the summary says why.
+        if (_phoneImagesOfText is { SnapshotsRead: > 0 } images)
+        {
+            var findings = images.For(visit);
+            var title = PhoneCheckNames.Title(PhoneCheckNames.ImageOfText);
+            var count = images.ImagesIn(visit);
+            if (!images.Read(visit))
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{title}: not checked, as OCR read no picture of this visit.", shownAt, null)
+                {
+                    IsCheck = true,
+                });
+            }
+            else if (count == 0)
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{title}: no image in this visit.", shownAt, null)
+                {
+                    IsCheck = true,
+                });
+            }
+            else if (findings.Count == 0)
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{title}: no findings, from {Count(count, "image")} read by OCR.", shownAt, null)
+                {
+                    IsCheck = true,
+                });
+            }
+            else
+            {
+                AddCheckRows(findings, $", from {Count(count, "image")} read by OCR");
             }
         }
     }
@@ -501,8 +544,8 @@ public partial class MainWindow
     // The audit level the checks were run at, and what it changes
     // (owner, 2026-11-12: the level guides the checks and their reporting).
     private string AuditSummary() => AuditLevel == PhoneAuditLevel.AAA
-        ? "Audit level AAA: text contrast is held to WCAG 1.4.6, and targets to 44 by 44 dp (WCAG 2.5.5) as well as 2.5.8; 2.5.5's exceptions (an equivalent target, a target in text, one sized by Android, an essential presentation) are not judged."
-        : "Audit level AA: text contrast is held to WCAG 1.4.3, and targets to 2.5.8.";
+        ? "Audit level AAA: text contrast is held to WCAG 1.4.6, targets to 44 by 44 dp (WCAG 2.5.5) as well as 2.5.8, and images of text to 1.4.9 as well as 1.4.5; 2.5.5's exceptions (an equivalent target, a target in text, one sized by Android, an essential presentation) are not judged."
+        : "Audit level AA: text contrast is held to WCAG 1.4.3, targets to 2.5.8, and images of text to 1.4.5.";
 
     // What the checks found, or why they have not.
     private string ChecksSummary()
@@ -577,6 +620,21 @@ public partial class MainWindow
             summary += string.Create(
                 CultureInfo.CurrentCulture,
                 $" {PhoneCheckNames.Title(PhoneCheckNames.NonTextContrast)}, at AA, its only level: {nonTextFindings}, from {Count(nonText.Controls, "control")} measured, {nonText.Passed:N0} passed; graphics with no item in the tree are not checked.");
+        }
+
+        if (_phoneImagesOfText is { } images)
+        {
+            var checks = images.Level == PhoneAuditLevel.AAA
+                ? $"{PhoneCheckNames.Title(PhoneCheckNames.ImageOfText)} and {PhoneCheckNames.Title(PhoneCheckNames.ImageOfTextAaa)}"
+                : PhoneCheckNames.Title(PhoneCheckNames.ImageOfText);
+            var imageFindings = images.Findings.Count == 0
+                ? "no findings"
+                : $"{Count(images.Findings.Count, "finding")} ({Levels(images.Findings)})";
+            summary += images.SnapshotsRead == 0
+                ? $" {checks}: not checked, as it needs OCR's words."
+                : string.Create(
+                    CultureInfo.CurrentCulture,
+                    $" {checks}: {imageFindings}, from {Count(images.Images, "image")} read by OCR, {images.Passed:N0} passed; the words OCR read inside an image that no item's text holds are a probable image of text, a warning, as the exceptions, such as a logotype, are not judged.");
         }
 
         var engine = measured.Snapshots.Select(snapshot => snapshot.Engine).FirstOrDefault(name => !string.IsNullOrEmpty(name));

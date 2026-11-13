@@ -369,6 +369,146 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Equal("Non-text contrast (WCAG 1.4.11)", PhoneCheckNames.Title(home.Check));
     }
 
+    // Step 8: images of text. A window with a picture of a title and its
+    // subtitle, described as both; a picture with a TextView drawn over it;
+    // a picture with an icon OCR reads as two letters; and a picture with no
+    // description whose words are found in no item.
+    private static AndroidTreeNode ImageNode(
+        int index, int? parent, (int Left, int Top, int Right, int Bottom) bounds, string className,
+        string? description = null, string? text = null) =>
+        new()
+        {
+            Index = index,
+            Parent = parent,
+            ClassName = className,
+            Bounds = new AndroidNodeBounds(bounds.Left, bounds.Top, bounds.Right, bounds.Bottom),
+            ContentDescription = description,
+            Text = text,
+            ImportantForAccessibility = true,
+            VisibleToUser = true,
+            Enabled = true,
+            Checked = "unchecked",
+        };
+
+    private static (PhoneCheckWindow Window, PhoneTextLine[] Lines) PicturesOfText()
+    {
+        var window = new PhoneCheckWindow(512, 1,
+        [
+            ImageNode(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout"),
+            ImageNode(1, 0, (59, 324, 1022, 724), "android.widget.ImageView", "Sleep Hygiene\nSteps to take for a good night's sleep."),
+            ImageNode(2, 0, (59, 724, 1022, 1124), "android.widget.ImageView"),
+            ImageNode(3, 0, (100, 800, 900, 900), "android.widget.TextView", text: "Daily tips"),
+            ImageNode(4, 0, (59, 1124, 1022, 1523), "android.widget.ImageButton", "Settings"),
+            ImageNode(5, 0, (59, 1523, 1022, 1923), "android.widget.ImageView"),
+        ]);
+        var items = window.Items;
+        PhoneTextLine Line(PhoneCheckItem? owner, PhoneCheckItem container, PhoneTextPlace place, string ocr, int left, int top, int right, int bottom) =>
+            new(owner, container, place, owner?.Node.ContentDescription ?? owner?.Text, ocr, new PhoneBounds(left, top, right, bottom), null, bottom - top);
+        return (window,
+        [
+            Line(items[1], items[1], PhoneTextPlace.AppTextPlacedByOcr, "Sleep Hygiene", 100, 400, 500, 442),
+            Line(items[1], items[1], PhoneTextPlace.AppTextPlacedByOcr, "Steps to take for a good night's sleep.", 100, 460, 900, 489),
+            Line(items[3], items[3], PhoneTextPlace.AppTextPlacedByOcr, "Daily tips", 100, 820, 400, 860),
+            Line(null, items[4], PhoneTextPlace.FoundByOcr, "Q:", 500, 1300, 560, 1340),
+            Line(null, items[5], PhoneTextPlace.FoundByOcr, "Sale 50%", 100, 1600, 500, 1642),
+        ]);
+    }
+
+    [Fact]
+    public void ImagesOfText_WarnsOfWordsInAnImageNoItemsTextHolds_AndMergesThemInAVisit()
+    {
+        var (window, lines) = PicturesOfText();
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        PhoneContrastSnapshot Snapshot(int settled, PhonePictureKind kind, string? engine = "Windows OCR, en-US")
+        {
+            var at = visit.SettledSnapshots[settled];
+            return new PhoneContrastSnapshot(
+                visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                new PhoneContrastPicture(kind, at.MonotonicNanoseconds + 250_000_000, "p.png", "p.png"),
+                engine, lines, null, window);
+        }
+
+        var measured = PhoneContrastRun.Of([Snapshot(0, PhonePictureKind.Frame), Snapshot(1, PhonePictureKind.Screenshot)]);
+        var run = PhoneImagesOfTextRun.Run(measured, archive.PhoneScreens, Device(), PhoneAuditLevel.AA);
+
+        // Four images on each of two snapshots: the TextView's words are the
+        // app's text, and "Q" is too few letters.
+        Assert.Equal((2, 8, 4), (run.SnapshotsRead, run.Images, run.Passed));
+        Assert.True(run.Read(visit));
+        Assert.Equal(8, run.ImagesIn(visit));
+        Assert.Equal(2, run.Findings.Count);
+        Assert.All(run.Findings, finding => Assert.Equal((PhoneCheckNames.ImageOfText, PhoneCheckLevel.Warning), (finding.Check, finding.Level)));
+        Assert.Equal(run.Findings, run.For(visit));
+        var described = run.Findings[0];
+        Assert.Equal(window.Items[1].Identity, described.Identity);
+        Assert.Equal([new PhoneBounds(59, 324, 1022, 724), new PhoneBounds(59, 324, 1022, 724)], described.Times.Select(time => time.Bounds));
+        Assert.All(described.Times, time => Assert.Equal(window.Items[1].TreeKey, time.TreeKey));
+        Assert.Equal(
+            "OCR (Windows OCR, en-US) read 2 lines of text inside the image: \"Sleep Hygiene\", \"Steps to take for a good night's sleep.\"; " +
+            "the words are 11.9 to 17.2 dp tall in OCR's box; its description holds them; " +
+            "a logotype, a picture with significant other visual content and an image that can be customized are not judged; approximate, from the video",
+            described.Times[0].Measured);
+        Assert.EndsWith("; from the phone's screenshot", described.Times[1].Measured, StringComparison.Ordinal);
+        Assert.Contains("(other values at other times)", described.Text, StringComparison.Ordinal);
+        Assert.Contains("\"Sale 50%\"; the words are 17.2 dp tall in OCR's box; it has no description;", run.Findings[1].Times[0].Measured, StringComparison.Ordinal);
+        Assert.Equal("Image of text (WCAG 1.4.5)", PhoneCheckNames.Title(described.Check));
+
+        // At AAA each is a 1.4.9 warning as well, after the 1.4.5 ones.
+        var aaa = PhoneImagesOfTextRun.Run(measured, archive.PhoneScreens, Device(), PhoneAuditLevel.AAA);
+
+        Assert.Equal(
+            [PhoneCheckNames.ImageOfText, PhoneCheckNames.ImageOfText, PhoneCheckNames.ImageOfTextAaa, PhoneCheckNames.ImageOfTextAaa],
+            aaa.Findings.Select(finding => finding.Check));
+        Assert.Contains("1.4.9 allows an image of text only as pure decoration or where essential", aaa.Findings[2].Times[0].Measured, StringComparison.Ordinal);
+        Assert.Equal("Image of text (WCAG 1.4.9, AAA)", PhoneCheckNames.Title(aaa.Findings[2].Check));
+
+        // With no OCR there is nothing to read.
+        var unread = PhoneImagesOfTextRun.Run(PhoneContrastRun.Of([Snapshot(0, PhonePictureKind.Frame, engine: null)]), archive.PhoneScreens, Device(), PhoneAuditLevel.AA);
+
+        Assert.Equal((0, 0), (unread.SnapshotsRead, unread.Findings.Count));
+        Assert.False(unread.Read(visit));
+    }
+
+    // A description that holds some of the words, and words split between
+    // two images go to the smaller one they are in.
+    [Fact]
+    public void ImagesOfText_SaysHowMuchTheDescriptionHolds_AndGivesWordsToTheSmallestImage()
+    {
+        var window = new PhoneCheckWindow(512, 1,
+        [
+            ImageNode(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout"),
+            ImageNode(1, 0, (0, 0, 1080, 1000), "android.widget.ImageView", "Sunset over a lake"),
+            ImageNode(2, 0, (100, 100, 500, 300), "android.widget.ImageView", "Summer offer"),
+        ]);
+        var lines = new PhoneTextLine[]
+        {
+            new(null, window.Items[2], PhoneTextPlace.FoundByOcr, null, "Summer sale", new PhoneBounds(120, 150, 480, 190), null, 40),
+            new(null, window.Items[1], PhoneTextPlace.FoundByOcr, null, "Lake Ontario", new PhoneBounds(600, 800, 1000, 840), null, 40),
+        };
+
+        var inside = PhoneImagesOfTextRun.InImages(window.Items.Skip(1).ToList(), lines);
+
+        Assert.Equal("Summer sale", Assert.Single(inside[window.Items[2]]).OcrText);
+        Assert.Equal("Lake Ontario", Assert.Single(inside[window.Items[1]]).OcrText);
+
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var at = visit.SettledSnapshots[0];
+        var measured = PhoneContrastRun.Of(
+        [
+            new PhoneContrastSnapshot(
+                visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                new PhoneContrastPicture(PhonePictureKind.Screenshot, at.MonotonicNanoseconds, "p.png", "p.png"),
+                "Windows OCR, en-US", lines, null, window),
+        ]);
+        var run = PhoneImagesOfTextRun.Run(measured, archive.PhoneScreens, Device(), PhoneAuditLevel.AA);
+
+        Assert.Equal(2, run.Findings.Count);
+        Assert.Contains("its description holds some of them", run.Findings[0].Times[0].Measured, StringComparison.Ordinal);
+        Assert.Contains("its description holds some of them", run.Findings[1].Times[0].Measured, StringComparison.Ordinal);
+    }
+
     // Step 6: two screens of one app with the same window title, each with
     // its own fixed text, as in the client's app, where every screen's
     // window title was "Nova SleepCare" (measured). Each visit's screen

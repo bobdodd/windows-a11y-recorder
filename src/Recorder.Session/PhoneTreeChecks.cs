@@ -64,6 +64,14 @@ public static class PhoneCheckNames
     /// <summary>The non-text contrast check (step 5), WCAG 2.2's 1.4.11, at AA only; not one of the tree's checks.</summary>
     public const string NonTextContrast = "non-text-contrast";
 
+    /// <summary>
+    /// Images of text, from the words OCR read inside an image (step 8): WCAG
+    /// 1.4.5 at AA, and 1.4.9 as well at the AAA audit level; not one of the
+    /// tree's checks.
+    /// </summary>
+    public const string ImageOfText = "image-of-text";
+    public const string ImageOfTextAaa = "image-of-text-aaa";
+
     /// <summary>The screen's title and headings (step 6, PhoneScreenChecks), each one discrete issue (owner, 2026-11-12).</summary>
     public const string TitleMissing = "screen-title-missing";
     public const string TitleShared = "screen-title-shared";
@@ -95,6 +103,8 @@ public static class PhoneCheckNames
         TextContrastAa => "Text contrast at AA (WCAG 1.4.3)",
         TextContrastAaa => "Text contrast at AAA (WCAG 1.4.6)",
         NonTextContrast => "Non-text contrast (WCAG 1.4.11)",
+        ImageOfText => "Image of text (WCAG 1.4.5)",
+        ImageOfTextAaa => "Image of text (WCAG 1.4.9, AAA)",
         TitleMissing => "No screen title (WCAG2ICT 2.4.2)",
         TitleShared => "Screen title shared with other screens (WCAG2ICT 2.4.2)",
         NoHeading => "No heading (WCAG 1.3.1)",

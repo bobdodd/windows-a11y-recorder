@@ -104,6 +104,10 @@ tree does not give.
 
 ## 1.4.5 Images of Text
 
+Built on 2026-11-12, as the probable image of text, with 1.4.9 at AAA
+(see "Step 8: images of text" in `android-checks.md`). Text found by OCR
+in no item is not built.
+
 ### What the standards ask (checked in cited documents)
 
 - **1.4.5 (level AA):** "If the technologies being used can achieve the
