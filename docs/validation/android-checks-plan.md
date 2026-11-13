@@ -2046,4 +2046,6 @@ phone was put down, readings flicked between flat, upright and sideways
 (72 and 110 degrees) for under half a second each. That brief sideways
 reading is the third turn; it was far shorter than the hold time, so it
 gave no finding. The count is of every change the sensor reported, not
-of turns held.
+of turns held. The owner chose to leave the count as it is, so test 53's
+expected line should be read as "2 times or more" when the phone moves
+while being put down.

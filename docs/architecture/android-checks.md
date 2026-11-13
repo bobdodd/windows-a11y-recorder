@@ -2933,8 +2933,15 @@ check cannot be measured on them, and they give "not looked for".
 - F100, a message asking the user to turn the phone, is not detected.
 - A recording must include a turn: the test procedure needs a step that
   turns the phone and holds it, with Auto-rotate on.
-- The feasibility of reading the sensor from the companion's service is
-  not yet checked on the phone.
+- The number of turns in the summary counts every change between
+  upright and sideways that the sensor reported, including brief ones,
+  such as when the phone is put down; only turns held for the hold time
+  give findings. In test 53 a sideways reading of under half a second,
+  as the phone was put down, made the count 3 where 2 turns were held.
+  The owner chose to leave the count as it is (2026-11-13).
+- Reading the sensor from the companion's service while it is in the
+  background was checked on the Pixel 10 Pro XL in tests 52 and 53
+  (2026-11-13).
 
 ## Decisions on the open questions (2026-11-11)
 

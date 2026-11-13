@@ -141,7 +141,8 @@ tree does not give.
   `android-checks.md`). WCAG2ICT applies it except to software never
   shown on hardware that is turned in typical use
   ([WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/)). Recordings need a
-  step that turns the phone; not yet checked on the PC.
+  step that turns the phone; checked on the PC in tests 51 to 53
+  (2026-11-13).
 - **1.3.2 Meaningful Sequence:** the screen reader's order against the
   order on the screen, top to bottom and left to right; layouts in
   columns would give false findings.
