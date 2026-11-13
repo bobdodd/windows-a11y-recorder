@@ -539,7 +539,7 @@ public static class PhoneTextMatching
         return word.Length >= 2 && text.Joined.Contains(word, StringComparison.Ordinal);
     }
 
-    private static int Distance(string first, string second)
+    internal static int Distance(string first, string second)
     {
         var previous = new int[second.Length + 1];
         var current = new int[second.Length + 1];

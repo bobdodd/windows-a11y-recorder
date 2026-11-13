@@ -61,6 +61,11 @@ tree does not give.
    error), and the visible text is not at the start of the name (a
    warning, best practice). An item with no visible text is not
    checked.
+   Built on 2026-11-12, to the owner's decisions: the label is all the
+   text inside a control, a label read only by OCR is checked and its
+   failure is an error saying so, and text outside a control is its
+   label only through `labeledBy` (see "Step 9: Label in Name" in
+   `android-checks.md`).
 2. **Clickable but not focusable (2.1.1 Keyboard).** From API 26 a
    view's focusability defaults to "auto", and it is focusable if it is
    clickable or has an `OnClickListener`

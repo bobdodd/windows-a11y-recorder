@@ -30,7 +30,9 @@ and 33 passed). Further checks WCAG2ICT allows without AI, including 1.4.5 Image
 Text measured on the recordings to hand, are recorded as options in
 `android-checks-candidates.md`. Step 8, images of text, is built (see
 "Step 8: images of text"), and was checked on the development PC on
-2026-11-12 (tests 34 and 35 passed). The owner's
+2026-11-12 (tests 34 and 35 passed). Step 9, Label in Name, is built
+to the owner's decisions (see "Step 9: Label in Name"), and is to be
+checked on the development PC (tests 36 and 37). The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -437,6 +439,8 @@ the recording is opened and nothing is kept.
 8. **Images of text** (WCAG 1.4.5, and 1.4.9 at AAA), from the words OCR
    already reads (see "Step 8: images of text"). Built, and checked on
    the PC.
+9. **Label in Name** (WCAG 2.5.3), a control's content description
+   against the text inside it (see "Step 9: Label in Name"). Built.
 
 ## As built: step 1
 
@@ -1809,6 +1813,164 @@ text found by OCR in no item is not part of this step.
   built.
 - A later AI-free confirmation is in `android-checks-candidates.md`:
   text in an image does not grow with Android's font size.
+
+## Step 9: Label in Name
+
+### The owner's decisions (2026-11-12)
+
+"Next let's do Label in Name", the first of the easy wins in
+`android-checks-candidates.md`. Three questions were put to the owner,
+and answered:
+
+1. **What a control's label is:** "All text inside it", the text of the
+   control and of the items drawn inside it.
+2. **A label read only by OCR:** "Error, saying OCR". Where the tree has
+   no text for a control's label, the words OCR read inside it are its
+   label, and a failure is an error like any other, saying it was read
+   by OCR.
+3. **Labels outside the control:** "labeledBy only". Text beside a
+   control is not taken as its label, unless the control is labelled by
+   it in the tree (Android's `labeledBy`).
+
+### What the standards ask (checked in cited documents)
+
+- **2.5.3 Label in Name (A):** "For user interface components with
+  labels that include text or images of text, the name contains the
+  text that is presented visually." WCAG2ICT applies it to software as
+  written ([WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/)).
+- **Where the label is.** Conventionally it is the adjacent text, and
+  for buttons and tabs it is the text "inside buttons and tabs or
+  immediately below icons serving as buttons"; only the adjacent text
+  should be treated as a label
+  ([Understanding SC 2.5.3](https://www.w3.org/WAI/WCAG22/Understanding/label-in-name.html)).
+- **What does not matter.** "Differences in capitalization and
+  punctuation are not relevant when evaluating this criterion": "first
+  name" passes for "First Name:", and "Next" for "Next…"
+  ([Understanding SC 2.5.3](https://www.w3.org/WAI/WCAG22/Understanding/label-in-name.html)).
+- **Symbols are not labels.** Text "used in a symbolic manner", such as
+  "B" for Bold or ">" for Next, is not a visible label
+  ([Understanding SC 2.5.3](https://www.w3.org/WAI/WCAG22/Understanding/label-in-name.html)).
+- **Text in round brackets** "may be optionally considered a description
+  and left out of the accessible name": "Name (required)" can accept
+  "Name"
+  ([Understanding SC 2.5.3](https://www.w3.org/WAI/WCAG22/Understanding/label-in-name.html)).
+- **Failures listed:** the name not containing the visible label text
+  (F96); the name containing the label's words "not in the same order";
+  and the name containing the label with "other words are interspersed"
+  ([Understanding SC 2.5.3](https://www.w3.org/WAI/WCAG22/Understanding/label-in-name.html)).
+- **Best practice:** "A best practice is to have the text of the label
+  at the start of the name"
+  ([Understanding SC 2.5.3](https://www.w3.org/WAI/WCAG22/Understanding/label-in-name.html)).
+
+### Measured first (2026-11-12)
+
+On the recordings of tests 16 and 18, with a throwaway program and the
+OCR the contrast check already reads (measured):
+
+- **The client's app puts its text in content descriptions.** Its
+  buttons, cards and tabs have content descriptions, and none of their
+  items has tree text, so every control's label is known only from OCR.
+  That is why a label read only by OCR is checked, and why each finding
+  says how its label was read.
+- **Test 16** (session 20261112-154851-32c7b61a5552453bbf5febffcca978c7,
+  from video frames): 47 controls checked, all 47 passed, 3 with no
+  label read: 11 on visit 1 to Welcome, 8 on visit 2 to Sleep Learning
+  Library, 8 on visit 4 to Sleep Diary, 9 on visit 6 to Bob Dodd and 11
+  on visit 7 to Welcome; visits 3 and 5 have no settled snapshot. The
+  3 with no label read are a button described as "3" (the notification
+  bell, whose orange badge "3" OCR did not read), on visits 1 and 7, and
+  "Help & FAQ / Get Support", cut off at the bottom of the screen, on
+  visit 6.
+- **Test 18** (session 20261112-171107-88cfc05214a34a3682222e7fb25d840d,
+  from the phone's screenshots): 27 controls checked, all 27 passed, 1
+  with no label read: 11 on visit 1, 8 on visit 2 and 8 on visit 3.
+- **So the app has no Label in Name finding** in these recordings. The
+  bell button named "3" is a question of its name, for 1.1.1 and 4.1.2,
+  not of 2.5.3.
+
+### As built
+
+- **The rule** (`PhoneLabelInNameRun`, in `Recorder.Session`). On each
+  settled snapshot, every control in the app's window is looked at: an
+  item visible to the user, with an area, that is clickable, long
+  clickable, checkable or editable, and has a content description. The
+  content description is its name. A control with no content
+  description is not checked, as Android names it from its text.
+- **Its label** is all the text inside it (decision 1), in reading
+  order, top to bottom and left to right: the tree text of the control
+  and of the visible items drawn inside it, and, where an item has no
+  tree text, the words OCR read whose centre is inside the control and
+  that no item's text holds (decision 2). The text of a control drawn
+  inside another control, as a button inside a card, is that control's
+  label, not the outer one's. An editable field's text is what was typed,
+  so it is not its label. Each item the control is labelled by
+  (`labeledBy`) gives a second label, its own text inside it
+  (decision 3).
+- **A label shorter than 2 letters or digits is not checked**
+  (`MinimumCharacters`, an assumption: a single character is likely a
+  symbol, such as "B" or ">"). A control with no label read is counted
+  as "with no label read".
+- **The match.** The label's words and the name's words are compared as
+  spelt for matching, with case and punctuation ignored and
+  apostrophes dropped (so "night's" and "night’s" are alike). The
+  label's words must be in the name together and in order. A word read
+  by OCR may differ by one letter (4 to 7 letters) or two (8 or more),
+  as OCR misreads. Words run together on one side and apart on the
+  other ("BobDodd" and "Bob Dodd") match. A label with text in round
+  brackets is tried again without it.
+- **Two discrete findings,** on the control, outlined at its bounds:
+  - **"Label not in name (WCAG 2.5.3)",** an error, when the name does
+    not contain a label, saying which words are missing, or "its words
+    are all in the name, but not together in this order" when they are
+    there out of order or with other words between them. For example
+    "Error: Button described as "Find items", its name "Find items" does
+    not contain the text inside it, "Search": "Search" is not in the
+    name; the label is the app's text, from the tree".
+  - **"Label not at the start of the name (WCAG 2.5.3, best practice)",**
+    a warning, when the name contains the label but does not start with
+    it.
+- **Each finding says how its label was read:** "the label is the app's
+  text, from the tree", or "the label was read by OCR (Windows OCR,
+  en-US), as the tree has no text for it, from the phone's screenshot"
+  (or "approximate, from the video"), or both, when some of it is each.
+- **One finding for each control and check in a visit**, with each
+  settled snapshot it was seen in, as for the other checks.
+- **In the Checks tab**, under each visit checked, after the images of
+  text rows: "Label in name (WCAG 2.5.3): no findings, from 8 controls
+  checked."; or the bold row with its findings; or "no control with a
+  label and a content description in this visit."
+- **The line under "Show current visit"** adds, after images of text,
+  for example "Label in name (WCAG 2.5.3): no findings, from 47 controls
+  checked, 47 passed, 3 with no label read; the label is all the text
+  inside a control, and the text of any item it is labelled by, from the
+  tree's text and, where it has none, OCR's, against its content
+  description; text beside a control is not taken as its label."
+- **The same at both audit levels:** 2.5.3 is level A.
+- **No new reading.** The check uses the snapshots' windows and the OCR
+  lines the contrast measurement already has.
+- **Checked before any PC test:** the solution builds with no warnings,
+  and the tests pass, 2,401 of them, with the 10 that need Windows
+  failing as before. The new tests cover a label from the tree that
+  passes and one that fails, a label read by OCR not at the start, words
+  out of order, a labelled-by item, text in round brackets, a symbol, an
+  OCR misreading of one letter, a button inside a card, an editable
+  field, an item inside a control with only a description, words found
+  by OCR in no item, the merge across two snapshots, and the match's
+  rules on their own.
+
+### Limits
+
+- Text beside a control is not its label unless the tree says so
+  (decision 3), so a field labelled by text beside it, with no
+  `labeledBy`, is not checked; an editable field's hint (its
+  placeholder) is not taken as its label.
+- The name is the content description only. A control named by its own
+  text, with no content description, is not checked, as its name is its
+  text.
+- OCR misses stylised, small or low-contrast text, so a label read only
+  by OCR can be missed or misread; a misread of more than the letters
+  allowed is a false error, and each such finding says the label was read
+  by OCR.
 
 ## Decisions on the open questions (2026-11-11)
 

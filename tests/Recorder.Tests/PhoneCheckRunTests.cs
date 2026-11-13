@@ -509,6 +509,168 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Contains("its description holds some of them", run.Findings[1].Times[0].Measured, StringComparison.Ordinal);
     }
 
+    // Step 9: Label in Name, on made-up controls. Items 2 to 17 are each a
+    // case; OCR's lines are placed as the contrast measurement places them.
+    private static AndroidTreeNode Control(
+        int index, int? parent, (int Left, int Top, int Right, int Bottom) bounds, string className,
+        string? description = null, string? text = null, bool clickable = true, bool checkable = false, bool editable = false,
+        IReadOnlyList<int>? labeledBy = null) =>
+        new()
+        {
+            Index = index,
+            Parent = parent,
+            ClassName = className,
+            Bounds = new AndroidNodeBounds(bounds.Left, bounds.Top, bounds.Right, bounds.Bottom),
+            ContentDescription = description,
+            Text = text,
+            ImportantForAccessibility = true,
+            VisibleToUser = true,
+            Enabled = true,
+            Clickable = clickable,
+            Checkable = checkable,
+            Editable = editable,
+            LabeledBy = labeledBy ?? [],
+            Checked = "unchecked",
+        };
+
+    private static (PhoneCheckWindow Window, PhoneTextLine[] Lines) Labelled()
+    {
+        const string Button = "android.widget.Button";
+        const string Text = "android.widget.TextView";
+        var window = new PhoneCheckWindow(512, 1,
+        [
+            Control(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout", clickable: false),
+            Control(1, 0, (0, 0, 1080, 100), Button, "Search for items"),
+            Control(2, 1, (10, 10, 300, 90), Text, text: "Search", clickable: false),
+            Control(3, 0, (0, 100, 1080, 200), Button, "Find items"),
+            Control(4, 3, (10, 110, 300, 190), Text, text: "Search", clickable: false),
+            Control(5, 0, (0, 200, 1080, 300), "android.widget.ImageView", "Open your settings"),
+            Control(6, 0, (0, 300, 1080, 400), Button, "Data privacy"),
+            Control(7, 0, (0, 400, 400, 500), Text, text: "Remember me", clickable: false),
+            Control(8, 0, (400, 400, 500, 500), "android.widget.CheckBox", "Keep me signed in", checkable: true, labeledBy: [7]),
+            Control(9, 0, (0, 500, 1080, 600), Button, "Name", text: "Name (required)"),
+            Control(10, 0, (0, 600, 100, 700), Button, "Bold", text: "B"),
+            Control(11, 0, (0, 700, 1080, 800), Button, "Notifications"),
+            Control(12, 0, (0, 800, 1080, 1000), "android.view.View", "Card"),
+            Control(13, 12, (10, 810, 300, 990), Button, text: "Delete"),
+            Control(14, 0, (0, 1000, 1080, 1100), "android.widget.EditText", "Email", text: "bob@example.com", editable: true),
+            Control(15, 0, (0, 1100, 1080, 1200), Button, "Sleep Goals"),
+            Control(16, 15, (10, 1110, 500, 1190), "android.view.View", "Sleep Goals", clickable: false),
+            Control(17, 0, (0, 1200, 1080, 1300), Button, "Sleep Goals"),
+        ]);
+        var items = window.Items;
+        PhoneTextLine Ocr(PhoneCheckItem? owner, PhoneCheckItem container, string words, int top) =>
+            new(owner, container, owner is null ? PhoneTextPlace.FoundByOcr : PhoneTextPlace.AppTextPlacedByOcr, owner?.Node.ContentDescription,
+                words, new PhoneBounds(20, top, 400, top + 40), null, 40);
+        return (window,
+        [
+            Ocr(items[2], items[2], "Search", 30),
+            Ocr(items[5], items[5], "Settings", 230),
+            Ocr(items[6], items[6], "Privacy Data", 330),
+            Ocr(items[11], items[11], "Notifcations", 730),
+            Ocr(items[16], items[16], "Sleep Goals", 1130),
+            Ocr(null, items[17], "Sleep Goals Today", 1230),
+        ]);
+    }
+
+    [Fact]
+    public void LabelInName_FindsEachDiscreteIssue_FromTheTreeAndFromOcr()
+    {
+        var (window, lines) = Labelled();
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var at = visit.SettledSnapshots[0];
+        var measured = PhoneContrastRun.Of(
+        [
+            new PhoneContrastSnapshot(
+                visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                new PhoneContrastPicture(PhonePictureKind.Frame, at.MonotonicNanoseconds + 250_000_000, "p.png", "p.png"),
+                "Windows OCR, en-US", lines, null, window),
+        ]);
+
+        var run = PhoneLabelInNameRun.Run(measured, archive.PhoneScreens);
+
+        // Checked: 1, 3, 5, 6, 8, 9, 11, 15 and 17. Not read: "B" is too
+        // short, the card's only text is its button's, and a field's text
+        // is what was typed.
+        Assert.Equal((9, 4, 3), (run.Controls, run.Passed, run.Unread));
+        Assert.True(run.UsedOcr);
+        Assert.Equal(9, run.ControlsIn(visit));
+        string Measured(int index, string check) =>
+            Assert.Single(run.Findings, finding => finding.Identity == window.Items[index].Identity && finding.Check == check).Times[0].Measured;
+
+        Assert.Equal(
+            "its name \"Find items\" does not contain the text inside it, \"Search\": \"Search\" is not in the name; the label is the app's text, from the tree",
+            Measured(3, PhoneCheckNames.LabelNotInName));
+        Assert.Equal(
+            "its name \"Open your settings\" contains the text inside it, \"Settings\", but does not start with it; a best practice is to have the label's text at the start of the name; " +
+            "the label was read by OCR (Windows OCR, en-US), as the tree has no text for it, approximate, from the video",
+            Measured(5, PhoneCheckNames.LabelNotAtStart));
+        Assert.Contains(
+            "the text inside it, \"Privacy Data\": its words are all in the name, but not together in this order",
+            Measured(6, PhoneCheckNames.LabelNotInName), StringComparison.Ordinal);
+        Assert.StartsWith(
+            "its name \"Keep me signed in\" does not contain the text of the item it is labelled by, \"Remember me\": \"Remember\" is not in the name",
+            Measured(8, PhoneCheckNames.LabelNotInName), StringComparison.Ordinal);
+        Assert.Contains("\"Today\" is not in the name", Measured(17, PhoneCheckNames.LabelNotInName), StringComparison.Ordinal);
+        Assert.Equal(5, run.Findings.Count);
+        Assert.All(run.Findings, finding => Assert.Equal(
+            finding.Check == PhoneCheckNames.LabelNotInName ? PhoneCheckLevel.Error : PhoneCheckLevel.Warning, finding.Level));
+
+        // Errors first, then the warning.
+        Assert.Equal(
+            [PhoneCheckNames.LabelNotInName, PhoneCheckNames.LabelNotInName, PhoneCheckNames.LabelNotInName, PhoneCheckNames.LabelNotInName, PhoneCheckNames.LabelNotAtStart],
+            run.Findings.Select(finding => finding.Check));
+        Assert.Equal(window.Items[5].Bounds, run.Findings[4].Times[0].Bounds);
+        Assert.Equal("Label not in name (WCAG 2.5.3)", PhoneCheckNames.Title(PhoneCheckNames.LabelNotInName));
+    }
+
+    [Fact]
+    public void LabelInName_MergesAControlsFindingsInAVisit_FromTwoScreenshots()
+    {
+        var (window, lines) = Labelled();
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        PhoneContrastSnapshot Snapshot(int settled)
+        {
+            var at = visit.SettledSnapshots[settled];
+            return new PhoneContrastSnapshot(
+                visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                new PhoneContrastPicture(PhonePictureKind.Screenshot, at.MonotonicNanoseconds + 250_000_000, "p.png", "p.png"),
+                "Windows OCR, en-US", lines, null, window);
+        }
+
+        var run = PhoneLabelInNameRun.Run(PhoneContrastRun.Of([Snapshot(0), Snapshot(1)]), archive.PhoneScreens);
+
+        Assert.Equal((18, 8, 6), (run.Controls, run.Passed, run.Unread));
+        Assert.Equal(5, run.Findings.Count);
+        Assert.All(run.Findings, finding => Assert.Equal(2, finding.Times.Count));
+        var settings = Assert.Single(run.Findings, finding => finding.Check == PhoneCheckNames.LabelNotAtStart);
+        Assert.EndsWith(
+            "the label was read by OCR (Windows OCR, en-US), as the tree has no text for it, from the phone's screenshot",
+            settings.Times[1].Measured, StringComparison.Ordinal);
+        Assert.Equal(visit.SettledSnapshots[1].MonotonicNanoseconds + 250_000_000, settings.Times[1].Time);
+    }
+
+    [Theory]
+    [InlineData("Search", "Search for items", false, 0)]
+    [InlineData("Settings", "Open your settings", false, 2)]
+    [InlineData("First Name:", "first name", false, 0)]
+    [InlineData("Next\u2026", "Next", false, 0)]
+    [InlineData("Name (required)", "Name", false, 0)]
+    [InlineData("good night's sleep", "Steps to take for a good night\u2019s sleep.", false, 5)]
+    [InlineData("Privacy & Data", "Privacy Data", false, 0)]
+    [InlineData("Notifcations", "Notifications", true, 0)]
+    [InlineData("Notifcations", "Notifications", false, null)]
+    [InlineData("Bob Dodd", "BobDodd", true, 0)]
+    [InlineData("Search", "Find items", false, null)]
+    [InlineData("Data Privacy", "Privacy Data", false, null)]
+    [InlineData("Sleep Goals", "Sleep your Goals", false, null)]
+    public void LabelInName_Match_IgnoresCaseAndPunctuation_AndNeedsTheWordsTogetherInOrder(string label, string name, bool ocr, int? expected)
+    {
+        Assert.Equal(expected, PhoneLabelInNameRun.Match(new PhoneLabelInNameRun.Label(label, ocr, !ocr, false), name));
+    }
+
     // Step 6: two screens of one app with the same window title, each with
     // its own fixed text, as in the client's app, where every screen's
     // window title was "Nova SleepCare" (measured). Each visit's screen

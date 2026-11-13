@@ -1395,3 +1395,57 @@ warnings, from 4 images read by OCR" had 4 rows, each including "1.4.9
 allows an image of text only as pure decoration or where essential".
 Long rows wrapped, with no horizontal scrollbar. Images of text are
 checked on the PC.
+
+## Step 9: Label in Name (2026-11-12)
+
+The owner's decisions, the standards and the check built to them are in
+the architecture document's "Step 9: Label in Name". A control's
+content description is checked against the text inside it, and against
+the text of any item it is labelled by: a name without the label is an
+error to "Label not in name (WCAG 2.5.3)", and a name with the label
+not at its start is a warning to "Label not at the start of the name
+(WCAG 2.5.3, best practice)". Checked in the Linux build environment:
+the solution builds with no warnings, and the new tests pass with the
+others. The throwaway program gives, for test 16's recording, 47
+controls checked, 47 passed and 3 with no label read, so no findings;
+the PC test shows the rows for a visit with no findings and the line
+under "Show current visit". The findings' own rows are covered by the
+tests in the build environment, as the client's app has none.
+
+## Test 36: build and install the twelfth build (development PC)
+
+As test 19: close the recorder, run the PowerShell of test 19's step 1,
+run the newest installer with "Start the recorder and set up the
+analysis models" unchecked, and start the recorder from the Start menu.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the recorder
+opens.
+
+## Test 37: the Label in Name rows of test 16's recording
+
+Keep the phone's picture in view throughout.
+
+1. Choose "Open recording...", and open
+   `20261112-154851-32c7b61a5552453bbf5febffcca978c7` (test 16). If the
+   Checks window is closed, click the "Checks" tab, then move it so the
+   phone's picture is fully in view. Wait 10 seconds, and take a
+   screenshot of the whole screen.
+2. Scroll the list so the row starting "Visit 1," is at the top, then
+   scroll down until the row starting "Label in name" is in view, and
+   take a screenshot of the whole screen.
+3. Scroll down until the rows from the one starting "Visit 3," to the
+   one starting "Visit 5," are in view, and take a screenshot of the
+   whole screen.
+
+**On screen:** in step 1 the line under "Show current visit" includes
+"Label in name (WCAG 2.5.3): no findings, from 47 controls checked, 47
+passed, 3 with no label read; the label is all the text inside a
+control, and the text of any item it is labelled by, from the tree's
+text and, where it has none, OCR's, against its content description;
+text beside a control is not taken as its label." In step 2, below the
+Visit 1 row and its other checks, after the rows starting "Image of
+text", is the row "Label in name (WCAG 2.5.3): no findings, from 11
+controls checked." In step 3, between the Visit 3 and Visit 5 rows,
+is the row "Not checked, as no snapshot of this visit settled.", and no
+row starting "Label in name". Long rows wrap; there is
+no horizontal scrollbar. Send the three screenshots.

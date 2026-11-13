@@ -72,6 +72,14 @@ public static class PhoneCheckNames
     public const string ImageOfText = "image-of-text";
     public const string ImageOfTextAaa = "image-of-text-aaa";
 
+    /// <summary>
+    /// Label in Name (step 9), from the tree's text and OCR's: the name
+    /// does not contain the visible label, and the name contains it but
+    /// does not start with it. Not one of the tree's checks.
+    /// </summary>
+    public const string LabelNotInName = "label-not-in-name";
+    public const string LabelNotAtStart = "label-not-at-start";
+
     /// <summary>The screen's title and headings (step 6, PhoneScreenChecks), each one discrete issue (owner, 2026-11-12).</summary>
     public const string TitleMissing = "screen-title-missing";
     public const string TitleShared = "screen-title-shared";
@@ -105,6 +113,8 @@ public static class PhoneCheckNames
         NonTextContrast => "Non-text contrast (WCAG 1.4.11)",
         ImageOfText => "Image of text (WCAG 1.4.5)",
         ImageOfTextAaa => "Image of text (WCAG 1.4.9, AAA)",
+        LabelNotInName => "Label not in name (WCAG 2.5.3)",
+        LabelNotAtStart => "Label not at the start of the name (WCAG 2.5.3, best practice)",
         TitleMissing => "No screen title (WCAG2ICT 2.4.2)",
         TitleShared => "Screen title shared with other screens (WCAG2ICT 2.4.2)",
         NoHeading => "No heading (WCAG 1.3.1)",

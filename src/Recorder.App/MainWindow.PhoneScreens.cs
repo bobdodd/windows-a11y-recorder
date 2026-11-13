@@ -50,6 +50,7 @@ public partial class MainWindow
     private PhoneTextContrastRun? _phoneTextContrast;
     private PhoneNonTextContrastRun? _phoneNonTextContrast;
     private PhoneImagesOfTextRun? _phoneImagesOfText;
+    private PhoneLabelInNameRun? _phoneLabelInName;
     private PhoneCheckSettings? _checkSettings;
 
     // The finding chosen in the list, and which of its times is shown.
@@ -86,6 +87,7 @@ public partial class MainWindow
             _phoneTextContrast = null;
             _phoneNonTextContrast = null;
             _phoneImagesOfText = null;
+            _phoneLabelInName = null;
             _shownFinding = null;
             if (_playbackArchive is { PhoneScreens.Recorded: true } opened)
             {
@@ -189,6 +191,9 @@ public partial class MainWindow
         // Non-text contrast has one level, AA (WCAG 2.2's 1.4.11), so is
         // judged once, not again when the text's level changes.
         _phoneNonTextContrast = run is null ? null : PhoneNonTextContrastRun.Run(run, archive.PhoneScreens);
+
+        // Label in Name is level A, so the same at both audit levels.
+        _phoneLabelInName = run is null ? null : PhoneLabelInNameRun.Run(run, archive.PhoneScreens);
         ShowPhoneScreenRows();
     }
 
@@ -357,7 +362,8 @@ public partial class MainWindow
     {
         if (visit.SettledSnapshots.Count == 0)
         {
-            if (_phoneChecks is not null || _phoneTextContrast is not null || _phoneNonTextContrast is not null || _phoneImagesOfText is not null)
+            if (_phoneChecks is not null || _phoneTextContrast is not null || _phoneNonTextContrast is not null || _phoneImagesOfText is not null ||
+                _phoneLabelInName is not null)
             {
                 _phoneScreenRows.Add(new PhoneScreenRowView(3, "Not checked, as no snapshot of this visit settled.", shownAt, null)
                 {
@@ -465,6 +471,30 @@ public partial class MainWindow
             else
             {
                 AddCheckRows(findings, $", from {Count(count, "image")} read by OCR");
+            }
+        }
+
+        if (_phoneLabelInName is { } labels)
+        {
+            var findings = labels.For(visit);
+            var controls = labels.ControlsIn(visit);
+            if (controls == 0)
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{PhoneLabelInNameRun.Title}: no control with a label and a content description in this visit.", shownAt, null)
+                {
+                    IsCheck = true,
+                });
+            }
+            else if (findings.Count == 0)
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{PhoneLabelInNameRun.Title}: no findings, from {Count(controls, "control")} checked.", shownAt, null)
+                {
+                    IsCheck = true,
+                });
+            }
+            else
+            {
+                AddCheckRows(findings, $", from {Count(controls, "control")} checked");
             }
         }
     }
@@ -635,6 +665,17 @@ public partial class MainWindow
                 : string.Create(
                     CultureInfo.CurrentCulture,
                     $" {checks}: {imageFindings}, from {Count(images.Images, "image")} read by OCR, {images.Passed:N0} passed; the words OCR read inside an image that no item's text holds are a probable image of text, a warning, as the exceptions, such as a logotype, are not judged.");
+        }
+
+        if (_phoneLabelInName is { } labels)
+        {
+            var labelFindings = labels.Findings.Count == 0
+                ? "no findings"
+                : $"{Count(labels.Findings.Count, "finding")} ({Levels(labels.Findings)})";
+            var read = labels.UsedOcr ? "the tree's text and, where it has none, OCR's" : "the tree's text";
+            summary += string.Create(
+                CultureInfo.CurrentCulture,
+                $" {PhoneLabelInNameRun.Title}: {labelFindings}, from {Count(labels.Controls, "control")} checked, {labels.Passed:N0} passed, {labels.Unread:N0} with no label read; the label is all the text inside a control, and the text of any item it is labelled by, from {read}, against its content description; text beside a control is not taken as its label.");
         }
 
         var engine = measured.Snapshots.Select(snapshot => snapshot.Engine).FirstOrDefault(name => !string.IsNullOrEmpty(name));
