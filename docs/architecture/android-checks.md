@@ -20,8 +20,8 @@ loading screens and screens with no fixed text follow decision 10,
 tests 25 to 27 passed. Non-text contrast was measured first (see
 "Step 5: measuring non-text contrast first"), and its check is built to
 the owner's decisions (see "Step 5: the owner's decisions" and "As
-built: step 5"), checked so far in the Linux build environment and with
-tests 16 and 18's recordings on the development PC. The owner's
+built: step 5"), and was checked on the development PC on 2026-11-12
+(tests 28 and 29 passed). The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a

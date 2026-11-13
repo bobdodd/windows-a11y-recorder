@@ -1156,3 +1156,24 @@ includes "1.98:1 against #FFFFFF, the other's fill, and 1.83:1 against
 #F7F7E3 around it", the time starts "00:00:42.154", and the outline
 surrounds WEEK VIEW. Long rows wrap; there is no horizontal scrollbar.
 Send the four screenshots.
+
+## Results of tests 28 and 29 (2026-11-12)
+
+Passed on the development PC with the build of 3a9ecf6, AAA still chosen
+for text (the level does not change non-text contrast). The line under
+"Show current visit" included "Non-text contrast (WCAG 1.4.11), at AA,
+its only level: 37 findings (6 errors, 31 info), from 50 controls
+measured, 13 passed; graphics with no item in the tree are not
+checked." Under Visit 2 the bold row read "Non-text contrast (WCAG
+1.4.11): 1 error, 4 info, from 8 controls measured", and the LEARN row
+"Error: View described as "LEARN", taken to show its state, as it is
+filled #F6E19B and the 3 others in its row are not: 1.18:1 against
+#F5CC53, the others' fill and the colour around it; a state needs 3:1;
+approximate, from the video; seen once, at 00:00:28.202". Choosing it
+showed the Sleep Learning Library screen at 00:00:28.202 with the cyan
+outline round the LEARN tab. Under Visit 4 the bold row read "2 errors,
+4 info, from 8 controls measured"; choosing the WEEK VIEW row ("1.98:1
+against #FFFFFF, the other's fill, and 1.83:1 against #F7F7E3 around
+it") showed the Sleep Diary screen at 00:00:42.154 with the outline
+round WEEK VIEW. Long rows wrapped, with no horizontal scrollbar. Step 5
+is checked on the PC.
