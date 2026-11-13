@@ -196,6 +196,21 @@ public sealed class PhoneCheckRun
     /// <summary>The runs of the phone's video that kept changing for more than 5 seconds with no touch.</summary>
     public int MovingRuns { get; private set; }
 
+    /// <summary>Whether the change of context checks ran: they need touches recorded.</summary>
+    public bool ContextRun { get; private set; }
+
+    /// <summary>The changes of context that followed a focus move, TalkBack focus move or setting change.</summary>
+    public int ContextChanges { get; private set; }
+
+    /// <summary>The focus moves by a key (Tab or an arrow) or a tap on a field.</summary>
+    public int FocusMoves { get; private set; }
+
+    /// <summary>TalkBack's focus moves after a gesture or key.</summary>
+    public int ScreenReaderFocusMoves { get; private set; }
+
+    /// <summary>The setting changes: text typed, a checkable item changed, a choice made or a slider moved.</summary>
+    public int SettingChanges { get; private set; }
+
     /// <summary>Why a snapshot could not be checked, one for each such snapshot.</summary>
     public IReadOnlyList<string> Problems { get; private set; } = [];
 
@@ -219,7 +234,8 @@ public sealed class PhoneCheckRun
         PhoneTouchTimeline? touches = null,
         PhoneAnnouncementTimeline? announcements = null,
         PhoneSettingsTimeline? settings = null,
-        Func<string, PhonePixels?>? loadPicture = null)
+        Func<string, PhonePixels?>? loadPicture = null,
+        PhoneInputTimeline? inputs = null)
     {
         ArgumentNullException.ThrowIfNull(screens);
         pictures ??= PhoneSnapshotPictures.Empty;
@@ -367,13 +383,22 @@ public sealed class PhoneCheckRun
         // Step 13, timing: 2.2.1 and 2.2.2's text from the same pass, and
         // 2.2.2's moving picture from the phone's video.
         var motion = PhoneMotionChecks.Run(screens, trees, touches ?? PhoneTouchTimeline.Empty, source, pictures, loadPicture, cancellationToken);
-        foreach (var finding in status.Brief.Concat(status.Timed).Concat(status.Updating).Concat(motion.Findings))
+        // Step 14, changes of context on focus and on input.
+        var contextChange = PhoneContextChecks.Run(
+            screens, trees, touches ?? PhoneTouchTimeline.Empty, inputs ?? PhoneInputTimeline.Empty, source, pictures, cancellationToken);
+        foreach (var finding in status.Brief.Concat(status.Timed).Concat(status.Updating).Concat(motion.Findings).Concat(contextChange.Findings))
         {
             findings[(finding.Visit, finding.Check, finding.Level, finding.Identity)] = finding;
         }
 
         problems.AddRange(status.Problems);
         problems.AddRange(motion.Problems);
+        problems.AddRange(contextChange.Problems);
+        run.ContextRun = contextChange.Run;
+        run.ContextChanges = contextChange.Changes;
+        run.FocusMoves = contextChange.FocusMoves;
+        run.ScreenReaderFocusMoves = contextChange.ScreenReaderFocusMoves;
+        run.SettingChanges = contextChange.SettingChanges;
         run.TimedMessages = status.TimedMessages;
         run.TimedAlone = status.TimedAlone;
         run.TimeoutMilliseconds = status.TimeoutMilliseconds;

@@ -44,7 +44,9 @@ owner's decisions (see "Step 12: status messages"), and was checked on
 the development PC on 2026-11-13 (tests 42 and 43 passed). Step 13,
 timing (WCAG 2.2.1 and 2.2.2), is built to the owner's decisions (see
 "Step 13: timing"), and was checked on the development PC on
-2026-11-13 (tests 44 and 45 passed). The owner's
+2026-11-13 (tests 44 and 45 passed). Step 14, changes of context (WCAG
+3.2.1 and 3.2.2), is built to the owner's decisions (see "Step 14:
+changes of context"); it is not yet checked on the PC. The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -465,6 +467,9 @@ the recording is opened and nothing is kept.
 13. **Timing** (WCAG 2.2.1 and 2.2.2), from the tree, touches, the
    phone's settings and the phone's video (see "Step 13: timing").
    Built, and checked on the PC.
+14. **Changes of context** (WCAG 3.2.1 and 3.2.2), from the tree,
+   touches, keys and events (see "Step 14: changes of context"). Built;
+   not yet checked on the PC.
 
 ## As built: step 1
 
@@ -2613,6 +2618,166 @@ With a throwaway program, on the recordings to hand (measured):
 - The recordings to hand have no carousel, ticker, counter or
   animation that runs by itself, so the text updating and moving
   content checks were only seen to find nothing on them.
+
+## Step 14: changes of context
+
+### The owner's decisions (2026-11-13)
+
+3.2.1 and 3.2.2 are the third item in "Medium, from events and touches,
+by rules that may mislead" in `android-checks-candidates.md`. The owner
+asked for them after step 13. They were measured first (below), then
+put to the owner:
+
+- **Which focus 3.2.1 looks at:** "Keyboard and TalkBack". So there are
+  two checks: the input focus moved by a key or by a tap on a text
+  field, and TalkBack's focus moved by a gesture with no double tap.
+- **The level of 3.2.1's findings:** "Error".
+- **The level of 3.2.2's findings:** "Warning", as a change is allowed
+  when the user was told of it before, which the recording cannot show.
+- **Each issue is discrete** (the owner, as for the other checks): three
+  checks.
+
+### What the standards say (checked in cited documents)
+
+- **3.2.1 On Focus (A):** "When any user interface component receives
+  focus, it does not initiate a change of context"
+  ([Understanding 3.2.1](https://www.w3.org/WAI/WCAG22/Understanding/on-focus.html)).
+- **3.2.2 On Input (A):** "Changing the setting of any user interface
+  component does not automatically cause a change of context unless the
+  user has been advised of the behavior before using the component".
+  "Checking a checkbox, entering text into a text field, or changing the
+  selected option in a list control changes its setting, but activating
+  a link or a button does not"
+  ([Understanding 3.2.2](https://www.w3.org/WAI/WCAG22/Understanding/on-input.html)).
+- **A change of context:** "Opening a new window, moving focus to a
+  different component, going to a new page ... or significantly
+  re-arranging the content of a page are examples of changes of
+  context"; "Changes in content, such as an expanding outline, dynamic
+  menu, or a tab control do not necessarily change the context, unless
+  they also change one of the above (e.g., focus)"
+  ([Understanding 3.2.1](https://www.w3.org/WAI/WCAG22/Understanding/on-focus.html)).
+- **WCAG2ICT:** both apply to software as written
+  ([WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/)).
+- **Failures named by W3C:** F55 (focus removed when an item receives
+  it), F36 (a form submitted when its last field is filled
+  in) and F37 (a new window opened when a radio button, check box or
+  select list is changed); techniques G13 (describing what will happen
+  before the change) and G80 (a submit button)
+  ([Understanding 3.2.1](https://www.w3.org/WAI/WCAG22/Understanding/on-focus.html),
+  [Understanding 3.2.2](https://www.w3.org/WAI/WCAG22/Understanding/on-input.html)).
+
+### Measured first (2026-11-13)
+
+With a throwaway program, on the recordings to hand (measured):
+
+- **Test 16, test 18 and the client's recording (TalkBack off):** no
+  keys, no typing, no taps on a field, a check box, a switch or a
+  slider. Every tap that changed the screen was on a button, tab or row,
+  which is activation, not a change of setting.
+- **The Display size recording:** two clicks, on the plus and minus
+  buttons, each followed by a new visit; activation, so not looked at.
+- **The Settings recording with TalkBack on (Safety and emergency):**
+  four moves of TalkBack's focus by the user's swipes, none followed by
+  a change of context; the focus TalkBack put on "Navigate up" 0.49
+  seconds after the Safety and emergency screen opened is TalkBack
+  placing its focus on the new screen, not the user moving it.
+
+So no recording to hand has a finding, as expected; the checks were
+seen to find nothing on them.
+
+### As built
+
+- **What it reads.** The phone's accessibility events (`PhoneInputTimeline`,
+  in `Recorder.Session`): clicks, long clicks, selections, the input
+  focus, text changes, TalkBack's focus and the start of a touch that
+  TalkBack handled; and the phone's keys and touches. The playback index
+  keeps these events (its version is now 31, so older recordings are
+  indexed again when opened). It needs touches recorded: with none, a
+  tap that caused a change cannot be told from none, and the checks do
+  not run.
+- **What the user did.** Each touch is matched to the item under it: the
+  topmost window at that place, by layer, and in it the smallest
+  enabled, visible item that is clickable, checkable, editable or a
+  slider. Touches on the keyboard are left out; a touch on the system's
+  bars, or one TalkBack handled, is activation. A tap on an editable
+  item gives it the focus; a tap on a checkable item, or on a row that
+  holds one switch or check box that is not clickable itself (as in
+  Android's Settings), changes its setting, as does moving a slider;
+  any other touch is activation. The click event a touch causes, up to
+  half a second after the finger lifted, is the same action, and makes
+  it a change of setting when the item clicked is checkable. Tab and
+  the arrow keys move the focus; the volume, power and modifier keys are
+  left out; other keys are activation. Text typed in an app's field, a
+  choice in a spinner or a new value in a seek bar or rating bar, and a
+  click on a checkable item with no touch (from a keyboard), are changes
+  of setting. TalkBack's focus moved by the user is its focus moving up
+  to a second after a gesture or key ended, unless it moved up to a
+  second after a change of context, which is TalkBack placing it.
+- **A change of context.** A new visit to a different screen, or another
+  app coming to the front; a window that took the focus or became active
+  appearing over the app, such as a dialog; a pane appearing; or the
+  input focus moving to an item other than the one a key or tap on a
+  field gave the focus to (up to half a second after it).
+- **A finding** is a focus move, TalkBack focus move or change of
+  setting followed within 1.5 seconds by a change of context in the
+  same visit, with no other action between. It is on the item acted
+  on, found by its bounds and class, or the window's first item when
+  that is not found, under the visit it happened in.
+- **"Change of context on focus (WCAG 3.2.1)"**, an error, for example
+  "a tap on the field gave it the focus, and 0.45 seconds later, with
+  nothing activated, the window 'Allow?' appeared, a change of context
+  on focus".
+- **"Change of context on TalkBack focus (WCAG 3.2.1)"**, an error, for
+  example "TalkBack's focus moved to it, and 0.45 seconds later, with no
+  double tap, touch or key, the window 'Allow?' appeared, a change of
+  context on a screen reader's focus".
+- **"Change of context on input (WCAG 3.2.2)"**, a warning, for example
+  "a tap changed its setting (it was not checked), and 0.45 seconds
+  later, with no further touch or key, the window 'Allow?' appeared, a
+  change of context on input, which is allowed only when the user was
+  told of it before using the item; look for such advice".
+- **The line under "Show current visit"** adds, for example, "Changes
+  of context (WCAG 3.2.1 and 3.2.2), three checks: no findings; 0 focus
+  moves by a key or a tap on a field, 0 TalkBack focus moves after a
+  gesture or key, and 0 setting changes (typing, checking, choosing or
+  moving a slider); 0 changes of context (a new screen or app, a window
+  that took the focus, a pane, or the focus moving by itself) within 1.5
+  seconds of one, with nothing touched, pressed or clicked between."
+- **The same at both audit levels:** 3.2.1 and 3.2.2 are level A.
+- **On the recordings to hand** (measured, with the throwaway program):
+  no findings on any; the Settings recording with TalkBack on has 4
+  TalkBack focus moves, and the others none of the three kinds.
+- **Checked before any PC test:** the solution builds with no warnings,
+  and the tests pass, with the Windows-only browser tests failing as
+  before. The new tests cover a switch tapped, with and without its
+  click event, a Settings row holding a switch tapped, and text typed,
+  each followed by a dialog (and the switch by a new screen); a tap on a
+  field, the Tab key and TalkBack's focus moved by a gesture, each
+  followed by a dialog; and, with no finding, a button tapped, with and
+  without its click event, the volume key, a switch tapped 1.8 seconds
+  before, another touch between, TalkBack's double tap between, a window
+  that did not take the focus, and a recording with no touches.
+
+### Limits
+
+- A change is taken as the action's only by time: something the app did
+  by itself within 1.5 seconds of an action is counted as the action's.
+- Only what the tree and events show is a change of context: a
+  significant re-arranging of content in the same window, with no new
+  screen, window or pane, is not found.
+- A window closing, such as a dialog going away, is not counted.
+- Apps drawn with Flutter, such as the client's, may not send focus,
+  click or text events, so their changes of setting are found from taps
+  only; typing in them may not be seen.
+- With a hardware keyboard, Space or Enter on a check box is seen only
+  through its click event.
+- A setting changed by choosing from a list is seen only when the list
+  sends a selection event from a spinner, seek bar, rating bar or
+  slider class.
+- 3.2.2's exception, advice given before the item is used, is not looked
+  for, so its findings are warnings.
+- No recording to hand has a finding, so the checks were seen finding
+  something only in the tests and, once it is run, test 48.
 
 ## Decisions on the open questions (2026-11-11)
 

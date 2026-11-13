@@ -123,6 +123,17 @@ public static class PhoneCheckNames
     public const string TextUpdatingByItself = "text-updating-by-itself";
     public const string MovingByItself = "moving-by-itself";
 
+    /// <summary>
+    /// Changes of context (step 14, PhoneContextChecks), WCAG 3.2.1 and
+    /// 3.2.2, each one discrete issue (owner, 2026-11-13): on focus from
+    /// the keyboard or a tap on a field (an error), on TalkBack's focus (an
+    /// error) and on input (a warning, as the user may have been told
+    /// before).
+    /// </summary>
+    public const string ContextOnFocus = "context-change-on-focus";
+    public const string ContextOnScreenReaderFocus = "context-change-on-screen-reader-focus";
+    public const string ContextOnInput = "context-change-on-input";
+
     /// <summary>The checks in the order the Checks tab lists them.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
@@ -130,6 +141,7 @@ public static class PhoneCheckNames
         EditableContentDescription, RedundantDescription, ClassName, TraversalOrder, ClickableNotFocusable,
         FieldNoLabel, FieldNoName, InvalidNoError, ExpandableNoState, SliderNoRange, StatusNotAnnounced, NoLiveRegion,
         TextGoneByItself, TextGoneAsContentChanged, TextUpdatingByItself, MovingByItself,
+        ContextOnFocus, ContextOnScreenReaderFocus, ContextOnInput,
         TitleMissing, TitleShared, NoHeading, FirstHeadingLow, ManyHeadings,
     ];
 
@@ -170,6 +182,9 @@ public static class PhoneCheckNames
         TextGoneAsContentChanged => "Text gone as new content appeared (WCAG 2.2.1)",
         TextUpdatingByItself => "Text updating by itself (WCAG 2.2.2)",
         MovingByItself => "Moving by itself, from the video (WCAG 2.2.2)",
+        ContextOnFocus => "Change of context on focus (WCAG 3.2.1)",
+        ContextOnScreenReaderFocus => "Change of context on TalkBack focus (WCAG 3.2.1)",
+        ContextOnInput => "Change of context on input (WCAG 3.2.2)",
         _ => check,
     };
 

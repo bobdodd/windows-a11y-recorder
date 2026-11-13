@@ -129,7 +129,7 @@ public partial class MainWindow
                 var at = level;
                 run = await Task.Run(
                     () => PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, archive.PhoneDevice, archive.RecordSource, PhoneSnapshotPictures.Of(archive), token, at,
-                        archive.PhoneTouches, archive.PhoneAnnouncements, archive.PhoneSettings, PhonePictures.Load),
+                        archive.PhoneTouches, archive.PhoneAnnouncements, archive.PhoneSettings, PhonePictures.Load, archive.PhoneInputs),
                     token);
             }
             catch (OperationCanceledException)
@@ -670,6 +670,20 @@ public partial class MainWindow
             ? string.Create(CultureInfo.CurrentCulture, $"{Count(run.MovingRuns, "part")} of the phone's video that kept changing for more than 5 seconds with no touch (from the video, so approximate)")
             : "moving content not looked for, as it needs the phone's video and touches recorded";
         summary += $" Timing (WCAG 2.2.1 and 2.2.2), four checks: {timingFindings}; {timed}; {moving}.";
+        var contextChecks = new[]
+        {
+            PhoneCheckNames.ContextOnFocus, PhoneCheckNames.ContextOnScreenReaderFocus, PhoneCheckNames.ContextOnInput,
+        };
+        var contextFound = run.Findings.Where(finding => contextChecks.Contains(finding.Check)).ToList();
+        var contextFindings = contextFound.Count == 0
+            ? "no findings"
+            : $"{Count(contextFound.Count, "finding")} ({Levels(contextFound)})";
+        var context = run.ContextRun
+            ? string.Create(
+                CultureInfo.CurrentCulture,
+                $"{Count(run.FocusMoves, "focus move")} by a key or a tap on a field, {Count(run.ScreenReaderFocusMoves, "TalkBack focus move")} after a gesture or key, and {Count(run.SettingChanges, "setting change")} (typing, checking, choosing or moving a slider); {run.ContextChanges:N0} {(run.ContextChanges == 1 ? "change" : "changes")} of context (a new screen or app, a window that took the focus, a pane, or the focus moving by itself) within 1.5 seconds of one, with nothing touched, pressed or clicked between")
+            : "not looked for, as no touches were recorded, so a tap that caused a change cannot be told from none";
+        summary += $" Changes of context (WCAG 3.2.1 and 3.2.2), three checks: {contextFindings}; {context}.";
         if (run.TextFocusablePackages.Count > 0)
         {
             summary += $" In {string.Join(" and ", run.TextFocusablePackages)}, every item with text is focusable, as in an app drawn with Flutter, whose tree marks focusable what a screen reader can reach, so the tree does not show which items a keyboard reaches.";

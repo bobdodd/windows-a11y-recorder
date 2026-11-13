@@ -22,7 +22,7 @@ public sealed class PhoneCheckRunTests : IDisposable
     private static readonly CollectorDescriptor Collector = CollectorDescriptor.Create(
         "android.accessibility", "AndroidAccessibilityCollector", "1",
         [AndroidAccessibilityRecords.EventsChannel, AndroidAccessibilityRecords.TreeChannel, AndroidCompanionRecords.DisplayChannel, AndroidTouchRecords.TouchChannel,
-            AndroidSettingsRecords.Channel],
+            AndroidSettingsRecords.Channel, AndroidTouchRecords.KeyChannel],
         "test");
 
     private readonly string _folder = Path.Combine(Path.GetTempPath(), "phone-checks-" + Guid.NewGuid().ToString("N"));
@@ -1252,6 +1252,273 @@ public sealed class PhoneCheckRunTests : IDisposable
         }
 
         Assert.Equal("Moving by itself, from the video (WCAG 2.2.2)", PhoneCheckNames.Title(PhoneCheckNames.MovingByItself));
+    }
+
+    // Step 14, changes of context (WCAG 3.2.1 and 3.2.2): Settings' page
+    // with its "Save" button, a "Wi-Fi" switch and a "Name" field, and at
+    // 3 seconds a dialog, "Allow?", over it, taking the focus (or not,
+    // as a list of suggestions does not), or with screen, the page's title
+    // changed to "Wi-Fi", a new screen.
+    private static JsonNode ContextItems()
+    {
+        var items = Items(0).AsArray();
+        items.Add(JsonSerializer.SerializeToNode(
+            new AndroidTreeNode
+            {
+                Index = 3, Parent = 0, Depth = 1, WindowId = 512, PackageName = Settings, ClassName = "android.widget.Switch",
+                Text = "Wi-Fi", Bounds = new AndroidNodeBounds(700, 500, 900, 600), Checked = "unchecked",
+                ImportantForAccessibility = true, VisibleToUser = true, Enabled = true, Clickable = true, Focusable = true, Checkable = true,
+            },
+            JsonSerializerOptions.Web));
+        items.Add(JsonSerializer.SerializeToNode(
+            new AndroidTreeNode
+            {
+                Index = 4, Parent = 0, Depth = 1, WindowId = 512, PackageName = Settings, ClassName = "android.widget.EditText",
+                Text = "Name", Bounds = new AndroidNodeBounds(100, 800, 1000, 900), Checked = "unchecked",
+                ImportantForAccessibility = true, VisibleToUser = true, Enabled = true, Clickable = true, Focusable = true, Editable = true,
+            },
+            JsonSerializerOptions.Web));
+
+        // A Settings row, clicked to change the switch inside it, which
+        // is not clickable itself.
+        items.Add(JsonSerializer.SerializeToNode(
+            new AndroidTreeNode
+            {
+                Index = 5, Parent = 0, Depth = 1, WindowId = 512, PackageName = Settings, ClassName = "android.widget.LinearLayout",
+                Bounds = new AndroidNodeBounds(0, 1900, 1080, 2100), Checked = "unchecked",
+                ImportantForAccessibility = true, VisibleToUser = true, Enabled = true, Clickable = true, Focusable = true,
+            },
+            JsonSerializerOptions.Web));
+        items.Add(JsonSerializer.SerializeToNode(
+            new AndroidTreeNode
+            {
+                Index = 6, Parent = 5, Depth = 2, WindowId = 512, PackageName = Settings, ClassName = "android.widget.Switch",
+                Bounds = new AndroidNodeBounds(900, 1950, 1000, 2050), Checked = "unchecked",
+                ImportantForAccessibility = true, VisibleToUser = true, Enabled = true, Checkable = true,
+            },
+            JsonSerializerOptions.Web));
+        return items;
+    }
+
+    private static AndroidAccessibilityTree ContextTree(long index, bool dialog, bool dialogFocused = true, string? title = null)
+    {
+        var tree = JsonNode.Parse(AndroidAccessibilityTreeTests.TreeLine(
+            index: index,
+            everyWindow: index == 1,
+            reason: index == 1 ? "requested" : "content-change"))!.AsObject();
+        var windows = tree["windows"]!.AsArray();
+        windows[0]!["items"] = ContextItems();
+        windows[1]!["bounds"]!["bottom"] = 100;
+        if (title is not null)
+        {
+            windows[0]!["title"] = title;
+        }
+
+        if (dialog)
+        {
+            var over = windows[0]!.DeepClone().AsObject();
+            over["id"] = 520;
+            over["title"] = "Allow?";
+            over["layer"] = 3;
+            over["bounds"] = new JsonObject { ["left"] = 100, ["top"] = 1000, ["right"] = 980, ["bottom"] = 1600 };
+            over["active"] = dialogFocused;
+            over["focused"] = dialogFocused;
+            over["items"] = JsonSerializer.SerializeToNode(
+                new AndroidTreeNode[]
+                {
+                    new()
+                    {
+                        Index = 0, WindowId = 520, PackageName = Settings, ClassName = "android.widget.FrameLayout",
+                        Bounds = new AndroidNodeBounds(100, 1000, 980, 1600), Checked = "unchecked",
+                        ImportantForAccessibility = true, VisibleToUser = true,
+                    },
+                },
+                JsonSerializerOptions.Web);
+            windows[0]!["active"] = !dialogFocused;
+            windows[0]!["focused"] = !dialogFocused;
+            windows.Add(over);
+        }
+
+        var (read, problem) = CompanionProtocol.ReadTree(tree.ToJsonString());
+        Assert.Null(problem);
+        return read!;
+    }
+
+    // A finger down at a place and up 50 ms later.
+    private static IEnumerable<(long Time, string Channel, string EventType, object Payload)> TouchAt(double at, int x, int y)
+    {
+        AndroidTouchReport Report(string action) =>
+            new("/dev/input/event1", 0, 0, 0, 1080, 2404, [new AndroidTouchPointer(0, 1, action, 1, 2, x, y, x, y, 40, 300, 200)]);
+        yield return (At(at), AndroidTouchRecords.TouchChannel, AndroidTouchRecords.TouchEventType, Report(AndroidTouchRecords.DownAction));
+        yield return (At(at + 0.05), AndroidTouchRecords.TouchChannel, AndroidTouchRecords.TouchEventType, Report(AndroidTouchRecords.UpAction));
+    }
+
+    // An accessibility event from one of the page's items, by its bounds.
+    private static (long Time, string Channel, string EventType, object Payload) InputEvent(
+        double at, int type, string name, string className, int left, int top, int right, int bottom, string text) =>
+        (At(at), AndroidAccessibilityRecords.EventsChannel, AndroidAccessibilityRecords.EventType, new
+        {
+            eventType = type, eventTypeName = name, packageName = Settings, className, windowId = 512, text = new[] { text },
+            source = new
+            {
+                windowId = 512, className, packageName = Settings, text,
+                bounds = new { left, top, right, bottom },
+                checkable = className.EndsWith("Switch", StringComparison.Ordinal),
+                editable = className.EndsWith("EditText", StringComparison.Ordinal),
+            },
+        });
+
+    private static (long Time, string Channel, string EventType, object Payload) Key(double at, string key) =>
+        (At(at), AndroidTouchRecords.KeyChannel, AndroidTouchRecords.KeyEventType,
+            new AndroidHardwareKey("/dev/input/event3", "Keyboard", key, "down", 0, At(at)));
+
+    private PhoneCheckRun ContextRun(string action, out SessionPlaybackArchive archive, string change = "dialog")
+    {
+        List<(long Time, string Channel, string EventType, object Payload)> records =
+        [
+            (At(0.5), AndroidCompanionRecords.DisplayChannel, AndroidCompanionRecords.DisplayEventType,
+                new AndroidDisplayState(AndroidCompanionRecords.InitialReason, 0, 1080, 2404)),
+            (At(1), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, ContextTree(1, false)),
+            (At(3), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, change switch
+            {
+                "screen" => ContextTree(2, false, title: "Wi-Fi"),
+                "suggestions" => ContextTree(2, true, dialogFocused: false),
+                _ => ContextTree(2, true),
+            }),
+            (At(6), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(3, null, statusBarBottom: 100)),
+        ];
+        if (action != "no touches")
+        {
+            records.AddRange(TouchAt(0.2, 540, 1200));
+        }
+
+        const int ScreenReaderTouch = PhoneInputTimeline.TouchInteractionStartEventType;
+        switch (action)
+        {
+            case "switch":
+            case "suggestions":
+                records.AddRange(TouchAt(2.5, 800, 550));
+                break;
+            case "late switch":
+                records.AddRange(TouchAt(1.2, 800, 550));
+                break;
+            case "switch then save":
+                records.AddRange(TouchAt(2.5, 800, 550));
+                records.AddRange(TouchAt(2.8, 150, 250));
+                break;
+            case "field":
+                records.AddRange(TouchAt(2.5, 500, 850));
+                break;
+            case "save":
+                records.AddRange(TouchAt(2.5, 150, 250));
+                break;
+            case "save clicked":
+                records.AddRange(TouchAt(2.5, 150, 250));
+                records.Add(InputEvent(2.56, PhoneInputTimeline.ClickedEventType, "TYPE_VIEW_CLICKED", "android.widget.Button", 100, 200, 198, 298, "Save"));
+                break;
+            case "switch clicked":
+                records.AddRange(TouchAt(2.5, 800, 550));
+                records.Add(InputEvent(2.56, PhoneInputTimeline.ClickedEventType, "TYPE_VIEW_CLICKED", "android.widget.Switch", 700, 500, 900, 600, "Wi-Fi"));
+                break;
+            case "row":
+                records.AddRange(TouchAt(2.5, 300, 2000));
+                break;
+            case "tab":
+                records.Add(Key(2.55, "KEY_TAB"));
+                records.Add(InputEvent(2.6, PhoneInputTimeline.FocusedEventType, "TYPE_VIEW_FOCUSED", "android.widget.EditText", 100, 800, 1000, 900, "Name"));
+                break;
+            case "volume":
+                records.Add(Key(2.55, "KEY_VOLUMEDOWN"));
+                break;
+            case "typed":
+            case "no touches":
+                records.Add(InputEvent(2.55, PhoneInputTimeline.TextChangedEventType, "TYPE_VIEW_TEXT_CHANGED", "android.widget.EditText", 100, 800, 1000, 900, "Nam"));
+                break;
+            case "talkback":
+            case "talkback double tap":
+                records.AddRange(TouchAt(2.3, 540, 1200));
+                records.Add((At(2.301), AndroidAccessibilityRecords.EventsChannel, AndroidAccessibilityRecords.EventType,
+                    new { eventType = ScreenReaderTouch, eventTypeName = "TYPE_TOUCH_INTERACTION_START", windowId = -1 }));
+                records.Add(InputEvent(2.55, PhoneAccessibilityTimeline.FocusedEventType, "TYPE_VIEW_ACCESSIBILITY_FOCUSED", "android.widget.Button", 100, 200, 198, 298, "Save"));
+                if (action == "talkback double tap")
+                {
+                    records.AddRange(TouchAt(2.7, 540, 1200));
+                    records.Add((At(2.701), AndroidAccessibilityRecords.EventsChannel, AndroidAccessibilityRecords.EventType,
+                        new { eventType = ScreenReaderTouch, eventTypeName = "TYPE_TOUCH_INTERACTION_START", windowId = -1 }));
+                }
+
+                break;
+        }
+
+        archive = ArchiveOf([.. records.OrderBy(record => record.Time)], out var recording);
+        return PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording,
+            cancellationToken: TestContext.Current.CancellationToken, touches: archive.PhoneTouches, announcements: archive.PhoneAnnouncements,
+            inputs: archive.PhoneInputs);
+    }
+
+    // A change of setting followed by a change of context, with no other
+    // touch or key between: a warning, as the user may have been told.
+    [Theory]
+    [InlineData("switch", "dialog", "window:512/0/2", "a tap changed its setting (it was not checked), and 0.45 seconds later, with no further touch or key, the window 'Allow?' appeared")]
+    [InlineData("switch clicked", "dialog", "window:512/0/2", "a tap changed its setting (it was not checked), and 0.45 seconds later, with no further touch or key, the window 'Allow?' appeared")]
+    [InlineData("row", "dialog", "window:512/0/4", "a tap changed the setting of its Switch (it was not checked), and 0.45 seconds later, with no further touch or key, the window 'Allow?' appeared")]
+    [InlineData("typed", "dialog", "window:512/0/3", "text was typed in it, and 0.45 seconds later, with no further touch or key, the window 'Allow?' appeared")]
+    [InlineData("switch", "screen", "window:512/0/2", "a tap changed its setting (it was not checked), and 0.45 seconds later, with no further touch or key, the screen 'Wi-Fi' opened")]
+    public void Context_SettingChangedThenAChangeOfContext_IsAWarning(string action, string change, string treeKey, string said)
+    {
+        var run = ContextRun(action, out var archive, change);
+
+        Assert.Empty(run.Problems);
+        var finding = Assert.Single(run.Findings, finding => finding.Check.StartsWith("context-", StringComparison.Ordinal));
+        Assert.Equal((PhoneCheckNames.ContextOnInput, PhoneCheckLevel.Warning, archive.PhoneScreens.Visits[0]), (finding.Check, finding.Level, finding.Visit));
+        var seen = Assert.Single(finding.Times);
+        Assert.Equal(treeKey, seen.TreeKey);
+        Assert.Equal(
+            said + ", a change of context on input, which is allowed only when the user was told of it before using the item; look for such advice",
+            seen.Measured);
+        Assert.Equal((true, 1, 0, 0, 1), (run.ContextRun, run.ContextChanges, run.FocusMoves, run.ScreenReaderFocusMoves, run.SettingChanges));
+        Assert.Equal("Change of context on input (WCAG 3.2.2)", PhoneCheckNames.Title(PhoneCheckNames.ContextOnInput));
+    }
+
+    // Focus from the keyboard or a tap on a field, or TalkBack's focus moved
+    // by a gesture, followed by a change of context with nothing activated:
+    // an error, each its own check.
+    [Theory]
+    [InlineData("field", "context-change-on-focus", "window:512/0/3", "a tap on the field gave it the focus, and 0.45 seconds later, with nothing activated, the window 'Allow?' appeared, a change of context on focus")]
+    [InlineData("tab", "context-change-on-focus", "window:512/0/3", "the Tab key moved the focus to it, and 0.45 seconds later, with nothing activated, the window 'Allow?' appeared, a change of context on focus")]
+    [InlineData("talkback", "context-change-on-screen-reader-focus", "window:512/0/0", "TalkBack's focus moved to it, and 0.45 seconds later, with no double tap, touch or key, the window 'Allow?' appeared, a change of context on a screen reader's focus")]
+    public void Context_FocusThenAChangeOfContext_IsAnError(string action, string check, string treeKey, string said)
+    {
+        var run = ContextRun(action, out _);
+
+        var finding = Assert.Single(run.Findings, finding => finding.Check.StartsWith("context-", StringComparison.Ordinal));
+        Assert.Equal((check, PhoneCheckLevel.Error), (finding.Check, finding.Level));
+        var seen = Assert.Single(finding.Times);
+        Assert.Equal((treeKey, said), (seen.TreeKey, seen.Measured));
+        Assert.Equal(action == "talkback" ? (0, 1) : (1, 0), (run.FocusMoves, run.ScreenReaderFocusMoves));
+        Assert.Equal("Change of context on focus (WCAG 3.2.1)", PhoneCheckNames.Title(PhoneCheckNames.ContextOnFocus));
+        Assert.Equal("Change of context on TalkBack focus (WCAG 3.2.1)", PhoneCheckNames.Title(PhoneCheckNames.ContextOnScreenReaderFocus));
+    }
+
+    // Not a finding: a button tapped (activation); the phone's volume key;
+    // the setting changed 1.8 seconds before; another touch between;
+    // TalkBack's double tap between; a window that did not take the focus;
+    // and with no touches recorded the checks do not run.
+    [Theory]
+    [InlineData("save", "dialog", true, 0, 0, 0)]
+    [InlineData("save clicked", "dialog", true, 0, 0, 0)]
+    [InlineData("volume", "dialog", true, 0, 0, 0)]
+    [InlineData("late switch", "dialog", true, 0, 0, 1)]
+    [InlineData("switch then save", "dialog", true, 0, 0, 1)]
+    [InlineData("talkback double tap", "dialog", true, 0, 1, 0)]
+    [InlineData("suggestions", "suggestions", true, 0, 0, 1)]
+    [InlineData("no touches", "dialog", false, 0, 0, 0)]
+    public void Context_ActivatedLateOrNoChange_IsNoFinding(string action, string change, bool ran, int focus, int reader, int settings)
+    {
+        var run = ContextRun(action, out _, change);
+
+        Assert.DoesNotContain(run.Findings, finding => finding.Check.StartsWith("context-", StringComparison.Ordinal));
+        Assert.Equal((ran, 0, focus, reader, settings), (run.ContextRun, run.ContextChanges, run.FocusMoves, run.ScreenReaderFocusMoves, run.SettingChanges));
     }
 
     // The recording's records, as the player reads one from the file.

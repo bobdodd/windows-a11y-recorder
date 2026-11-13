@@ -583,7 +583,7 @@ public sealed class AndroidFramesTests : IDisposable
             AndroidFrameRecords.FrameEventType, new { path = AndroidFrameRecords.FramePath(2), width = 2404, height = 1080, session = 2 }));
         var index = builder.Build();
 
-        Assert.Equal(30, index.Version);
+        Assert.Equal(31, index.Version);
         Assert.Equal(2, index.Events.Count(item => item.Channel == AndroidFrameRecords.FramesChannel));
 
         var archiveBuilder = new SessionPlaybackArchiveBuilder(_folder, retainEvents: false);

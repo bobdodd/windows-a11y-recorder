@@ -119,6 +119,7 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _phoneFocus = [];
     private readonly List<(SessionTimelineEvent Event, JsonElement Payload)> _phoneWindowStates = [];
     private readonly List<(long Time, JsonElement Payload)> _phoneAnnouncements = [];
+    private readonly List<(long Time, JsonElement Payload)> _phoneInputs = [];
     private readonly List<(long Time, JsonElement Payload)> _phoneDisplays = [];
     private readonly List<PhoneScreenshot> _phoneScreenshots = [];
     private readonly List<(long Time, string EventType, JsonElement Payload)> _phoneSettings = [];
@@ -336,6 +337,14 @@ public sealed class SessionPlaybackArchiveBuilder
         if (PhoneAnnouncementTimeline.IsAnnouncementRecord(timelineEvent.Channel, timelineEvent.EventType, payload))
         {
             _phoneAnnouncements.Add((timestamp, payload.Clone()));
+        }
+
+        // Its input events and hardware keys, for the change of context
+        // checks (android-checks.md, step 14).
+        if (PhoneInputTimeline.IsInputRecord(timelineEvent.Channel, timelineEvent.EventType, payload) &&
+            payload.ValueKind == JsonValueKind.Object)
+        {
+            _phoneInputs.Add((timestamp, payload.Clone()));
         }
 
         if (PhoneAccessibilityTimeline.IsDisplayRecord(timelineEvent.Channel, timelineEvent.EventType) &&
@@ -622,6 +631,9 @@ public sealed class SessionPlaybackArchiveBuilder
             PhoneAnnouncements = _phoneAnnouncements.Count == 0
                 ? PhoneAnnouncementTimeline.Empty
                 : new PhoneAnnouncementTimeline(_phoneAnnouncements),
+            PhoneInputs = _phoneInputs.Count == 0
+                ? PhoneInputTimeline.Empty
+                : new PhoneInputTimeline(_phoneInputs),
             PhoneScreenshots = [.. _phoneScreenshots.OrderBy(shot => shot.MonotonicNanoseconds)],
             PhoneSettings = _phoneSettings.Count == 0
                 ? PhoneSettingsTimeline.Empty

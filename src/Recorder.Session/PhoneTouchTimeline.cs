@@ -98,6 +98,61 @@ public sealed class PhoneTouchTimeline
         return (index < _times.Length && _times[index] <= to) || At(from) is { Fingers.Count: > 0 };
     }
 
+    /// <summary>
+    /// Each finger's time on the screen, in the order the fingers went
+    /// down: where and when it went down, when it was lifted (the report
+    /// that lifted it, or the first without it, or the last report), the
+    /// furthest it went from where it went down, in screen pixels, and the
+    /// size of the screen the positions are on. The change of context
+    /// checks (android-checks.md, step 14) find what each touch was on.
+    /// </summary>
+    internal IReadOnlyList<PhoneGesture> Gestures()
+    {
+        var open = new Dictionary<int, (long Down, float X, float Y, double Moved, int Width, int Height)>();
+        var gestures = new List<PhoneGesture>();
+        for (var index = 0; index < _times.Length; index++)
+        {
+            var report = _reports[index];
+            var present = new HashSet<int>();
+            for (var p = report.Start; p < report.Start + report.Count; p++)
+            {
+                var pointer = _pointers[p];
+                present.Add(pointer.TrackingId);
+                if (!open.TryGetValue(pointer.TrackingId, out var finger))
+                {
+                    if (pointer.Up)
+                    {
+                        continue;
+                    }
+
+                    open[pointer.TrackingId] = finger = (_times[index], pointer.X, pointer.Y, 0, report.ScreenWidth, report.ScreenHeight);
+                }
+
+                var moved = Math.Max(finger.Moved, Math.Abs(pointer.X - finger.X) + Math.Abs(pointer.Y - finger.Y));
+                open[pointer.TrackingId] = finger with { Moved = moved };
+                if (pointer.Up)
+                {
+                    gestures.Add(new PhoneGesture(finger.Down, _times[index], finger.X, finger.Y, moved, finger.Width, finger.Height));
+                    open.Remove(pointer.TrackingId);
+                }
+            }
+
+            foreach (var gone in open.Keys.Where(id => !present.Contains(id)).ToList())
+            {
+                var finger = open[gone];
+                gestures.Add(new PhoneGesture(finger.Down, _times[index], finger.X, finger.Y, finger.Moved, finger.Width, finger.Height));
+                open.Remove(gone);
+            }
+        }
+
+        foreach (var finger in open.Values)
+        {
+            gestures.Add(new PhoneGesture(finger.Down, _times[^1], finger.X, finger.Y, finger.Moved, finger.Width, finger.Height));
+        }
+
+        return [.. gestures.OrderBy(gesture => gesture.Down)];
+    }
+
     public static bool IsTouchReport(string channel, string eventType) =>
         channel == AndroidTouchRecords.TouchChannel &&
         eventType == AndroidTouchRecords.TouchEventType;
@@ -337,3 +392,10 @@ public sealed record PhoneFinger(
 
 /// <summary>A finger's position in one touch report.</summary>
 public sealed record PhoneTouchPoint(long Time, double X, double Y);
+
+/// <summary>
+/// One finger's time on the screen: when it went down and where, when it
+/// was lifted, the furthest it went from where it went down, and the size
+/// of the screen the position is on.
+/// </summary>
+public sealed record PhoneGesture(long Down, long Up, float X, float Y, double Moved, int ScreenWidth, int ScreenHeight);

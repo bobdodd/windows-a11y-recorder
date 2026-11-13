@@ -341,6 +341,22 @@ public sealed class PhoneAccessibilityTimeline
         return name is null ? source : source is null ? name : $"{name}, {source}";
     }
 
+    /// <summary>
+    /// The windows the latest snapshot at or before a time lists, with
+    /// their type, title, layer, bounds and whether each was active and
+    /// focused; empty before the first snapshot. The change of context
+    /// checks (android-checks.md, step 14) find the window a touch was on,
+    /// and whether a window that appeared took the focus.
+    /// </summary>
+    internal IReadOnlyList<PhoneListedWindow> WindowsAt(long time)
+    {
+        var index = LastAtOrBefore(_snapshotTimes, time);
+        return index < 0
+            ? []
+            : [.. _snapshots[index].Windows.Select(entry =>
+                new PhoneListedWindow(entry.Id, entry.TypeName, entry.Title, entry.Active, entry.Focused, entry.Layer, entry.Bounds))];
+    }
+
     /// <summary>The item with accessibility focus at a time; null when none is known to have it.</summary>
     public PhoneAccessibilityFocus? FocusAt(long time)
     {
@@ -810,7 +826,15 @@ public sealed class PhoneAccessibilityTimeline
                 ReadBoolean(window, "accessibilityFocused"),
                 taken,
                 ReadBoolean(window, "truncated"),
-                ReadInt32(window, "missingChildren") ?? 0));
+                ReadInt32(window, "missingChildren") ?? 0)
+            {
+                Layer = ReadInt32(window, "layer") ?? 0,
+                Bounds = window.TryGetProperty("bounds", out var box) && box.ValueKind == JsonValueKind.Object &&
+                    ReadInt32(box, "left") is { } left && ReadInt32(box, "top") is { } top &&
+                    ReadInt32(box, "right") is { } right && ReadInt32(box, "bottom") is { } bottom
+                        ? new PhoneBounds(left, top, right, bottom)
+                        : null,
+            });
         }
 
         return new Snapshot(item, windows);
@@ -995,7 +1019,20 @@ public sealed class PhoneAccessibilityTimeline
         bool AccessibilityFocused,
         bool Taken,
         bool Truncated,
-        int MissingChildren);
+        int MissingChildren)
+    {
+        public int Layer { get; init; }
+
+        public PhoneBounds? Bounds { get; init; }
+    }
 
     private sealed record ItemData(int Index, int? Parent, PhoneItem Item, string Json);
+}
+
+/// <summary>A window as a snapshot lists it, without its items.</summary>
+public sealed record PhoneListedWindow(int Id, string TypeName, string? Title, bool Active, bool Focused, int Layer, PhoneBounds? Bounds)
+{
+    public const string ApplicationType = "TYPE_APPLICATION";
+
+    public const string InputMethodType = "TYPE_INPUT_METHOD";
 }

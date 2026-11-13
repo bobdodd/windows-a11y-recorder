@@ -150,7 +150,7 @@ public sealed class PhoneAccessibilityTimelineTests : IDisposable
     {
         FromIndex(out var index, out _);
 
-        Assert.Equal(30, index.Version);
+        Assert.Equal(31, index.Version);
         var trees = index.Events.Where(item => item.Channel == AndroidAccessibilityRecords.TreeChannel).ToArray();
         Assert.Equal(2, trees.Length);
         var windows = trees[0].Payload.GetProperty("windows").EnumerateArray().ToArray();

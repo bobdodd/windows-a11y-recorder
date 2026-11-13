@@ -306,7 +306,7 @@ public sealed class ReadingPositionTests
         }
 
         var index = builder.Build();
-        Assert.Equal(30, index.Version);
+        Assert.Equal(31, index.Version);
         var kept = Assert.Single(index.Events, item => item.EventType == BrowserEvidenceEventTypes.FocusChanged);
         Assert.True(kept.Payload.TryGetProperty("focusedNodeId", out _));
 

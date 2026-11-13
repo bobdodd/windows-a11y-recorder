@@ -1765,3 +1765,79 @@ warning, and the recording cannot show that it was not on a timer; seen
 once, at 00:00:22.575", with the loading text outlined on the phone's
 picture when chosen. Long rows wrapped, with no horizontal scrollbar.
 The timing checks are checked on the PC.
+
+## Step 14: changes of context (2026-11-13)
+
+The owner's decisions, what the standards say, and the checks built to
+them are in the architecture document's "Step 14: changes of context".
+Three checks, each one discrete issue: a change of context after the
+focus moved by a key or a tap on a field (3.2.1) and after TalkBack's
+focus moved by a gesture with no double tap (3.2.1) are errors; a
+change of context after a setting changed, such as a switch tapped or
+text typed (3.2.2), is a warning. Checked in the Linux build
+environment: the solution builds with no warnings, and the new tests
+pass with the others. The throwaway program gives no finding for any
+recording to hand, as none has a key, typing, or a tap on a field,
+switch, check box or slider; test 48 makes one that should have a
+finding.
+
+## Test 46: build and install the seventeenth build (development PC)
+
+As test 19: close the recorder, run the PowerShell of test 19's step 1,
+run the newest installer with "Start the recorder and set up the
+analysis models" unchecked, and start the recorder from the Start menu.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the recorder
+opens.
+
+## Test 47: changes of context in test 16's recording
+
+Keep the phone's picture in view throughout.
+
+1. Choose "Open recording...", and open
+   `20261112-154851-32c7b61a5552453bbf5febffcca978c7`. If the Checks
+   window is closed, click the "Checks" tab, then move it so the phone's
+   picture is fully in view. Wait 10 seconds, and take a screenshot of
+   the whole screen.
+
+**On screen:** the line under "Show current visit" includes "Changes of
+context (WCAG 3.2.1 and 3.2.2), three checks: no findings; 0 focus
+moves by a key or a tap on a field, 0 TalkBack focus moves after a
+gesture or key, and 0 setting changes (typing, checking, choosing or
+moving a slider); 0 changes of context (a new screen or app, a window
+that took the focus, a pane, or the focus moving by itself) within 1.5
+seconds of one, with nothing touched, pressed or clicked between." Long
+rows wrap; there is no horizontal scrollbar. Send the screenshot.
+
+## Test 48: a switch that opens a message, in Settings
+
+Keep the phone's picture in view throughout.
+
+Before the test, make sure TalkBack is off. On the phone, open
+Settings, then Accessibility, then Select to Speak, so that the "Select
+to Speak shortcut" row and its switch, which is off, are on the screen.
+Leave the recorder open from test 47, with "Android device" chosen.
+
+1. In the recorder, choose "Start recording", and wait 5 seconds.
+2. On the phone, tap the switch at the right end of the "Select to
+   Speak shortcut" row once, and wait 5 seconds.
+3. In the message that appears, asking to let Select to Speak have full
+   control of the phone, tap "Deny", and wait 5 seconds.
+4. Choose "Stop recording", and wait until the recording has opened in
+   the player.
+5. If the Checks window is closed, click the "Checks" tab, then move it
+   so the phone's picture is fully in view. Wait 10 seconds, scroll the list until the row starting
+   "Change of context on input" is in view, and take a screenshot of the
+   whole screen.
+
+**On screen:** in step 2 the message appears, and in step 3 it goes and
+the switch is still off. In step 5 the line under "Show current visit"
+includes "Changes of context (WCAG 3.2.1 and 3.2.2), three checks: 1
+finding (1 warning);" and "1 setting change"; the list has the row
+"Change of context on input (WCAG 3.2.2): 1 warning", and below it a row
+starting "Warning:" that includes "seconds later, with no further touch
+or key," and ends its measurement with "a change of context on input,
+which is allowed only when the user was told of it before using the
+item; look for such advice". No such row is a failure; send the
+screenshot as it is. Long rows wrap; there is no horizontal scrollbar.
+Send the screenshot.

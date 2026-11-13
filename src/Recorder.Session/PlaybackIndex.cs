@@ -113,7 +113,13 @@ public sealed record PlaybackIndex
     // TYPE_NOTIFICATION_STATE_CHANGED) whole, for the status message
     // checks of android-checks.md step 12 (PhoneAnnouncementTimeline); an
     // older index is derived again.
-    public const int CurrentVersion = 30;
+    // Version 31 keeps the phone's input events (accessibility.android.events,
+    // TYPE_VIEW_CLICKED, _LONG_CLICKED, _SELECTED, _FOCUSED, _TEXT_CHANGED,
+    // _ACCESSIBILITY_FOCUSED and TYPE_TOUCH_INTERACTION_START) and its
+    // hardware keys (input.android.key) whole, for the change of context
+    // checks of android-checks.md step 14 (PhoneInputTimeline); an older
+    // index is derived again.
+    public const int CurrentVersion = 31;
 
     public required int Version { get; init; }
 
@@ -318,6 +324,7 @@ public sealed class PlaybackIndexBuilder
             PhoneAccessibilityTimeline.IsFocusRecord(channel, record.EventType, payload) ||
             PhoneScreenTimeline.IsWindowStateRecord(channel, record.EventType, payload) ||
             PhoneAnnouncementTimeline.IsAnnouncementRecord(channel, record.EventType, payload) ||
+            PhoneInputTimeline.IsInputRecord(channel, record.EventType, payload) ||
             PhoneAccessibilityTimeline.IsDisplayRecord(channel, record.EventType))
         {
             Keep(eventKey, record);
@@ -501,6 +508,7 @@ public sealed class PlaybackIndexBuilder
              PhoneAccessibilityTimeline.IsFocusRecord(record.Channel, record.EventType, record.Payload) ||
              PhoneScreenTimeline.IsWindowStateRecord(record.Channel, record.EventType, record.Payload) ||
              PhoneAnnouncementTimeline.IsAnnouncementRecord(record.Channel, record.EventType, record.Payload) ||
+             PhoneInputTimeline.IsInputRecord(record.Channel, record.EventType, record.Payload) ||
              PhoneAccessibilityTimeline.IsDisplayRecord(record.Channel, record.EventType)) &&
             record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()

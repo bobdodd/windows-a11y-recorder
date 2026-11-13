@@ -201,6 +201,9 @@ public sealed class PhoneScreenChecksTests
 
         Assert.Equal(checks, PhoneCheckNames.All.TakeLast(5));
         Assert.Equal(
+            [PhoneCheckNames.MovingByItself, PhoneCheckNames.ContextOnFocus, PhoneCheckNames.ContextOnScreenReaderFocus, PhoneCheckNames.ContextOnInput],
+            PhoneCheckNames.All.SkipLast(5).TakeLast(4));
+        Assert.Equal(
             ["No screen title (WCAG2ICT 2.4.2)", "Screen title shared with other screens (WCAG2ICT 2.4.2)", "No heading (WCAG 1.3.1)", "First heading far from the top", "Many headings"],
             checks.Select(PhoneCheckNames.Title));
     }
