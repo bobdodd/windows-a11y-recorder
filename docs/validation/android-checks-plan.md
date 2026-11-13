@@ -2023,3 +2023,27 @@ seconds or more after 0 turns within a visit; it is looked for only
 while Auto-rotate is on." The list has no row starting "Orientation
 restricted". Long rows wrap; there is no horizontal scrollbar. Send the
 screenshot.
+
+## Results of tests 51 to 53 (2026-11-13)
+
+Tests 51 and 52 passed on the development PC with the build of 329940d:
+the companion line read "Companion app: installed, on, and answering
+(version 1.1.0, version code 824, protocol 7)." So the companion app's
+Java builds, and its accessibility service reads the phone's sensor
+while in the background, which was the feasibility question.
+
+Test 53 passed (session
+`20261113-214438-2e4d9f29c24e4576b249934b206a16e1`): the home screen
+stayed upright, "Phone turned for:" showed "2 seconds", and the list had
+"Orientation restricted (WCAG 1.3.4): 1 warning" with "Warning:
+FrameLayout containing "At a glance", "Fri, Nov 13", "2°C", the phone
+was held sideways for 6.6 seconds with Auto-rotate on, and the screen
+stayed portrait, ... seen once, at 00:00:08.622". The line said the
+phone was turned "3 times", where the test expected 2. Measured on the
+recording: upright at 0.2 seconds, sideways (60 degrees) at 8.623,
+upright (30 degrees) at 15.263, then, from 18.842 to 19.622, as the
+phone was put down, readings flicked between flat, upright and sideways
+(72 and 110 degrees) for under half a second each. That brief sideways
+reading is the third turn; it was far shorter than the hold time, so it
+gave no finding. The count is of every change the sensor reported, not
+of turns held.
