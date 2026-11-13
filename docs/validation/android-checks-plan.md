@@ -1583,3 +1583,24 @@ program, whose copy of the recording has no phone video. A finding is
 shown at the picture of its snapshot, the last video frame before the
 window was next listed, as for the other checks, and that is
 00:00:41.101, as on the owner's screenshot.
+
+## Results of tests 40 and 41 (2026-11-13)
+
+Passed on the development PC with the build of 7be8e24, as recorded by
+the owner, with AAA chosen (3.3.1, 3.3.2 and 4.1.2 are level A, so the
+same at both levels). The build ended with `INSTALLER BUILT` and the
+recorder opened. The line under "Show current visit" included "Fields
+and states, five of them: 1 finding (1 error), from 1 field, 0 marked
+invalid, 0 expandable items and 0 sliders checked; a field's label is
+only an item linked to it as its label (labeledBy), as a hint is not
+shown once text is typed." Under visit 4 the row "Field with no label
+(WCAG 3.3.2): 1 error" was followed by the finding "Error: EditText with
+no text, its only label is its hint, "Fell asleep quickly, woke up
+once...", which is not shown once text is typed, and no item is linked
+to it as its label (labeledBy); the text just above it, "Notes
+(optional)", is not linked to it as its label, in pane 'Dialog'; seen
+once, at 00:00:41.101", with the field outlined on the phone's picture
+when chosen, and no row starting "Field with no name". Long rows
+wrapped, with no horizontal scrollbar. The time differed from the one
+first written, which was the test's error (see the correction under
+test 41). The checks of fields and states are checked on the PC.

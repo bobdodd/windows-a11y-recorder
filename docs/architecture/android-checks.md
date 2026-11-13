@@ -38,7 +38,8 @@ the owner's decision (see "Step 10: clickable but not focusable"), and
 was checked on the development PC on 2026-11-13 (tests 38 and 39
 passed). Step 11, the checks of fields and states, is built from the
 tree alone, to the owner's decisions (see "Step 11: fields and
-states"). The owner's
+states"), and was checked on the development PC on 2026-11-13 (tests 40
+and 41 passed). The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -452,7 +453,8 @@ the recording is opened and nothing is kept.
    (see "Step 10: clickable but not focusable"). Built, and checked on
    the PC.
 11. **Fields and states** (WCAG 3.3.2, 4.1.2 and 3.3.1), from the tree
-   alone (see "Step 11: fields and states"). Built.
+   alone (see "Step 11: fields and states"). Built, and checked on the
+   PC.
 
 ## As built: step 1
 
