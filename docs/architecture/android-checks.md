@@ -43,7 +43,8 @@ and 41 passed). Step 12, status messages (WCAG 4.1.3), is built to the
 owner's decisions (see "Step 12: status messages"), and was checked on
 the development PC on 2026-11-13 (tests 42 and 43 passed). Step 13,
 timing (WCAG 2.2.1 and 2.2.2), is built to the owner's decisions (see
-"Step 13: timing"), and is not yet checked on the PC. The owner's
+"Step 13: timing"), and was checked on the development PC on
+2026-11-13 (tests 44 and 45 passed). The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -463,7 +464,7 @@ the recording is opened and nothing is kept.
    (see "Step 12: status messages"). Built, and checked on the PC.
 13. **Timing** (WCAG 2.2.1 and 2.2.2), from the tree, touches, the
    phone's settings and the phone's video (see "Step 13: timing").
-   Built; not yet checked on the PC.
+   Built, and checked on the PC.
 
 ## As built: step 1
 

@@ -1743,3 +1743,25 @@ between, as new content appeared, as when loading finishes; it went
 without warning, and the recording cannot show that it was not on a
 timer". Long rows wrap; there is no horizontal scrollbar. Send the two
 screenshots.
+
+## Results of tests 44 and 45 (2026-11-13)
+
+Passed on the development PC with the build of 9af870b, as recorded by
+the owner, with AAA chosen (2.2.1 and 2.2.2 are level A, so they run at
+both levels). The line under "Show current visit" included "Timing (WCAG
+2.2.1 and 2.2.2), four checks: 3 findings (3 warnings); Time to take
+action was Default, so texts gone within 5 seconds were looked at: 3
+texts with no touch between, 0 of them gone with nothing new shown as
+they went; 0 items whose text changed in place with no touch; 0 parts of
+the phone's video that kept changing for more than 5 seconds with no
+touch (from the video, so approximate)." Under visit 2 ("45 snapshots, 1
+settled"), after the row "Status message not announced (WCAG 4.1.3): 1
+error" and its finding, the row "Text gone as new content appeared
+(WCAG 2.2.1): 1 warning" was followed by the finding "Warning: View
+described as "Loading your personal sleep learning space.", it was shown
+with "☀️🌙" and they went away 0.41 seconds later, with no touch between,
+as new content appeared, as when loading finishes; it went without
+warning, and the recording cannot show that it was not on a timer; seen
+once, at 00:00:22.575", with the loading text outlined on the phone's
+picture when chosen. Long rows wrapped, with no horizontal scrollbar.
+The timing checks are checked on the PC.
