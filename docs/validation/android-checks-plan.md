@@ -1177,3 +1177,50 @@ against #FFFFFF, the other's fill, and 1.83:1 against #F7F7E3 around
 it") showed the Sleep Diary screen at 00:00:42.154 with the outline
 round WEEK VIEW. Long rows wrapped, with no horizontal scrollbar. Step 5
 is checked on the PC.
+
+## Step 6: titles and headings (2026-11-12)
+
+The owner's decisions, what the recordings to hand measured, and the
+checks built to them are in the architecture document's "Step 6: titles
+and headings". Checked in the Linux build environment: the solution
+builds with no warnings, and the new tests pass with the others. The
+throwaway program, run with the checks, gives the rows below from test
+16's recording.
+
+## Test 30: build and install the ninth build (development PC)
+
+As test 19: close the recorder, run the PowerShell of test 19's step 1,
+run the newest installer with "Start the recorder and set up the
+analysis models" unchecked, and start the recorder from the Start menu.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the recorder
+opens.
+
+## Test 31: the title and heading findings of test 16's recording
+
+Keep the phone's picture in view throughout.
+
+1. Choose "Open recording...", and open
+   `20261112-154851-32c7b61a5552453bbf5febffcca978c7` (test 16). If the
+   Checks window is closed, click the "Checks" tab, then move it so the
+   phone's picture is fully in view. Wait 10 seconds, and take a
+   screenshot of the whole screen.
+2. Scroll the list so the row starting "Visit 2," is at the top, and
+   take a screenshot of the whole screen.
+3. Click the row starting "Error: FrameLayout containing "Sleep Learning
+   Library"" under the bold row "Screen title shared with other
+   screens", and take a screenshot of the whole screen.
+
+**On screen:** in step 1 the line under "Show current visit" includes
+"Checks of the tree: 11 findings (10 errors, 1 not run), from 7 settled
+snapshots". In step 2, below the Visit 2 row, the bold row "Screen title
+shared with other screens (WCAG2ICT 2.4.2): 1 error", then a row ending
+"its window title 'Nova SleepCare' is also the title of 3 other screens
+checked in this recording: 'Welcome, Bob Dodd', 'Sleep Diary', 'Bob
+Dodd'; seen once, at 00:00:28.202", then the bold row "No heading (WCAG
+1.3.1): 1 error", then a row ending "no item on the screen is marked as
+a heading; seen once, at 00:00:28.202". In step 3 the time under the
+phone's picture starts "00:00:28.202", the Sleep Learning Library screen
+is shown, and a cyan outline runs round the edge of the whole picture.
+Long rows wrap; there is no horizontal scrollbar. Send the three
+screenshots.

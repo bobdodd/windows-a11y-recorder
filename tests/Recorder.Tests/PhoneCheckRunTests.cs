@@ -31,8 +31,8 @@ public sealed class PhoneCheckRunTests : IDisposable
 
     private static long At(double seconds) => (long)Math.Round(seconds * Second);
 
-    // The Settings window's page and its "Save" button, 98 pixels square
-    // (40 dp), moved down by moved pixels.
+    // The Settings window's page, its "Save" button, 98 pixels square
+    // (40 dp), moved down by moved pixels, and its heading.
     private static JsonNode Items(int moved) =>
         JsonSerializer.SerializeToNode(
             new AndroidTreeNode[]
@@ -49,6 +49,14 @@ public sealed class PhoneCheckRunTests : IDisposable
                     ViewId = "com.android.settings:id/save", Text = "Save",
                     Bounds = new AndroidNodeBounds(100, 200 + moved, 198, 298 + moved), Checked = "unchecked",
                     ImportantForAccessibility = true, VisibleToUser = true, Clickable = true, Focusable = true,
+                },
+
+                // The page's title, marked as a heading, so the heading checks find nothing.
+                new()
+                {
+                    Index = 2, Parent = 0, Depth = 1, WindowId = 512, PackageName = Settings, ClassName = "android.widget.TextView",
+                    Text = "Settings", Bounds = new AndroidNodeBounds(100, 60, 600, 130), Checked = "unchecked",
+                    ImportantForAccessibility = true, VisibleToUser = true, Heading = true,
                 },
             },
             JsonSerializerOptions.Web)!;
@@ -113,6 +121,11 @@ public sealed class PhoneCheckRunTests : IDisposable
                 (At(3), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(2, Items(10))),
                 (At(5), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(3, null)),
             ];
+        return ArchiveOf(records, out recording);
+    }
+
+    private SessionPlaybackArchive ArchiveOf(List<(long Time, string Channel, string EventType, object Payload)> records, out FakeRecords recording)
+    {
         var builder = new PlaybackIndexBuilder(10_000_000, TimeSpan.Zero);
         recording = new FakeRecords();
         var sequence = 0UL;
@@ -334,6 +347,58 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Equal(2, home.Times.Count);
         Assert.EndsWith("; a state needs 3:1; from the phone's screenshot", home.Times[0].Measured, StringComparison.Ordinal);
         Assert.Equal("Non-text contrast (WCAG 1.4.11)", PhoneCheckNames.Title(home.Check));
+    }
+
+    // Step 6: two screens of one app with the same window title, each with
+    // its own fixed text, as in the client's app, where every screen's
+    // window title was "Nova SleepCare" (measured). Each visit's screen
+    // gets its own error, apart from the screens' other findings.
+    [Fact]
+    public void Run_ScreensSharingATitle_AreEachAnError_ApartFromNoHeading()
+    {
+        static JsonNode Screen(string text) =>
+            JsonSerializer.SerializeToNode(
+                new AndroidTreeNode[]
+                {
+                    new()
+                    {
+                        Index = 0, WindowId = 512, PackageName = Settings, ClassName = "android.widget.FrameLayout",
+                        Bounds = new AndroidNodeBounds(0, 0, 1080, 2404), Checked = "unchecked",
+                        ImportantForAccessibility = true, VisibleToUser = true,
+                    },
+                    new()
+                    {
+                        Index = 1, Parent = 0, Depth = 1, WindowId = 512, PackageName = Settings, ClassName = "android.widget.TextView",
+                        Text = text, Bounds = new AndroidNodeBounds(100, 60, 600, 130), Checked = "unchecked",
+                        ImportantForAccessibility = true, VisibleToUser = true,
+                    },
+                },
+                JsonSerializerOptions.Web)!;
+        var archive = ArchiveOf(
+        [
+            (At(0.5), AndroidCompanionRecords.DisplayChannel, AndroidCompanionRecords.DisplayEventType,
+                new AndroidDisplayState(AndroidCompanionRecords.InitialReason, 0, 1080, 2404)),
+            (At(1), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(1, Screen("Welcome"))),
+            (At(4), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(2, Screen("Sleep Diary"))),
+        ], out var recording);
+        Assert.Equal(2, archive.PhoneScreens.Screens.Count);
+
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording, cancellationToken: TestContext.Current.CancellationToken);
+
+        var shared = run.Findings.Where(finding => finding.Check == PhoneCheckNames.TitleShared).ToList();
+        Assert.Equal(2, shared.Count);
+        Assert.Equal(archive.PhoneScreens.Visits, shared.Select(finding => finding.Visit));
+        Assert.All(shared, finding => Assert.Equal(PhoneCheckLevel.Error, finding.Level));
+        Assert.Equal(
+            "its window title 'Settings' is also the title of 1 other screen checked in this recording: 'Sleep Diary'",
+            shared[0].Times[0].Measured);
+        Assert.EndsWith("'Welcome'", shared[1].Times[0].Measured, StringComparison.Ordinal);
+        Assert.Equal("window:512/0", shared[0].Times[0].TreeKey);
+
+        // No heading is its own finding, one for each visit.
+        Assert.Equal(2, run.Findings.Count(finding => finding.Check == PhoneCheckNames.NoHeading));
+        Assert.DoesNotContain(run.Findings, finding => finding.Check == PhoneCheckNames.TitleMissing);
+        Assert.Equal("Screen title shared with other screens (WCAG2ICT 2.4.2)", PhoneCheckNames.Title(PhoneCheckNames.TitleShared));
     }
 
     // The recording's records, as the player reads one from the file.

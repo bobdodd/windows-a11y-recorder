@@ -61,11 +61,19 @@ public static class PhoneCheckNames
     /// <summary>The non-text contrast check (step 5), WCAG 2.2's 1.4.11, at AA only; not one of the tree's checks.</summary>
     public const string NonTextContrast = "non-text-contrast";
 
+    /// <summary>The screen's title and headings (step 6, PhoneScreenChecks), each one discrete issue (owner, 2026-11-12).</summary>
+    public const string TitleMissing = "screen-title-missing";
+    public const string TitleShared = "screen-title-shared";
+    public const string NoHeading = "no-heading";
+    public const string FirstHeadingLow = "first-heading-low";
+    public const string ManyHeadings = "many-headings";
+
     /// <summary>The checks in the order the Checks tab lists them.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
         TouchTarget, TouchTargetWcag, SpeakableText, DuplicateSpeakableText, DuplicateClickableBounds,
         EditableContentDescription, RedundantDescription, ClassName, TraversalOrder,
+        TitleMissing, TitleShared, NoHeading, FirstHeadingLow, ManyHeadings,
     ];
 
     /// <summary>A check's name as the Checks tab shows it.</summary>
@@ -83,6 +91,11 @@ public static class PhoneCheckNames
         TextContrastAa => "Text contrast at AA (WCAG 1.4.3)",
         TextContrastAaa => "Text contrast at AAA (WCAG 1.4.6)",
         NonTextContrast => "Non-text contrast (WCAG 1.4.11)",
+        TitleMissing => "No screen title (WCAG2ICT 2.4.2)",
+        TitleShared => "Screen title shared with other screens (WCAG2ICT 2.4.2)",
+        NoHeading => "No heading (WCAG 1.3.1)",
+        FirstHeadingLow => "First heading far from the top",
+        ManyHeadings => "Many headings",
         _ => check,
     };
 
@@ -119,11 +132,12 @@ public sealed class PhoneCheckWindow
     // AccessibilityWindowInfo.TYPE_INPUT_METHOD, ATF's TYPE_INPUT_METHOD.
     internal const int InputMethodWindowType = 2;
 
-    public PhoneCheckWindow(int windowId, int windowType, IReadOnlyList<AndroidTreeNode> nodes)
+    public PhoneCheckWindow(int windowId, int windowType, IReadOnlyList<AndroidTreeNode> nodes, string? title = null)
     {
         ArgumentNullException.ThrowIfNull(nodes);
         WindowId = windowId;
         WindowType = windowType;
+        Title = title;
         var items = nodes.Select(node => new PhoneCheckItem(node)).ToList();
         var byIndex = new Dictionary<int, PhoneCheckItem>();
         foreach (var item in items)
@@ -203,6 +217,9 @@ public sealed class PhoneCheckWindow
     public int WindowId { get; }
 
     public int WindowType { get; }
+
+    /// <summary>The window's title (<c>AccessibilityWindowInfo.getTitle</c>), or null when it has none.</summary>
+    public string? Title { get; }
 
     /// <summary>The items in the window's list order, depth first.</summary>
     public IReadOnlyList<PhoneCheckItem> Items { get; }

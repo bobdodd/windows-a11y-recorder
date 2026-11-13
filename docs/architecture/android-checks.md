@@ -21,7 +21,9 @@ tests 25 to 27 passed. Non-text contrast was measured first (see
 "Step 5: measuring non-text contrast first"), and its check is built to
 the owner's decisions (see "Step 5: the owner's decisions" and "As
 built: step 5"), and was checked on the development PC on 2026-11-12
-(tests 28 and 29 passed). The owner's
+(tests 28 and 29 passed). Step 6, the screen's title and headings, is
+built to the owner's decisions (see "Step 6: titles and headings") and
+is to be checked on the development PC (tests 30 and 31). The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -421,6 +423,8 @@ the recording is opened and nothing is kept.
    recordings to hand, with its rules decided by the owner from the
    measurement (see "Step 5: measuring non-text contrast first"). Built
    (see "As built: step 5").
+6. **The screen's title and headings**, one check for each discrete
+   issue (see "Step 6: titles and headings"). Built.
 
 ## As built: step 1
 
@@ -1461,6 +1465,138 @@ were then looked at to check what the numbers meant.
   Focus indicators are not checked, as they need the focus moved. A
   state is found only in rows of controls; one shown by an outline, an
   underline or a change of the icon, not a fill, is not found.
+
+## Step 6: titles and headings
+
+### What the standards ask (checked in cited documents)
+
+- **The checks are of an app, not a web page**, so the requirements are
+  read through WCAG2ICT, the W3C's guidance on applying WCAG 2.2 to
+  non-web software ([WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/)).
+- **1.3.1 Info and Relationships applies as written.** WCAG2ICT's note
+  2 says information is programmatically determined in software through
+  the platform's accessibility services
+  ([WCAG2ICT, 1.3.1](https://www.w3.org/TR/wcag2ict-22/#sc1-3-1-info-and-relationships)).
+  The W3C's Understanding document for 1.3.1 does not itself require a
+  heading on every page
+  ([Understanding 1.3.1](https://www.w3.org/WAI/WCAG22/Understanding/info-and-relationships.html));
+  the "no heading" rule below is the owner's reading of it.
+- **2.4.2 Page Titled becomes "Non-web Software Titled"**: "In non-web
+  software implemented on a platform that supports a Title property for
+  windows or screens, the non-web software provides titles that
+  describe the name, topic or purpose of each window or screen"
+  ([WCAG2ICT, 2.4.2](https://www.w3.org/TR/wcag2ict-22/#sc2-4-2-page-titled)).
+- **Android's title properties** are the window's title and the pane
+  title, `accessibilityPaneTitle` in views and `paneTitle` in Compose,
+  and Android asks for "unique pane titles across your app"
+  ([Android, principles](https://developer.android.com/guide/topics/ui/accessibility/principles),
+  [views](https://developer.android.com/guide/topics/ui/accessibility/views/principles-views),
+  [Compose semantics](https://developer.android.com/develop/ui/compose/accessibility/semantics)).
+- **Android's headings have no levels**: an item is a heading or not
+  (`isHeading`,
+  [AccessibilityNodeInfoCompat](https://developer.android.com/reference/androidx/core/view/accessibility/AccessibilityNodeInfoCompat)).
+  The companion records it for every item (checked in source:
+  `AccessibilityEventJson.java`, `item.put("heading", node.isHeading())`).
+
+### The owner's decisions (2026-11-12)
+
+1. **Each issue is its own finding.** "Always break issues down into
+   their atomic parts. No window or pane title is one discrete issue.
+   duplicate pane title is another. It allows remediation advice to be
+   more specific" (owner).
+2. **No title is an error, under WCAG2ICT's 2.4.2.**
+3. **A title shared with other screens is a separate error, under the
+   same criterion.**
+4. **No heading on the screen is an error under 1.3.1.** "The page needs
+   to be described properly to AT and that means the structure of the
+   page must be evident. Without headings you just have prose. ... It is
+   a reasonable argument to say that without at least one heading, the
+   page fails to be described adequately. That does allow for some false
+   positives (potentially e-book pages for example) and I'm okay with
+   that" (owner).
+5. **A first heading not close to the top of the screen is a warning.**
+6. **An abundance of headings on the screen is a warning.**
+
+### Measured first (2026-11-12)
+
+The recordings to hand were run through the new checks on the
+development PC before the limits were chosen (measured: test 16 session
+20261112-154851-32c7b61a5552453bbf5febffcca978c7, test 18 session
+20261112-171107-88cfc05214a34a3682222e7fb25d840d, and the earlier
+recordings of the client's app and of Settings):
+
+- **The client's app.** Every screen's window title is "Nova SleepCare";
+  its one pane's title is a single space; no item on any screen is
+  marked as a heading; while the diary's dialog is open the pane's title
+  is "Dialog". So each checked visit gets two errors, the shared title
+  and no heading, and none for a missing title.
+- **Settings.** "Safety and emergency" and "Display size & text" have
+  their title marked as a heading at 59 to 66 dp from the top of the
+  window, 7% of its height; "Display size & text" has 3 headings shown
+  against 15 to 17 items a screen reader stops at. Settings' first screen
+  has 6 items marked as headings, none shown to the user (not visible,
+  some with no height), so it gets "no heading". The launcher's home
+  screen has no heading.
+- **No screen measured has a first heading below its top quarter or
+  more headings than half its screen reader's stops**, so the two
+  warnings below are set from the unit tests' made-up screens, not from a
+  recording.
+
+### As built: step 6, the title and heading checks
+
+- **Files.** `PhoneScreenChecks.cs` in `Recorder.Session` runs the
+  checks of one window; `PhoneCheckRun` runs them with the tree's
+  checks on each visit's settled snapshots, on the app's window, and
+  then checks the shared titles across the recording's screens. The
+  window's title is now passed with its items (`PhoneCheckWindow.Title`).
+  The findings are listed under each visit with the tree's, after them.
+- **The screen's title** is the first non-blank pane title in the
+  tree's order, or else the window's title; a title of only spaces is
+  none, as nothing would be said.
+- **No screen title (WCAG2ICT 2.4.2)**, an error on the window's first
+  item, when the screen has no title; it says whether the window's title
+  is missing or blank and whether its pane titles are blank.
+- **Screen title shared with other screens (WCAG2ICT 2.4.2)**, an error
+  on the window's first item, for each visit whose screen's title is
+  also the title of another screen of the same app checked in the
+  recording, ignoring case. It says which title (pane or window) and
+  names up to 3 of the other screens.
+- **No heading (WCAG 1.3.1)**, an error on the window's first item, when
+  no item shown is marked as a heading. An item marked as a heading is
+  shown when it is visible to the user and has an area; the finding
+  counts those that are not shown.
+- **First heading far from the top**, a warning on the topmost heading
+  shown, when it starts below the top quarter of the window's height
+  (my assumption for "close to the top"; the measured titles start at
+  7%). It says how far down, in dp and as a share of the height.
+- **Many headings**, a warning on the window's first item, when at
+  least 3 items shown are headings and they are more than half as many
+  as the items a screen reader stops at (ATF's `shouldFocusView`, as
+  for Speakable text present). This is my assumption for "an
+  abundance"; it is meant to catch every item of a list marked as a
+  heading, not cards with a heading each.
+- **Run on the development PC** with test 16's recording: on each of
+  the 5 checked visits, "Screen title shared with other screens", "its
+  window title 'Nova SleepCare' is also the title of 3 other screens
+  checked in this recording", and "No heading". The loading screen's
+  visits have no settled snapshot, so they are not checked and not
+  counted among the screens sharing the title. Test 18's recording gives
+  the same two errors on each of its 3 visits, with 2 other screens.
+- **Checked before any PC test:** the solution builds with no warnings,
+  and the tests pass, 2,377 of them, with the 10 that need Windows
+  failing as before. The new tests cover a missing and a blank title, a
+  pane title before the window's, two screens sharing a window title
+  (each visit's own error, apart from "No heading"), headings not shown,
+  the first heading in and below the top quarter, with and without the
+  density, and the limits for many headings.
+- **Limits.** Whether a unique title describes the screen is for a
+  person or a vision model; the check finds only missing and shared
+  titles. A title is compared only with the screens seen in the same
+  recording. A screen scrolled so that its headings are off the screen
+  gets "no heading", and one scrolled past its title gets "first heading
+  far from the top", as the checks are of what is on the screen. A
+  heading with no text of its own or its children's is counted as a
+  heading.
 
 ## Decisions on the open questions (2026-11-11)
 

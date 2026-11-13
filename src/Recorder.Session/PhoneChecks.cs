@@ -154,6 +154,7 @@ public sealed class PhoneCheckRun
         var findings = new Dictionary<(PhoneVisit, string, PhoneCheckLevel, string), PhoneFinding>();
         var problems = new List<string>();
         var checkedTakings = new HashSet<string>(StringComparer.Ordinal);
+        var sightings = new List<(PhoneVisit Visit, SessionTimelineEvent Settled, SessionTimelineEvent Taking, PhoneCheckWindow Window, long ShownAt, string? State)>();
         foreach (var visit in screens.Visits)
         {
             // The results of each taking of the window's items in the visit.
@@ -208,7 +209,7 @@ public sealed class PhoneCheckRun
                         if (ReadWindow(source, taking, visit.WindowId) is { } window)
                         {
                             var context = new PhoneCheckContext((float)(density?.PixelsPerDp ?? 0), screen?.Width, screen?.Height);
-                            checkedWindow = (window, PhoneTreeChecks.Run(window, context));
+                            checkedWindow = (window, [.. PhoneTreeChecks.Run(window, context), .. PhoneScreenChecks.Run(window, context)]);
                             if (checkedTakings.Add(taking.EventId))
                             {
                                 run.WindowsChecked++;
@@ -240,6 +241,7 @@ public sealed class PhoneCheckRun
                 // Shown at the snapshot's picture, as the video can lag the
                 // tree (PhoneSnapshotPictures).
                 var shownAt = pictures.Of(visit, settled)?.Time ?? time;
+                sightings.Add((visit, settled, taking, done.Window, shownAt, state));
                 var items = done.Window.Items.GroupBy(item => item.Node.Index).ToDictionary(group => group.Key, group => group.First());
                 foreach (var result in done.Results)
                 {
@@ -258,6 +260,8 @@ public sealed class PhoneCheckRun
                 }
             }
         }
+
+        SharedTitles(sightings, findings);
 
         var order = PhoneCheckNames.All.Select((check, index) => (check, index)).ToDictionary(pair => pair.check, pair => pair.index);
         var screenOrder = screens.Apps
@@ -289,6 +293,47 @@ public sealed class PhoneCheckRun
         run.Problems = problems;
         run.Elapsed = stopwatch.Elapsed;
         return run;
+    }
+
+    // WCAG2ICT's 2.4.2 Non-web Software Titled: a screen whose title (its
+    // pane title, or else its window's) is also another screen's of the
+    // same app, of the screens seen in the recording, does not say which
+    // screen it is (owner, 2026-11-12, one issue apart from no title).
+    // Titles are the same ignoring case, as a screen reader says them alike.
+    private static void SharedTitles(
+        List<(PhoneVisit Visit, SessionTimelineEvent Settled, SessionTimelineEvent Taking, PhoneCheckWindow Window, long ShownAt, string? State)> sightings,
+        Dictionary<(PhoneVisit, string, PhoneCheckLevel, string), PhoneFinding> findings)
+    {
+        var titled = sightings
+            .Select(sighting => (Sighting: sighting, Title: PhoneScreenChecks.ScreenTitle(sighting.Window)))
+            .Where(pair => pair.Title is not null && pair.Sighting.Window.Items.Count > 0)
+            .ToList();
+        var screensOf = titled
+            .GroupBy(pair => (pair.Sighting.Visit.Package, pair.Title!.Value.Title.ToUpperInvariant()))
+            .ToDictionary(group => group.Key, group => group.Select(pair => pair.Sighting.Visit.Screen).Distinct().ToList());
+        foreach (var (sighting, title) in titled)
+        {
+            var (text, from) = title!.Value;
+            var screens = screensOf[(sighting.Visit.Package, text.ToUpperInvariant())];
+            if (screens.Count < 2)
+            {
+                continue;
+            }
+
+            var others = screens.Where(screen => screen != sighting.Visit.Screen).Select(screen => $"'{screen.Name}'").ToList();
+            var named = others.Count <= 3 ? string.Join(", ", others) : string.Join(", ", others.Take(3)) + ", and more";
+            var measured = string.Create(
+                CultureInfo.InvariantCulture,
+                $"its {from} '{text}' is also the title of {(others.Count == 1 ? "1 other screen" : $"{others.Count} other screens")} checked in this recording: {named}");
+            var root = sighting.Window.Items[0];
+            var key = (sighting.Visit, PhoneCheckNames.TitleShared, PhoneCheckLevel.Error, root.Identity);
+            if (!findings.TryGetValue(key, out var finding))
+            {
+                findings[key] = finding = new PhoneFinding(PhoneCheckNames.TitleShared, PhoneCheckLevel.Error, sighting.Visit, root.Identity, root.Label);
+            }
+
+            finding._times.Add(new PhoneFindingTime(sighting.ShownAt, sighting.Visit, sighting.Settled, sighting.Taking, sighting.Visit.WindowId, root.Bounds, root.TreeKey, measured, sighting.State));
+        }
     }
 
     // The state of the screen at a time: one in the app's window, as a pane,
@@ -332,7 +377,7 @@ public sealed class PhoneCheckRun
             }
 
             var window = entry.Deserialize<AndroidAccessibilityWindow>(JsonOptions);
-            return window?.Items is { } items ? new PhoneCheckWindow(windowId, window.Type, items) : null;
+            return window?.Items is { } items ? new PhoneCheckWindow(windowId, window.Type, items, window.Title) : null;
         }
 
         return null;
