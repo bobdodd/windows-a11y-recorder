@@ -4,19 +4,33 @@ using System.Text.Json;
 
 namespace Recorder.Session;
 
-/// <summary>The level the text contrast check holds text to (android-checks.md, step 4, decision 3).</summary>
-public enum PhoneContrastLevel
+/// <summary>
+/// The WCAG level an audit is made to (android-checks.md, "The audit
+/// level"), which guides the checks and their reporting (owner,
+/// 2026-11-12). It began as the text contrast check's level (step 4,
+/// decision 3).
+/// </summary>
+public enum PhoneAuditLevel
 {
-    /// <summary>WCAG 2.2's 1.4.3, Contrast (Minimum): 4.5:1, or 3:1 for large text.</summary>
+    /// <summary>
+    /// WCAG 2.2's level AA: text contrast to 1.4.3, Contrast (Minimum),
+    /// 4.5:1, or 3:1 for large text; target size to 2.5.8, 24 by 24 dp.
+    /// </summary>
     AA,
 
-    /// <summary>WCAG 2.2's 1.4.6, Contrast (Enhanced): 7:1, or 4.5:1 for large text.</summary>
+    /// <summary>
+    /// Level AAA as well: text contrast to 1.4.6, Contrast (Enhanced), 7:1,
+    /// or 4.5:1 for large text, in place of 1.4.3; and target size to 2.5.5,
+    /// Target Size (Enhanced), 44 by 44 dp, as well as 2.5.8.
+    /// </summary>
     AAA,
 }
 
 /// <summary>
 /// The checks' settings an auditor chose, kept per Windows user beside the
-/// player's layout: for now, the level of the text contrast check.
+/// player's layout: for now, the audit level. A file from before the
+/// audit level was named holds the text contrast check's level, as
+/// "contrastLevel", which is read as the audit level.
 /// </summary>
 public sealed record PhoneCheckSettings
 {
@@ -27,7 +41,7 @@ public sealed record PhoneCheckSettings
 
     public static PhoneCheckSettings Default { get; } = new();
 
-    public PhoneContrastLevel ContrastLevel { get; init; } = PhoneContrastLevel.AA;
+    public PhoneAuditLevel AuditLevel { get; init; } = PhoneAuditLevel.AA;
 
     public static string DefaultPath =>
         Path.Combine(
@@ -45,8 +59,23 @@ public sealed record PhoneCheckSettings
                 return Default;
             }
 
-            var settings = JsonSerializer.Deserialize<PhoneCheckSettings>(File.ReadAllText(path), JsonOptions);
-            return settings is null || !Enum.IsDefined(settings.ContrastLevel) ? Default : settings;
+            var text = File.ReadAllText(path);
+            var settings = JsonSerializer.Deserialize<PhoneCheckSettings>(text, JsonOptions);
+            if (settings is null)
+            {
+                return Default;
+            }
+
+            using var document = JsonDocument.Parse(text);
+            if (document.RootElement.ValueKind == JsonValueKind.Object &&
+                !document.RootElement.TryGetProperty("auditLevel", out _) &&
+                document.RootElement.TryGetProperty("contrastLevel", out var legacy) &&
+                legacy.TryGetInt32(out var level))
+            {
+                settings = settings with { AuditLevel = (PhoneAuditLevel)level };
+            }
+
+            return Enum.IsDefined(settings.AuditLevel) ? settings : Default;
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
@@ -110,14 +139,14 @@ public sealed class PhoneTextContrastRun
     private readonly Dictionary<PhoneVisit, List<PhoneFinding>> _byVisit = [];
     private readonly Dictionary<PhoneVisit, int> _linesByVisit = [];
 
-    private PhoneTextContrastRun(PhoneContrastLevel level)
+    private PhoneTextContrastRun(PhoneAuditLevel level)
     {
         Level = level;
     }
 
-    public static PhoneTextContrastRun Empty { get; } = new(PhoneContrastLevel.AA);
+    public static PhoneTextContrastRun Empty { get; } = new(PhoneAuditLevel.AA);
 
-    public PhoneContrastLevel Level { get; }
+    public PhoneAuditLevel Level { get; }
 
     /// <summary>The check's name for the level.</summary>
     public string Check => CheckFor(Level);
@@ -148,18 +177,18 @@ public sealed class PhoneTextContrastRun
     public int LinesOn(PhoneScreen screen) =>
         _linesByScreen.TryGetValue(screen, out var count) ? count : 0;
 
-    public static string CheckFor(PhoneContrastLevel level) =>
-        level == PhoneContrastLevel.AAA ? PhoneCheckNames.TextContrastAaa : PhoneCheckNames.TextContrastAa;
+    public static string CheckFor(PhoneAuditLevel level) =>
+        level == PhoneAuditLevel.AAA ? PhoneCheckNames.TextContrastAaa : PhoneCheckNames.TextContrastAa;
 
     /// <summary>The level's limits: for text that is not large, and for large text.</summary>
-    public static (double Normal, double Large) Limits(PhoneContrastLevel level) =>
-        level == PhoneContrastLevel.AAA ? (7.0, 4.5) : (4.5, 3.0);
+    public static (double Normal, double Large) Limits(PhoneAuditLevel level) =>
+        level == PhoneAuditLevel.AAA ? (7.0, 4.5) : (4.5, 3.0);
 
     public static PhoneTextContrastRun Run(
         PhoneContrastRun measured,
         PhoneScreenTimeline screens,
         PhoneDeviceTimeline device,
-        PhoneContrastLevel level)
+        PhoneAuditLevel level)
     {
         ArgumentNullException.ThrowIfNull(measured);
         ArgumentNullException.ThrowIfNull(screens);
@@ -267,7 +296,7 @@ public sealed class PhoneTextContrastRun
         PhoneSwatch colours,
         PhonePictureKind kind,
         string? engine,
-        PhoneContrastLevel level,
+        PhoneAuditLevel level,
         double? pixelsPerDp)
     {
         ArgumentNullException.ThrowIfNull(line);

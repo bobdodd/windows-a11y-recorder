@@ -102,6 +102,9 @@ public sealed class PhoneCheckRun
 
     public static PhoneCheckRun Empty { get; } = new();
 
+    /// <summary>The audit level the checks were run at.</summary>
+    public PhoneAuditLevel Level { get; private set; }
+
     /// <summary>The findings, by app, screen, visit, check (in <see cref="PhoneCheckNames.All"/> order), then first time.</summary>
     public IReadOnlyList<PhoneFinding> Findings { get; private set; } = [];
 
@@ -138,13 +141,14 @@ public sealed class PhoneCheckRun
         PhoneDeviceTimeline device,
         ISessionEventRecordSource? source,
         PhoneSnapshotPictures? pictures = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        PhoneAuditLevel level = PhoneAuditLevel.AA)
     {
         ArgumentNullException.ThrowIfNull(screens);
         pictures ??= PhoneSnapshotPictures.Empty;
         ArgumentNullException.ThrowIfNull(trees);
         ArgumentNullException.ThrowIfNull(device);
-        var run = new PhoneCheckRun();
+        var run = new PhoneCheckRun { Level = level };
         if (!screens.Recorded || source is null)
         {
             return run;
@@ -208,7 +212,7 @@ public sealed class PhoneCheckRun
                     {
                         if (ReadWindow(source, taking, visit.WindowId) is { } window)
                         {
-                            var context = new PhoneCheckContext((float)(density?.PixelsPerDp ?? 0), screen?.Width, screen?.Height);
+                            var context = new PhoneCheckContext((float)(density?.PixelsPerDp ?? 0), screen?.Width, screen?.Height, level);
                             checkedWindow = (window, [.. PhoneTreeChecks.Run(window, context), .. PhoneScreenChecks.Run(window, context)]);
                             if (checkedTakings.Add(taking.EventId))
                             {

@@ -46,6 +46,9 @@ public static class PhoneCheckNames
 {
     public const string TouchTarget = "touch-target-size";
     public const string TouchTargetWcag = "touch-target-24dp";
+
+    /// <summary>WCAG 2.5.5, Target Size (Enhanced), run only at the AAA audit level.</summary>
+    public const string TouchTargetEnhanced = "touch-target-44dp";
     public const string SpeakableText = "speakable-text-present";
     public const string DuplicateSpeakableText = "duplicate-speakable-text";
     public const string DuplicateClickableBounds = "duplicate-clickable-bounds";
@@ -71,7 +74,7 @@ public static class PhoneCheckNames
     /// <summary>The checks in the order the Checks tab lists them.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
-        TouchTarget, TouchTargetWcag, SpeakableText, DuplicateSpeakableText, DuplicateClickableBounds,
+        TouchTarget, TouchTargetWcag, TouchTargetEnhanced, SpeakableText, DuplicateSpeakableText, DuplicateClickableBounds,
         EditableContentDescription, RedundantDescription, ClassName, TraversalOrder,
         TitleMissing, TitleShared, NoHeading, FirstHeadingLow, ManyHeadings,
     ];
@@ -81,6 +84,7 @@ public static class PhoneCheckNames
     {
         TouchTarget => "Touch target size (ATF, 48dp)",
         TouchTargetWcag => "Touch target under 24dp (WCAG 2.5.8)",
+        TouchTargetEnhanced => "Touch target under 44dp (WCAG 2.5.5, AAA)",
         SpeakableText => "Speakable text present (ATF)",
         DuplicateSpeakableText => "Duplicate speakable text (ATF)",
         DuplicateClickableBounds => "Duplicate clickable bounds (ATF)",
@@ -118,9 +122,10 @@ public sealed record PhoneCheckResult(string Check, PhoneCheckLevel Level, int I
 /// <summary>
 /// What a check needs beyond the items: the display density as a scale
 /// (dpi / 160, ATF's <c>getDensity()</c>), and the screen's size in pixels
-/// as it was turned (ATF's real metrics), or null when not recorded.
+/// as it was turned (ATF's real metrics), or null when not recorded; and
+/// the audit level, which adds WCAG 2.5.5's check at AAA.
 /// </summary>
-public sealed record PhoneCheckContext(float Density, int? ScreenWidth, int? ScreenHeight);
+public sealed record PhoneCheckContext(float Density, int? ScreenWidth, int? ScreenHeight, PhoneAuditLevel Level = PhoneAuditLevel.AA);
 
 /// <summary>
 /// A window's items prepared for the checks: each with its parent and
@@ -282,6 +287,9 @@ public static class PhoneTreeChecks
     // WCAG 2.5.8 Target Size (Minimum), with dp for the CSS pixel.
     private const double WcagTargetMinimum = 24;
 
+    // WCAG 2.5.5, Target Size (Enhanced), in dp standing for CSS pixels.
+    private const double EnhancedTargetMinimum = 44;
+
     private const string AbsListView = "android.widget.AbsListView";
     private const string AdapterView = "android.widget.AdapterView";
     private const string ScrollView = "android.widget.ScrollView";
@@ -385,6 +393,10 @@ public static class PhoneTreeChecks
         {
             TouchTargetSize(window, context, results);
             TouchTargetWcag(window, context, results);
+            if (context.Level == PhoneAuditLevel.AAA)
+            {
+                TouchTargetEnhanced(window, context, results);
+            }
         }
 
         SpeakableTextPresent(window, results);
@@ -607,6 +619,38 @@ public static class PhoneTreeChecks
             var scrollEdge = IsAgainstScrollableEdge(target);
             results.Add(new PhoneCheckResult(
                 PhoneCheckNames.TouchTargetWcag,
+                scrollEdge ? PhoneCheckLevel.NotRun : PhoneCheckLevel.Error,
+                target.Node.Index,
+                scrollEdge ? measured + "; not run, as it is against the edge of a list that scrolls, so may be cut off by it" : measured));
+        }
+    }
+
+    // ---- WCAG 2.5.5, at the AAA audit level ----------------------------------
+
+    // A target under 44 by 44 dp fails (owner, 2026-11-12: the audit level
+    // guides the checks). 2.5.5 has no spacing exception. Its exceptions,
+    // an equivalent target of 44 dp on the screen, a target in a sentence
+    // or block of text, one sized by Android and not by the app, and an
+    // essential presentation, are not judged, as the tree does not say
+    // them; the summary says so. The targets are 2.5.8's, and a target
+    // against the edge of a list that scrolls is not run, as there.
+    internal static void TouchTargetEnhanced(PhoneCheckWindow window, PhoneCheckContext context, List<PhoneCheckResult> results)
+    {
+        var density = (double)context.Density;
+        foreach (var target in window.Items.Where(item => (item.Node.Clickable || item.Node.LongClickable) && item.Node.VisibleToUser && !item.Bounds.IsEmpty))
+        {
+            var width = target.Bounds.Width / density;
+            var height = target.Bounds.Height / density;
+            if (width >= EnhancedTargetMinimum && height >= EnhancedTargetMinimum)
+            {
+                continue;
+            }
+
+            var measured = string.Create(CultureInfo.InvariantCulture,
+                $"{width:0.#} by {height:0.#} dp, {(width < EnhancedTargetMinimum && height < EnhancedTargetMinimum ? "too narrow and too short" : width < EnhancedTargetMinimum ? "too narrow" : "too short")}; WCAG 2.5.5 needs 44 by 44 dp");
+            var scrollEdge = IsAgainstScrollableEdge(target);
+            results.Add(new PhoneCheckResult(
+                PhoneCheckNames.TouchTargetEnhanced,
                 scrollEdge ? PhoneCheckLevel.NotRun : PhoneCheckLevel.Error,
                 target.Node.Index,
                 scrollEdge ? measured + "; not run, as it is against the edge of a list that scrolls, so may be cut off by it" : measured));

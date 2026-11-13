@@ -156,6 +156,67 @@ public sealed class PhoneTreeChecksTests
         Assert.Empty(results);
     }
 
+    // Touch target under 44dp (WCAG 2.5.5, AAA), at the AAA audit level only
+
+    private static readonly PhoneCheckContext PixelAaa = Pixel with { Level = PhoneAuditLevel.AAA };
+
+    [Fact]
+    public void Enhanced_A98PixelButton_AtAAA_IsAnError()
+    {
+        // 98 pixels is 40.2 dp, under 44.
+        var window = Window(Page(), Item(1, 0, Button, (100, 200, 198, 298), text: "Save", clickable: true));
+
+        var result = Assert.Single(PhoneTreeChecks.Run(window, PixelAaa), result => result.Check == PhoneCheckNames.TouchTargetEnhanced);
+        Assert.Equal((PhoneCheckLevel.Error, 1), (result.Level, result.Item));
+        Assert.Equal("40.2 by 40.2 dp, too narrow and too short; WCAG 2.5.5 needs 44 by 44 dp", result.Measured);
+    }
+
+    [Fact]
+    public void Enhanced_AtAA_IsNotChecked()
+    {
+        var window = Window(Page(), Item(1, 0, Button, (100, 200, 198, 298), text: "Save", clickable: true));
+
+        Assert.DoesNotContain(PhoneTreeChecks.Run(window, Pixel), result => result.Check == PhoneCheckNames.TouchTargetEnhanced);
+    }
+
+    [Fact]
+    public void Enhanced_44dpWide_ButShort_IsTooShort_And44dpSquare_Passes()
+    {
+        // 108 pixels is 44.3 dp; 107 pixels is 43.9 dp.
+        var window = Window(
+            Page(),
+            Item(1, 0, Button, (100, 200, 208, 307), text: "Short", clickable: true),
+            Item(2, 0, Button, (100, 600, 208, 708), text: "Square", clickable: true));
+
+        var result = Assert.Single(PhoneTreeChecks.Run(window, PixelAaa), result => result.Check == PhoneCheckNames.TouchTargetEnhanced);
+        Assert.Equal((PhoneCheckLevel.Error, 1), (result.Level, result.Item));
+        Assert.Equal("44.3 by 43.9 dp, too short; WCAG 2.5.5 needs 44 by 44 dp", result.Measured);
+    }
+
+    [Fact]
+    public void Enhanced_AgainstTheEdgeOfAListThatScrolls_IsNotRun()
+    {
+        var list = Item(1, 0, "androidx.recyclerview.widget.RecyclerView", (0, 0, 1080, 1000)) with
+        {
+            Scrollable = true,
+            Actions = [new AndroidNodeAction(0x1000, null)],
+        };
+        var window = Window(Page(), list, Item(2, 1, Button, (100, 970, 600, 1000), text: "Reset", clickable: true));
+
+        var result = Assert.Single(PhoneTreeChecks.Run(window, PixelAaa), result => result.Check == PhoneCheckNames.TouchTargetEnhanced);
+        Assert.Equal(PhoneCheckLevel.NotRun, result.Level);
+        Assert.Equal("205.1 by 12.3 dp, too short; WCAG 2.5.5 needs 44 by 44 dp; not run, as it is against the edge of a list that scrolls, so may be cut off by it", result.Measured);
+    }
+
+    [Fact]
+    public void Enhanced_WithoutTheDensity_IsNotChecked()
+    {
+        var window = Window(Page(), Item(1, 0, Button, (100, 200, 198, 298), text: "Save", clickable: true));
+
+        Assert.DoesNotContain(PhoneTreeChecks.Run(window, new PhoneCheckContext(0, 1080, 2404, PhoneAuditLevel.AAA)),
+            result => result.Check == PhoneCheckNames.TouchTargetEnhanced);
+    }
+
     // Speakable text present (ATF)
 
     [Fact]

@@ -182,6 +182,26 @@ public sealed class PhoneCheckRunTests : IDisposable
             finding.Text);
     }
 
+    // The owner, 2026-11-12: a general AA or AAA audit level guides the
+    // checks. At AAA the 40 dp "Save" button also fails WCAG 2.5.5's 44 dp,
+    // as one more finding; at AA (the test above) it does not.
+    [Fact]
+    public void Run_AtAAA_AlsoChecksTargetsTo44dp()
+    {
+        var archive = Archive(out var recording);
+
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording,
+            cancellationToken: TestContext.Current.CancellationToken, level: PhoneAuditLevel.AAA);
+
+        Assert.Equal(PhoneAuditLevel.AAA, run.Level);
+        Assert.Equal([PhoneCheckNames.TouchTargetEnhanced, PhoneCheckNames.TouchTarget], run.Findings.Select(finding => finding.Check).Order(StringComparer.Ordinal));
+        var finding = Assert.Single(run.Findings, finding => finding.Check == PhoneCheckNames.TouchTargetEnhanced);
+        Assert.Equal(PhoneCheckLevel.Error, finding.Level);
+        Assert.Equal(
+            "Error: Button \"Save\", 40.2 by 40.2 dp, too narrow and too short; WCAG 2.5.5 needs 44 by 44 dp; seen 2 times, first at 00:00:01.000",
+            finding.Text);
+    }
+
     // The owner, 2026-11-12: findings belong to the visit they were seen
     // in, as the screen's content can change between visits. Settings,
     // then the Clock app, then Settings again: the same button failing on
@@ -286,7 +306,7 @@ public sealed class PhoneCheckRunTests : IDisposable
             Snapshot(1, Line(save, PhoneTextPlace.AppTextPlacedByOcr, "Save", 0x777777, 230)),
         ]);
 
-        var aa = PhoneTextContrastRun.Run(measured, archive.PhoneScreens, Device(), PhoneContrastLevel.AA);
+        var aa = PhoneTextContrastRun.Run(measured, archive.PhoneScreens, Device(), PhoneAuditLevel.AA);
 
         Assert.Equal((4, 1), (aa.Lines, aa.Passed));
         Assert.Equal(4, aa.LinesOn(visit.Screen));
@@ -311,7 +331,7 @@ public sealed class PhoneCheckRunTests : IDisposable
             line.Text);
 
         // At AAA the same measurement is two errors.
-        var aaa = PhoneTextContrastRun.Run(measured, archive.PhoneScreens, Device(), PhoneContrastLevel.AAA);
+        var aaa = PhoneTextContrastRun.Run(measured, archive.PhoneScreens, Device(), PhoneAuditLevel.AAA);
 
         Assert.Equal(PhoneCheckNames.TextContrastAaa, aaa.Check);
         Assert.All(aaa.Findings, finding => Assert.Equal(PhoneCheckLevel.Error, finding.Level));

@@ -24,7 +24,7 @@ public sealed class PhoneTextContrastTests : IDisposable
     private static (PhoneCheckLevel Level, string Measured)? Judge(
         uint foreground,
         PhonePictureKind kind = PhonePictureKind.Screenshot,
-        PhoneContrastLevel level = PhoneContrastLevel.AA,
+        PhoneAuditLevel level = PhoneAuditLevel.AA,
         PhoneTextLine? line = null,
         int joined = 2) =>
         PhoneTextContrastRun.Judge(line ?? Line(), new PhoneSwatch(White, foreground, 0, joined, joined), kind, "Windows OCR, en-US", level, 2.4375);
@@ -43,7 +43,7 @@ public sealed class PhoneTextContrastTests : IDisposable
     [InlineData(0x767676u, PhoneCheckLevel.Warning)] // 4.54:1
     [InlineData(0x777777u, PhoneCheckLevel.Error)] // 4.48:1
     public void Judge_AtAAA_HoldsTextToSevenAndFourAndAHalf(uint foreground, PhoneCheckLevel? expected) =>
-        Assert.Equal(expected, Judge(foreground, level: PhoneContrastLevel.AAA)?.Level);
+        Assert.Equal(expected, Judge(foreground, level: PhoneAuditLevel.AAA)?.Level);
 
     [Fact]
     public void Judge_ComparesTheRatioUnrounded_AndShowsAThirdPlaceWhenTwoWouldReachTheLimit()
@@ -106,24 +106,32 @@ public sealed class PhoneTextContrastTests : IDisposable
     [Fact]
     public void Judge_WithoutTheDensity_GivesTheWordsHeightInPixels()
     {
-        var judged = PhoneTextContrastRun.Judge(Line(), new PhoneSwatch(White, 0x959595, 0, 2, 2), PhonePictureKind.Screenshot, null, PhoneContrastLevel.AA, null);
+        var judged = PhoneTextContrastRun.Judge(Line(), new PhoneSwatch(White, 0x959595, 0, 2, 2), PhonePictureKind.Screenshot, null, PhoneAuditLevel.AA, null);
 
         Assert.Contains("the words are 39 pixels tall in OCR's box, as no density was recorded;", judged?.Measured, StringComparison.Ordinal);
         Assert.EndsWith("placed on the screen by OCR", judged?.Measured, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Settings_AreKept_AndAMissingOrUnreadableFileIsAA()
+    public void Settings_AreKept_AnOldFilesContrastLevelIsTheAuditLevel_AndAMissingOrUnreadableFileIsAA()
     {
         var path = Path.Combine(_folder, "settings", "check-settings.json");
 
-        Assert.Equal(PhoneContrastLevel.AA, PhoneCheckSettings.Load(path).ContrastLevel);
-        Assert.True(new PhoneCheckSettings { ContrastLevel = PhoneContrastLevel.AAA }.TrySave(path));
-        Assert.Equal(PhoneContrastLevel.AAA, PhoneCheckSettings.Load(path).ContrastLevel);
+        Assert.Equal(PhoneAuditLevel.AA, PhoneCheckSettings.Load(path).AuditLevel);
+        Assert.True(new PhoneCheckSettings { AuditLevel = PhoneAuditLevel.AAA }.TrySave(path));
+        Assert.Equal(PhoneAuditLevel.AAA, PhoneCheckSettings.Load(path).AuditLevel);
 
+        Assert.Contains("\"auditLevel\": 1", File.ReadAllText(path), StringComparison.Ordinal);
+
+        // A file from before the audit level was named: its text contrast
+        // level is the audit level.
+        File.WriteAllText(path, "{\"contrastLevel\": 1}");
+        Assert.Equal(PhoneAuditLevel.AAA, PhoneCheckSettings.Load(path).AuditLevel);
         File.WriteAllText(path, "{\"contrastLevel\": 7}");
-        Assert.Equal(PhoneContrastLevel.AA, PhoneCheckSettings.Load(path).ContrastLevel);
+        Assert.Equal(PhoneAuditLevel.AA, PhoneCheckSettings.Load(path).AuditLevel);
+        File.WriteAllText(path, "{\"auditLevel\": 7}");
+        Assert.Equal(PhoneAuditLevel.AA, PhoneCheckSettings.Load(path).AuditLevel);
         File.WriteAllText(path, "not json");
-        Assert.Equal(PhoneContrastLevel.AA, PhoneCheckSettings.Load(path).ContrastLevel);
+        Assert.Equal(PhoneAuditLevel.AA, PhoneCheckSettings.Load(path).AuditLevel);
     }
 }

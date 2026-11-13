@@ -60,8 +60,8 @@ public partial class MainWindow
     private void LoadCheckSettings()
     {
         _checkSettings = PhoneCheckSettings.Load(PhoneCheckSettings.DefaultPath);
-        ContrastAaRadioButton.IsChecked = _checkSettings.ContrastLevel == PhoneContrastLevel.AA;
-        ContrastAaaRadioButton.IsChecked = _checkSettings.ContrastLevel == PhoneContrastLevel.AAA;
+        AuditAaRadioButton.IsChecked = _checkSettings.AuditLevel == PhoneAuditLevel.AA;
+        AuditAaaRadioButton.IsChecked = _checkSettings.AuditLevel == PhoneAuditLevel.AAA;
     }
 
     private void BindPhoneScreens()
@@ -101,34 +101,54 @@ public partial class MainWindow
     // open.
     private async Task RunPhoneChecksAsync(SessionPlaybackArchive archive, CancellationToken token)
     {
-        PhoneCheckRun? run = null;
-        string? problem = null;
-        try
-        {
-            run = await Task.Run(
-                () => PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, archive.PhoneDevice, archive.RecordSource, PhoneSnapshotPictures.Of(archive), token),
-                token);
-        }
-        catch (OperationCanceledException)
+        if (!await RunTreeChecksAsync(archive, token))
         {
             return;
-        }
-        catch (Exception exception) when (
-            exception is IOException or InvalidDataException or InvalidOperationException or
-                JsonException or UnauthorizedAccessException or DbException)
-        {
-            problem = exception.Message;
         }
 
-        if (!ReferenceEquals(_playbackArchive, archive) || token.IsCancellationRequested)
+        await RunPhoneContrastAsync(archive, token);
+    }
+
+    // The tree's checks at the audit level, away from the window's thread;
+    // false when the recording was closed meanwhile. When the level is
+    // changed while they run, they are run again at the new level.
+    private async Task<bool> RunTreeChecksAsync(SessionPlaybackArchive archive, CancellationToken token)
+    {
+        PhoneAuditLevel level;
+        PhoneCheckRun? run;
+        string? problem;
+        do
         {
-            return;
+            (level, run, problem) = (AuditLevel, null, null);
+            try
+            {
+                var at = level;
+                run = await Task.Run(
+                    () => PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, archive.PhoneDevice, archive.RecordSource, PhoneSnapshotPictures.Of(archive), token, at),
+                    token);
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+            catch (Exception exception) when (
+                exception is IOException or InvalidDataException or InvalidOperationException or
+                    JsonException or UnauthorizedAccessException or DbException)
+            {
+                problem = exception.Message;
+            }
+
+            if (!ReferenceEquals(_playbackArchive, archive) || token.IsCancellationRequested)
+            {
+                return false;
+            }
         }
+        while (level != AuditLevel);
 
         _phoneChecks = run;
         _phoneChecksProblem = problem;
         ShowPhoneScreenRows();
-        await RunPhoneContrastAsync(archive, token);
+        return true;
     }
 
     // Measures the colours of the text on each settled snapshot's picture,
@@ -174,13 +194,18 @@ public partial class MainWindow
     private void JudgeTextContrast()
     {
         _phoneTextContrast = _phoneContrast is { } measured && _playbackArchive is { } archive
-            ? PhoneTextContrastRun.Run(measured, archive.PhoneScreens, archive.PhoneDevice, ContrastLevel)
+            ? PhoneTextContrastRun.Run(measured, archive.PhoneScreens, archive.PhoneDevice, AuditLevel)
             : null;
     }
 
-    private PhoneContrastLevel ContrastLevel => _checkSettings?.ContrastLevel ?? PhoneContrastLevel.AA;
+    private PhoneAuditLevel AuditLevel => _checkSettings?.AuditLevel ?? PhoneAuditLevel.AA;
 
-    private void ContrastLevelRadioButton_Checked(object sender, RoutedEventArgs e)
+    // The audit level guides the checks (owner, 2026-11-12): changing it
+    // works the text contrast findings out again from the same
+    // measurement, and runs the tree's checks again, as WCAG 2.5.5's runs
+    // only at AAA. The chosen finding goes, with its outline and its time
+    // buttons, as the findings are new.
+    private void AuditLevelRadioButton_Checked(object sender, RoutedEventArgs e)
     {
         // Setting the buttons from the saved level, as the window opens.
         if (_checkSettings is null)
@@ -188,32 +213,37 @@ public partial class MainWindow
             return;
         }
 
-        var level = ReferenceEquals(sender, ContrastAaaRadioButton) ? PhoneContrastLevel.AAA : PhoneContrastLevel.AA;
-        if (level == ContrastLevel)
+        var level = ReferenceEquals(sender, AuditAaaRadioButton) ? PhoneAuditLevel.AAA : PhoneAuditLevel.AA;
+        if (level == AuditLevel)
         {
             return;
         }
 
-        _checkSettings = (_checkSettings ?? PhoneCheckSettings.Default) with { ContrastLevel = level };
+        _checkSettings = (_checkSettings ?? PhoneCheckSettings.Default) with { AuditLevel = level };
         _checkSettings.TrySave(PhoneCheckSettings.DefaultPath);
         if (!_phoneScreensBound)
         {
             return;
         }
 
-        var cleared = _shownFinding is { Check: PhoneCheckNames.TextContrastAa or PhoneCheckNames.TextContrastAaa };
-        if (cleared)
+        _shownFinding = null;
+        JudgeTextContrast();
+        var rerun = _playbackArchive is { PhoneScreens.Recorded: true } archive &&
+            ReferenceEquals(_phoneChecksArchive, archive) &&
+            _phoneChecksCancellation is { } cancellation &&
+            (_phoneChecks is not null || _phoneChecksProblem is not null);
+        if (rerun)
         {
-            _shownFinding = null;
+            _phoneChecks = null;
+            _phoneChecksProblem = null;
         }
 
-        JudgeTextContrast();
         ShowPhoneScreenRows();
-        if (cleared)
+        ShowFindingButtons();
+        DisplayTouchesAt(_playbackPositionNanoseconds);
+        if (rerun)
         {
-            // The finding's outline goes with it, and its time buttons.
-            ShowFindingButtons();
-            DisplayTouchesAt(_playbackPositionNanoseconds);
+            _ = RunTreeChecksAsync(_playbackArchive!, _phoneChecksCancellation!.Token);
         }
     }
 
@@ -465,8 +495,14 @@ public partial class MainWindow
         var totals = $"{Count(screens.Apps.Count, "app")}, {Count(screens.Screens.Count, "screen")}, {Count(screens.Visits.Count, "visit")}.";
         ChecksStatusTextBlock.Text = (visit is null
             ? $"{totals} Before the first visit."
-            : $"{totals} Visit {visit.Number}, to {visit.Screen.Label}, at the playhead.") + " " + ChecksSummary();
+            : $"{totals} Visit {visit.Number}, to {visit.Screen.Label}, at the playhead.") + " " + AuditSummary() + " " + ChecksSummary();
     }
+
+    // The audit level the checks were run at, and what it changes
+    // (owner, 2026-11-12: the level guides the checks and their reporting).
+    private string AuditSummary() => AuditLevel == PhoneAuditLevel.AAA
+        ? "Audit level AAA: text contrast is held to WCAG 1.4.6, and targets to 44 by 44 dp (WCAG 2.5.5) as well as 2.5.8; 2.5.5's exceptions (an equivalent target, a target in text, one sized by Android, an essential presentation) are not judged."
+        : "Audit level AA: text contrast is held to WCAG 1.4.3, and targets to 2.5.8.";
 
     // What the checks found, or why they have not.
     private string ChecksSummary()

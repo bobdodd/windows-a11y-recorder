@@ -1240,3 +1240,57 @@ ending "no item on the screen is marked as a heading; seen once, at
 title row showed the Sleep Learning Library screen at 00:00:28.202 with
 the cyan outline round the whole picture. Long rows wrapped, with no
 horizontal scrollbar. Step 6 is checked on the PC.
+
+## Step 7: the audit level (2026-11-12)
+
+The owner's decision, the standards and the check built to them are in
+the architecture document's "The audit level". "Text contrast level:"
+is now "Audit level:", with "AA" and "AAA"; at AAA, targets are also
+held to 44 by 44 dp (WCAG 2.5.5), and the line under "Show current
+visit" says the level and what it holds the checks to. Checked in the
+Linux build environment: the solution builds with no warnings, and the
+new tests pass with the others. The throwaway program gives, for test
+16's recording, 11 findings of the tree at AA and 12 at AAA, the one
+added being on visit 6.
+
+## Test 32: build and install the tenth build (development PC)
+
+As test 19: close the recorder, run the PowerShell of test 19's step 1,
+run the newest installer with "Start the recorder and set up the
+analysis models" unchecked, and start the recorder from the Start menu.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the recorder
+opens.
+
+## Test 33: the audit level and the 44dp check, on test 16's recording
+
+Keep the phone's picture in view throughout. AAA was chosen for text
+contrast before this build.
+
+1. Choose "Open recording...", and open
+   `20261112-154851-32c7b61a5552453bbf5febffcca978c7` (test 16). If the
+   Checks window is closed, click the "Checks" tab, then move it so the
+   phone's picture is fully in view. Wait 10 seconds, and take a
+   screenshot of the whole screen.
+2. Scroll the list so the row starting "Visit 6," is at the top, and
+   take a screenshot of the whole screen.
+3. Above the list, click "AA", wait 10 seconds, scroll the list so the
+   row starting "Visit 6," is at the top again, and take a screenshot of
+   the whole screen.
+
+**On screen:** in step 1, "Audit level:" is shown above the list with
+"AAA" chosen, and the line under "Show current visit" includes "Audit
+level AAA: text contrast is held to WCAG 1.4.6, and targets to 44 by 44
+dp (WCAG 2.5.5) as well as 2.5.8; 2.5.5's exceptions (an equivalent
+target, a target in text, one sized by Android, an essential
+presentation) are not judged." and "Checks of the tree: 12 findings (10
+errors, 2 not run), from 7 settled snapshots". In step 2, below the
+Visit 6 row, are the bold row "Touch target under 44dp (WCAG 2.5.5,
+AAA): 1 not run" and, under it, a row starting "Not run: Button
+described as "Help & FAQ Get Support", 345.4 by 23 dp, too short; WCAG
+2.5.5 needs 44 by 44 dp". In step 3, "AA" is chosen, the line includes
+"Audit level AA: text contrast is held to WCAG 1.4.3, and targets to
+2.5.8." and "Checks of the tree: 11 findings (10 errors, 1 not run),
+from 7 settled snapshots", and there is no row starting "Touch target
+under 44dp" below the Visit 6 row. Long rows wrap; there is no
+horizontal scrollbar. Send the three screenshots.

@@ -24,7 +24,8 @@ built: step 5"), and was checked on the development PC on 2026-11-12
 (tests 28 and 29 passed). Step 6, the screen's title and headings, is
 built to the owner's decisions (see "Step 6: titles and headings") and
 was checked on the development PC on 2026-11-12 (tests 30 and 31
-passed). The owner's
+passed). The general audit level, AA or AAA, is built (see "The audit
+level"), and is yet to be checked on the development PC. The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -426,6 +427,8 @@ the recording is opened and nothing is kept.
    (see "As built: step 5").
 6. **The screen's title and headings**, one check for each discrete
    issue (see "Step 6: titles and headings"). Built.
+7. **The audit level**, AA or AAA, guiding the checks and their
+   reporting (see "The audit level"). Built.
 
 ## As built: step 1
 
@@ -1155,7 +1158,9 @@ Step 4c turns step 4b's measurements into findings in the Checks tab.
   a missing or unreadable file is AA. It is shown as the window opens, and
   can be changed before a recording is open. Changing it works the findings out
   again from the same measurement, without measuring or reading again.
-  The check is named for the level: "Text contrast at AA (WCAG 1.4.3)"
+  Since 2026-11-12 this setting is the general audit level (see "The
+  audit level"), and a file holding only the old "contrastLevel" keeps
+  its level. The check is named for the level: "Text contrast at AA (WCAG 1.4.3)"
   or "Text contrast at AAA (WCAG 1.4.6)".
 - **The limits.** AA: 4.5:1, or 3:1 for large text; AAA: 7:1, or 4.5:1
   for large text (decision 3). The ratio compared is worked out again
@@ -1598,6 +1603,80 @@ recordings of the client's app and of Settings):
   far from the top", as the checks are of what is on the screen. A
   heading with no text of its own or its children's is counted as a
   heading.
+
+## The audit level
+
+### The owner's decision (2026-11-12)
+
+Asked whether the touch target checks follow the AA or AAA setting (24
+or 44 px), the owner decided: "I want a general AA / AAA "audit" flag to
+guide checks and check reporting". The proposed units (dp for CSS
+pixels) and the standard (WCAG 2.5.5 applied directly) were accepted.
+
+### What the standards ask (checked in cited documents)
+
+- **WCAG 2.5.5 Target Size (Enhanced), level AAA:** "The size of the
+  target for pointer inputs is at least 44 by 44 CSS pixels except
+  when" the target has an equivalent of that size on the same page, is
+  inline in a sentence or block of text, is sized by the user agent and
+  not changed by the author, or a particular presentation is essential
+  ([Understanding SC 2.5.5](https://www.w3.org/WAI/WCAG22/Understanding/target-size-enhanced.html)).
+  Unlike 2.5.8, it has no spacing exception.
+- **WCAG2ICT** gives guidance on applying the level A and AA criteria to
+  non-web software, not AAA
+  ([WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/)), so 2.5.5 is applied
+  directly, with Android's dp for CSS pixels, as the 24dp check of 2.5.8
+  already does.
+
+### As built
+
+- **The setting.** "Audit level:" in the Checks tab, with "AA" and
+  "AAA", in place of "Text contrast level:". It is kept in
+  `check-settings.json` as "auditLevel" (`PhoneCheckSettings.AuditLevel`,
+  the `PhoneAuditLevel` enumeration, renamed from `PhoneContrastLevel`);
+  a file with only the old "contrastLevel" keeps that level, and a
+  missing, unreadable or unknown level is AA.
+- **What it guides.** AA: text contrast to WCAG 1.4.3 and target size
+  to 2.5.8 (the ATF 48dp check is run at both levels). AAA: text
+  contrast to 1.4.6 in place of 1.4.3, and target size to 2.5.5 as well
+  as 2.5.8. Non-text contrast (1.4.11) and the title and heading checks
+  are the same at both levels.
+- **Touch target under 44dp (WCAG 2.5.5, AAA)**, run only at AAA and
+  only with the display density: an error for each clickable or long
+  clickable item visible to the user, with an area, under 44 dp wide or
+  high, unrounded, saying "too narrow", "too short" or both, for
+  example "40.2 by 40.2 dp, too narrow and too short; WCAG 2.5.5 needs
+  44 by 44 dp". As for the other touch target checks, an item against
+  the edge of a list that scrolls is not run, as the list may cut it
+  off.
+- **The reporting.** The line under "Show current visit" says the level
+  and what it holds the checks to, before the findings: "Audit level
+  AA: text contrast is held to WCAG 1.4.3, and targets to 2.5.8." or
+  "Audit level AAA: text contrast is held to WCAG 1.4.6, and targets to
+  44 by 44 dp (WCAG 2.5.5) as well as 2.5.8; 2.5.5's exceptions (an
+  equivalent target, a target in text, one sized by Android, an
+  essential presentation) are not judged."
+- **Changing the level** works the text contrast findings out again
+  from the same measurement, and runs the tree's checks again at the new
+  level; if they are still running, they are run again when they end.
+- **Run on the development PC** with test 16's recording (session
+  20261112-154851-32c7b61a5552453bbf5febffcca978c7): at AA, 11 findings
+  of the tree (10 errors, 1 not run), as before; at AAA, 12 (10 errors,
+  2 not run). The one added is on visit 6: "Not run: Button described as
+  "Help & FAQ Get Support", 345.4 by 23 dp, too short; WCAG 2.5.5 needs
+  44 by 44 dp; not run, as it is against the edge of a list that
+  scrolls, so may be cut off by it". No other target in the recording's
+  checked snapshots is under 44 dp.
+- **Checked before any PC test:** the solution builds with no warnings,
+  and the tests pass, 2,381 of them, with the 10 that need Windows
+  failing as before. The new tests cover a 40.2 dp button at AAA and at
+  AA, a target 44 dp wide but 43.9 dp high, a 44 dp square passing, a
+  target against a list's edge, no density, the run at AAA, and the old
+  setting's name.
+- **Limits.** 2.5.5's exceptions are not judged: a target with an
+  equivalent of 44 dp, one in text, one sized by Android and one whose
+  size is essential are all reported, and need a person to set aside.
+  Section headings (2.4.10) and other AAA criteria are not checked.
 
 ## Decisions on the open questions (2026-11-11)
 
