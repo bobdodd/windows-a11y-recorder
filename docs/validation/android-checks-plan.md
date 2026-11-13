@@ -2049,3 +2049,19 @@ gave no finding. The count is of every change the sensor reported, not
 of turns held. The owner chose to leave the count as it is, so test 53's
 expected line should be read as "2 times or more" when the phone moves
 while being put down.
+
+## Result of test 54 (2026-11-13)
+
+Test 54 passed (session
+`20261113-215419-44a271ec63364cfeab5bfbc72a4fb1f6`): the line read
+"Orientation (WCAG 1.3.4), one check: no findings; the phone was turned
+between upright and sideways 3 times, from the companion app's own
+sensor, and the screen stayed as it was, with Auto-rotate on, for 2
+seconds or more after 0 turns within a visit; it is looked for only
+while Auto-rotate is on.", and the list had no row starting
+"Orientation restricted". Measured on the recording: the sensor read
+sideways at 7.615 seconds and the display turned to 270 at 7.898; it
+read upright at 14.256 and the display turned back to 0 at 14.545. The
+third turn is a sideways reading of under half a second from 20.876, as
+the phone was put down, as in test 53. Step 15 has its acceptance on the
+development PC.
