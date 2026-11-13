@@ -1224,3 +1224,19 @@ phone's picture starts "00:00:28.202", the Sleep Learning Library screen
 is shown, and a cyan outline runs round the edge of the whole picture.
 Long rows wrap; there is no horizontal scrollbar. Send the three
 screenshots.
+
+## Results of tests 30 and 31 (2026-11-12)
+
+Passed on the development PC with the build of 3a162e4, AAA still chosen
+for text. The line under "Show current visit" included "Checks of the
+tree: 11 findings (10 errors, 1 not run), from 7 settled snapshots".
+Under Visit 2 the bold row read "Screen title shared with other screens
+(WCAG2ICT 2.4.2): 1 error", then the row ending "its window title 'Nova
+SleepCare' is also the title of 3 other screens checked in this
+recording: 'Welcome, Bob Dodd', 'Sleep Diary', 'Bob Dodd'; seen once, at
+00:00:28.202", then "No heading (WCAG 1.3.1): 1 error" and the row
+ending "no item on the screen is marked as a heading; seen once, at
+00:00:28.202". Visit 1 showed the same two errors. Choosing the shared
+title row showed the Sleep Learning Library screen at 00:00:28.202 with
+the cyan outline round the whole picture. Long rows wrapped, with no
+horizontal scrollbar. Step 6 is checked on the PC.

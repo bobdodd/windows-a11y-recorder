@@ -23,7 +23,8 @@ the owner's decisions (see "Step 5: the owner's decisions" and "As
 built: step 5"), and was checked on the development PC on 2026-11-12
 (tests 28 and 29 passed). Step 6, the screen's title and headings, is
 built to the owner's decisions (see "Step 6: titles and headings") and
-is to be checked on the development PC (tests 30 and 31). The owner's
+was checked on the development PC on 2026-11-12 (tests 30 and 31
+passed). The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
