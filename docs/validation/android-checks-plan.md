@@ -1510,3 +1510,18 @@ com.pss.novasleepcare, every item with text is focusable, as in an app
 drawn with Flutter, whose tree marks focusable what a screen reader can
 reach, so the tree does not show which items a keyboard reaches." Long
 rows wrap; there is no horizontal scrollbar. Send the screenshot.
+
+## Results of tests 38 and 39 (2026-11-13)
+
+Passed on the development PC with the build of 1565150, as recorded by
+the owner, with AAA chosen (2.1.1 is level A, so the same at both
+levels). The build ended with `INSTALLER BUILT` and the recorder
+opened. The line under "Show current visit" included "Clickable but not
+focusable (WCAG 2.1.1), one of them: no findings, from 50 clickable
+items checked, 0 set aside inside a focusable clickable item; each is a
+warning, until a keyboard test confirms it." and "In
+com.pss.novasleepcare, every item with text is focusable, as in an app
+drawn with Flutter, whose tree marks focusable what a screen reader can
+reach, so the tree does not show which items a keyboard reaches." Long
+rows wrapped, with no horizontal scrollbar. Clickable but not focusable
+is checked on the PC.

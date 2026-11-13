@@ -34,7 +34,9 @@ Text measured on the recordings to hand, are recorded as options in
 to the owner's decisions (see "Step 9: Label in Name"), and was
 checked on the development PC on 2026-11-12 (tests 36 and 37 passed).
 Step 10, clickable but not focusable, is built from the tree alone, to
-the owner's decision (see "Step 10: clickable but not focusable"). The owner's
+the owner's decision (see "Step 10: clickable but not focusable"), and
+was checked on the development PC on 2026-11-13 (tests 38 and 39
+passed). The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -445,7 +447,8 @@ the recording is opened and nothing is kept.
    against the text inside it (see "Step 9: Label in Name"). Built, and
    checked on the PC.
 10. **Clickable but not focusable** (WCAG 2.1.1), from the tree alone
-   (see "Step 10: clickable but not focusable"). Built.
+   (see "Step 10: clickable but not focusable"). Built, and checked on
+   the PC.
 
 ## As built: step 1
 
