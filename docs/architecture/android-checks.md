@@ -2221,7 +2221,11 @@ With a throwaway program, on the recordings to hand (measured):
 - **The same at both audit levels:** 3.3.1, 3.3.2 and 4.1.2 are level A.
 - **On the recordings to hand** (measured, with the throwaway program):
   the client's app and home screen give one finding, the Sleep Diary
-  field's, at 00:00:23.368 in visit 4, quoting "Notes (optional)";
+  field's, in visit 4, quoting "Notes (optional)", at 00:00:41.101 on
+  the PC (test 41): the picture of its snapshot, the last video frame
+  before the window was next listed. The throwaway program's copy of the
+  recording has no phone video, so gave the snapshot's own time,
+  00:00:23.368;
   "Display size & text" gives 12 sliders checked and no findings; tests
   16 and 18 give none.
 - **Checked before any PC test:** the solution builds with no warnings,

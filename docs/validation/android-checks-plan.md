@@ -1538,7 +1538,9 @@ Linux build environment: the solution builds with no warnings, and the
 new tests pass with the others. The throwaway program gives, for the
 recording of the client's app and the home screen
 (`20261112-005243-5528d67531dd4441a50b2c2985350c59`), one finding, the
-Sleep Diary notes field's, at 00:00:23.368 in visit 4.
+Sleep Diary notes field's, in visit 4. Its copy of the recording has
+no phone video, so it gave the snapshot's own time, 00:00:23.368, not
+the time of the snapshot's picture that the recorder shows.
 
 ## Test 40: build and install the fourteenth build (development PC)
 
@@ -1572,5 +1574,12 @@ that includes "its only label is its hint, "Fell asleep quickly, woke
 up once...", which is not shown once text is typed, and no item is
 linked to it as its label (labeledBy); the text just above it, "Notes
 (optional)", is not linked to it as its label" and "seen once, at
-00:00:23.368". There is no row starting "Field with no name". Long rows
+00:00:41.101". There is no row starting "Field with no name". Long rows
 wrap; there is no horizontal scrollbar. Send the two screenshots.
+
+Corrected on 2026-11-13, after the owner's run: the time was first
+written as "00:00:23.368", the snapshot's own time from the throwaway
+program, whose copy of the recording has no phone video. A finding is
+shown at the picture of its snapshot, the last video frame before the
+window was next listed, as for the other checks, and that is
+00:00:41.101, as on the owner's screenshot.
