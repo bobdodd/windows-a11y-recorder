@@ -226,6 +226,13 @@ public sealed class PhoneCheckRun
     /// <summary>The times, in visits, the screen did not turn with the phone for the hold time, with Auto-rotate on.</summary>
     public int OrientationNotFollowed { get; private set; }
 
+    /// <summary>
+    /// Step 16: the texts looked at for white space used for layout (an
+    /// item's text, content description, hint, state description and pane
+    /// title), once for each distinct sight of them.
+    /// </summary>
+    public int SequenceTexts { get; private set; }
+
     /// <summary>Why a snapshot could not be checked, one for each such snapshot.</summary>
     public IReadOnlyList<string> Problems { get; private set; } = [];
 
@@ -275,6 +282,7 @@ public sealed class PhoneCheckRun
             // The results of each taking of the window's items in the visit.
             var byTaking = new Dictionary<string, (PhoneCheckWindow Window, IReadOnlyList<PhoneCheckResult> Results)?>(StringComparer.Ordinal);
             var fieldsByTaking = new Dictionary<string, PhoneFieldChecks.Measured>(StringComparer.Ordinal);
+            var sequenceByTaking = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var settled in visit.SettledSnapshots)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -326,8 +334,11 @@ public sealed class PhoneCheckRun
                         {
                             var context = new PhoneCheckContext((float)(density?.PixelsPerDp ?? 0), screen?.Width, screen?.Height, level);
                             var fieldCheck = PhoneFieldChecks.Measure(window, context);
-                            checkedWindow = (window, [.. PhoneTreeChecks.Run(window, context), .. PhoneFocusChecks.Run(window, context), .. fieldCheck.Results, .. PhoneScreenChecks.Run(window, context)]);
+                            var sequenceCheck = PhoneSequenceChecks.Measure(window);
+                            checkedWindow = (window, [.. PhoneTreeChecks.Run(window, context), .. PhoneFocusChecks.Run(window, context), .. fieldCheck.Results,
+                                .. sequenceCheck.Results, .. PhoneScreenChecks.Run(window, context)]);
                             fieldsByTaking[key] = fieldCheck;
+                            sequenceByTaking[key] = sequenceCheck.Texts;
                             if (checkedTakings.Add(taking.EventId))
                             {
                                 run.WindowsChecked++;
@@ -370,6 +381,11 @@ public sealed class PhoneCheckRun
                     run.Expandable += fieldCounts.Expandable;
                     run.ExpandableNotRecorded += fieldCounts.ExpandableNotRecorded;
                     run.Sliders += fieldCounts.Sliders;
+                }
+
+                if (sequenceByTaking.TryGetValue(key, out var sequenceTexts))
+                {
+                    run.SequenceTexts += sequenceTexts;
                 }
                 textFocus.TryGetValue(visit.Screen.Package, out var sofar);
                 textFocus[visit.Screen.Package] = (sofar.Text + focus.TextItems, sofar.Focusable + focus.FocusableTextItems);

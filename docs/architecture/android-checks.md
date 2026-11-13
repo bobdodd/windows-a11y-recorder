@@ -2943,6 +2943,145 @@ check cannot be measured on them, and they give "not looked for".
   background was checked on the Pixel 10 Pro XL in tests 52 and 53
   (2026-11-13).
 
+## Step 16: white space used for layout
+
+### The owner's decisions (2026-11-13)
+
+The candidates list first had 1.3.2 as the screen reader's order
+compared with the order on the screen. The owner pointed out that this
+is not 1.3.2: a reading order can differ from the screen's and still be
+meaningful (out of order paragraphs fail, text and a table in either
+order do not), and telling which needs an understanding of the content.
+What can be found without it is white space used for layout. The owner
+asked for the F32 and F33 findings, and then, as newlines used to force
+layout also fail 1.3.2, for a line break in mid-sentence. The
+recordings were looked at first (below), then the choices were put to
+the owner:
+
+- **F32, which letters count as a spaced-out word:** "3+ letters, all":
+  a run of 3 or more single letters (2 or more Han, kana or Hangul
+  characters) separated by one white space character each, a space, a
+  no-break space, an ideographic space or a line break. An initialism
+  spaced out, such as "U S A", which F32 exempts, is found as well, a
+  false positive the owner accepts.
+- **F33, what counts as columns:** "2+ lines with gaps": 2 or more lines
+  of one item's text that each have a gap of 2 or more white space
+  characters, or a tab, between words. One line with a double space is
+  not columns.
+- **A line break in mid-sentence:** "Mid-sentence too": a line break in
+  one item's text where the line before ends with none of . ! ? : ; (or
+  an ellipsis, or their CJK forms, with any closing quotes or brackets
+  after them) and the next line starts with a lowercase letter.
+- **Level:** "Both errors", at both audit levels (1.3.2 is level A),
+  and the mid-sentence break an error as well.
+
+### What the standards say (checked in cited documents)
+
+- **1.3.2 Meaningful Sequence (A):** "it be possible to programmatically
+  determine at least one sequence of the content that makes sense"; a
+  sequence is meaningful "if the order of content in the sequence cannot
+  be changed without affecting its meaning", and "There may be more than
+  one order that is "correct"" ([Understanding 1.3.2](https://www.w3.org/WAI/WCAG22/Understanding/meaningful-sequence.html)).
+  WCAG2ICT says it "applies directly as written" to non-web software
+  ([WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/)).
+- **F32:** white space characters, "such as space, tab, line break, or
+  carriage return", used "to control letter spacing within a word"; its
+  examples are "W e l c o m e", "H&nbsp;E&nbsp;L&nbsp;L&nbsp;O", Tokyo
+  written with an ideographic space between its two characters, and
+  vertical text made with line breaks. "Inserting white space characters
+  into an initialism is not an example of this failure", and white
+  space between words "is not a failure" ([F32](https://www.w3.org/WAI/WCAG22/Techniques/failures/F32)).
+- **F33:** white space characters used "to format columns of data in
+  text content"; a screen reader reads such text across the columns,
+  line by line ([F33](https://www.w3.org/WAI/WCAG22/Techniques/failures/F33)).
+
+### Looked at first (2026-11-13)
+
+Measured on the 45 phone recordings made since 2026-11-08, 15 of them
+with trees: 493 distinct texts (items' text, content descriptions,
+hints, state descriptions and pane titles), from Settings, Gmail,
+Chrome, the home screen, the client's app (Nova SleepCare) and others.
+None has spaced-out letters. Four Gmail texts have 2 spaces in a row,
+each on one line: a sender list and its count ("me, Chris  2", with
+no-break spaces) and a subject typed with a double space, neither of
+them columns. The 21 texts with line breaks break between whole parts,
+such as a title and its subtitle ("Sleep Goals" over "Update your
+goals"), an emoji over its word, a heading over a list, or list items;
+Settings starts each item of one list with a no-break space. None
+breaks a sentence. The rules as built find nothing in any of the 493.
+
+### As built
+
+- **The checks,** `PhoneSequenceChecks`, run with the tree's checks on
+  each taking of a visit's window, and their findings are merged as
+  theirs are, by visit, check and item. Three discrete errors, at both
+  audit levels:
+  - "Letters spaced apart with white space (WCAG 1.3.2, F32)", for
+    example "its text has 7 single letters separated by spaces, "W e l c
+    o m e", so a screen reader may read them one at a time instead of as
+    the word "Welcome"; F32: white space used to space the letters of a
+    word; an initialism spaced this way, which F32 allows, is found as
+    well". A line break in the run is shown as "⏎".
+  - "Columns made with white space (WCAG 1.3.2, F33)", for example "3
+    of the 6 lines of its text have a gap of 2 or more spaces, or a tab,
+    between words, as columns laid out with white space, the first "Name
+    Hours"; a screen reader reads across the columns, line by line;
+    F33: white space used to make columns".
+  - "Line break in mid-sentence (WCAG 1.3.2)", for example "its text has
+    a line break in mid-sentence, the first between "This sentence is
+    broken" and "across two lines for": the line ends with no . ! ? : or
+    ;, and the next starts with a lowercase letter, so the break is there
+    for its layout, and a screen reader or larger text keeps it". A break
+    inside a run of spaced letters (vertical text) is F32's, not counted
+    again.
+- **The text looked at** is what TalkBack reads from each shown item:
+  its text, content description, hint, state description and pane
+  title. The text typed into a field is the user's, not the app's, so
+  it is not looked at, unless the field is showing its hint. Each item
+  has at most one finding of each check, from the first of its texts
+  that shows it. OCR is not used: it reads the picture, where spacing
+  drawn by the font cannot be told from white space in the text.
+- **The line under "Show current visit"** adds, for example, "White
+  space used for layout (WCAG 1.3.2), three checks: no findings, from
+  12 texts looked at (each shown item's text, content description, hint,
+  state description and pane title, from the tree, not OCR; text typed
+  into a field is not looked at); letters of a word spaced apart (3 or
+  more single letters, 2 or more Han, kana or Hangul, initialisms
+  included), 2 or more lines with gaps of 2 or more spaces or a tab, and
+  a line break before a lowercase letter with no . ! ? : or ; before it.
+  Whether the order of the content makes sense is not looked for."
+- **No new record:** the checks read the trees already recorded, so the
+  playback index's version is unchanged, and recordings to hand can be
+  checked.
+- **A test page,** `docs/validation/fixtures/white-space-layout.txt`, a
+  plain text file Chrome shows as it is, with each of the three.
+- **Checked before any PC test:** the solution builds with no warnings,
+  and the tests pass, with the Windows-only browser tests failing as
+  before. The new tests cover F32's examples (spaces, no-break spaces,
+  an ideographic space, line breaks, a letter with a combining accent,
+  an initialism), what is not spaced letters (2 letters, words, digits,
+  double spaces), columns against single lines with a double space and
+  Settings' indented list, mid-sentence breaks against the measured
+  titles, lists and emoji, and which of an item's texts are looked at.
+
+### Limits
+
+- Whether the order of the content makes sense, such as paragraphs out
+  of order, is not looked for: that needs an understanding of the
+  content, and would be a vision or AI review.
+- An initialism spaced out is found, which F32 allows (owner's choice).
+  Single letters that are a list, such as "A B C" for answer choices in
+  one text, are found as well.
+- A list of lowercase words, one to a line, with no punctuation, is
+  found as a mid-sentence break.
+- Columns are found only within one item's text. Columns made of items
+  side by side, or a layout table, are not; nor are columns whose lines
+  are separate items.
+- F34, a table made with white space, is not built; text laid out as a
+  table with gaps on 2 or more lines is found as F33's columns.
+- Line breaks between words in a script with no case, such as Japanese,
+  are not found, as the next line has no lowercase letter.
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A

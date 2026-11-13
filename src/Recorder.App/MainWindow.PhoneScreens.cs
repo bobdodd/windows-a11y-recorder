@@ -740,6 +740,14 @@ public partial class MainWindow
                 $"the phone was turned between upright and sideways {Count(run.OrientationTurns, "time")}, from the companion app's own sensor, and the screen stayed as it was, with Auto-rotate on, for {Count(run.OrientationHoldSeconds, "second")} or more after {Count(run.OrientationNotFollowed, "turn")} within a visit")
             : $"not looked for, as {run.OrientationNotRun ?? "the checks did not run"}";
         summary += $" Orientation (WCAG 1.3.4), one check: {orientationFindings}; {orientation}; it is looked for only while Auto-rotate is on.";
+        var sequenceChecks = new[] { PhoneCheckNames.SpacedLetters, PhoneCheckNames.SpaceColumns, PhoneCheckNames.LineBreakMidSentence };
+        var sequenceFound = run.Findings.Where(finding => sequenceChecks.Contains(finding.Check)).ToList();
+        var sequenceFindings = sequenceFound.Count == 0
+            ? "no findings"
+            : $"{Count(sequenceFound.Count, "finding")} ({Levels(sequenceFound)})";
+        summary += string.Create(
+            CultureInfo.CurrentCulture,
+            $" White space used for layout (WCAG 1.3.2), three checks: {sequenceFindings}, from {Count(run.SequenceTexts, "text")} looked at (each shown item's text, content description, hint, state description and pane title, from the tree, not OCR; text typed into a field is not looked at); letters of a word spaced apart (3 or more single letters, 2 or more Han, kana or Hangul, initialisms included), 2 or more lines with gaps of 2 or more spaces or a tab, and a line break before a lowercase letter with no . ! ? : or ; before it. Whether the order of the content makes sense is not looked for.");
         if (run.TextFocusablePackages.Count > 0)
         {
             summary += $" In {string.Join(" and ", run.TextFocusablePackages)}, every item with text is focusable, as in an app drawn with Flutter, whose tree marks focusable what a screen reader can reach, so the tree does not show which items a keyboard reaches.";

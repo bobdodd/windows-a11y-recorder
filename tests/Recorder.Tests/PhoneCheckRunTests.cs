@@ -196,6 +196,9 @@ public sealed class PhoneCheckRunTests : IDisposable
 
         // Step 11: the fixture has no field, invalid item, expandable item or slider.
         Assert.Equal((0, 0, 0, 0, 0), (run.Fields, run.Invalid, run.Expandable, run.ExpandableNotRecorded, run.Sliders));
+
+        // Step 16: "Save" and "Settings", once for each taking.
+        Assert.Equal(4, run.SequenceTexts);
     }
 
     // Step 10: clickable but not focusable (WCAG 2.1.1), from the tree.

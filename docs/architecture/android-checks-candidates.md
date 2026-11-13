@@ -143,9 +143,16 @@ tree does not give.
   ([WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/)). Recordings need a
   step that turns the phone; checked on the PC in tests 51 to 53
   (2026-11-13).
-- **1.3.2 Meaningful Sequence:** the screen reader's order against the
-  order on the screen, top to bottom and left to right; layouts in
-  columns would give false findings.
+- **1.3.2 Meaningful Sequence:** built on 2026-11-13 for white space
+  used for layout only: F32 (letters of a word spaced apart), F33
+  (columns made with spaces) and a line break in mid-sentence, three
+  errors (see "Step 16: white space used for layout" in
+  `android-checks.md`). This entry first had the screen reader's order
+  compared with the order on the screen; the owner pointed out that is
+  not 1.3.2, as more than one order can be meaningful
+  ([Understanding 1.3.2](https://www.w3.org/WAI/WCAG22/Understanding/meaningful-sequence.html)),
+  and whether an order changes the meaning needs an understanding of
+  the content, a vision or AI review, not built.
 
 ## 1.4.5 Images of Text
 

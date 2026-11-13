@@ -2065,3 +2065,76 @@ read upright at 14.256 and the display turned back to 0 at 14.545. The
 third turn is a sideways reading of under half a second from 20.876, as
 the phone was put down, as in test 53. Step 15 has its acceptance on the
 development PC.
+
+## Step 16: white space used for layout (2026-11-13)
+
+The owner's decisions, what the standard says, and the checks built to
+them are in the architecture document's "Step 16: white space used for
+layout". Three checks of WCAG 1.3.2, each an error at both audit
+levels, from the tree's text: letters of a word spaced apart (F32),
+columns made with white space (F33), and a line break in mid-sentence.
+They read the trees already recorded, so no new companion app is
+needed. Measured on 45 phone recordings to hand first: none of their
+493 distinct texts gives a finding. Checked in the Linux build
+environment: the solution builds with no warnings, and the new tests
+pass with the others.
+
+The phone shows each of the three on a test page, the plain text file
+`docs/validation/fixtures/white-space-layout.txt`, which Chrome shows
+as it is, read from GitHub:
+
+```
+W e l c o m e
+Name      Hours
+Bob       7.5
+Ann       8
+This sentence is broken
+across two lines for its layout.
+```
+
+## Test 55: build and install the twentieth build (development PC)
+
+As test 19: close the recorder, run the PowerShell of test 19's step 1,
+run the newest installer with "Start the recorder and set up the
+analysis models" unchecked, and start the recorder from the Start menu.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the recorder
+opens.
+
+## Test 56: the test page in Chrome
+
+Keep the phone's picture in view throughout.
+
+Before the test, make sure TalkBack is off. Connect the Pixel by USB,
+unlocked. Leave the recorder open from test 55, with "Android device"
+chosen in "Recording target".
+
+1. In PowerShell on the PC, run:
+
+   ```powershell
+   $adb = Join-Path $env:USERPROFILE "windows-a11y-recorder\artifacts\android-checks\tools\scrcpy-win64-v5.0.1\adb.exe"
+   & $adb shell am start -a android.intent.action.VIEW -d "https://raw.githubusercontent.com/bobdodd/windows-a11y-recorder/main/docs/validation/fixtures/white-space-layout.txt" com.android.chrome
+   ```
+
+2. On the phone, Chrome shows a page of 6 lines starting "W e l c o m
+   e". In the recorder, choose "Start recording", and wait 10 seconds.
+3. Choose "Stop recording", and wait until the recording has opened in
+   the player.
+4. If the Checks window is closed, click the "Checks" tab, then move it
+   so the phone's picture is fully in view. Wait 10 seconds, scroll the
+   list until the row starting "Letters spaced apart" is in view, and
+   take a screenshot of the whole screen.
+
+**On screen:** in step 2 the page shows the 6 lines above. In step 4 the
+line under "Show current visit" includes "White space used for layout
+(WCAG 1.3.2), three checks: 3 findings (3 errors)". The list has, under
+Chrome's screen, the rows "Letters spaced apart with white space (WCAG
+1.3.2, F32): 1 error", "Columns made with white space (WCAG 1.3.2, F33):
+1 error" and "Line break in mid-sentence (WCAG 1.3.2): 1 error", each
+with a row below it starting "Error:"; the first includes "7 single
+letters separated by spaces", the second "3 of the 6 lines", and the
+third "between "This sentence is broken" and "across two lines for"".
+If none of the rows is there, say so and send the screenshot as it is:
+Chrome may give the page's lines as separate items, which the recording
+will show. Long rows wrap; there is no horizontal scrollbar. Send the
+screenshot.

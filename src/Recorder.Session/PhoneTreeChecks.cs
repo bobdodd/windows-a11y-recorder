@@ -141,6 +141,16 @@ public static class PhoneCheckNames
     /// </summary>
     public const string OrientationRestricted = "orientation-restricted";
 
+    /// <summary>
+    /// White space used for layout (step 16, PhoneSequenceChecks), WCAG
+    /// 1.3.2, from the tree's text, each one discrete error (owner,
+    /// 2026-11-13): the letters of a word spaced apart (F32), columns made
+    /// with spaces (F33), and a line break in mid-sentence.
+    /// </summary>
+    public const string SpacedLetters = "spaced-letters";
+    public const string SpaceColumns = "space-columns";
+    public const string LineBreakMidSentence = "line-break-mid-sentence";
+
     /// <summary>The checks in the order the Checks tab lists them.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
@@ -149,6 +159,7 @@ public static class PhoneCheckNames
         FieldNoLabel, FieldNoName, InvalidNoError, ExpandableNoState, SliderNoRange, StatusNotAnnounced, NoLiveRegion,
         TextGoneByItself, TextGoneAsContentChanged, TextUpdatingByItself, MovingByItself,
         ContextOnFocus, ContextOnScreenReaderFocus, ContextOnInput, OrientationRestricted,
+        SpacedLetters, SpaceColumns, LineBreakMidSentence,
         TitleMissing, TitleShared, NoHeading, FirstHeadingLow, ManyHeadings,
     ];
 
@@ -193,6 +204,9 @@ public static class PhoneCheckNames
         ContextOnScreenReaderFocus => "Change of context on TalkBack focus (WCAG 3.2.1)",
         ContextOnInput => "Change of context on input (WCAG 3.2.2)",
         OrientationRestricted => "Orientation restricted (WCAG 1.3.4)",
+        SpacedLetters => "Letters spaced apart with white space (WCAG 1.3.2, F32)",
+        SpaceColumns => "Columns made with white space (WCAG 1.3.2, F33)",
+        LineBreakMidSentence => "Line break in mid-sentence (WCAG 1.3.2)",
         _ => check,
     };
 
