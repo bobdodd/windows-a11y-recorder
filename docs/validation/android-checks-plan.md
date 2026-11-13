@@ -1449,3 +1449,21 @@ controls checked." In step 3, between the Visit 3 and Visit 5 rows,
 is the row "Not checked, as no snapshot of this visit settled.", and no
 row starting "Label in name". Long rows wrap; there is
 no horizontal scrollbar. Send the three screenshots.
+
+## Results of tests 36 and 37 (2026-11-12)
+
+Passed on the development PC with the build of c229844, as recorded by
+the owner, with AAA chosen (2.5.3 is level A, so the same at both
+levels). The line under "Show current visit" included "Label in name
+(WCAG 2.5.3): no findings, from 47 controls checked, 47 passed, 3 with
+no label read; the label is all the text inside a control, and the text
+of any item it is labelled by, from the tree's text and, where it has
+none, OCR's, against its content description; text beside a control is
+not taken as its label." Under Visit 1, after "Image of text (WCAG
+1.4.5): no image in this visit.", was the row "Label in name (WCAG
+2.5.3): no findings, from 11 controls checked.", with Visit 7's row
+next; Visit 2's row read "no findings, from 8 controls checked.".
+Between the Visit 3 and Visit 5 rows was "Not checked, as no snapshot of
+this visit settled.", with no row starting "Label in name". Long rows
+wrapped, with no horizontal scrollbar. Label in Name is checked on the
+PC.
