@@ -596,6 +596,17 @@ public partial class MainWindow
         var summary = string.Create(
             CultureInfo.CurrentCulture,
             $"Checks of the tree: {findings}, from {Count(run.SnapshotsChecked, "settled snapshot")}, in {run.Elapsed.TotalSeconds:0.0} seconds.");
+        var unfocusable = run.Findings.Where(finding => finding.Check == PhoneCheckNames.ClickableNotFocusable).ToList();
+        var unfocusableFindings = unfocusable.Count == 0
+            ? "no findings"
+            : $"{Count(unfocusable.Count, "finding")} ({Levels(unfocusable)})";
+        summary += string.Create(
+            CultureInfo.CurrentCulture,
+            $" {PhoneCheckNames.Title(PhoneCheckNames.ClickableNotFocusable)}, one of them: {unfocusableFindings}, from {Count(run.Clickable, "clickable item")} checked, {run.ClickableSetAside:N0} set aside inside a focusable clickable item; each is a warning, until a keyboard test confirms it.");
+        if (run.TextFocusablePackages.Count > 0)
+        {
+            summary += $" In {string.Join(" and ", run.TextFocusablePackages)}, every item with text is focusable, as in an app drawn with Flutter, whose tree marks focusable what a screen reader can reach, so the tree does not show which items a keyboard reaches.";
+        }
         if (run.WithoutDensity > 0)
         {
             summary += $" The touch target checks did not run on {Count(run.WithoutDensity, "settled snapshot")}, as no density was recorded for them.";

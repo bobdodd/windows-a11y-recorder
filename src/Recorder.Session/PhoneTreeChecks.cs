@@ -80,6 +80,12 @@ public static class PhoneCheckNames
     public const string LabelNotInName = "label-not-in-name";
     public const string LabelNotAtStart = "label-not-at-start";
 
+    /// <summary>
+    /// Clickable but not focusable (step 10, PhoneFocusChecks), WCAG 2.1.1,
+    /// from the tree alone: a warning, until a keyboard test confirms it.
+    /// </summary>
+    public const string ClickableNotFocusable = "clickable-not-focusable";
+
     /// <summary>The screen's title and headings (step 6, PhoneScreenChecks), each one discrete issue (owner, 2026-11-12).</summary>
     public const string TitleMissing = "screen-title-missing";
     public const string TitleShared = "screen-title-shared";
@@ -91,7 +97,7 @@ public static class PhoneCheckNames
     public static IReadOnlyList<string> All { get; } =
     [
         TouchTarget, TouchTargetWcag, TouchTargetEnhanced, SpeakableText, DuplicateSpeakableText, DuplicateClickableBounds,
-        EditableContentDescription, RedundantDescription, ClassName, TraversalOrder,
+        EditableContentDescription, RedundantDescription, ClassName, TraversalOrder, ClickableNotFocusable,
         TitleMissing, TitleShared, NoHeading, FirstHeadingLow, ManyHeadings,
     ];
 
@@ -115,6 +121,7 @@ public static class PhoneCheckNames
         ImageOfTextAaa => "Image of text (WCAG 1.4.9, AAA)",
         LabelNotInName => "Label not in name (WCAG 2.5.3)",
         LabelNotAtStart => "Label not at the start of the name (WCAG 2.5.3, best practice)",
+        ClickableNotFocusable => "Clickable but not focusable (WCAG 2.1.1)",
         TitleMissing => "No screen title (WCAG2ICT 2.4.2)",
         TitleShared => "Screen title shared with other screens (WCAG2ICT 2.4.2)",
         NoHeading => "No heading (WCAG 1.3.1)",

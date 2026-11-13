@@ -32,7 +32,9 @@ Text measured on the recordings to hand, are recorded as options in
 "Step 8: images of text"), and was checked on the development PC on
 2026-11-12 (tests 34 and 35 passed). Step 9, Label in Name, is built
 to the owner's decisions (see "Step 9: Label in Name"), and was
-checked on the development PC on 2026-11-12 (tests 36 and 37 passed). The owner's
+checked on the development PC on 2026-11-12 (tests 36 and 37 passed).
+Step 10, clickable but not focusable, is built from the tree alone, to
+the owner's decision (see "Step 10: clickable but not focusable"). The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
@@ -442,6 +444,8 @@ the recording is opened and nothing is kept.
 9. **Label in Name** (WCAG 2.5.3), a control's content description
    against the text inside it (see "Step 9: Label in Name"). Built, and
    checked on the PC.
+10. **Clickable but not focusable** (WCAG 2.1.1), from the tree alone
+   (see "Step 10: clickable but not focusable"). Built.
 
 ## As built: step 1
 
@@ -540,7 +544,8 @@ screens were one screen, "Nova SleepCare". Measured in the recording:
   start to end, with one transition time (51734729) throughout;
 - moving between screens raised only `TYPE_WINDOW_CONTENT_CHANGED`
   events from `android.view.View` items: no window-state event and no
-  title change (inference: the app is drawn with Jetpack Compose);
+  title change (inference: the app is drawn with Jetpack Compose,
+  corrected in step 10: its tree is as Flutter makes one);
 - no item was a heading, and the only view IDs were Android's own
   (`android:id/content`, `android:id/navigationBarBackground`), the same
   on every screen;
@@ -1339,7 +1344,7 @@ were then looked at to check what the numbers meant.
 
 - **The tree.** 38 items on 4 of test 16's 5 screens (the loading
   screen has none; 50 counting both Welcome visits), 28 on test 18's 3. No item has text of its own: all the words
-  are in content descriptions (Compose). No item is checkable, and none
+  are in content descriptions (as Flutter gives them; see step 10). No item is checkable, and none
   is marked selected: the bottom tabs and the CALENDAR and WEEK VIEW pair
   have no selected state in the tree. There are no items for the icons,
   the chevrons, the progress bars on Learn, the weekly recap chart or
@@ -1972,6 +1977,119 @@ OCR the contrast check already reads (measured):
   by OCR can be missed or misread; a misread of more than the letters
   allowed is a false error, and each such finding says the label was read
   by OCR.
+
+## Step 10: clickable but not focusable
+
+### The owner's decision (2026-11-12)
+
+"Clickable but not focusable" is item 2 of the easy wins in
+`android-checks-candidates.md`. Measured first (below), the client's
+app has no clickable item that is not focusable, and its tree marks
+focusable what a screen reader can reach, so the tree cannot show which
+items a keyboard reaches in it. Three other ways were put to the owner:
+the recorder sending Tab key presses to the phone through adb, a Tab
+walk by hand, or moving on to the checks of fields. The owner chose
+"Tree-only check": build the check as proposed; it finds nothing in this
+app, and the line under "Show current visit" says that a tree like this
+app's cannot show it.
+
+### What the standards and Android say (checked in cited documents)
+
+- **2.1.1 Keyboard (A)** applies to software as written
+  ([WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/)).
+- **Android's default.** `FOCUSABLE_AUTO` "Indicates that the view
+  determines focusability automatically. This is the default value for
+  focusable.", and "Setting this to FOCUSABLE_AUTO will cause the view to
+  be focusable if it is clickable or long clickable"
+  ([Android View reference](https://developer.android.com/reference/android/view/View#FOCUSABLE_AUTO)).
+  So a clickable view that is not focusable has usually been made so by
+  the app.
+- **Flutter's tree.** Flutter's Android bridge sets each node's
+  focusable from its own `isFocusable()`
+  (`result.setFocusable(semanticsNode.isFocusable())`, in
+  [Flutter's AccessibilityBridge](https://raw.githubusercontent.com/flutter/engine/main/shell/platform/android/io/flutter/view/AccessibilityBridge.java),
+  now in `configureFocusable` of
+  [Flutter's BaseRoleConfigurator](https://raw.githubusercontent.com/flutter/flutter/master/engine/src/flutter/shell/platform/android/io/flutter/view/BaseRoleConfigurator.java)).
+  Unless a node says otherwise, that is true for any action other than
+  scrolling, for its "Flags that make a node accessibility focusable"
+  (such as a checked state), and for any label, value or hint
+  ([Flutter's AccessibilityBridge](https://raw.githubusercontent.com/flutter/flutter/master/engine/src/flutter/shell/platform/android/io/flutter/view/AccessibilityBridge.java)).
+  So in an app drawn with Flutter, focusable in the tree is about what a
+  screen reader can reach, and every item with text is focusable.
+
+### Measured first (2026-11-12)
+
+With a throwaway program, on the recordings to hand (measured):
+
+- **Test 16** (session 20261112-154851-32c7b61a5552453bbf5febffcca978c7):
+  7 settled snapshots, 50 clickable items checked, 0 set aside, none
+  not focusable; in `com.pss.novasleepcare` every item with text that
+  is not a control is focusable.
+- **Test 18** (session 20261112-171107-88cfc05214a34a3682222e7fb25d840d):
+  28 clickable items checked, 0 set aside, none not focusable, and the
+  same for its items with text.
+- **Earlier recordings:** of Settings' "Safety and emergency" (session
+  20261111-002648-06be83ce21ec47309bd4bc68b4ae1cb4), 36 clickable items,
+  none not focusable; of Settings' "Display size & text" (session
+  20261112-031508-262e4d97af4847dca17d45d0131b4814), 55, none not
+  focusable; of the client's app and the Pixel's home screen (session
+  20261112-005243-5528d67531dd4441a50b2c2985350c59), 156, 4 set aside
+  inside a focusable clickable item, none not focusable. In Settings
+  and the home screen, some items with text are not focusable, as in a
+  view-based app; in the client's app every one is.
+- **So the client's app is drawn with Flutter** (inference, from its
+  tree matching Flutter's rules above, with no `ComposeView` in its
+  windows: the only `ComposeView` items are `com.android.systemui`'s).
+  This corrects step 1's inference that it is drawn with Jetpack
+  Compose.
+
+### As built
+
+- **The rule** (`PhoneFocusChecks`, in `Recorder.Session`). On each
+  settled snapshot, in the app's window, each item shown (visible to the
+  user, with an area) that is enabled and clickable or long clickable is
+  checked. One inside an item that is focusable and clickable (or long
+  clickable), as a button in a card, is set aside, as that item takes
+  the focus. A checked item that is not focusable is a warning, to
+  "Clickable but not focusable (WCAG 2.1.1)", outlined at its bounds:
+  for example "it is clickable but not focusable, and no item it is in
+  is focusable and clickable, so a keyboard or switch user may not reach
+  it; Android makes a clickable view focusable unless the app says not;
+  a likely failure, until a keyboard test confirms it" ("long
+  clickable" for an item only long clickable).
+- **A Flutter-style tree is named.** The items with text or a content
+  description that are not controls are counted, with how many of them
+  are focusable. An app in which there is at least one and every one is
+  focusable is named on the line under "Show current visit".
+- **One finding for each item in a visit**, with each settled snapshot
+  it was seen in, as for the other tree checks, listed under each visit
+  in the Checks tab.
+- **The line under "Show current visit"** adds, after "Checks of the
+  tree: ...", for example "Clickable but not focusable (WCAG 2.1.1), one
+  of them: no findings, from 50 clickable items checked, 0 set aside
+  inside a focusable clickable item; each is a warning, until a keyboard
+  test confirms it." and, for such an app, "In com.pss.novasleepcare,
+  every item with text is focusable, as in an app drawn with Flutter,
+  whose tree marks focusable what a screen reader can reach, so the tree
+  does not show which items a keyboard reaches."
+- **The same at both audit levels:** 2.1.1 is level A.
+- **Checked before any PC test:** the solution builds with no warnings,
+  and the tests pass, with the Windows-only browser tests failing as
+  before. The new tests cover a clickable item not focusable, one
+  focusable, one inside a focusable card, one only long clickable, one
+  not enabled, one not shown, the counts of items with text in a
+  view-based tree and in a Flutter-style one, and the counts across a
+  recording.
+
+### Limits
+
+- The tree does not show what a keyboard reaches. A focusable item may
+  still not take the keyboard's focus, and in a Flutter-style tree no
+  clickable item is ever not focusable, so the check finds nothing
+  there. A keyboard test, by hand or with Tab key presses sent through
+  adb, would confirm it; that is not built.
+- Focusable in touch mode is not considered, and an item not enabled is
+  not checked.
 
 ## Decisions on the open questions (2026-11-11)
 

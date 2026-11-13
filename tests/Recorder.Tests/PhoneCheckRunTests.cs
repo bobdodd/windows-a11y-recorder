@@ -48,7 +48,7 @@ public sealed class PhoneCheckRunTests : IDisposable
                     Index = 1, Parent = 0, Depth = 1, WindowId = 512, PackageName = Settings, ClassName = "android.widget.Button",
                     ViewId = "com.android.settings:id/save", Text = "Save",
                     Bounds = new AndroidNodeBounds(100, 200 + moved, 198, 298 + moved), Checked = "unchecked",
-                    ImportantForAccessibility = true, VisibleToUser = true, Clickable = true, Focusable = true,
+                    ImportantForAccessibility = true, VisibleToUser = true, Enabled = true, Clickable = true, Focusable = true,
                 },
 
                 // The page's title, marked as a heading, so the heading checks find nothing.
@@ -180,6 +180,69 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Equal(
             "Error: Button \"Save\", 40 by 40 dp, too narrow and too short; ATF needs 48 by 48 dp; seen 2 times, first at 00:00:01.000",
             finding.Text);
+
+        // Step 10: the focusable "Save" button, once for each taking, and
+        // Settings' heading is text that is not focusable.
+        Assert.Equal((2, 0), (run.Clickable, run.ClickableSetAside));
+        Assert.Empty(run.TextFocusablePackages);
+    }
+
+    // Step 10: clickable but not focusable (WCAG 2.1.1), from the tree.
+    [Fact]
+    public void ClickableNotFocusable_WarnsOnEachEnabledClickableItemNotFocusable_AndSetsAsideThoseInAFocusableControl()
+    {
+        const string Button = "android.widget.Button";
+        var window = new PhoneCheckWindow(512, 1,
+        [
+            Control(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout", clickable: false),
+            Control(1, 0, (0, 0, 500, 100), Button, text: "Save", focusable: true),
+            Control(2, 0, (0, 100, 500, 200), "android.view.View", "Delete"),
+            Control(3, 0, (0, 200, 1080, 600), "android.view.View", "Card", focusable: true),
+            Control(4, 3, (10, 210, 300, 300), Button, "Share"),
+            Control(5, 0, (0, 600, 500, 700), Button, "Archive", clickable: false, longClickable: true),
+            Control(6, 0, (0, 700, 500, 800), Button, "Send", enabled: false),
+            Control(7, 0, (0, 800, 500, 900), Button, "Hidden", visible: false),
+            Control(8, 0, (0, 900, 500, 1000), "android.widget.TextView", text: "Messages", clickable: false),
+            Control(9, 0, (0, 1000, 500, 1100), "android.widget.ImageView", "Logo", clickable: false),
+        ]);
+
+        var measured = PhoneFocusChecks.Measure(window);
+
+        Assert.Equal([2, 5], measured.Results.Select(result => result.Item));
+        Assert.All(measured.Results, result => Assert.Equal(
+            (PhoneCheckNames.ClickableNotFocusable, PhoneCheckLevel.Warning), (result.Check, result.Level)));
+        Assert.Equal(
+            "it is clickable but not focusable, and no item it is in is focusable and clickable, so a keyboard or switch user may not reach it; " +
+            "Android makes a clickable view focusable unless the app says not; a likely failure, until a keyboard test confirms it",
+            measured.Results[0].Measured);
+        Assert.StartsWith("it is long clickable but not focusable", measured.Results[1].Measured, StringComparison.Ordinal);
+
+        // Checked: 1, 2, 3 and 5; 4 is inside the focusable card; 6 is not
+        // enabled and 7 not shown. The text and the description that are not
+        // controls are not focusable, as in a view-based app.
+        Assert.Equal((4, 1, 2, 0), (measured.Clickable, measured.SetAside, measured.TextItems, measured.FocusableTextItems));
+        Assert.Equal("Clickable but not focusable (WCAG 2.1.1)", PhoneCheckNames.Title(PhoneCheckNames.ClickableNotFocusable));
+        var order = PhoneCheckNames.All.ToList();
+        Assert.Equal(order.IndexOf(PhoneCheckNames.TraversalOrder) + 1, order.IndexOf(PhoneCheckNames.ClickableNotFocusable));
+    }
+
+    // A tree like the client's app's (measured, tests 16 and 18): every item
+    // with text is focusable, clickable or not, as Flutter's bridge marks
+    // them.
+    [Fact]
+    public void ClickableNotFocusable_CountsTextThatIsFocusable_AsAFlutterTreeHasIt()
+    {
+        var window = new PhoneCheckWindow(512, 1,
+        [
+            Control(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout", clickable: false, focusable: true),
+            Control(1, 0, (0, 0, 1080, 100), "android.view.View", "Welcome, Bob Dodd", clickable: false, focusable: true),
+            Control(2, 0, (0, 100, 500, 200), "android.widget.Button", "Sleep Goals", focusable: true),
+        ]);
+
+        var measured = PhoneFocusChecks.Measure(window);
+
+        Assert.Empty(measured.Results);
+        Assert.Equal((1, 0, 1, 1), (measured.Clickable, measured.SetAside, measured.TextItems, measured.FocusableTextItems));
     }
 
     // The owner, 2026-11-12: a general AA or AAA audit level guides the
@@ -514,7 +577,7 @@ public sealed class PhoneCheckRunTests : IDisposable
     private static AndroidTreeNode Control(
         int index, int? parent, (int Left, int Top, int Right, int Bottom) bounds, string className,
         string? description = null, string? text = null, bool clickable = true, bool checkable = false, bool editable = false,
-        IReadOnlyList<int>? labeledBy = null) =>
+        IReadOnlyList<int>? labeledBy = null, bool focusable = false, bool longClickable = false, bool enabled = true, bool visible = true) =>
         new()
         {
             Index = index,
@@ -524,9 +587,11 @@ public sealed class PhoneCheckRunTests : IDisposable
             ContentDescription = description,
             Text = text,
             ImportantForAccessibility = true,
-            VisibleToUser = true,
-            Enabled = true,
+            VisibleToUser = visible,
+            Enabled = enabled,
             Clickable = clickable,
+            LongClickable = longClickable,
+            Focusable = focusable,
             Checkable = checkable,
             Editable = editable,
             LabeledBy = labeledBy ?? [],

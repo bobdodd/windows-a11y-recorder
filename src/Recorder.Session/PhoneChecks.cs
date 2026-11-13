@@ -123,6 +123,19 @@ public sealed class PhoneCheckRun
     /// </summary>
     public int DensityChanged { get; private set; }
 
+    /// <summary>The enabled clickable items the clickable but not focusable check looked at, once for each distinct sight of them.</summary>
+    public int Clickable { get; private set; }
+
+    /// <summary>The enabled clickable items set aside, as they are inside a focusable clickable item.</summary>
+    public int ClickableSetAside { get; private set; }
+
+    /// <summary>
+    /// The apps whose tree marks every item with text that is not a control
+    /// as focusable, as Flutter's does, so focusable there is about a
+    /// screen reader and the tree does not show what the keyboard reaches.
+    /// </summary>
+    public IReadOnlyList<string> TextFocusablePackages { get; private set; } = [];
+
     /// <summary>Why a snapshot could not be checked, one for each such snapshot.</summary>
     public IReadOnlyList<string> Problems { get; private set; } = [];
 
@@ -158,6 +171,7 @@ public sealed class PhoneCheckRun
         var findings = new Dictionary<(PhoneVisit, string, PhoneCheckLevel, string), PhoneFinding>();
         var problems = new List<string>();
         var checkedTakings = new HashSet<string>(StringComparer.Ordinal);
+        var textFocus = new Dictionary<string, (int Text, int Focusable)>(StringComparer.Ordinal);
         var sightings = new List<(PhoneVisit Visit, SessionTimelineEvent Settled, SessionTimelineEvent Taking, PhoneCheckWindow Window, long ShownAt, string? State)>();
         foreach (var visit in screens.Visits)
         {
@@ -213,7 +227,7 @@ public sealed class PhoneCheckRun
                         if (ReadWindow(source, taking, visit.WindowId) is { } window)
                         {
                             var context = new PhoneCheckContext((float)(density?.PixelsPerDp ?? 0), screen?.Width, screen?.Height, level);
-                            checkedWindow = (window, [.. PhoneTreeChecks.Run(window, context), .. PhoneScreenChecks.Run(window, context)]);
+                            checkedWindow = (window, [.. PhoneTreeChecks.Run(window, context), .. PhoneFocusChecks.Run(window, context), .. PhoneScreenChecks.Run(window, context)]);
                             if (checkedTakings.Add(taking.EventId))
                             {
                                 run.WindowsChecked++;
@@ -246,6 +260,11 @@ public sealed class PhoneCheckRun
                 // tree (PhoneSnapshotPictures).
                 var shownAt = pictures.Of(visit, settled)?.Time ?? time;
                 sightings.Add((visit, settled, taking, done.Window, shownAt, state));
+                var focus = PhoneFocusChecks.Measure(done.Window);
+                run.Clickable += focus.Clickable;
+                run.ClickableSetAside += focus.SetAside;
+                textFocus.TryGetValue(visit.Screen.Package, out var sofar);
+                textFocus[visit.Screen.Package] = (sofar.Text + focus.TextItems, sofar.Focusable + focus.FocusableTextItems);
                 var items = done.Window.Items.GroupBy(item => item.Node.Index).ToDictionary(group => group.Key, group => group.First());
                 foreach (var result in done.Results)
                 {
@@ -266,6 +285,10 @@ public sealed class PhoneCheckRun
         }
 
         SharedTitles(sightings, findings);
+        run.TextFocusablePackages = [.. textFocus
+            .Where(pair => pair.Value.Text > 0 && pair.Value.Focusable == pair.Value.Text)
+            .Select(pair => pair.Key)
+            .Order(StringComparer.Ordinal)];
 
         var order = PhoneCheckNames.All.Select((check, index) => (check, index)).ToDictionary(pair => pair.check, pair => pair.index);
         var screenOrder = screens.Apps

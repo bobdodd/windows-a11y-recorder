@@ -68,12 +68,16 @@ tree does not give.
    `android-checks.md`).
 2. **Clickable but not focusable (2.1.1 Keyboard).** From API 26 a
    view's focusability defaults to "auto", and it is focusable if it is
-   clickable or has an `OnClickListener`
+   clickable or long clickable
    ([Android View reference](https://developer.android.com/reference/android/view/View#FOCUSABLE_AUTO)).
    A clickable item that is not focusable has usually been made so, and
    a keyboard or switch user cannot reach it. A warning, as a likely
    failure until a keyboard test confirms it; an item inside a
    focusable clickable parent would be set aside.
+   Built on 2026-11-12 from the tree alone, to the owner's decision;
+   the client's app has a Flutter-style tree, in which every clickable
+   item is focusable, so it finds nothing there (see "Step 10:
+   clickable but not focusable" in `android-checks.md`).
 3. **Smaller checks of fields and states**, each to be measured first:
    - a text field with no label: no item labelling it, no content
      description, a hint only (3.3.2 and 4.1.2); Material's floating

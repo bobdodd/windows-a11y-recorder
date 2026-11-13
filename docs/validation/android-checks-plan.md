@@ -1467,3 +1467,46 @@ Between the Visit 3 and Visit 5 rows was "Not checked, as no snapshot of
 this visit settled.", with no row starting "Label in name". Long rows
 wrapped, with no horizontal scrollbar. Label in Name is checked on the
 PC.
+
+## Step 10: clickable but not focusable (2026-11-12)
+
+The owner's decision, what Android and Flutter say, and the check built
+to them are in the architecture document's "Step 10: clickable but not
+focusable". Each enabled clickable item shown on a settled snapshot
+that is not focusable, and not inside a focusable clickable item, is a
+warning to "Clickable but not focusable (WCAG 2.1.1)". Checked in the
+Linux build environment: the solution builds with no warnings, and the
+new tests pass with the others. The throwaway program gives, for test
+16's recording, 50 clickable items checked, 0 set aside and none not
+focusable, with every item with text focusable in the client's app, so
+no findings and the line naming a Flutter-style tree. The findings' own
+rows are covered by the tests in the build environment, as the client's
+app has none.
+
+## Test 38: build and install the thirteenth build (development PC)
+
+As test 19: close the recorder, run the PowerShell of test 19's step 1,
+run the newest installer with "Start the recorder and set up the
+analysis models" unchecked, and start the recorder from the Start menu.
+
+**On screen:** the build ends with `INSTALLER BUILT`, and the recorder
+opens.
+
+## Test 39: the clickable but not focusable line for test 16's recording
+
+Keep the phone's picture in view throughout.
+
+1. Choose "Open recording...", and open
+   `20261112-154851-32c7b61a5552453bbf5febffcca978c7` (test 16). If the
+   Checks window is closed, click the "Checks" tab, then move it so the
+   phone's picture is fully in view. Wait 10 seconds, and take a
+   screenshot of the whole screen.
+
+**On screen:** the line under "Show current visit" includes "Clickable
+but not focusable (WCAG 2.1.1), one of them: no findings, from 50
+clickable items checked, 0 set aside inside a focusable clickable item;
+each is a warning, until a keyboard test confirms it." and "In
+com.pss.novasleepcare, every item with text is focusable, as in an app
+drawn with Flutter, whose tree marks focusable what a screen reader can
+reach, so the tree does not show which items a keyboard reaches." Long
+rows wrap; there is no horizontal scrollbar. Send the screenshot.
