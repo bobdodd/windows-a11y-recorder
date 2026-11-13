@@ -3,9 +3,12 @@
 ## Status
 
 Recorded 2026-11-12 for future reference, at the owner's request. These
-are options, not decisions: no check here is built, and each would be
+are options, not decisions, until the owner decides one; each is
 measured on the recordings to hand before its rules are set, as the
-earlier checks were (see `android-checks.md`). The owner's standing
+earlier checks were (see `android-checks.md`). Built so far, to the
+owner's decisions: the three easy wins (Label in Name, clickable but not
+focusable, and fields and states, steps 9 to 11) and 1.4.5 Images of
+Text (step 8), each marked "Built" below. Updated 2026-11-13. The owner's standing
 rule applies: testing is AI-free as far as possible, with AI kept for
 summary reports and vision-centric tests, and OCR may be used in
 addition to the text the tree gives, saying when it is.
@@ -17,7 +20,10 @@ text, duplicate clickable bounds, editable content description,
 redundant description, class name, traversal order), target size to
 WCAG 2.5.8 (24dp) and, at the AAA audit level, 2.5.5 (44dp), text
 contrast to 1.4.3 or, at AAA, 1.4.6, non-text contrast to 1.4.11, the
-screen's title to WCAG2ICT 2.4.2, and headings to 1.3.1.
+screen's title to WCAG2ICT 2.4.2, and headings to 1.3.1. From this
+document: images of text to 1.4.5 (and 1.4.9 at AAA), Label in Name to
+2.5.3, clickable but not focusable to 2.1.1, and fields and states to
+3.3.2, 4.1.2 and 3.3.1.
 
 ## What the recordings hold
 
