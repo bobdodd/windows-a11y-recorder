@@ -26,7 +26,9 @@ built to the owner's decisions (see "Step 6: titles and headings") and
 was checked on the development PC on 2026-11-12 (tests 30 and 31
 passed). The general audit level, AA or AAA, is built (see "The audit
 level"), and was checked on the development PC on 2026-11-12 (tests 32
-and 33 passed). The owner's
+and 33 passed). Further checks WCAG2ICT allows without AI, including 1.4.5 Images of
+Text measured on the recordings to hand, are recorded as options in
+`android-checks-candidates.md`. The owner's
 decisions are in "Decisions (2026-11-11)", "Decisions on loading
 screens (2026-11-12)" and "Decisions on the open questions
 (2026-11-11)". Before any check is assigned a
