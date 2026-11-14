@@ -12,6 +12,16 @@
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+  <!-- The Android report's fixed text for each check (android-report.md),
+       in the program so the report and its SHA-256 come from one file. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Android/android-check-guidance.json"
+                      LogicalName="Recorder.Analysis.Android.android-check-guidance.json" />
+  </ItemGroup>
+  <!-- Writes the Android report as a Word document (android-report.md). -->
+  <ItemGroup>
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
+  </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Recorder.Tests" />
   </ItemGroup>

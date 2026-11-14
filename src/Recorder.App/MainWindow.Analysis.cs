@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Threading;
 using Npgsql;
 using Recorder.Analysis;
+using Recorder.Analysis.Android;
 using Recorder.Analysis.Summary;
 
 namespace Recorder.App;
@@ -105,6 +106,13 @@ public partial class MainWindow
         QueueSummaryButton.IsEnabled = open && ProfileComboBox.Items.Count > 0;
         ProfileComboBox.IsEnabled = open && ProfileComboBox.Items.Count > 0;
         SummariseMenuItem.IsEnabled = QueueSummaryButton.IsEnabled;
+        // The Android report needs phone screens, and the summary a profile
+        // for text too (android-report.md).
+        var phone = open && _playbackArchive is { PhoneScreens.Recorded: true };
+        QueueAndroidReportButton.IsEnabled = phone;
+        AndroidReportMenuItem.IsEnabled = phone;
+        QueueAndroidSummaryButton.IsEnabled = phone && ProfileComboBox.Items.Count > 0;
+        AndroidSummaryMenuItem.IsEnabled = QueueAndroidSummaryButton.IsEnabled;
         VisionMenuItem.IsEnabled = open && AnalysisPlayer.DefaultProfile(_analysisSettings, ModelCapabilities.Image) is not null;
         CapabilitiesMenuItem.IsEnabled = open;
     }
@@ -276,6 +284,11 @@ public partial class MainWindow
         Add(task.State == AnalysisTaskStates.Failed ? "Why it failed" : "Open result", "open",
             task.State == AnalysisTaskStates.Failed ? $"Why {label} failed" : $"Open the result of {label}",
             task.State is AnalysisTaskStates.Done or AnalysisTaskStates.Failed, () => OpenResultAsync(task));
+        if (task.Kind is AndroidReportKind.Name or AndroidSummaryKind.Name)
+        {
+            Add("Open in Word", "word", $"Open the Word document of {label}", task.State == AnalysisTaskStates.Done, () => OpenInWordAsync(task));
+        }
+
         lines.Children.Add(buttons);
         var row = new Border
         {
@@ -306,8 +319,10 @@ public partial class MainWindow
         try
         {
             await catalog.QueueTaskAsync(recording, kind, KindVersion(kind), profiles, afterTaskId: afterTaskId, sessionDirectory: _analysisSessionDirectory, rerunOfTaskId: rerunOfTaskId, cancellationToken: CancellationToken.None);
-            ShowAnalysisStatus($"{AnalysisPlayer.KindName(kind)} queued with " +
-                string.Join(", ", profiles.Values.Distinct().Select(name => _analysisSettings.Profile(name) is { } profile ? AnalysisPlayer.ProfileLabel(profile) : name)) + ".");
+            ShowAnalysisStatus(profiles.Count == 0
+                ? $"{AnalysisPlayer.KindName(kind)} queued; it uses no model."
+                : $"{AnalysisPlayer.KindName(kind)} queued with " +
+                    string.Join(", ", profiles.Values.Distinct().Select(name => _analysisSettings.Profile(name) is { } profile ? AnalysisPlayer.ProfileLabel(profile) : name)) + ".");
             _busy.AnnounceCompleted(AnalysisStatusTextBlock.Text);
             StartWorker();
             await ReadAnalysisAsync();
@@ -343,6 +358,56 @@ public partial class MainWindow
         }
 
         await QueueAsync(RecordingSummaryKind.Name, new Dictionary<string, string> { [ModelCapabilities.Text] = profile });
+    }
+
+    // The Android report uses no model, so is queued with no profile; the
+    // summary with the profile chosen for text (android-report.md).
+    private async void AndroidReportMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        ShowAnalysisTab();
+        await QueueAsync(AndroidReportKind.Name, new Dictionary<string, string>());
+    }
+
+    private async void AndroidSummaryMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        ShowAnalysisTab();
+        if (SelectedProfile is not { } profile)
+        {
+            ShowAnalysisStatus("There is no model profile for text. Open Model profiles... from the Analysis menu.");
+            return;
+        }
+
+        await QueueAsync(AndroidSummaryKind.Name, new Dictionary<string, string> { [ModelCapabilities.Text] = profile });
+    }
+
+    // Opens a task's Word document in the program Windows opens .docx
+    // files with (android-report.md, "Opening the report").
+    private async Task OpenInWordAsync(AnalysisTaskSummary task)
+    {
+        if (AnalysisCatalogOrNull is not { } catalog || _analysisSessionDirectory is not { } session)
+        {
+            return;
+        }
+
+        var reports = await catalog.ReportsAsync(task.TaskId, CancellationToken.None);
+        var document = reports.FirstOrDefault(report => report.FileName.EndsWith(".docx", StringComparison.OrdinalIgnoreCase));
+        if (document.RelativePath is null)
+        {
+            ShowAnalysisStatus("This task wrote no Word document.");
+            return;
+        }
+
+        var path = Path.Combine(session, document.RelativePath);
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            await catalog.MarkReadAsync(task.TaskId, CancellationToken.None);
+            await ReadAnalysisAsync();
+        }
+        catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException or FileNotFoundException)
+        {
+            ShowAnalysisStatus($"The Word document {path} could not be opened: {exception.Message}");
+        }
     }
 
     private async void VisionMenuItem_Click(object sender, RoutedEventArgs e)

@@ -175,6 +175,16 @@
                 Style="{StaticResource AnalysisMenuItem}"
                 Header="Add _vision to the summary"
                 Click="VisionMenuItem_Click" />
+      <!-- The Android report and summary (android-report.md), for a
+           recording with phone screens. -->
+      <MenuItem x:Name="AndroidReportMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="Android _report, with no model"
+                Click="AndroidReportMenuItem_Click" />
+      <MenuItem x:Name="AndroidSummaryMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="Android summ_ary, with the chosen profile"
+                Click="AndroidSummaryMenuItem_Click" />
       <MenuItem x:Name="CapabilitiesMenuItem"
                 Style="{StaticResource AnalysisMenuItem}"
                 Header="_Describe the participant's capabilities..."
@@ -1765,6 +1775,14 @@
                         Style="{StaticResource AnalysisButton}"
                         Content="_Queue summary"
                         Click="QueueSummaryButton_Click" />
+                <Button x:Name="QueueAndroidReportButton"
+                        Style="{StaticResource AnalysisButton}"
+                        Content="Queue Android report"
+                        Click="AndroidReportMenuItem_Click" />
+                <Button x:Name="QueueAndroidSummaryButton"
+                        Style="{StaticResource AnalysisButton}"
+                        Content="Queue Android summary"
+                        Click="AndroidSummaryMenuItem_Click" />
                 <Button x:Name="RefreshAnalysisButton"
                         Style="{StaticResource AnalysisButton}"
                         Content="_Read the queue again"

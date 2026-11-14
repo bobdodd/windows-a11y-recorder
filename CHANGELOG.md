@@ -18,6 +18,21 @@ Changes on `main` since 1.1.0, not yet released.
   without AI, APK copies, extraction or decompilation. See
   [framework metadata](docs/architecture/android-framework-metadata.md).
 
+### Android report and summary
+
+- Two analysis tasks for a phone recording, each written as a Word
+  document and Markdown, arranged by screen: the Android report, with
+  no model, and the Android summary, which adds a model's summary of
+  each screen with findings and of the whole app, labelled as
+  inferred. Each finding has its title, level, impact score, WCAG
+  success criteria, what the issue is, why it matters, who it affects,
+  remediation for Android and, when found in the app, Flutter or React
+  Native, and its sources, from a guidance file embedded in the
+  program. Each visit's picture has its findings' items outlined in
+  cyan between black bands and numbered, and small items are also
+  shown zoomed. A finished task has an "Open in Word" button. See
+  [the Android report](docs/architecture/android-report.md).
+
 ### Analysis
 
 - The analysis runner: tasks queued from the player's Analysis menu run in
