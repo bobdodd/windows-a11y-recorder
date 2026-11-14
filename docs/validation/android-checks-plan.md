@@ -2168,8 +2168,9 @@ about Chrome, not the test page, and follow the rules as decided.
 ## Test 57: build and install the twenty-first build
 
 This build adds framework metadata, not an accessibility check.
-Run only after its commit has been pushed. Phone verification has not
-yet been performed.
+Run only after its commit has been pushed. Test 58 records the bounded
+phone-playback result separately; these installer steps have not been
+independently observed.
 
 1. Close the recorder. After the push is confirmed, run this in
    PowerShell to build and launch the newest installer:
@@ -2213,6 +2214,21 @@ is not established. It gives the APK count and an evidence entry ending
 in `libflutter.so`. Long text wraps without a horizontal scrollbar.
 If it says unknown, unavailable or incomplete, send that result as it
 is; do not mark the positive-detection test passed.
+
+### Result
+
+Bounded pass on the development PC, 2026-11-14, from the owner's
+`h1.PNG`: the app's next row reports `Framework: Flutter`, `APKs read:
+4 of 4` and the evidence `split_config.arm64_v8a.apk:
+lib/arm64-v8a/libflutter.so`. It retains the qualification that this is
+a bundled library detected at the stop, not proof of use by this
+screen. The normal-weight row wraps onto a second line, with no
+horizontal scrollbar visible in the Checks list.
+
+This accepts the displayed framework row for this recorded app only.
+The screenshot does not independently observe every capture or
+installation step. React Native and older-recording target-machine
+acceptance are not established by this result.
 
 ## Test 59: an older recording's framework is not invented
 

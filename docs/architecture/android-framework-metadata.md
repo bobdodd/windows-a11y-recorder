@@ -85,7 +85,11 @@ exercise capture into `app-versions`; recording-codec, validator and
 timeline tests exercise persistence, old records and playback text.
 Tests do not use a client's APK or retain any extracted app files.
 
-Phone verification and Windows visual acceptance are pending the
-owner's next build. Tests 57 to 59 in
-`docs/validation/android-checks-plan.md` cover installation, collection
-and old-recording behaviour separately.
+Test 58 has bounded Windows/phone playback acceptance from the owner's
+`h1.PNG`: Flutter, four of four APKs read, the matching native library
+entry and the qualification about this screen are displayed in a
+normal-weight wrapping row. This accepts the displayed metadata for
+that recorded app only, not every capture or installer step. React
+Native and old-recording target-machine acceptance remain unverified.
+Tests 57 to 59 in `docs/validation/android-checks-plan.md` keep
+installation, collection and old-recording behaviour separate.
