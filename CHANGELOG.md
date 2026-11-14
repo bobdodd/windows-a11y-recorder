@@ -33,6 +33,9 @@ Changes on `main` since 1.1.0, not yet released.
   cyan between black bands and numbered, and small items are also
   shown zoomed. A finished task has an "Open in Word" button. See
   [the Android report](docs/architecture/android-report.md).
+- Every fact the Android summary's model is given has an evidence
+  reference, the screen, its app and the counts by success criterion
+  included, so that a claim about any of them can cite it.
 
 ### Analysis
 

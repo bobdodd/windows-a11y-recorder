@@ -157,12 +157,12 @@ public sealed class AndroidReportTests : IDisposable
         Assert.Equal("Medium", table.Rows[2][1]);
         Assert.Equal("None: best practice, related to 2.5.8 Target Size (Minimum) (AA)", table.Rows[3][1]);
         // Both snapshots are shown by the one video frame.
-        Assert.Equal("Twice, in 1 picture, at 00:00:01.500 [E3]", table.Rows[6][1]);
+        Assert.Equal("Twice, in 1 picture, at 00:00:01.500 [E6]", table.Rows[6][1]);
         var paragraphs = document.Blocks.Where(block => block.Kind == ReportBlockKind.Paragraph).Select(block => block.Text).ToList();
         Assert.Contains(paragraphs, text => text.StartsWith("What the issue is: A control that can be tapped", StringComparison.Ordinal));
         Assert.Contains(paragraphs, text => text.StartsWith("Suggested remediation for Android:", StringComparison.Ordinal));
-        Assert.Contains("The app com.android.settings; the screen is named by its window title. Visited once, with 1 finding.", paragraphs);
-        Assert.Contains("The recording's first app window. [E2]", paragraphs);
+        Assert.Contains("The app com.android.settings; the screen is named by its window title. Visited once, with 1 finding. [E4]", paragraphs);
+        Assert.Contains("The recording's first app window. [E5]", paragraphs);
 
         // No framework was found, so Android's remediation and sources only.
         Assert.DoesNotContain(paragraphs, text => text.StartsWith("Suggested remediation for Flutter:", StringComparison.Ordinal));
@@ -189,9 +189,14 @@ public sealed class AndroidReportTests : IDisposable
         Assert.Equal((596, 596), (zoom.Width, zoom.Height));
 
         // Each visit and finding cited is in the evidence list, at its time.
-        Assert.Equal(At(1.5), document.Evidence["E3"].Nanoseconds);
-        Assert.Equal(At(1), document.Evidence["E2"].Nanoseconds);
-        Assert.StartsWith("Visit 1 to the screen Settings", document.Evidence["E2"].Text, StringComparison.Ordinal);
+        Assert.Equal(At(1.5), document.Evidence["E6"].Nanoseconds);
+        Assert.Equal(At(1), document.Evidence["E5"].Nanoseconds);
+        Assert.StartsWith("Visit 1 to the screen Settings", document.Evidence["E5"].Text, StringComparison.Ordinal);
+        // The screen and the app have references too, the app's for the whole recording.
+        Assert.StartsWith("Screen 1, Settings (com.android.settings): the screen is named by its window title", document.Evidence["E4"].Text, StringComparison.Ordinal);
+        Assert.Equal(At(1), document.Evidence["E4"].Nanoseconds);
+        Assert.Null(document.Evidence["E1"].Nanoseconds);
+        Assert.Equal("Whole recording", document.Evidence["E1"].Time);
         Assert.Contains(document.Blocks, block => block.Kind == ReportBlockKind.Heading && block.Text == "Limits");
     }
 
@@ -236,15 +241,15 @@ public sealed class AndroidReportTests : IDisposable
 
         var (facts, references) = AndroidSummaryKind.ScreenInput(screen, evidence, guidance, input.Device);
 
-        Assert.Equal(["E2", "E3"], references.Order(StringComparer.Ordinal));
-        Assert.Contains("[E3] Finding 2, error, impact medium, no WCAG success criterion, best practice: Touch target smaller than Android's 48 by 48 dp. Item: Button \"Save\".", facts, StringComparison.Ordinal);
+        Assert.Equal(["E1", "E4", "E5", "E6"], references.Order(StringComparer.Ordinal));
+        Assert.Contains("[E6] Finding 2, error, impact medium, no WCAG success criterion, best practice: Touch target smaller than Android's 48 by 48 dp. Item: Button \"Save\".", facts, StringComparison.Ordinal);
         Assert.Equal("screen-0001", AndroidSummaryKind.ScreenStepKey(screen));
 
         var empty = JsonDocument.Parse("{}").RootElement;
         var screenStep = new AcceptedStep(Guid.NewGuid(), "", empty,
         [
-            new Claim("screen", 0, 0, Claim.ClaimKind, "Inferring from its heading, the screen holds the phone's settings.", ["E2"]),
-            new Claim("issues", 0, 0, Claim.ClaimKind, "The Save button is smaller than Android recommends.", ["E3"]),
+            new Claim("screen", 0, 0, Claim.ClaimKind, "Inferring from its heading, the screen holds the phone's settings.", ["E5"]),
+            new Claim("issues", 0, 0, Claim.ClaimKind, "The Save button is smaller than Android recommends.", ["E6"]),
         ]);
         var overall = new AcceptedStep(Guid.NewGuid(), "", empty,
         [
@@ -263,10 +268,12 @@ public sealed class AndroidReportTests : IDisposable
         Assert.Contains(document.Blocks, block => block.Kind == ReportBlockKind.Heading && block.Text == "How the summaries were written");
 
         var (whole, wholeReferences) = AndroidSummaryKind.RecordingInput(input.Screens, evidence, guidance, input.Device, model.Screens);
-        Assert.Contains("  (issues, inferred) The Save button is smaller than Android recommends. [E3]", whole, StringComparison.Ordinal);
+        Assert.Contains("  (issues, inferred) The Save button is smaller than Android recommends. [E6]", whole, StringComparison.Ordinal);
         Assert.Contains("No WCAG success criterion, best practice: 1 finding, 1 error", whole, StringComparison.Ordinal);
-        Assert.Contains("The recorder found the screen \"Settings\" of the app com.android.settings, named by its window title.", facts, StringComparison.Ordinal);
-        Assert.Equal(["E1", "E2", "E3"], wholeReferences.Order(StringComparer.Ordinal));
+        Assert.Contains("[E4] The recorder found the screen \"Settings\" of the app com.android.settings, named by its window title.\n[E1] The app com.android.settings: ", facts, StringComparison.Ordinal);
+        Assert.Equal(["E1", "E2", "E3", "E5", "E6"], wholeReferences.Order(StringComparer.Ordinal));
+        Assert.Contains("[E1] The app com.android.settings: ", whole, StringComparison.Ordinal);
+        Assert.Contains("[E2] The recorder's counts of findings by WCAG success criterion:", whole, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -325,7 +332,7 @@ public sealed class AndroidReportTests : IDisposable
         var tree = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, device, recording, pictures, TestContext.Current.CancellationToken);
         var audit = AndroidAudit.Of(tree, PhoneAuditLevel.AA, 5, null, null, archive.PhoneScreens, device);
         var guidance = AndroidGuidance.Load();
-        var evidence = AndroidEvidence.Build(archive.PhoneScreens, audit, guidance);
+        var evidence = AndroidEvidence.Build(archive.PhoneScreens, audit, guidance, device);
         var input = new AndroidReportInput("s", 10 * Second, archive.PhoneScreens, device, audit, pictures,
             archive.PhoneAccessibility.ScreenAt, PhonePictures.Load, ["the phone's video, 1 frame"], null);
         return (input, guidance, evidence);

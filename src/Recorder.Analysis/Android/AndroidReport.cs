@@ -130,7 +130,7 @@ public static class AndroidReport
             };
             foreach (var app in input.Screens.Screens.Select(screen => screen.Package).Distinct(StringComparer.Ordinal))
             {
-                rows.Add(($"App {app}", $"{input.Device.DescribeVersion(app)}. {input.Device.DescribeFramework(app)}"));
+                rows.Add(($"App {app}", $"{input.Device.DescribeVersion(app)}. {input.Device.DescribeFramework(app)}{Refs(evidence.AppReference(app))}"));
             }
 
             rows.Add(("Screens and visits", Count(input.Screens.Screens.Count, "screen", "screens") + ", " + Count(input.Screens.Visits.Count, "visit", "visits")));
@@ -280,7 +280,7 @@ public static class AndroidReport
             Heading(2, ScreenHeading(screen));
             var findings = evidence.For(screen).ToList();
             Paragraph(string.Create(CultureInfo.InvariantCulture,
-                $"The app {screen.Package}; the screen is {screen.NamedBy}. Visited {Times(screen.Visits.Count)}, with {Count(findings.Count, "finding", "findings")}."));
+                $"The app {screen.Package}; the screen is {screen.NamedBy}. Visited {Times(screen.Visits.Count)}, with {Count(findings.Count, "finding", "findings")}.{Refs(evidence.ScreenReference(screen))}"));
             if (model is not null)
             {
                 Heading(3, "Summary of the screen, inferred by a model");
@@ -636,10 +636,10 @@ public static class AndroidReport
         private void Evidence()
         {
             Heading(2, "Evidence");
-            Paragraph("Each visit and each finding the report cites, with its time in the recording.");
+            Paragraph("Each app, screen, visit and finding the report cites, with its time in the recording.");
             Table(["Ref", "Time", "Evidence"], evidence.Entries
                 .Where(entry => _cited.Contains(entry.Reference))
-                .Select(entry => (IReadOnlyList<string>)[entry.Reference, WindowsPreferenceTimeline.ClockOf(entry.Time), entry.Text]));
+                .Select(entry => (IReadOnlyList<string>)[entry.Reference, entry.Time is { } time ? WindowsPreferenceTimeline.ClockOf(time) : "Whole recording", entry.Text]));
         }
 
         private string Refs(params string[] references)

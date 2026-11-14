@@ -43,7 +43,9 @@ public sealed class AndroidSummaryKind : IAnalysisTaskKind
 
     public const string RecordingTemplate = "android-summary-recording";
 
-    public const int TemplateVersion = 1;
+    // Version 2: every fact has a reference, the screen and its app
+    // included (target machine, 2026-11-14).
+    public const int TemplateVersion = 2;
 
     public static readonly IReadOnlyList<string> ScreenSections = ["screen", "issues"];
 
@@ -51,7 +53,7 @@ public sealed class AndroidSummaryKind : IAnalysisTaskKind
 
     public const string ScreenInstructions =
         "You summarise one screen of an Android app from an accessibility test recording, for an accessibility auditor and the app's developers. " +
-        "You are given the recorder's facts about the screen: its visits and the findings of the recorder's automated checks, each beginning with an evidence reference such as [E3]. " +
+        "You are given the recorder's facts about the screen: the screen and how the recorder named it, its app, its visits and the findings of the recorder's automated checks, each fact beginning with its evidence reference such as [E3]. " +
         "Describe only what the facts support. Name the app, the screen and its items only as the facts name them. " +
         "An error is a check that failed on the recorded evidence. A warning or information is a likely issue that a person has not yet confirmed: " +
         "open a statement about one with that, such as \"a likely issue, not yet confirmed, is\", never state it as a failure. " +
@@ -67,7 +69,7 @@ public sealed class AndroidSummaryKind : IAnalysisTaskKind
 
     public const string RecordingInstructions =
         "You summarise the accessibility of an Android app from a test recording, for an accessibility auditor and the app's developers. " +
-        "You are given the recorder's facts: the app, its framework as the recorder found it, the counts of findings by WCAG success criterion, " +
+        "You are given the recorder's facts, each beginning with its evidence reference such as [E3]: the app, its framework as the recorder found it, the counts of findings by WCAG success criterion, " +
         "and each screen as a model summarised it from the recorder's findings, labelled inferred; these summaries are inferences, not facts. " +
         "Describe only what these support, and name the app and its screens only as they are named. " +
         "A warning is a likely issue that a person has not yet confirmed; never state one as a failure. " +
@@ -104,10 +106,12 @@ public sealed class AndroidSummaryKind : IAnalysisTaskKind
         ArgumentNullException.ThrowIfNull(evidence);
         ArgumentNullException.ThrowIfNull(guidance);
         ArgumentNullException.ThrowIfNull(device);
-        var references = new HashSet<string>(StringComparer.Ordinal);
+        var screenReference = evidence.ScreenReference(screen);
+        var appReference = evidence.AppReference(screen.Package);
+        var references = new HashSet<string>(StringComparer.Ordinal) { screenReference, appReference };
         var input = new StringBuilder()
-            .Append(CultureInfo.InvariantCulture, $"The recorder found the screen \"{screen.Name}\" of the app {screen.Package}, {screen.NamedBy}. ")
-            .Append(device.DescribeFramework(screen.Package)).Append('\n');
+            .Append(CultureInfo.InvariantCulture, $"[{screenReference}] The recorder found the screen \"{screen.Name}\" of the app {screen.Package}, {screen.NamedBy}.\n")
+            .Append(CultureInfo.InvariantCulture, $"[{appReference}] The app {screen.Package}: {device.DescribeFramework(screen.Package)}\n");
         foreach (var visit in screen.Visits)
         {
             var reference = evidence.VisitReference(visit);
@@ -160,11 +164,14 @@ public sealed class AndroidSummaryKind : IAnalysisTaskKind
         var input = new StringBuilder();
         foreach (var app in screens.Screens.Select(screen => screen.Package).Distinct(StringComparer.Ordinal))
         {
-            input.Append(CultureInfo.InvariantCulture, $"The app {app}: {device.DescribeVersion(app)}. {device.DescribeFramework(app)}\n");
+            var reference = evidence.AppReference(app);
+            references.Add(reference);
+            input.Append(CultureInfo.InvariantCulture, $"[{reference}] The app {app}: {device.DescribeVersion(app)}. {device.DescribeFramework(app)}\n");
         }
 
         input.Append(CultureInfo.InvariantCulture, $"The recorder found {Count(screens.Screens.Count, "screen", "screens")} in {Count(screens.Visits.Count, "visit", "visits")}, and {Count(evidence.All.Count, "finding", "findings")}.\n");
-        input.Append("The recorder's counts of findings by WCAG success criterion:\n");
+        references.Add(evidence.CountsReference);
+        input.Append(CultureInfo.InvariantCulture, $"[{evidence.CountsReference}] The recorder's counts of findings by WCAG success criterion:\n");
         foreach (var group in evidence.All
             .SelectMany(finding => (finding.Guidance?.Criteria ?? []).DefaultIfEmpty("").Select(criterion => (Key: criterion, Finding: finding)))
             .GroupBy(pair => pair.Key, pair => pair.Finding)
@@ -226,7 +233,7 @@ internal static class AndroidReportRun
                 () => AndroidAudit.Run(archive, settings, new WindowsPhoneTextReader(), PhonePictures.Load, cancellationToken),
                 cancellationToken).ConfigureAwait(false);
             var guidance = AndroidGuidance.Load();
-            var evidence = AndroidEvidence.Build(archive.PhoneScreens, audit, guidance);
+            var evidence = AndroidEvidence.Build(archive.PhoneScreens, audit, guidance, archive.PhoneDevice);
 
             AndroidModelText? model = null;
             if (summarize)

@@ -105,11 +105,22 @@ guidance file's order, then by first time.
 
 ### Evidence references
 
-References such as [E3] are numbered in the same order: the app's
-findings, then for each screen each visit, then that visit's findings.
-The "Evidence" list at the end gives each cited reference's time in the
-recording and what it is, so that the player can go to it. A model's
-statements in the summary cite the same references.
+References such as [E3] are numbered in this order: each app, with its
+version and framework; the recorder's counts of findings by WCAG
+success criterion; the app's findings; then for each screen the screen
+itself, with how the recorder named it, each visit, and that visit's
+findings. The "Evidence" list at the end gives each cited reference's
+time in the recording, "Whole recording" for an app and for the counts,
+and what it is, so that the player can go to it. A model's statements
+in the summary cite the same references.
+
+Every fact a model is given begins with its reference, so that a claim
+about any of them has one to cite. On the target machine, on
+2026-11-14, the summary failed: a screen's summary restated how the
+recorder had named the screen, as a claim, and the line giving the
+screen's name had no reference, so the claim cited nothing and was
+refused three times. The screen, its app and the counts were given
+references then, and the templates are version 2.
 
 ## Each finding
 

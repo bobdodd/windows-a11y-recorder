@@ -13,16 +13,21 @@ public sealed record NumberedFinding(int Number, PhoneFinding Finding, CheckGuid
 }
 
 /// <summary>
-/// The report's numbering (android-report.md, "Evidence references"): the
-/// app's findings, then each screen's visits in turn, each visit's findings
-/// by impact, level, check and time; each visit and each finding one
-/// evidence reference, E1 upward, in that order. Both reports and the
-/// model's requests use the same numbers, so a model's statement cites the
-/// same evidence the report lists.
+/// The report's numbering (android-report.md, "Evidence references"): each
+/// app, the counts of findings by WCAG success criterion, the app's
+/// findings, then each screen in turn, its visits and each visit's findings
+/// by impact, level, check and time; each one evidence reference, E1
+/// upward, in that order. Every fact a model is given has a reference, so
+/// that a claim about it has one to cite (target machine, 2026-11-14: a
+/// screen's summary restated how the screen was named, which had none).
+/// Both reports and the model's requests use the same numbers, so a
+/// model's statement cites the same evidence the report lists.
 /// </summary>
 public sealed class AndroidEvidence
 {
-    private readonly List<(string Reference, long Time, string Text)> _entries = [];
+    private readonly List<(string Reference, long? Time, string Text)> _entries = [];
+    private readonly Dictionary<string, string> _apps = new(StringComparer.Ordinal);
+    private readonly Dictionary<PhoneScreen, string> _screens = [];
     private readonly Dictionary<PhoneVisit, string> _visits = [];
     private readonly Dictionary<PhoneVisit, IReadOnlyList<NumberedFinding>> _byVisit = [];
     private readonly List<NumberedFinding> _app = [];
@@ -32,7 +37,17 @@ public sealed class AndroidEvidence
     {
     }
 
-    public IReadOnlyList<(string Reference, long Time, string Text)> Entries => _entries;
+    /// <summary>Each reference, its time in the recording, or null for one about the whole recording, and what it is.</summary>
+    public IReadOnlyList<(string Reference, long? Time, string Text)> Entries => _entries;
+
+    /// <summary>The reference of the recorder's counts of findings by WCAG success criterion.</summary>
+    public string CountsReference { get; private set; } = "";
+
+    /// <summary>An app's reference: its version and framework as the recorder found them.</summary>
+    public string AppReference(string package) => _apps[package];
+
+    /// <summary>A screen's reference: its name, app and how the recorder named it.</summary>
+    public string ScreenReference(PhoneScreen screen) => _screens[screen];
 
     /// <summary>The findings of the whole app.</summary>
     public IReadOnlyList<NumberedFinding> App => _app;
@@ -50,12 +65,19 @@ public sealed class AndroidEvidence
         return screen.Visits.SelectMany(For);
     }
 
-    public static AndroidEvidence Build(PhoneScreenTimeline screens, AndroidAudit audit, AndroidGuidance guidance)
+    public static AndroidEvidence Build(PhoneScreenTimeline screens, AndroidAudit audit, AndroidGuidance guidance, PhoneDeviceTimeline device)
     {
         ArgumentNullException.ThrowIfNull(screens);
         ArgumentNullException.ThrowIfNull(audit);
         ArgumentNullException.ThrowIfNull(guidance);
+        ArgumentNullException.ThrowIfNull(device);
         var evidence = new AndroidEvidence();
+        foreach (var app in screens.Screens.Select(screen => screen.Package).Distinct(StringComparer.Ordinal))
+        {
+            evidence._apps[app] = evidence.Reference(null, $"The app {app}: {device.DescribeVersion(app)}. {device.DescribeFramework(app)}");
+        }
+
+        evidence.CountsReference = evidence.Reference(null, "The recorder's counts of findings by WCAG success criterion, as in \"At a glance\"");
         foreach (var finding in Ordered(audit.AppFindings, guidance))
         {
             evidence._app.Add(evidence.Add(finding, guidance));
@@ -63,6 +85,8 @@ public sealed class AndroidEvidence
 
         foreach (var screen in screens.Screens)
         {
+            evidence._screens[screen] = evidence.Reference(screen.Visits.Count == 0 ? null : screen.Visits[0].Start,
+                $"Screen {screen.Number.ToString(CultureInfo.InvariantCulture)}, {screen.Label}: the screen is {screen.NamedBy}");
             foreach (var visit in screen.Visits)
             {
                 var reference = evidence.Reference(visit.Start,
@@ -86,7 +110,7 @@ public sealed class AndroidEvidence
         return numbered;
     }
 
-    private string Reference(long time, string text)
+    private string Reference(long? time, string text)
     {
         var reference = "E" + (_entries.Count + 1).ToString(CultureInfo.InvariantCulture);
         _entries.Add((reference, time, text));

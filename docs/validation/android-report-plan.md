@@ -142,4 +142,8 @@ with a heading "Overview, inferred by a model" after "How to read this
 report". Each screen with findings has "Summary of the screen, inferred
 by a model" before its first visit, with references such as [E3] in
 its statements. The findings below are laid out as in the Android
-report.
+report. Each screen's first paragraph ends with the screen's own
+reference, such as [E4].
+
+If the task fails, choose "Why it failed" and take a screenshot of the
+message.
