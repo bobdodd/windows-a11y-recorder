@@ -47,11 +47,11 @@ public sealed class AndroidReportTests : IDisposable
         ];
         var checks = PhoneCheckNames.All.Concat(measured).ToList();
         Assert.Equal(checks.Order(StringComparer.Ordinal), guidance.Checks.Select(check => check.Check).Order(StringComparer.Ordinal));
-        Assert.Equal([4, 3, 2, 1], guidance.Impact.Select(step => step.Score));
+        Assert.Equal(["high", "medium", "low"], guidance.Impact.Select(step => step.Level));
         Assert.Matches("^[0-9a-f]{64}$", guidance.Sha256);
         foreach (var check in guidance.Checks)
         {
-            Assert.InRange(check.Impact, 1, 4);
+            Assert.InRange(guidance.Rank(check.Impact), 1, 3);
             Assert.NotEmpty(check.Affects);
             Assert.NotEmpty(check.Sources);
             Assert.All(new[] { check.Title, check.Issue, check.Why, check.Basis, check.Android, check.Flutter, check.ReactNative }, text => Assert.False(string.IsNullOrWhiteSpace(text), check.Check));
@@ -154,7 +154,7 @@ public sealed class AndroidReportTests : IDisposable
         var table = document.Blocks.Where(block => block.Kind == ReportBlockKind.Table && block.Rows[0][0] == "Field").Last();
         Assert.Equal(["Level", "Impact", "WCAG success criteria", "Item", "Measured", "Seen", "Check"], table.Rows.Skip(1).Select(row => row[0]));
         Assert.Equal("Error", table.Rows[1][1]);
-        Assert.Equal("2 of 4, moderate", table.Rows[2][1]);
+        Assert.Equal("Medium", table.Rows[2][1]);
         Assert.Equal("None: best practice, related to 2.5.8 Target Size (Minimum) (AA)", table.Rows[3][1]);
         // Both snapshots are shown by the one video frame.
         Assert.Equal("Twice, in 1 picture, at 00:00:01.500 [E3]", table.Rows[6][1]);
@@ -237,7 +237,7 @@ public sealed class AndroidReportTests : IDisposable
         var (facts, references) = AndroidSummaryKind.ScreenInput(screen, evidence, guidance, input.Device);
 
         Assert.Equal(["E2", "E3"], references.Order(StringComparer.Ordinal));
-        Assert.Contains("[E3] Finding 2, error, impact 2 of 4, moderate, no WCAG success criterion, best practice: Touch target smaller than Android's 48 by 48 dp. Item: Button \"Save\".", facts, StringComparison.Ordinal);
+        Assert.Contains("[E3] Finding 2, error, impact medium, no WCAG success criterion, best practice: Touch target smaller than Android's 48 by 48 dp. Item: Button \"Save\".", facts, StringComparison.Ordinal);
         Assert.Equal("screen-0001", AndroidSummaryKind.ScreenStepKey(screen));
 
         var empty = JsonDocument.Parse("{}").RootElement;

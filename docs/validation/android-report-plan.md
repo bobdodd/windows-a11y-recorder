@@ -106,7 +106,8 @@ in the same way. The numbers match the findings' headings.
 2. Take a screenshot of the finding from its heading to its sources.
 
 **On screen:** the table rows are Level, Impact, WCAG success criteria,
-Item, Measured, Seen and Check. After the pictures come "What the issue
+Item, Measured, Seen and Check. The Impact row reads High, Medium or
+Low, with ", if confirmed" after it for a warning. After the pictures come "What the issue
 is:", "Why it matters:", "Who it affects:" and "Suggested remediation
 for Android:", each label in bold, then "Sources:" with links. For a
 Flutter app, "Suggested remediation for Flutter:" follows Android's.

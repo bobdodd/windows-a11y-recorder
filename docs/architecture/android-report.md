@@ -82,7 +82,7 @@ By screen, as the owner decided (decision 2):
    version and framework as recorded, the counts of screens and visits,
    the audit level, the evidence in the recording, whether OCR was used,
    the guidance file's version and SHA-256, and when it was written.
-3. "How to read this report": the levels, the impact scale, the
+3. "How to read this report": the levels, the impact levels, the
    pictures, the frameworks, and the evidence references.
 4. In the summary only, "Overview, inferred by a model".
 5. "At a glance": the counts by WCAG success criterion and by screen,
@@ -118,7 +118,7 @@ As the owner decided (decision 3), each finding has its heading, the "summary ti
 | Field | Value |
 | --- | --- |
 | Level | Error; Warning, for a person to confirm; or Information, for a person to judge |
-| Impact | The score from 1 to 4 and its word, "if confirmed" for a warning or information |
+| Impact | High, medium or low, "if confirmed" for a warning or information |
 | WCAG success criteria | Each criterion with its name and level, or "None: best practice", with any related criterion |
 | Item | The item as the checks name it |
 | Measured | What the check measured |
@@ -146,7 +146,7 @@ picture, at 00:00:01.500".
 The fixed text of every check is in
 `src/Recorder.Analysis/Android/android-check-guidance.json`, embedded in
 the program. It holds, for each of the 41 checks: the title, the issue,
-why it matters, who it affects, the impact score, the WCAG success
+why it matters, who it affects, the impact level, the WCAG success
 criteria and related ones, the basis, the remediation for Android,
 Flutter and React Native, and its sources. The sources and criteria are
 listed once, by key, with their titles and addresses. A test checks
@@ -156,30 +156,35 @@ resolves, and that the file holds no em dash.
 The report gives the file's version and SHA-256, so a report can be
 traced to the text it used.
 
-### The impact scale (proposed, for the owner to review)
+### The impact levels
 
-The score is the recorder's default judgement of each kind of issue
-once confirmed; it is not measured from the app, and the report says
-so.
+The impact is high, medium or low, the levels the project's other tools
+use. The owner asked for them on 2026-11-14: "I need high, medium, low
+for impact to match other tools in the project". The level is the
+recorder's default judgement of each kind of issue once confirmed; it
+is not measured from the app, and the report says so. The guidance file
+names each check's level by its word, and the program orders findings
+by it, high first.
 
-| Score | Word | Meaning |
-| --- | --- | --- |
-| 4 | critical | Can stop the people it affects from completing a task or using the screen at all. |
-| 3 | serious | Makes a task very hard for the people it affects, or likely to fail. |
-| 2 | moderate | Makes a task harder, slower or more confusing for the people it affects. |
-| 1 | minor | An inconvenience; the task can still be done without much extra effort. |
+| Level | Meaning |
+| --- | --- |
+| High | Can stop the people it affects from completing a task, or make a task very hard for them or likely to fail. |
+| Medium | Makes a task harder, slower or more confusing for the people it affects. |
+| Low | An inconvenience; the task can still be done without much extra effort. |
 
-The proposed scores: 4 for an item with nothing to say, a text field
-with no name, a clickable item the keyboard may not reach, and a change
-of context when TalkBack's focus moved; 3 for touch targets under 24 by
-24 dp, a text field with a content description, conflicting reading
-order, text contrast below AA, non-text contrast, a label not in the
-name, a field with no label, an invalid field with no error, a status
-not announced, text gone by itself, a change of context on focus or on
-input, and columns made with spaces; 1 for a redundant description, an
-image of text at AAA, a label not at the start of the name, a first
-heading low on the screen, many headings, and a line break in
-mid-sentence; 2 for the rest. These are for the owner to change.
+The levels replace the four scores first proposed: critical and serious
+became high, moderate became medium, and minor became low. High: an
+item with nothing to say, a text field with no name, a clickable item
+the keyboard may not reach, a change of context when TalkBack's focus
+moved, touch targets under 24 by 24 dp, a text field with a content
+description, conflicting reading order, text contrast below AA,
+non-text contrast, a label not in the name, a field with no label, an
+invalid field with no error, a status not announced, text gone by
+itself, a change of context on focus or on input, and columns made with
+spaces. Low: a redundant description, an image of text at AAA, a label
+not at the start of the name, a first heading low on the screen, many
+headings, and a line break in mid-sentence. Medium: the rest. These are
+for the owner to change.
 
 ## Pictures
 
@@ -245,7 +250,7 @@ analysis runner, with its reuse, attempts and fixed-seed retries:
   inferred.
 
 The instructions say that a warning is a likely issue not yet confirmed
-and is never to be stated as a failure, that the impact scores are not
+and is never to be stated as a failure, that the impact levels are not
 measured, and that the model is not to say whether the app meets WCAG.
 Each statement is a claim citing its evidence, or says what is unknown
 or that there is no evidence, as in the recording summary. The report
@@ -256,7 +261,7 @@ labels each summary as inferred by a model.
 - The findings are the recorder's checks of what was recorded; the
   report does not show that a screen meets WCAG.
 - Warnings and information need a person to confirm them.
-- The impact scores and remediation are fixed text for each kind of
+- The impact levels and remediation are fixed text for each kind of
   issue, not advice for the app.
 - Colours measured on video frames are approximate.
 - The framework is the libraries bundled in the app, not what drew each

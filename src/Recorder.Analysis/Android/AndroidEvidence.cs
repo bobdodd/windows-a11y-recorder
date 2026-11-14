@@ -4,11 +4,10 @@ using Recorder.Session;
 namespace Recorder.Analysis.Android;
 
 /// <summary>A finding as the report numbers it, with its guidance and its evidence reference.</summary>
-public sealed record NumberedFinding(int Number, PhoneFinding Finding, CheckGuidance? Guidance, string Reference)
+/// <param name="Impact">The impact level once confirmed, or null when the guidance has none.</param>
+/// <param name="Rank">The level's rank, 3 for high down to 1 for low, 0 when there is none.</param>
+public sealed record NumberedFinding(int Number, PhoneFinding Finding, CheckGuidance? Guidance, string Reference, GuidanceImpact? Impact, int Rank)
 {
-    /// <summary>The impact score once confirmed, 0 when the guidance has none.</summary>
-    public int Impact => Guidance?.Impact ?? 0;
-
     /// <summary>The finding's heading: its number, the guidance's title or the check's name, and the item.</summary>
     public string Heading => $"Finding {Number.ToString(CultureInfo.InvariantCulture)}: {Guidance?.Title ?? PhoneCheckNames.Title(Finding.Check)}: {Finding.Label}";
 }
@@ -80,7 +79,9 @@ public sealed class AndroidEvidence
     {
         var number = _all.Count + 1;
         var reference = Reference(finding.Times[0].Time, $"Finding {number.ToString(CultureInfo.InvariantCulture)}: {finding.Text}");
-        var numbered = new NumberedFinding(number, finding, guidance.For(finding.Check), reference);
+        var check = guidance.For(finding.Check);
+        var rank = guidance.Rank(check?.Impact);
+        var numbered = new NumberedFinding(number, finding, check, reference, guidance.OfRank(rank), rank);
         _all.Add(numbered);
         return numbered;
     }
@@ -99,7 +100,7 @@ public sealed class AndroidEvidence
     {
         var order = guidance.Checks.Select((check, index) => (check.Check, index)).ToDictionary(pair => pair.Check, pair => pair.index, StringComparer.Ordinal);
         return findings
-            .OrderByDescending(finding => guidance.For(finding.Check)?.Impact ?? 0)
+            .OrderByDescending(finding => guidance.Rank(guidance.For(finding.Check)?.Impact))
             .ThenBy(finding => finding.Level)
             .ThenBy(finding => order.GetValueOrDefault(finding.Check, int.MaxValue))
             .ThenBy(finding => finding.Times.Count == 0 ? long.MaxValue : finding.Times[0].Time);

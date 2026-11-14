@@ -3,8 +3,15 @@ using System.Text.Json;
 
 namespace Recorder.Analysis.Android;
 
-/// <summary>One step of the impact scale: its score, 4 down to 1, its word and what it means.</summary>
-public sealed record GuidanceImpact(int Score, string Word, string Meaning);
+/// <summary>
+/// One step of the impact scale (android-report.md, "The impact levels"):
+/// high, medium or low, as in the project's other tools, and what it means.
+/// </summary>
+public sealed record GuidanceImpact(string Level, string Meaning)
+{
+    /// <summary>The level as the report writes it, such as "High".</summary>
+    public string Label => Level.Length == 0 ? Level : char.ToUpperInvariant(Level[0]) + Level[1..];
+}
 
 /// <summary>A source the guidance rests on.</summary>
 public sealed record GuidanceSource(string Title, string Url);
@@ -25,7 +32,7 @@ public sealed record CheckGuidance(
     string Issue,
     string Why,
     IReadOnlyList<string> Affects,
-    int Impact,
+    string Impact,
     IReadOnlyList<string> Criteria,
     IReadOnlyList<string> Related,
     string Basis,
@@ -80,7 +87,7 @@ public sealed class AndroidGuidance
     /// <summary>The SHA-256 of the guidance file, in lower-case hexadecimal.</summary>
     public string Sha256 { get; }
 
-    /// <summary>The impact scale, from 4, critical, down to 1, minor.</summary>
+    /// <summary>The impact scale, from high down to low.</summary>
     public IReadOnlyList<GuidanceImpact> Impact { get; }
 
     public IReadOnlyDictionary<string, GuidanceSource> Sources { get; }
@@ -92,9 +99,25 @@ public sealed class AndroidGuidance
     /// <summary>A check's guidance, or null for a check the file does not cover.</summary>
     public CheckGuidance? For(string check) => _checks.GetValueOrDefault(check);
 
-    /// <summary>The impact scale's step for a score.</summary>
-    public GuidanceImpact ImpactOf(int score) =>
-        Impact.FirstOrDefault(step => step.Score == score) ?? new GuidanceImpact(score, "unscored", "Not on the scale.");
+    /// <summary>
+    /// A level's rank, for ordering: 3 for high down to 1 for low, 0 for a
+    /// level not on the scale.
+    /// </summary>
+    public int Rank(string? level)
+    {
+        for (var index = 0; index < Impact.Count; index++)
+        {
+            if (string.Equals(Impact[index].Level, level, StringComparison.Ordinal))
+            {
+                return Impact.Count - index;
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>The scale's step of a rank, or null for 0.</summary>
+    public GuidanceImpact? OfRank(int rank) => rank >= 1 && rank <= Impact.Count ? Impact[Impact.Count - rank] : null;
 
     /// <summary>A criterion as the report names it, such as "2.5.8 Target Size (Minimum) (AA)".</summary>
     public string CriterionText(string number) =>
@@ -104,10 +127,16 @@ public sealed class AndroidGuidance
     {
         var file = JsonSerializer.Deserialize<GuidanceFile>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ??
             throw new InvalidDataException("The Android check guidance is empty.");
+        var levels = file.Impact.Select(step => step.Level).ToHashSet(StringComparer.Ordinal);
+        if (file.Checks.FirstOrDefault(check => !levels.Contains(check.Impact)) is { } unknown)
+        {
+            throw new InvalidDataException($"The Android check guidance gives {unknown.Check} the impact \"{unknown.Impact}\", which is not on its scale.");
+        }
+
         return new AndroidGuidance(
             file.Version,
             Convert.ToHexStringLower(SHA256.HashData(json)),
-            [.. file.Impact.OrderByDescending(step => step.Score)],
+            file.Impact,
             file.Sources,
             file.Criteria,
             file.Checks);

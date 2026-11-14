@@ -55,7 +55,7 @@ public sealed class AndroidSummaryKind : IAnalysisTaskKind
         "Describe only what the facts support. Name the app, the screen and its items only as the facts name them. " +
         "An error is a check that failed on the recorded evidence. A warning or information is a likely issue that a person has not yet confirmed: " +
         "open a statement about one with that, such as \"a likely issue, not yet confirmed, is\", never state it as a failure. " +
-        "The impact scores are the recorder's default judgement of each kind of issue once confirmed, not measured from this app. " +
+        "Each finding's impact, high, medium or low, is the recorder's default judgement of that kind of issue once confirmed, not measured from this app. " +
         "Do not add issues, causes or fixes the facts do not give, and do not say whether the screen meets WCAG as a whole. " +
         "Answer in JSON with two sections: \"screen\", what the screen appears to be for and what it holds, as far as the facts show; " +
         "and \"issues\", the main barriers on the screen, who they affect and how, most serious first, grouping findings of the same kind into one statement citing each of their references. " +
@@ -71,7 +71,7 @@ public sealed class AndroidSummaryKind : IAnalysisTaskKind
         "and each screen as a model summarised it from the recorder's findings, labelled inferred; these summaries are inferences, not facts. " +
         "Describe only what these support, and name the app and its screens only as they are named. " +
         "A warning is a likely issue that a person has not yet confirmed; never state one as a failure. " +
-        "The impact scores are the recorder's default judgement of each kind of issue once confirmed. " +
+        "Each finding's impact, high, medium or low, is the recorder's default judgement of that kind of issue once confirmed. " +
         "Do not say whether the app meets WCAG as a whole, and do not add issues or fixes the input does not give. " +
         "Answer in JSON with three sections: \"app\", what the app appears to be and what the recording covered; " +
         "\"barriers\", the main barriers across the app and who they affect; and \"priorities\", which kinds of issue to fix first and why, from their impact and how widely they were found. " +
@@ -135,7 +135,7 @@ public sealed class AndroidSummaryKind : IAnalysisTaskKind
             PhoneCheckLevel.Warning => "warning, not yet confirmed",
             _ => "information, not yet confirmed",
         };
-        var impact = check is null ? "not scored" : $"{check.Impact} of 4, {guidance.ImpactOf(check.Impact).Word}";
+        var impact = finding.Impact?.Level ?? "not given";
         var criteria = check is null || check.Criteria.Count == 0 ? "no WCAG success criterion, best practice" : "WCAG " + string.Join("; ", check.Criteria.Select(guidance.CriterionText));
         var affects = check is null ? "" : " Affects: " + string.Join("; ", check.Affects) + ".";
         var first = finding.Finding.Times[0];
@@ -172,7 +172,7 @@ public sealed class AndroidSummaryKind : IAnalysisTaskKind
         {
             var name = group.Key.Length == 0 ? "No WCAG success criterion, best practice" : guidance.CriterionText(group.Key);
             input.Append(CultureInfo.InvariantCulture,
-                $"  {name}: {Count(group.Count(), "finding", "findings")}, {Count(group.Count(f => f.Finding.Level == PhoneCheckLevel.Error), "error", "errors")}, {group.Count(f => f.Finding.Level != PhoneCheckLevel.Error)} not yet confirmed, highest impact {group.Max(f => f.Impact)} of 4.\n");
+                $"  {name}: {Count(group.Count(), "finding", "findings")}, {Count(group.Count(f => f.Finding.Level == PhoneCheckLevel.Error), "error", "errors")}, {group.Count(f => f.Finding.Level != PhoneCheckLevel.Error)} not yet confirmed, highest impact {guidance.OfRank(group.Max(f => f.Rank))?.Level ?? "not given"}.\n");
         }
 
         foreach (var finding in evidence.App)

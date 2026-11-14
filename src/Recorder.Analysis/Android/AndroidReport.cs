@@ -156,12 +156,12 @@ public static class AndroidReport
             Heading(2, "How to read this report");
             Paragraph("The report is arranged by screen, in the order the screens were first visited, after the findings of the app as a whole. Each visit to a screen has the screen's picture, with each finding's item outlined and numbered, and each finding has its own section.");
             Item("An error is a check that failed on the recorded evidence.");
-            Item("A warning is a likely issue that a person needs to confirm, for example with TalkBack or a keyboard; its impact is scored as if confirmed.");
-            Item("Information is a note that may point to an issue; its impact is also scored as if confirmed.");
-            Paragraph("The impact score is the recorder's default judgement of each kind of issue once confirmed, from its guidance file; it is not measured from this app:");
+            Item("A warning is a likely issue that a person needs to confirm, for example with TalkBack or a keyboard; its impact is given as if confirmed.");
+            Item("Information is a note that may point to an issue; its impact is also given as if confirmed.");
+            Paragraph("The impact, high, medium or low, is the recorder's default judgement of each kind of issue once confirmed, from its guidance file; it is not measured from this app:");
             foreach (var step in guidance.Impact)
             {
-                Item($"{step.Score.ToString(CultureInfo.InvariantCulture)}, {step.Word}: {step.Meaning}");
+                Item($"{step.Label}: {step.Meaning}");
             }
 
             Paragraph("In the pictures, each item is outlined in cyan between two black bands, with the finding's number in black on cyan beside it. A small item also has a zoomed picture, taken from the picture at full size. A finding about the whole screen has no outline.");
@@ -244,13 +244,13 @@ public static class AndroidReport
 
         private IReadOnlyList<string> Counts(IReadOnlyList<NumberedFinding> findings)
         {
-            var highest = findings.Count == 0 ? 0 : findings.Max(finding => finding.Impact);
+            var highest = findings.Count == 0 ? 0 : findings.Max(finding => finding.Rank);
             return
             [
                 findings.Count.ToString(CultureInfo.InvariantCulture),
                 findings.Count(finding => finding.Finding.Level == PhoneCheckLevel.Error).ToString(CultureInfo.InvariantCulture),
                 findings.Count(finding => finding.Finding.Level == PhoneCheckLevel.Warning).ToString(CultureInfo.InvariantCulture),
-                highest == 0 ? "None" : $"{highest.ToString(CultureInfo.InvariantCulture)}, {guidance.ImpactOf(highest).Word}",
+                guidance.OfRank(highest)?.Label ?? "None",
             ];
         }
 
@@ -491,9 +491,8 @@ public static class AndroidReport
             var check = numbered.Guidance;
             Heading(visit is null ? 3 : 4, numbered.Heading);
             var first = finding.Times[0];
-            var impact = check is null ? "Not scored: the guidance does not cover this check"
-                : $"{check.Impact.ToString(CultureInfo.InvariantCulture)} of 4, {guidance.ImpactOf(check.Impact).Word}" +
-                  (finding.Level == PhoneCheckLevel.Error ? "" : ", if confirmed");
+            var impact = numbered.Impact is not { } step ? "Not given: the guidance does not cover this check"
+                : step.Label + (finding.Level == PhoneCheckLevel.Error ? "" : ", if confirmed");
             var level = finding.Level switch
             {
                 PhoneCheckLevel.Error => "Error",
@@ -619,8 +618,8 @@ public static class AndroidReport
             Heading(2, "Limits");
             Item("The checks cover what the recording shows: the screens visited, in the states they were seen in. A screen or state not recorded is not checked.");
             Item("No finding on a screen does not show that it meets WCAG; many success criteria need a person's judgement or a test the recording cannot make.");
-            Item("Warnings and information need a person to confirm them; their impact is scored as if confirmed.");
-            Item("The impact scores and the remediation are the recorder's guidance for each kind of issue, not advice written for this app.");
+            Item("Warnings and information need a person to confirm them; their impact is given as if confirmed.");
+            Item("The impact levels and the remediation are the recorder's guidance for each kind of issue, not advice written for this app.");
             Item("Colours measured on a video frame are approximate, as the video is compressed; those measured on the companion app's screenshots are exact.");
             Item("The report covers the whole recording, whatever part of it was chosen when it was queued.");
             if (input.Audit.MeasureProblem is { } problem)
