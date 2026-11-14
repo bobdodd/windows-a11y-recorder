@@ -203,46 +203,40 @@ public static partial class WordReport
             _lastHeading = block.Text;
         }
 
-        // The table of contents: Word's TOC field over Heading 1 and 2,
-        // with its entries written as links to the headings' bookmarks so
-        // that it reads in full before Word updates it with page numbers.
+        // The table of contents, Heading 1 and 2: each entry a link to its
+        // heading's bookmark, with its number and text, then a tab to the
+        // right margin, dotted, and its page number as a PAGEREF field.
+        // There is no TOC field round the entries: LibreOffice shows a TOC
+        // field's stored text as it is, page numbers included, but works
+        // out each PAGEREF itself as it lays the pages out. Word updates
+        // the PAGEREF fields when it opens the document (UpdateFieldsOnOpen,
+        // after asking) and before printing; until then they are empty, as
+        // only a layout gives a page number.
         private void Contents()
         {
             body.Append(Paragraph("TOCHeading", [new Run(Text("Contents"))]));
             var entries = contents.Select((entry, index) => (entry.Heading, entry.Number, Index: index))
                 .Where(entry => entry.Heading.Level - 1 <= ContentsLevels)
                 .ToList();
-            var instruction = $" TOC \\o \"1-{ContentsLevels.ToString(System.Globalization.CultureInfo.InvariantCulture)}\" \\h \\z \\u ";
-            OpenXmlElement[] begin =
-            [
-                new Run(new FieldChar { FieldCharType = FieldCharValues.Begin, Dirty = true }),
-                new Run(new FieldCode(instruction) { Space = SpaceProcessingModeValues.Preserve }),
-                new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }),
-            ];
-            OpenXmlElement end = new Run(new FieldChar { FieldCharType = FieldCharValues.End });
             if (entries.Count == 0)
             {
-                body.Append(new Paragraph(begin.Append(new Run(Text("No headings."))).Append(end)));
+                body.Append(Paragraph("Normal", [new Run(Text("The report has no sections."))]));
                 return;
             }
 
-            for (var at = 0; at < entries.Count; at++)
+            foreach (var (heading, number, index) in entries)
             {
-                var (heading, number, index) = entries[at];
                 var level = Math.Clamp(heading.Level - 1, 1, ContentsLevels);
-                var paragraph = new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "TOC" + level.ToString(System.Globalization.CultureInfo.InvariantCulture) }));
-                if (at == 0)
-                {
-                    paragraph.Append(begin.Select(element => element.CloneNode(true)));
-                }
-
-                paragraph.Append(new Hyperlink(new Run(new RunProperties(new RunStyle { Val = "Hyperlink" }), Text(number + " " + heading.Text))) { Anchor = Bookmark(index), History = true });
-                if (at == entries.Count - 1)
-                {
-                    paragraph.Append(end);
-                }
-
-                body.Append(paragraph);
+                body.Append(new Paragraph(
+                    new ParagraphProperties(new ParagraphStyleId { Val = "TOC" + level.ToString(System.Globalization.CultureInfo.InvariantCulture) }),
+                    new Hyperlink(
+                        new Run(Text(number + " " + heading.Text)),
+                        new Run(new TabChar()),
+                        new Run(new FieldChar { FieldCharType = FieldCharValues.Begin, Dirty = true }),
+                        new Run(new FieldCode($" PAGEREF {Bookmark(index)} \\h ") { Space = SpaceProcessingModeValues.Preserve }),
+                        new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }),
+                        new Run(new FieldChar { FieldCharType = FieldCharValues.End }))
+                    { Anchor = Bookmark(index), History = true }));
             }
         }
 
@@ -457,7 +451,8 @@ public static partial class WordReport
                 new StyleParagraphProperties(
                     new Tabs(new TabStop { Val = TabStopValues.Right, Leader = TabStopLeaderCharValues.Dot, Position = 9350 }),
                     new SpacingBetweenLines { After = "60" },
-                    new Indentation { Left = ((level - 1) * 440).ToString(System.Globalization.CultureInfo.InvariantCulture) }))
+                    // A long entry wraps short of the page numbers.
+                    new Indentation { Left = ((level - 1) * 440).ToString(System.Globalization.CultureInfo.InvariantCulture), Right = "720" }))
             { Type = StyleValues.Paragraph, StyleId = "TOC" + level.ToString(System.Globalization.CultureInfo.InvariantCulture) });
         }
 

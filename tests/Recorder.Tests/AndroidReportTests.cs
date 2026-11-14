@@ -247,12 +247,24 @@ public sealed class AndroidReportTests : IDisposable
         var heading1 = main.StyleDefinitionsPart!.Styles!.Elements<Style>().Single(style => style.StyleId == "Heading1");
         Assert.NotNull(heading1.StyleParagraphProperties!.NumberingProperties);
 
-        // The contents: Word's TOC field, its entries linked to the headings' bookmarks, updated on opening.
-        Assert.Contains(body.Descendants<FieldCode>(), code => code.Text.Contains("TOC \\o \"1-2\" \\h", StringComparison.Ordinal));
+        // The contents: each entry a link to its heading's bookmark, with
+        // a tab to a dotted right-aligned stop and a PAGEREF field to the
+        // same bookmark, which Word updates on opening. No TOC field round
+        // them, whose stored text LibreOffice would show unchanged.
+        Assert.DoesNotContain(body.Descendants<FieldCode>(), code => code.Text.Contains("TOC", StringComparison.Ordinal));
         var bookmarks = body.Descendants<BookmarkStart>().Select(mark => mark.Name!.Value).ToHashSet(StringComparer.Ordinal);
         var anchors = body.Descendants<Hyperlink>().Where(link => link.Anchor is not null).ToList();
-        Assert.NotEmpty(anchors);
-        Assert.All(anchors, link => Assert.Contains(link.Anchor!.Value!, bookmarks));
+        Assert.Equal(11, anchors.Count);
+        Assert.All(anchors, link =>
+        {
+            Assert.Contains(link.Anchor!.Value!, bookmarks);
+            Assert.Single(link.Descendants<TabChar>());
+            Assert.Equal($" PAGEREF {link.Anchor.Value} \\h ", Assert.Single(link.Descendants<FieldCode>()).Text);
+        });
+        var toc1 = main.StyleDefinitionsPart!.Styles!.Elements<Style>().Single(style => style.StyleId == "TOC1");
+        var stop = Assert.Single(toc1.Descendants<TabStop>());
+        Assert.Equal(TabStopValues.Right, stop.Val!.Value);
+        Assert.Equal(TabStopLeaderCharValues.Dot, stop.Leader!.Value);
         Assert.StartsWith("1 ", anchors[0].InnerText, StringComparison.Ordinal);
         Assert.Contains(anchors, link => link.InnerText.StartsWith("3.1 By WCAG success criterion", StringComparison.Ordinal));
         Assert.True(main.DocumentSettingsPart!.Settings!.GetFirstChild<UpdateFieldsOnOpen>()!.Val!.Value);

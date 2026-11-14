@@ -76,18 +76,23 @@ without a horizontal scrollbar.
 
 ## Test 4: open the report in Word
 
+The button opens the document in the program Windows has for Word
+documents, LibreOffice Writer on the development PC.
+
 1. In the row from test 3, choose "Open in Word".
-2. If Word asks whether to update the fields in the document, choose
-   Yes.
-3. In Word, choose View, then tick Navigation Pane.
-4. Take a screenshot of Word showing the first page and the Navigation
-   Pane.
+2. If asked whether to update the fields in the document, choose Yes.
+3. Open the Navigator (LibreOffice: View, then Navigator) or the
+   Navigation Pane (Word: View, then tick Navigation Pane).
+4. Hold Ctrl and click the contents entry for "Evidence".
+5. Take a screenshot showing the contents and the Navigator or
+   Navigation Pane, then one after the click.
 
 **On screen:** the first page has "Accessibility report:" and the
 app's package name at its top, as the header and as the title, a
 paragraph ending "The final report is manually inspected.", then
-"Contents" with numbered entries, each with a page number, and "Page 1
-of" in the footer. The word "model" is not on the page. The Navigation
+"Contents" with numbered entries, each with a dotted line to its page
+number at the right margin, and "Page 1 of" in the footer. The click
+moves to the "Evidence" heading, on the page its entry gave. The word "model" is not on the page. The Navigation
 Pane lists numbered headings: "1 About this recording", "2 How to read
 this report", "3 At a glance", "4 Findings across the app" if there are
 any, then "Findings by screen" with "Screen 1:" and the screen's name

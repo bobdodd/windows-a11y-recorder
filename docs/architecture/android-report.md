@@ -266,17 +266,24 @@ Written with the Open XML SDK (`DocumentFormat.OpenXml` 3.5.1) from the
 client's Markdown (see "Two readers"):
 
 - the title in Word's Title style, then the opening paragraph, then
-  "Contents", a table of contents in Word's own TOC field over Heading 1
-  and 2, each entry a link to its heading;
+  "Contents", a table of contents over Heading 1 and 2: each entry is a
+  link to its heading, with the heading's number and text, then a dotted
+  tab to its page number at the right margin;
 - every other heading in Word's heading styles, Heading 1 to 6, a level
   below the Markdown's, numbered by the styles themselves, 1, 1.1, 1.1.1
   and so on, so that the numbers stay right if the document is edited;
   the first numbered heading starts a new page after the contents;
 - the title in each page's header, and "Page 1 of 7" in its footer, from
   Word's PAGE and NUMPAGES fields;
-- Word set to update the fields on opening, so the contents gain their
-  page numbers; Word asks before it updates them, and until then each
-  entry shows its heading's number and text with no page number;
+- each page number in the contents a PAGEREF field to its heading's
+  bookmark. LibreOffice works these out itself as it lays out the
+  pages. Word is set to update the fields when it opens the document,
+  after asking, and updates them before printing; until then they are
+  empty, as only a layout gives a page number. The entries are not
+  inside Word's TOC field: tried on 2026-11-14, LibreOffice showed the
+  text stored in a TOC field as it was, so the page numbers it held
+  could not be right, and the development PC opens Word documents in
+  LibreOffice Writer;
 - Word's current mode, not compatibility mode, so that its
   accessibility checker can check everything;
 - tables with a repeated header row, rows that do not split across
