@@ -11,11 +11,13 @@ public interface IPhonePackagesSeen
 }
 
 /// <summary>
-/// Records the phone's display density and the versions of the apps seen
+/// Records the phone's display density and the versions and bundled-framework
+/// markers of the apps seen
 /// (android-checks.md, step 2), with adb, as
 /// <see cref="AndroidDeviceRecords"/> describes: <c>wm density</c> at the
 /// start and the stop, and <c>dumpsys package</c> at the stop for each
-/// package the accessibility tree collector saw. It comes before that
+/// package the accessibility tree collector saw, then on-phone APK entry
+/// listings for its framework metadata. It comes before that
 /// collector in the list, and so stops after it, when every snapshot has
 /// been read. A density or version that cannot be read does not stop the
 /// recording: the collector records why, reports itself degraded, and the
@@ -261,7 +263,15 @@ public sealed partial class AndroidDeviceCollector : ICaptureCollector
                     continue;
                 }
 
-                apps.Add(ParseVersion(package, result.Output));
+                var app = ParseVersion(package, result.Output);
+                var framework = app.Found
+                    ? await AndroidFrameworkDetector.ReadAsync(_adb, _serial, package, cancellation).ConfigureAwait(false)
+                    : AndroidFrameworkDetector.Unavailable("The app was not found at the stop.");
+                apps.Add(app with { Framework = framework });
+                if (app.Found && framework.Problem is { } problem)
+                {
+                    problems.Add($"The framework of {package} could not be fully checked: {problem}");
+                }
             }
             catch (IOException ex)
             {
@@ -276,7 +286,7 @@ public sealed partial class AndroidDeviceCollector : ICaptureCollector
         _versions = string.Create(CultureInfo.InvariantCulture, $"{found} of {_packages.PackagesSeen.Count} {(_packages.PackagesSeen.Count == 1 ? "app's version" : "apps' versions")} read at the stop");
         if (problems.Count > 0)
         {
-            Unavailable($"not every app's version was read at the stop: {string.Join(" ", problems)}");
+            Unavailable($"not every app's metadata was read at the stop: {string.Join(" ", problems)}");
         }
     }
 

@@ -356,6 +356,11 @@ public partial class MainWindow
                 $"App {app.Package}, {device.DescribeVersion(app.Package)}: {Count(app.Screens.Count, "screen")}, {Count(visits, "visit")}",
                 pictures.TimeOf(app.Screens[0].Visits[0]),
                 null));
+            _phoneScreenRows.Add(new PhoneScreenRowView(
+                1,
+                device.DescribeFramework(app.Package),
+                pictures.TimeOf(app.Screens[0].Visits[0]),
+                null) { IsMetadata = true });
 
             // Step 12's warning for an app with no live region in the whole
             // recording, under the app, as it is about all its visits.
@@ -938,7 +943,7 @@ public partial class MainWindow
         string.Create(CultureInfo.CurrentCulture, $"{count:N0} {(count == 1 ? noun : noun + "s")}");
 }
 
-/// <summary>A row of the Checks tab: the density, an app, a screen, a visit, a state, a check or a finding.</summary>
+/// <summary>A row of the Checks tab: the density, an app, app metadata, a screen, a visit, a state, a check or a finding.</summary>
 public sealed class PhoneScreenRowView : INotifyPropertyChanged
 {
     private bool _isCurrent;
@@ -970,7 +975,10 @@ public sealed class PhoneScreenRowView : INotifyPropertyChanged
     /// <summary>Whether the row heads a check's findings, or says a visit has none or was not checked.</summary>
     public bool IsCheck { get; init; }
 
-    public bool IsHeading => Level < 2 || IsCheck;
+    /// <summary>App information, shown as normal text rather than a screen heading.</summary>
+    public bool IsMetadata { get; init; }
+
+    public bool IsHeading => !IsMetadata && (Level < 2 || IsCheck);
 
     public Thickness Indent => new(Level * 20, 0, 0, 0);
 

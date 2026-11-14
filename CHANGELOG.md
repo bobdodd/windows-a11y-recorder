@@ -8,6 +8,16 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Android app metadata
+
+- Record Flutter and React Native bundled-library markers for apps seen
+  during a phone recording, including installed split APKs, and show
+  the result under each app in the Checks list. Keep unknown,
+  unavailable and incomplete reads explicit; old recordings say
+  "Framework not recorded." Detection uses on-phone file listings
+  without AI, APK copies, extraction or decompilation. See
+  [framework metadata](docs/architecture/android-framework-metadata.md).
+
 ### Analysis
 
 - The analysis runner: tasks queued from the player's Analysis menu run in

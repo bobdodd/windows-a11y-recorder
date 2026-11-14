@@ -639,6 +639,10 @@ snapshot's time.
 
 ## As built: step 2
 
+Framework metadata extends the per-app records without adding a finding:
+see [Android app framework metadata](android-framework-metadata.md)
+for the supported signatures, provenance, unknown results and limits.
+
 Built 2026-11-12 in `src/Recorder.Collectors.Android/AndroidDeviceCollector.cs`
 (records in `src/Recorder.Contracts/AndroidDeviceRecords.cs`, channel
 `device.android`) and `src/Recorder.Session/PhoneDeviceTimeline.cs`, with

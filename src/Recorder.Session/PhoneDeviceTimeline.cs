@@ -183,6 +183,39 @@ public sealed class PhoneDeviceTimeline
         _versions.GetValueOrDefault(package);
 
     /// <summary>
+    /// Framework metadata read at the stop. Unknown is not a native-Android
+    /// classification; a match describes bundled code, not every screen.
+    /// </summary>
+    public string DescribeFramework(string package)
+    {
+        var result = VersionOf(package)?.Framework;
+        if (result is null)
+        {
+            return "Framework not recorded.";
+        }
+
+        var description = result.Status switch
+        {
+            "detected" when result.Names.Count > 0 =>
+                $"Framework: {string.Join(", ", result.Names)} (bundled APK library detected at the stop; use by this screen is not established).",
+            "unknown" => "Framework unknown: no supported Flutter or React Native library marker was found.",
+            _ => "Framework unavailable."
+        };
+        description += string.Create(CultureInfo.CurrentCulture, $" APKs read: {result.ApksRead} of {result.ApksTotal}.");
+        if (result.Evidence.Count > 0)
+        {
+            description += " Evidence: " + string.Join("; ", result.Evidence) + ".";
+        }
+
+        if (result.Problem is { Length: > 0 } problem)
+        {
+            description += " Incomplete check: " + problem;
+        }
+
+        return description;
+    }
+
+    /// <summary>
     /// A package's version in words, such as "version 1.0.3 (code 12),
     /// targets API 35", or why there is none.
     /// </summary>

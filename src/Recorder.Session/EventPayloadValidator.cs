@@ -10114,12 +10114,32 @@ internal static class EventPayloadValidator
                     NullableInteger("targetSdk", nonnegative: true),
                     NullableText("lastUpdateTime"),
                     NullableText("installer"),
-                    RequiredTextArray("lines")
+                    RequiredTextArray("lines"),
+                    OptionalNullableObject("framework")
                 ],
                 issues,
                 $"#/payload/apps/{index}");
+            ValidateOptionalObject(app, "framework", ValidateAndroidAppFramework, issues, $"#/payload/apps/{index}");
             index++;
         }
+    }
+
+    private static void ValidateAndroidAppFramework(JsonElement value, ICollection<EventValidationIssue> issues, string path)
+    {
+        ValidateShape(
+            value,
+            [
+                RequiredString("source"),
+                new PropertyRule("status", true, false, item => IsString(item) &&
+                    item.GetString() is "detected" or "unknown" or "unavailable",
+                    "must be detected, unknown or unavailable"),
+                RequiredTextArray("names"),
+                RequiredTextArray("evidence"),
+                RequiredInteger("apksRead", nonnegative: true),
+                RequiredInteger("apksTotal", nonnegative: true),
+                NullableText("problem")
+            ],
+            issues, path);
     }
 
     private static PropertyRule RequiredString(string name) =>

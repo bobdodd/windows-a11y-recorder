@@ -2164,3 +2164,65 @@ an error under "Field with no label (WCAG 3.3.2)", and a FrameLayout
 holding "Open the home page", the page's address and "New tab" is a
 clickable but not focusable warning (WCAG 2.1.1). Both are findings
 about Chrome, not the test page, and follow the rules as decided.
+
+## Test 57: build and install the twenty-first build
+
+This build adds framework metadata, not an accessibility check.
+Run only after its commit has been pushed. Phone verification has not
+yet been performed.
+
+1. Close the recorder. After the push is confirmed, run this in
+   PowerShell to build and launch the newest installer:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $ErrorActionPreference = "Stop"
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   if ($LASTEXITCODE -ne 0) { throw "Git pull failed." }
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   $installer = Get-ChildItem (Join-Path $repo "artifacts\installer\output") -File -Filter "*.exe" |
+       Sort-Object LastWriteTime -Descending | Select-Object -First 1
+   if (-not $installer) { throw "No installer was found." }
+   Start-Process -FilePath $installer.FullName
+   ```
+
+2. Complete setup with model setup unchecked.
+3. Start the recorder from the Start menu.
+
+**On screen:** the build reports `INSTALLER BUILT`, the installer opens,
+and the recorder opens after setup.
+
+## Test 58: record a known Flutter app's framework
+
+Keep the phone's picture in view throughout.
+
+Before the test, connect the unlocked phone by USB and leave TalkBack
+off. Use an installed app independently known to bundle Flutter.
+
+1. On the phone, open that app. In the recorder choose Android device,
+   then Start recording.
+2. Wait five seconds, then Stop recording and wait for playback.
+3. Open Checks, keeping the phone's picture in view. Find that app's
+   heading and its next row.
+4. Take a screenshot of the whole recorder.
+
+**On screen:** the next row starts `Framework: Flutter`, says it is a
+bundled APK library detected at the stop, and says use by this screen
+is not established. It gives the APK count and an evidence entry ending
+in `libflutter.so`. Long text wraps without a horizontal scrollbar.
+If it says unknown, unavailable or incomplete, send that result as it
+is; do not mark the positive-detection test passed.
+
+## Test 59: an older recording's framework is not invented
+
+Keep the phone's picture in view throughout.
+
+1. Open a phone recording made before this build.
+2. Open Checks, keeping the phone's picture in view, and find an app's
+   heading.
+3. Take a screenshot of the heading and the next row.
+
+**On screen:** the next row says `Framework not recorded.` The recorder
+does not retrospectively label an old recording using the currently
+installed version of that app.

@@ -142,6 +142,7 @@ public sealed class AndroidDeviceTests
         var apps = records[2].Payload.GetProperty("apps");
         Assert.Equal(2, apps.GetArrayLength());
         Assert.Equal("3.4.1", apps[0].GetProperty("versionName").GetString());
+        Assert.Equal("Flutter", apps[0].GetProperty("framework").GetProperty("names")[0].GetString());
         Assert.False(apps[1].GetProperty("found").GetBoolean());
 
         var device = new PhoneDeviceTimeline(
@@ -153,6 +154,8 @@ public sealed class AndroidDeviceTests
         Assert.Equal(3.0, period.PixelsPerDp);
         Assert.Equal("00:00:00.000 to 00:00:08.000", period.When);
         Assert.Equal("version 3.4.1 (code 412), targets API 35", device.DescribeVersion(Nova));
+        Assert.Contains("Framework: Flutter", device.DescribeFramework(Nova), StringComparison.Ordinal);
+        Assert.Contains("base.apk: lib/arm64-v8a/libflutter.so", device.DescribeFramework(Nova), StringComparison.Ordinal);
         Assert.Equal("not found at the stop", device.DescribeVersion("com.android.systemui"));
         Assert.Equal("version not read", device.DescribeVersion("com.example.unseen"));
     }
@@ -176,6 +179,31 @@ public sealed class AndroidDeviceTests
         Assert.All(records, record => Assert.Empty(validator.Validate(record)));
         Assert.Equal(2, records.Count(record => record.EventType == AndroidDeviceRecords.UnavailableEventType));
         Assert.Empty(new PhoneDeviceTimeline(records.Select(record => (record.MonotonicNanoseconds, record.EventType, record.Payload)), [], Second).Densities);
+    }
+
+    [Fact]
+    public async Task Collector_FrameworkReadFails_KeepsVersionAndRecordsUnavailableMetadata()
+    {
+        var adb = new FakeAdb(frameworkFails: true);
+        var sink = new ListSink();
+        var clock = new ManualClock(Second);
+        await using var collector = new AndroidDeviceCollector(adb, Serial, new FakePackages([Nova]));
+        await collector.InitializeAsync(new CollectorInitializationContext("session-1", Path.GetTempPath(), clock, sink), CancellationToken.None);
+        await collector.StartAsync(new SessionBoundary(Second, DateTimeOffset.UtcNow), CancellationToken.None);
+        await WaitUntilAsync(() => collector.Summary is not null, () => collector.Summary);
+        clock.Now = 2 * Second;
+        await collector.StopAsync(new SessionBoundary(2 * Second, DateTimeOffset.UtcNow), CancellationToken.None);
+
+        Assert.Equal(CollectorHealthState.Degraded, collector.HealthState);
+        Assert.Contains("framework", collector.HealthReason, StringComparison.Ordinal);
+        var record = Assert.Single(sink.Records, item => item.EventType == AndroidDeviceRecords.AppVersionsEventType);
+        Assert.Empty(new EventRecordValidator("session-1").Validate(record));
+        var app = Assert.Single(record.Payload.GetProperty("apps").EnumerateArray());
+        Assert.Equal("3.4.1", app.GetProperty("versionName").GetString());
+        Assert.Equal("unavailable", app.GetProperty("framework").GetProperty("status").GetString());
+        Assert.Equal(0, app.GetProperty("framework").GetProperty("apksRead").GetInt32());
+        Assert.Equal(1, app.GetProperty("framework").GetProperty("apksTotal").GetInt32());
+        Assert.Single(record.Payload.GetProperty("problems").EnumerateArray());
     }
 
     // The density's periods
@@ -276,7 +304,7 @@ public sealed class AndroidDeviceTests
     }
 
     /// <summary>A phone at 480 dpi with the Nova app installed and nothing else printed.</summary>
-    private sealed class FakeAdb(bool fails = false) : IAdb
+    private sealed class FakeAdb(bool fails = false, bool frameworkFails = false) : IAdb
     {
         private readonly List<string> _commands = [];
 
@@ -309,6 +337,11 @@ public sealed class AndroidDeviceTests
             {
                 ["-s", Serial, "shell", "wm", "density"] => new AdbResult(0, "Physical density: 480\n", ""),
                 ["-s", Serial, "shell", "dumpsys", "package", Nova] => new AdbResult(0, NovaDump.Replace("\n", "\r\n", StringComparison.Ordinal), ""),
+                ["-s", Serial, "shell", "pm", "path", Nova] => new AdbResult(0, "package:/data/app/example/base.apk\n", ""),
+                ["-s", Serial, "shell", "unzip", "-l", _] when frameworkFails =>
+                    new AdbResult(1, "", "unzip: not found"),
+                ["-s", Serial, "shell", "unzip", "-l", "/data/app/example/base.apk"] =>
+                    new AdbResult(0, "  1234  2026-11-13 10:00  lib/arm64-v8a/libflutter.so\n", ""),
                 ["-s", Serial, "shell", "dumpsys", "package", _] => new AdbResult(0, "Activity Resolver Table:\n\nKey Set Manager:\n", ""),
                 _ => new AdbResult(1, "", $"unexpected command: {string.Join(' ', arguments)}")
             });

@@ -101,7 +101,31 @@ public sealed record AndroidAppVersion(
     int? TargetSdk,
     string? LastUpdateTime,
     string? Installer,
-    IReadOnlyList<string> Lines);
+    IReadOnlyList<string> Lines)
+{
+    /// <summary>
+    /// Framework libraries found in this installed package's APK file names
+    /// at the stop. Null for recordings made without this detection.
+    /// This describes bundled code, not the framework of every screen.
+    /// </summary>
+    public AndroidAppFramework? Framework { get; init; }
+}
+
+/// <summary>
+/// Deterministic APK-entry detection, not a conformance finding. Status is
+/// detected, unknown (no supported marker) or unavailable (nothing read).
+/// A problem can accompany a detected or unknown result when only some APKs
+/// were read. Names may contain more than one framework; no match does not
+/// establish a native Android UI. Evidence contains only matched file names.
+/// </summary>
+public sealed record AndroidAppFramework(
+    string Source,
+    string Status,
+    IReadOnlyList<string> Names,
+    IReadOnlyList<string> Evidence,
+    int ApksRead,
+    int ApksTotal,
+    string? Problem);
 
 /// <summary>Why the density or the versions are missing from a recording.</summary>
 public sealed record AndroidDeviceUnavailable(string Serial, string Reason);
