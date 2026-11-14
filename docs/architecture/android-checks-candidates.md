@@ -227,6 +227,69 @@ found no words outside the tree's text on any of them.
   show the words inside the image staying the same height (with 1.4.4,
   once the font scale is recorded).
 
+## Keyboard use watched in a recording (waiting for a keyboard)
+
+Recorded 2026-11-13 at the owner's request, to return to once a
+Bluetooth keyboard is to hand. The recorder tests a recording and does
+not drive the phone, so a Tab walk cannot be part of a check; what it
+can do is watch the keyboard use the tester makes and report what is
+seen or can be inferred. These are options, not decisions; each is to
+be measured on a recording first and put to the owner.
+
+What the recordings already hold: every key press from every input
+device on the phone (`getevent`, so a paired keyboard's Tab, arrows,
+Enter, Escape and letters, with times); each item taking the input
+focus (TYPE_VIEW_FOCUSED, with its class, text and bounds); the tree's
+focused and focusable marks; TalkBack's focus, apart from the keyboard
+focus; and the picture before and after each move. No recording to hand
+has keyboard use in it. A key sent by `adb shell input keyevent` is
+expected not to appear among the key presses, as it is injected above
+the input devices, so it cannot stand in for a keyboard; this is to be
+checked.
+
+1. **Keyboard trap (2.1.2, level A).** Focus "can be moved away from
+   that component using only a keyboard interface"
+   ([Understanding 2.1.2](https://www.w3.org/WAI/WCAG21/Understanding/no-keyboard-trap.html)).
+   Possible finding: Tab, Shift+Tab, the arrows or Escape pressed
+   several times with the focus never leaving a small set of items,
+   while the screen has other focusable items. Seen directly; how many
+   presses make a trap is a setting or a decision.
+2. **Never reached by keyboard (2.1.1).** Once the tester has gone
+   round a screen (the focus came back to where it started), a clickable
+   item never focused. This would turn the clickable but not focusable
+   warning into an error, for screens the tester went round only.
+3. **Focus hidden (2.4.11 at AA, 2.4.12 at AAA).** "When a user
+   interface component receives keyboard focus, the component is not
+   entirely hidden due to author-created content"
+   ([Understanding 2.4.11](https://www.w3.org/WAI/WCAG22/Understanding/focus-not-obscured-minimum)).
+   From the tree: the focused item off the screen, or wholly covered by
+   another window or a fixed bar; partly covered for 2.4.12. Content the
+   user opened may cover it, so only covering not caused by the tester
+   would count.
+4. **Focus lost.** A Tab press after which no item has focus, or the
+   focused item is not shown. Inferred; points to 2.4.3 or 2.4.7.
+5. **Key does nothing (2.1.1).** Enter, Space or the centre key pressed
+   on a focused control with no click, no change of state and no new
+   window. Inferred, so a warning.
+6. **No visible focus (2.4.7).** The pixels inside the newly focused
+   item's bounds do not change in the video or screenshots when the
+   focus moves onto it. AI-free; 2.4.13 at AAA could later measure the
+   size and contrast of the change.
+7. **Single-key shortcuts (2.1.4).** A shortcut "using only letter
+   (including upper- and lower-case letters), punctuation, number, or
+   symbol characters" needs a way to turn it off or remap it, or to be
+   active only on focus
+   ([Understanding 2.1.4](https://www.w3.org/WAI/WCAG22/Understanding/character-key-shortcuts)).
+   Possible finding: a letter or number key pressed with no text field
+   focused, followed by a change. Inferred, so a warning.
+8. **Focus order (2.4.3), recorded only.** The order the tester tabbed
+   through, listed for review, not judged: as with reading order, more
+   than one order can be meaningful.
+
+The same approach would apply to TalkBack swipes: focus stuck after
+repeated swipes, items skipped in a full pass, or focus on an item not
+shown.
+
 ## Hard, or needing more to be recorded
 
 - **1.4.4 Resize Text:** needs the font scale recorded, a pass at 200%
