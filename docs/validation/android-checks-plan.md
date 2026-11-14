@@ -2138,3 +2138,29 @@ If none of the rows is there, say so and send the screenshot as it is:
 Chrome may give the page's lines as separate items, which the recording
 will show. Long rows wrap; there is no horizontal scrollbar. Send the
 screenshot.
+
+## Results of tests 55 and 56 (2026-11-13)
+
+Test 55 passed: the twentieth build built and installed, and the
+recorder opened.
+
+Test 56 passed. The line under "Show current visit" read "White space
+used for layout (WCAG 1.3.2), three checks: 3 findings (3 errors), from
+12 texts looked at". Chrome gave the page's six lines as one TextView,
+so all three checks could see them. The list showed, under Chrome's
+screen, "Letters spaced apart with white space (WCAG 1.3.2, F32): 1
+error" with the row "Error: TextView "W e l c o m e Name Hours Bob 7.5
+Ann 8 This sentence is broken across two lines...", its text has 7
+single letters separated by spaces, "W e l c o m e", ...; seen 2 times,
+first at 00:00:05.808", and below it the heading "Columns made with
+white space (WCAG 1.3.2, F33): 1 error". The F33 row's detail and the
+line break row were below the part of the list in the screenshot; the
+count of 3 errors shows both were found. Step 16 has its acceptance on
+the development PC.
+
+Recorded, not changed: in the same visit Chrome's own address bar, an
+EditText whose only label is its hint "Search Google or type URL", is
+an error under "Field with no label (WCAG 3.3.2)", and a FrameLayout
+holding "Open the home page", the page's address and "New tab" is a
+clickable but not focusable warning (WCAG 2.1.1). Both are findings
+about Chrome, not the test page, and follow the rules as decided.
