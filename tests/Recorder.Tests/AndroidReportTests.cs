@@ -204,7 +204,7 @@ public sealed class AndroidReportTests : IDisposable
     public void WordDocument_IsValid_WithHeadingsRepeatedHeaderRowsPicturesAltTextLinksAndLanguage()
     {
         var (input, guidance, evidence) = Recording();
-        var markdown = AndroidReport.Write(input, guidance, evidence, null, Path.Combine(_folder, "pictures"), "pictures", DateTime.UtcNow);
+        var markdown = AndroidReport.Write(input, guidance, evidence, null, Path.Combine(_folder, "pictures"), "pictures", DateTime.UtcNow, ReportAudience.Client);
 
         var bytes = WordReport.Write(markdown, _folder, AndroidReport.Labels);
 
@@ -216,21 +216,83 @@ public sealed class AndroidReportTests : IDisposable
             .Validate(word, TestContext.Current.CancellationToken)
             .Select(error => error.Description + " at " + error.Path?.XPath);
         Assert.Equal("", string.Join("\n", errors));
-        Assert.Equal("Android accessibility report: s", word.PackageProperties.Title);
+        Assert.Equal("Accessibility report: com.android.settings", word.PackageProperties.Title);
         Assert.Equal("en-CA", word.PackageProperties.Language);
-        var body = word.MainDocumentPart!.Document!.Body!;
+        var main = word.MainDocumentPart!;
+        var body = main.Document!.Body!;
         var styles = body.Descendants<ParagraphStyleId>().Select(style => style.Val!.Value).ToList();
+        Assert.Equal("Title", styles[0]);
+        Assert.Single(styles, style => style == "Title");
         Assert.Contains("Heading1", styles);
-        Assert.Contains("Heading4", styles);
-        Assert.NotEmpty(body.Descendants<TableHeader>());
+        Assert.Contains("Heading3", styles);
+        Assert.Contains("TOC1", styles);
+        Assert.Contains("TOC2", styles);
+        Assert.Contains(body.Descendants<TableHeader>(), _ => true);
+        // Every table has a caption, so a screen reader's list of tables names it.
+        Assert.All(body.Descendants<Table>(), table => Assert.False(string.IsNullOrEmpty(table.GetFirstChild<TableProperties>()!.GetFirstChild<TableCaption>()?.Val?.Value)));
         var pictures = body.Descendants<DW.DocProperties>().ToList();
         Assert.Equal(2, pictures.Count);
         Assert.All(pictures, picture => Assert.False(string.IsNullOrEmpty(picture.Description)));
-        Assert.Equal(2, word.MainDocumentPart.ImageParts.Count());
-        Assert.Contains(word.MainDocumentPart.HyperlinkRelationships, link => link.Uri.AbsoluteUri.StartsWith("https://support.google.com/accessibility/android/answer/7101858", StringComparison.Ordinal));
+        Assert.Equal(2, main.ImageParts.Count());
+        Assert.Contains(main.HyperlinkRelationships, link => link.Uri.AbsoluteUri.StartsWith("https://support.google.com/accessibility/android/answer/7101858", StringComparison.Ordinal));
+        // A link reads as its source's title, not its address.
+        Assert.DoesNotContain(body.Descendants<Hyperlink>(), link => link.InnerText.StartsWith("http", StringComparison.Ordinal));
+        Assert.Contains(body.Descendants<Run>(), run => run.RunProperties?.Bold is not null && run.InnerText == "What the issue is:");
+
+        // The headings are numbered by their styles, 1, 1.1 and so on.
+        var numbering = main.NumberingDefinitionsPart!.Numbering!;
+        var headingList = numbering.Elements<DocumentFormat.OpenXml.Wordprocessing.AbstractNum>()
+            .Single(list => list.Elements<Level>().Any(level => level.ParagraphStyleIdInLevel?.Val?.Value == "Heading1"));
+        Assert.Equal("%1.%2", headingList.Elements<Level>().Single(level => level.LevelIndex!.Value == 1).LevelText!.Val!.Value);
+        var heading1 = main.StyleDefinitionsPart!.Styles!.Elements<Style>().Single(style => style.StyleId == "Heading1");
+        Assert.NotNull(heading1.StyleParagraphProperties!.NumberingProperties);
+
+        // The contents: Word's TOC field, its entries linked to the headings' bookmarks, updated on opening.
+        Assert.Contains(body.Descendants<FieldCode>(), code => code.Text.Contains("TOC \\o \"1-2\" \\h", StringComparison.Ordinal));
+        var bookmarks = body.Descendants<BookmarkStart>().Select(mark => mark.Name!.Value).ToHashSet(StringComparer.Ordinal);
+        var anchors = body.Descendants<Hyperlink>().Where(link => link.Anchor is not null).ToList();
+        Assert.NotEmpty(anchors);
+        Assert.All(anchors, link => Assert.Contains(link.Anchor!.Value!, bookmarks));
+        Assert.StartsWith("1 ", anchors[0].InnerText, StringComparison.Ordinal);
+        Assert.Contains(anchors, link => link.InnerText.StartsWith("3.1 By WCAG success criterion", StringComparison.Ordinal));
+        Assert.True(main.DocumentSettingsPart!.Settings!.GetFirstChild<UpdateFieldsOnOpen>()!.Val!.Value);
+
+        // The title in each page's header, and its number in the footer.
         var section = body.Elements<SectionProperties>().Single();
         Assert.Equal(12240U, section.GetFirstChild<PageSize>()!.Width!.Value);
-        Assert.Contains(body.Descendants<Run>(), run => run.RunProperties?.Bold is not null && run.InnerText == "What the issue is:");
+        var header = (HeaderPart)main.GetPartById(section.GetFirstChild<HeaderReference>()!.Id!.Value!);
+        Assert.Equal("Accessibility report: com.android.settings", header.Header!.InnerText);
+        var footer = (FooterPart)main.GetPartById(section.GetFirstChild<FooterReference>()!.Id!.Value!);
+        Assert.Equal([" PAGE ", " NUMPAGES "], footer.Footer!.Descendants<SimpleField>().Select(field => field.Instruction!.Value));
+
+        // Nothing for the client's team about models.
+        Assert.DoesNotContain("model", body.InnerText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("The final report is manually inspected.", body.InnerText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ClientSummary_SaysOnlyThatAiIsUsed_AndThatTheReportIsManuallyInspected()
+    {
+        var (input, guidance, evidence) = Recording();
+        var screen = Assert.Single(input.Screens.Screens);
+        var empty = JsonDocument.Parse("{}").RootElement;
+        var screenStep = new AcceptedStep(Guid.NewGuid(), "", empty,
+            [new Claim("screen", 0, 0, Claim.ClaimKind, "Inferring from its heading, the screen holds the phone's settings.", ["E5"])]);
+        var overall = new AcceptedStep(Guid.NewGuid(), "", empty,
+            [new Claim("app", 0, 0, Claim.ClaimKind, "The app holds the phone's settings.", ["E4"])]);
+        var model = new AndroidModelText(overall, new Dictionary<PhoneScreen, AcceptedStep> { [screen] = screenStep }, []);
+
+        var markdown = AndroidReport.Write(input, guidance, evidence, model, Path.Combine(_folder, "pictures"), "pictures", DateTime.UtcNow, ReportAudience.Client);
+
+        var document = ReportDocument.Parse(markdown);
+        var headings = document.Blocks.Where(block => block.Kind == ReportBlockKind.Heading).Select(block => block.Text).ToList();
+        Assert.Contains("Overview", headings);
+        Assert.Contains("Summary of the screen", headings);
+        Assert.DoesNotContain("How the summaries were written", headings);
+        Assert.DoesNotContain(guidance.Sha256, markdown, StringComparison.Ordinal);
+        var sentences = markdown.Split('.').Where(sentence => sentence.Contains("model", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Empty(sentences);
+        Assert.Contains("AI is used in generating this report, and the final report is manually inspected.", markdown, StringComparison.Ordinal);
     }
 
     [Fact]

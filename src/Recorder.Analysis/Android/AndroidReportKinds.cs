@@ -317,8 +317,8 @@ internal static class AndroidReportRun
     }
 
     /// <summary>
-    /// Writes the pictures, the Word document and the Markdown to the task's
-    /// folder, and records the reports, the Markdown last, as the player
+    /// Writes the pictures, the client's Word document and the auditor's
+    /// Markdown to the task's folder, and records the reports, the Markdown last, as the player
     /// opens a task's last report in its reading view.
     /// </summary>
     internal static async Task WriteAsync(
@@ -339,8 +339,13 @@ internal static class AndroidReportRun
             Directory.Delete(pictures, recursive: true);
         }
 
-        var markdown = AndroidReport.Write(input, guidance, evidence, model, pictures, "pictures", DateTime.UtcNow);
-        var word = WordReport.Write(markdown, folder, AndroidReport.Labels);
+        // The Markdown is the auditor's, with where each statement came
+        // from; the Word document is the client's (android-report.md,
+        // "Two readers"). Both write the same pictures.
+        var written = DateTime.UtcNow;
+        var markdown = AndroidReport.Write(input, guidance, evidence, model, pictures, "pictures", written);
+        var client = AndroidReport.Write(input, guidance, evidence, model, pictures, "pictures", written, ReportAudience.Client);
+        var word = WordReport.Write(client, folder, AndroidReport.Labels);
         await AddAsync(context, folder, folderRelative, baseName + ".docx", word, cancellationToken).ConfigureAwait(false);
         await AddAsync(context, folder, folderRelative, baseName + ".md", new UTF8Encoding(false).GetBytes(markdown), cancellationToken).ConfigureAwait(false);
     }

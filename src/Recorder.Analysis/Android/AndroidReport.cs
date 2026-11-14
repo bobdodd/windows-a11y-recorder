@@ -22,6 +22,19 @@ public sealed record AndroidReportInput(
     IReadOnlyList<string> EvidenceKinds,
     string? Incomplete);
 
+/// <summary>
+/// Who a report is written for (android-report.md, "Two readers"): the
+/// auditor, in the player's reading view, with how each part was made; or
+/// the client's team, in the Word document, which says only that AI is
+/// used in writing the report and that the final report is manually
+/// inspected (owner, 2026-11-14).
+/// </summary>
+public enum ReportAudience
+{
+    Auditor,
+    Client,
+}
+
 /// <summary>A model's summaries for the Android summary: the whole app's, each screen's, and the attempts that wrote them.</summary>
 public sealed record AndroidModelText(
     AcceptedStep? Overall,
@@ -30,9 +43,10 @@ public sealed record AndroidModelText(
 
 /// <summary>
 /// Writes the Android report as Markdown, by screen, with the pictures it
-/// shows (android-report.md). The Word document is made from this
-/// Markdown, so the two say the same. With a model's text it is the Android
-/// summary: the same report with each screen's and the app's summaries.
+/// shows (android-report.md), for the auditor or for the client's team
+/// (<see cref="ReportAudience"/>). The Word document is made from the
+/// client's Markdown. With a model's text it is the Android summary: the
+/// same report with each screen's and the app's summaries.
 /// </summary>
 public static class AndroidReport
 {
@@ -55,13 +69,22 @@ public static class AndroidReport
         AndroidModelText? model,
         string picturesFolder,
         string picturesRelative,
-        DateTime writtenUtc)
+        DateTime writtenUtc,
+        ReportAudience audience = ReportAudience.Auditor)
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(guidance);
         ArgumentNullException.ThrowIfNull(evidence);
-        var writer = new Writer(input, guidance, evidence, model, picturesFolder, picturesRelative);
+        var writer = new Writer(input, guidance, evidence, model, picturesFolder, picturesRelative, audience);
         return writer.Write(writtenUtc);
+    }
+
+    /// <summary>The client's report's title, which its pages' header repeats: the apps it covers.</summary>
+    public static string ClientTitle(PhoneScreenTimeline screens)
+    {
+        ArgumentNullException.ThrowIfNull(screens);
+        var apps = screens.Screens.Select(screen => screen.Package).Distinct(StringComparer.Ordinal).ToList();
+        return "Accessibility report: " + (apps.Count == 0 ? "Android app" : string.Join(", ", apps));
     }
 
     /// <summary>A model statement's text with its references at its end, each once.</summary>
@@ -78,8 +101,10 @@ public static class AndroidReport
         AndroidEvidence evidence,
         AndroidModelText? model,
         string picturesFolder,
-        string picturesRelative)
+        string picturesRelative,
+        ReportAudience audience)
     {
+        private readonly bool _client = audience == ReportAudience.Client;
         private readonly StringBuilder _text = new();
         private readonly HashSet<string> _cited = new(StringComparer.Ordinal);
         private readonly Dictionary<PhoneFinding, string> _placed = [];
@@ -88,10 +113,23 @@ public static class AndroidReport
         public string Write(DateTime writtenUtc)
         {
             var summary = model is not null;
-            Heading(1, (summary ? "Android accessibility summary: " : "Android accessibility report: ") + input.SessionKey);
-            Paragraph(summary
-                ? "The findings in this summary are the recorder's own checks of the recording, with no model. The summaries of the app and of each screen are a model's inferences from those findings, and say so where they appear."
-                : "Every finding in this report is the recorder's own check of the recording; no model wrote any of it.");
+            if (_client)
+            {
+                // For the client's team, only that AI is used and that the
+                // report is manually inspected (owner, 2026-11-14).
+                Heading(1, ClientTitle(input.Screens));
+                Paragraph(summary
+                    ? "This report gives the results of automated accessibility checks of a recording of the app, with summaries of the app and of each screen. AI is used in generating this report, and the final report is manually inspected."
+                    : "This report gives the results of automated accessibility checks of a recording of the app. The final report is manually inspected.");
+            }
+            else
+            {
+                Heading(1, (summary ? "Android accessibility summary: " : "Android accessibility report: ") + input.SessionKey);
+                Paragraph(summary
+                    ? "The findings in this summary are the recorder's own checks of the recording, with no model. The summaries of the app and of each screen are a model's inferences from those findings, and say so where they appear."
+                    : "Every finding in this report is the recorder's own check of the recording; no model wrote any of it.");
+            }
+
             About(writtenUtc);
             HowToRead();
             if (model is not null)
@@ -101,13 +139,19 @@ public static class AndroidReport
 
             AtAGlance();
             AcrossTheApp();
+            if (_client)
+            {
+                Heading(2, "Findings by screen");
+                Paragraph("Each screen in the order it was first visited, with its visits and each visit's findings.");
+            }
+
             foreach (var screen in input.Screens.Screens)
             {
                 Screen(screen);
             }
 
             Limits();
-            if (model is not null)
+            if (model is not null && !_client)
             {
                 Heading(2, "How the summaries were written");
                 var lines = new StringBuilder();
@@ -141,7 +185,9 @@ public static class AndroidReport
                 : input.Audit.Measured?.OcrUnavailable is { } unavailable ? "Not used: " + unavailable + "; the app's text was measured on its items' bounds"
                 : input.Audit.MeasureProblem is { } problem ? "The colours could not be measured: " + problem
                 : "Not used"));
-            rows.Add(("Guidance", $"Version {guidance.Version.ToString(CultureInfo.InvariantCulture)}, SHA-256 {guidance.Sha256}"));
+            rows.Add(("Guidance", _client
+                ? $"Version {guidance.Version.ToString(CultureInfo.InvariantCulture)}"
+                : $"Version {guidance.Version.ToString(CultureInfo.InvariantCulture)}, SHA-256 {guidance.Sha256}"));
             rows.Add(("Written", writtenUtc.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture)));
             if (input.Incomplete is { } incomplete)
             {
@@ -171,22 +217,27 @@ public static class AndroidReport
 
         private void Overview(AndroidModelText text)
         {
-            Heading(2, "Overview, inferred by a model");
+            Heading(2, _client ? "Overview" : "Overview, inferred by a model");
             if (text.Overall is null)
             {
-                Paragraph("No overview was written, as the recording has no findings.");
+                Paragraph(_client ? "The recording has no findings." : "No overview was written, as the recording has no findings.");
                 return;
             }
 
-            Claims(text.Overall, "app", "The app, inferred");
-            Claims(text.Overall, "barriers", "The main barriers, inferred");
-            Claims(text.Overall, "priorities", "What to fix first, inferred");
+            Claims(text.Overall, "app", _client ? "The app" : "The app, inferred");
+            Claims(text.Overall, "barriers", _client ? "The main barriers" : "The main barriers, inferred");
+            Claims(text.Overall, "priorities", _client ? "What to fix first" : "What to fix first, inferred");
         }
 
         private void Claims(AcceptedStep step, string section, string heading)
         {
-            Heading(3, heading);
             var claims = step.Claims.Where(claim => claim.Section == section).ToList();
+            if (claims.Count == 0 && _client)
+            {
+                return;
+            }
+
+            Heading(3, heading);
             if (claims.Count == 0)
             {
                 Paragraph("The model wrote nothing here.");
@@ -264,7 +315,7 @@ public static class AndroidReport
                 return;
             }
 
-            Heading(2, "Across the app");
+            Heading(2, _client ? "Findings across the app" : "Across the app");
             Paragraph("These findings are about the app as a whole, not one screen.");
             foreach (var finding in evidence.App)
             {
@@ -275,15 +326,19 @@ public static class AndroidReport
         private static string ScreenHeading(PhoneScreen screen) =>
             $"Screen {screen.Number.ToString(CultureInfo.InvariantCulture)}: {screen.Name}";
 
+        // In the client's report the screens are under "Findings by screen",
+        // a level lower, so that no heading level is skipped.
+        private int ScreenLevel => _client ? 3 : 2;
+
         private void Screen(PhoneScreen screen)
         {
-            Heading(2, ScreenHeading(screen));
+            Heading(ScreenLevel, ScreenHeading(screen));
             var findings = evidence.For(screen).ToList();
             Paragraph(string.Create(CultureInfo.InvariantCulture,
                 $"The app {screen.Package}; the screen is {screen.NamedBy}. Visited {Times(screen.Visits.Count)}, with {Count(findings.Count, "finding", "findings")}.{Refs(evidence.ScreenReference(screen))}"));
-            if (model is not null)
+            if (model is not null && (!_client || model.Screens.ContainsKey(screen)))
             {
-                Heading(3, "Summary of the screen, inferred by a model");
+                Heading(ScreenLevel + 1, _client ? "Summary of the screen" : "Summary of the screen, inferred by a model");
                 if (model.Screens.TryGetValue(screen, out var step))
                 {
                     foreach (var section in new[] { "screen", "issues" })
@@ -321,7 +376,7 @@ public static class AndroidReport
 
         private void Visit(PhoneVisit visit)
         {
-            Heading(3, $"Visit {visit.Number.ToString(CultureInfo.InvariantCulture)}, {visit.When}");
+            Heading(ScreenLevel + 1, $"Visit {visit.Number.ToString(CultureInfo.InvariantCulture)}, {visit.When}");
             Paragraph($"{Sentence(visit.CauseText)}.{Refs(evidence.VisitReference(visit))}");
             var findings = evidence.For(visit);
             if (findings.Count == 0)
@@ -489,7 +544,7 @@ public static class AndroidReport
         {
             var finding = numbered.Finding;
             var check = numbered.Guidance;
-            Heading(visit is null ? 3 : 4, numbered.Heading);
+            Heading(visit is null ? 3 : ScreenLevel + 2, numbered.Heading);
             var first = finding.Times[0];
             var impact = numbered.Impact is not { } step ? "Not given: the guidance does not cover this check"
                 : step.Label + (finding.Level == PhoneCheckLevel.Error ? "" : ", if confirmed");
@@ -559,7 +614,9 @@ public static class AndroidReport
                     : null;
                 if ((framework is null || frameworks.Contains(framework)) && guidance.Sources.TryGetValue(key, out var source))
                 {
-                    Item($"{source.Title}: {source.Url}");
+                    // The client's report links each source by its title,
+                    // so that the link says where it goes.
+                    Item(_client ? $"[{source.Title}]({source.Url})" : $"{source.Title}: {source.Url}");
                 }
             }
         }

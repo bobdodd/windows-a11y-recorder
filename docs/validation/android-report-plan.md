@@ -10,8 +10,10 @@ the solution builds with no warnings; the new tests pass
 (`AndroidReportTests`), for the guidance file, the outlines, numbers,
 zooms and edges of the pictures, the report's sections and each
 finding's fields, the Word document against Office 2016's schema with
-its headings, header rows, pictures with alternative text, links and
-language, and the model's input and statements in the summary. The rest
+its title, numbered headings, table of contents, header and footer with
+page numbers, header rows, table captions, pictures with alternative
+text, links and language, that the client's version does not mention
+models, and the model's input and statements in the summary. The rest
 of the tests pass, except the 10 browser tests that need Windows, as
 before. A Word document made by the tests was converted to PDF with
 LibreOffice and looked at page by page.
@@ -75,15 +77,21 @@ without a horizontal scrollbar.
 ## Test 4: open the report in Word
 
 1. In the row from test 3, choose "Open in Word".
-2. In Word, choose View, then tick Navigation Pane.
-3. Take a screenshot of Word showing the first page and the Navigation
+2. If Word asks whether to update the fields in the document, choose
+   Yes.
+3. In Word, choose View, then tick Navigation Pane.
+4. Take a screenshot of Word showing the first page and the Navigation
    Pane.
 
-**On screen:** Word opens the document. The first page starts
-"Android accessibility report:" with the recording's name, then "About
-this recording" and its table. The Navigation Pane lists "How to read
-this report", "At a glance", "Screen 1:" with the screen's name, and
-"Limits" and "Evidence" at the end.
+**On screen:** the first page has "Accessibility report:" and the
+app's package name at its top, as the header and as the title, a
+paragraph ending "The final report is manually inspected.", then
+"Contents" with numbered entries, each with a page number, and "Page 1
+of" in the footer. The word "model" is not on the page. The Navigation
+Pane lists numbered headings: "1 About this recording", "2 How to read
+this report", "3 At a glance", "4 Findings across the app" if there are
+any, then "Findings by screen" with "Screen 1:" and the screen's name
+numbered under it, and "Limits" and "Evidence" at the end.
 
 ## Test 5: the pictures in the report
 
@@ -118,8 +126,9 @@ Flutter app, "Suggested remediation for Flutter:" follows Android's.
 2. Take a screenshot of the Accessibility pane.
 
 **On screen:** the pane lists no errors. In particular, no picture is
-listed as missing alternative text and no table as missing a header
-row. Warnings or tips may be listed; send them as they are.
+listed as missing alternative text, no table as missing a header row,
+and the document is not in compatibility mode. Warnings or tips may be
+listed; send them as they are.
 
 ## Test 8: queue the Android summary
 
@@ -137,13 +146,15 @@ recorder's findings to the profile's model.
 4. Take a screenshot of Word's first page, then of the first "Screen"
    section with its summary.
 
-**On screen:** the first page starts "Android accessibility summary:",
-with a heading "Overview, inferred by a model" after "How to read this
-report". Each screen with findings has "Summary of the screen, inferred
-by a model" before its first visit, with references such as [E3] in
-its statements. The findings below are laid out as in the Android
-report. Each screen's first paragraph ends with the screen's own
-reference, such as [E4].
+**On screen:** the first page's paragraph ends "AI is used in
+generating this report, and the final report is manually inspected."
+After "How to read this report" comes a numbered heading "Overview".
+Each screen with findings has "Summary of the screen" before its first
+visit, with references such as [E3] in its statements. The findings
+below are laid out as in the Android report. Each screen's first
+paragraph ends with the screen's own reference, such as [E4]. There is
+no heading "How the summaries were written", and no other mention of a
+model.
 
 If the task fails, choose "Why it failed" and take a screenshot of the
 message.

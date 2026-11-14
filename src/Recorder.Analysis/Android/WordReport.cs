@@ -10,19 +10,29 @@ using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
 namespace Recorder.Analysis.Android;
 
 /// <summary>
-/// A report's Markdown as a Word document (android-report.md, "The Word
-/// document"): each block the reading view reads, in the same order, with
-/// Word's heading styles, tables whose header row repeats on each page,
-/// pictures with their descriptions as alternative text, web addresses as
-/// links, the title and language in the document's properties, on Letter
-/// paper with one inch margins.
+/// A report's Markdown as a Word document for the client's team
+/// (android-report.md, "The Word document"): each block the reading view
+/// reads, in the same order. The first level 1 heading is the title, in
+/// Word's Title style, followed by a table of contents; every other
+/// heading is one of Word's numbered heading styles, a level higher, so
+/// that the Markdown's level 2 is Heading 1, numbered 1, 1.1 and so on by
+/// the styles themselves. Each page has the title in its header and its
+/// number in its footer. Tables have their header row repeated on each page
+/// and a caption; pictures have their descriptions as alternative text;
+/// links say where they go; the title and language are in the document's
+/// properties; on Letter paper with one inch margins. Word updates the
+/// contents' page numbers when it opens the document.
 /// </summary>
 public static partial class WordReport
 {
     private const long EmuPerInch = 914400;
 
-    [GeneratedRegex(@"https?://[^\s)\]]+")]
-    private static partial Regex UrlPattern();
+    /// <summary>The heading levels the table of contents lists: Word's Heading 1 and 2.</summary>
+    public const int ContentsLevels = 2;
+
+    // A Markdown link, [text](address), or a web address on its own.
+    [GeneratedRegex(@"\[([^\]]+)\]\((https?://[^)\s]+)\)|https?://[^\s)\]]+")]
+    private static partial Regex LinkPattern();
 
     /// <summary>The Word document's bytes.</summary>
     /// <param name="folder">The report's folder, which the pictures' paths are relative to.</param>
@@ -32,24 +42,39 @@ public static partial class WordReport
         ArgumentNullException.ThrowIfNull(markdown);
         ArgumentNullException.ThrowIfNull(boldLabels);
         var report = ReportDocument.Parse(markdown);
+        var title = report.Title ?? "Android accessibility report";
         using var stream = new MemoryStream();
         using (var document = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document))
         {
-            document.PackageProperties.Title = report.Title ?? "Android accessibility report";
+            document.PackageProperties.Title = title;
             document.PackageProperties.Language = "en-CA";
             document.PackageProperties.Creator = "Windows A11y Recorder";
             var main = document.AddMainDocumentPart();
             AddStyles(main);
             AddNumbering(main);
+            AddSettings(main);
             var body = new Body();
             main.Document = new Document(body);
-            var writer = new BodyWriter(main, body, folder, boldLabels);
+            var writer = new BodyWriter(main, body, folder, boldLabels, Contents(report.Blocks));
             foreach (var block in report.Blocks)
             {
                 writer.Add(block);
             }
 
+            var header = main.AddNewPart<HeaderPart>();
+            header.Header = new Header(new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "Header" }), new Run(new Text(title))));
+            header.Header.Save();
+            var footer = main.AddNewPart<FooterPart>();
+            footer.Footer = new Footer(new Paragraph(
+                new ParagraphProperties(new ParagraphStyleId { Val = "Footer" }),
+                new Run(new Text("Page ") { Space = SpaceProcessingModeValues.Preserve }),
+                new SimpleField(new Run(new Text("1"))) { Instruction = " PAGE " },
+                new Run(new Text(" of ") { Space = SpaceProcessingModeValues.Preserve }),
+                new SimpleField(new Run(new Text("1"))) { Instruction = " NUMPAGES " }));
+            footer.Footer.Save();
             body.Append(new SectionProperties(
+                new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(header) },
+                new FooterReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(footer) },
                 new PageSize { Width = 12240U, Height = 15840U },
                 new PageMargin { Top = 1440, Bottom = 1440, Left = 1440U, Right = 1440U, Header = 720U, Footer = 720U, Gutter = 0U }));
             main.Document.Save();
@@ -58,16 +83,73 @@ public static partial class WordReport
         return stream.ToArray();
     }
 
-    private sealed class BodyWriter(MainDocumentPart main, Body body, string folder, IReadOnlyList<string> boldLabels)
+    /// <summary>A heading's number as its style numbers it, such as "2.3", by its place among the headings before it.</summary>
+    private static List<(ReportBlock Heading, string Number)> Contents(IReadOnlyList<ReportBlock> blocks)
+    {
+        var counts = new int[6];
+        var numbered = new List<(ReportBlock, string)>();
+        var titled = false;
+        foreach (var block in blocks.Where(block => block.Kind == ReportBlockKind.Heading))
+        {
+            if (block.Level == 1 && !titled)
+            {
+                titled = true;
+                continue;
+            }
+
+            var level = Math.Clamp(block.Level - 1, 1, 6);
+            counts[level - 1]++;
+            Array.Clear(counts, level, counts.Length - level);
+            numbered.Add((block, string.Join('.', counts.Take(level).Select(count => count.ToString(System.Globalization.CultureInfo.InvariantCulture)))));
+        }
+
+        return numbered;
+    }
+
+    private sealed class BodyWriter(MainDocumentPart main, Body body, string folder, IReadOnlyList<string> boldLabels, List<(ReportBlock Heading, string Number)> contents)
     {
         private uint _pictures;
+        private int _headings;
+        private bool _titled;
+        private bool _afterTable;
+        private string _lastHeading = "";
+
+        private static string Bookmark(int index) => "_Toc" + index.ToString("D6", System.Globalization.CultureInfo.InvariantCulture);
 
         public void Add(ReportBlock block)
         {
+            // Two tables in a row would join into one; a paragraph keeps
+            // them apart. Otherwise no empty paragraph is written, as a
+            // screen reader reads each one as blank.
+            if (block.Kind == ReportBlockKind.Table && _afterTable)
+            {
+                body.Append(new Paragraph(new ParagraphProperties(new SpacingBetweenLines { After = "0" })));
+            }
+
+            var spaceAfterTable = _afterTable && block.Kind != ReportBlockKind.Table;
+            var first = body.ChildElements.Count;
+            _afterTable = block.Kind == ReportBlockKind.Table;
+            Write(block);
+
+            // The paragraph after a table is set a little below it.
+            if (spaceAfterTable && body.ChildElements.Count > first && body.ChildElements[first] is Paragraph next)
+            {
+                var properties = next.ParagraphProperties ??= new ParagraphProperties();
+                var spacing = properties.SpacingBetweenLines ??= new SpacingBetweenLines();
+                spacing.Before ??= "160";
+            }
+        }
+
+        private void Write(ReportBlock block)
+        {
             switch (block.Kind)
             {
+                case ReportBlockKind.Heading when block.Level == 1 && !_titled:
+                    _titled = true;
+                    body.Append(Paragraph("Title", Runs(block.Text)));
+                    break;
                 case ReportBlockKind.Heading:
-                    body.Append(Paragraph("Heading" + Math.Clamp(block.Level, 1, 6).ToString(System.Globalization.CultureInfo.InvariantCulture), Runs(block.Text)));
+                    Heading(block);
                     break;
                 case ReportBlockKind.ListItem:
                     body.Append(new Paragraph(new OpenXmlElement[]
@@ -83,7 +165,6 @@ public static partial class WordReport
                     break;
                 case ReportBlockKind.Table:
                     body.Append(Table(block.Rows));
-                    body.Append(new Paragraph(new ParagraphProperties(new SpacingBetweenLines { After = "0" })));
                     break;
                 case ReportBlockKind.Image:
                     body.Append(Picture(block.Text, block.Source ?? ""));
@@ -97,6 +178,74 @@ public static partial class WordReport
         private static Paragraph Paragraph(string style, IEnumerable<OpenXmlElement> runs) =>
             new(new OpenXmlElement[] { new ParagraphProperties(new ParagraphStyleId { Val = style }) }.Concat(runs));
 
+        // A heading in its numbered style, a level higher than the
+        // Markdown's, with a bookmark for the contents to link to. The
+        // contents come before the first heading, which starts a new page.
+        private void Heading(ReportBlock block)
+        {
+            var index = _headings++;
+            if (index == 0)
+            {
+                Contents();
+            }
+
+            var level = Math.Clamp(block.Level - 1, 1, 6);
+            var properties = new ParagraphProperties(new ParagraphStyleId { Val = "Heading" + level.ToString(System.Globalization.CultureInfo.InvariantCulture) });
+            if (index == 0)
+            {
+                properties.Append(new PageBreakBefore());
+            }
+
+            var id = (index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            body.Append(new Paragraph(new OpenXmlElement[] { properties, new BookmarkStart { Name = Bookmark(index), Id = id } }
+                .Concat(Runs(block.Text))
+                .Append(new BookmarkEnd { Id = id })));
+            _lastHeading = block.Text;
+        }
+
+        // The table of contents: Word's TOC field over Heading 1 and 2,
+        // with its entries written as links to the headings' bookmarks so
+        // that it reads in full before Word updates it with page numbers.
+        private void Contents()
+        {
+            body.Append(Paragraph("TOCHeading", [new Run(Text("Contents"))]));
+            var entries = contents.Select((entry, index) => (entry.Heading, entry.Number, Index: index))
+                .Where(entry => entry.Heading.Level - 1 <= ContentsLevels)
+                .ToList();
+            var instruction = $" TOC \\o \"1-{ContentsLevels.ToString(System.Globalization.CultureInfo.InvariantCulture)}\" \\h \\z \\u ";
+            OpenXmlElement[] begin =
+            [
+                new Run(new FieldChar { FieldCharType = FieldCharValues.Begin, Dirty = true }),
+                new Run(new FieldCode(instruction) { Space = SpaceProcessingModeValues.Preserve }),
+                new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }),
+            ];
+            OpenXmlElement end = new Run(new FieldChar { FieldCharType = FieldCharValues.End });
+            if (entries.Count == 0)
+            {
+                body.Append(new Paragraph(begin.Append(new Run(Text("No headings."))).Append(end)));
+                return;
+            }
+
+            for (var at = 0; at < entries.Count; at++)
+            {
+                var (heading, number, index) = entries[at];
+                var level = Math.Clamp(heading.Level - 1, 1, ContentsLevels);
+                var paragraph = new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "TOC" + level.ToString(System.Globalization.CultureInfo.InvariantCulture) }));
+                if (at == 0)
+                {
+                    paragraph.Append(begin.Select(element => element.CloneNode(true)));
+                }
+
+                paragraph.Append(new Hyperlink(new Run(new RunProperties(new RunStyle { Val = "Hyperlink" }), Text(number + " " + heading.Text))) { Anchor = Bookmark(index), History = true });
+                if (at == entries.Count - 1)
+                {
+                    paragraph.Append(end);
+                }
+
+                body.Append(paragraph);
+            }
+        }
+
         private IEnumerable<OpenXmlElement> Labelled(string text)
         {
             var label = boldLabels.FirstOrDefault(candidate => text.StartsWith(candidate, StringComparison.Ordinal));
@@ -108,22 +257,24 @@ public static partial class WordReport
             return new OpenXmlElement[] { new Run(new RunProperties(new Bold()), Text(label)) }.Concat(Runs(text[label.Length..]));
         }
 
-        // Text as runs, with each web address a link to itself.
+        // Text as runs, with each Markdown link a link with its text, and
+        // each web address on its own a link to itself.
         private List<OpenXmlElement> Runs(string text, bool bold = false)
         {
             var runs = new List<OpenXmlElement>();
             var at = 0;
-            foreach (Match match in UrlPattern().Matches(text))
+            foreach (Match match in LinkPattern().Matches(text))
             {
                 if (match.Index > at)
                 {
                     runs.Add(Run(text[at..match.Index], bold));
                 }
 
-                var url = match.Value.TrimEnd('.', ',', ';', ':');
+                var named = match.Groups[1].Success;
+                var url = named ? match.Groups[2].Value : match.Value.TrimEnd('.', ',', ';', ':');
                 var relationship = main.AddHyperlinkRelationship(new Uri(url, UriKind.Absolute), true);
-                runs.Add(new Hyperlink(new Run(new RunProperties(new RunStyle { Val = "Hyperlink" }), Text(url))) { Id = relationship.Id });
-                at = match.Index + url.Length;
+                runs.Add(new Hyperlink(new Run(new RunProperties(new RunStyle { Val = "Hyperlink" }), Text(named ? match.Groups[1].Value : url))) { Id = relationship.Id });
+                at = match.Index + (named ? match.Length : url.Length);
             }
 
             if (at < text.Length || runs.Count == 0)
@@ -145,7 +296,10 @@ public static partial class WordReport
             var table = new Table(new TableProperties(
                 new TableStyle { Val = "ReportTable" },
                 new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct },
-                new TableLook { Val = "04A0", FirstRow = true, LastRow = false, FirstColumn = false, LastColumn = false, NoHorizontalBand = true, NoVerticalBand = true }));
+                new TableLook { Val = "04A0", FirstRow = true, LastRow = false, FirstColumn = false, LastColumn = false, NoHorizontalBand = true, NoVerticalBand = true },
+                // The heading the table is under, as its title for a
+                // screen reader's list of tables.
+                new TableCaption { Val = _lastHeading.Length == 0 ? "Table" : _lastHeading }));
             // Each column's width in fiftieths of a percent, shared by the
             // length of its longest text, counted from 6 to 60 characters,
             // so that short columns such as a reference or a time are narrow
@@ -252,9 +406,19 @@ public static partial class WordReport
                     new Languages { Val = "en-CA" })),
                 new ParagraphPropertiesDefault(new ParagraphPropertiesBaseStyle(new SpacingBetweenLines { After = "160", Line = "264", LineRule = LineSpacingRuleValues.Auto }))),
             new Style(new StyleName { Val = "Normal" }, new PrimaryStyle()) { Type = StyleValues.Paragraph, StyleId = "Normal", Default = true });
-        var sizes = new[] { "36", "30", "26", "24", "22", "22" };
+        styles.Append(new Style(
+            new StyleName { Val = "Title" },
+            new BasedOn { Val = "Normal" },
+            new NextParagraphStyle { Val = "Normal" },
+            new PrimaryStyle(),
+            new StyleParagraphProperties(new SpacingBetweenLines { After = "240" }),
+            new StyleRunProperties(new Bold(), new Color { Val = "1F3864" }, new FontSize { Val = "48" }, new FontSizeComplexScript { Val = "48" }))
+        { Type = StyleValues.Paragraph, StyleId = "Title" });
+        var sizes = new[] { "32", "28", "26", "24", "22", "22" };
         for (var level = 1; level <= 6; level++)
         {
+            // Each heading style is numbered by the heading list, at its
+            // level: 1, 1.1, 1.1.1 and so on.
             styles.Append(new Style(
                 new StyleName { Val = "heading " + level.ToString(System.Globalization.CultureInfo.InvariantCulture) },
                 new BasedOn { Val = "Normal" },
@@ -263,7 +427,8 @@ public static partial class WordReport
                 new StyleParagraphProperties(
                     new KeepNext(),
                     new KeepLines(),
-                    new SpacingBetweenLines { Before = level == 1 ? "240" : "200", After = "80" },
+                    new NumberingProperties(new NumberingLevelReference { Val = level - 1 }, new NumberingId { Val = HeadingNumbering }),
+                    new SpacingBetweenLines { Before = level == 1 ? "360" : "240", After = "80" },
                     new OutlineLevel { Val = level - 1 }),
                 new StyleRunProperties(
                     new Bold(),
@@ -274,6 +439,36 @@ public static partial class WordReport
                 Type = StyleValues.Paragraph,
                 StyleId = "Heading" + level.ToString(System.Globalization.CultureInfo.InvariantCulture),
             });
+        }
+
+        styles.Append(new Style(
+            new StyleName { Val = "TOC Heading" },
+            new BasedOn { Val = "Normal" },
+            new NextParagraphStyle { Val = "Normal" },
+            new StyleParagraphProperties(new KeepNext(), new SpacingBetweenLines { Before = "240", After = "120" }),
+            new StyleRunProperties(new Bold(), new Color { Val = "1F3864" }, new FontSize { Val = "32" }, new FontSizeComplexScript { Val = "32" }))
+        { Type = StyleValues.Paragraph, StyleId = "TOCHeading" });
+        for (var level = 1; level <= ContentsLevels; level++)
+        {
+            styles.Append(new Style(
+                new StyleName { Val = "toc " + level.ToString(System.Globalization.CultureInfo.InvariantCulture) },
+                new BasedOn { Val = "Normal" },
+                new NextParagraphStyle { Val = "Normal" },
+                new StyleParagraphProperties(
+                    new Tabs(new TabStop { Val = TabStopValues.Right, Leader = TabStopLeaderCharValues.Dot, Position = 9350 }),
+                    new SpacingBetweenLines { After = "60" },
+                    new Indentation { Left = ((level - 1) * 440).ToString(System.Globalization.CultureInfo.InvariantCulture) }))
+            { Type = StyleValues.Paragraph, StyleId = "TOC" + level.ToString(System.Globalization.CultureInfo.InvariantCulture) });
+        }
+
+        foreach (var (name, id) in new[] { ("header", "Header"), ("footer", "Footer") })
+        {
+            styles.Append(new Style(
+                new StyleName { Val = name },
+                new BasedOn { Val = "Normal" },
+                new StyleParagraphProperties(new SpacingBetweenLines { After = "0" }, new Justification { Val = id == "Footer" ? JustificationValues.Center : JustificationValues.Right }),
+                new StyleRunProperties(new Color { Val = "404040" }, new FontSize { Val = "20" }, new FontSizeComplexScript { Val = "20" }))
+            { Type = StyleValues.Paragraph, StyleId = id });
         }
 
         styles.Append(new Style(
@@ -318,9 +513,42 @@ public static partial class WordReport
         part.Styles.Save();
     }
 
+    private const int HeadingNumbering = 2;
+
+    // Word opens the document in its current mode, not compatibility mode,
+    // where its accessibility checker is limited, and updates the
+    // contents' page numbers when it opens it.
+    private static void AddSettings(MainDocumentPart main)
+    {
+        var part = main.AddNewPart<DocumentSettingsPart>();
+        part.Settings = new Settings(
+            new UpdateFieldsOnOpen { Val = true },
+            new Compatibility(new CompatibilitySetting
+            {
+                Name = CompatSettingNameValues.CompatibilityMode,
+                Uri = "http://schemas.microsoft.com/office/word",
+                Val = "15",
+            }));
+        part.Settings.Save();
+    }
+
     private static void AddNumbering(MainDocumentPart main)
     {
         var part = main.AddNewPart<NumberingDefinitionsPart>();
+        var headings = new AbstractNum(new MultiLevelType { Val = MultiLevelValues.Multilevel }) { AbstractNumberId = HeadingNumbering };
+        for (var level = 0; level < 6; level++)
+        {
+            headings.Append(new Level(
+                new StartNumberingValue { Val = 1 },
+                new NumberingFormat { Val = NumberFormatValues.Decimal },
+                new ParagraphStyleIdInLevel { Val = "Heading" + (level + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) },
+                new LevelSuffix { Val = LevelSuffixValues.Space },
+                new LevelText { Val = string.Join('.', Enumerable.Range(1, level + 1).Select(n => "%" + n.ToString(System.Globalization.CultureInfo.InvariantCulture))) },
+                new LevelJustification { Val = LevelJustificationValues.Left },
+                new PreviousParagraphProperties(new Indentation { Left = "0", FirstLine = "0" }))
+            { LevelIndex = level });
+        }
+
         part.Numbering = new Numbering(
             new AbstractNum(
                 new MultiLevelType { Val = MultiLevelValues.SingleLevel },
@@ -332,7 +560,9 @@ public static partial class WordReport
                     new PreviousParagraphProperties(new Indentation { Left = "720", Hanging = "360" }))
                 { LevelIndex = 0 })
             { AbstractNumberId = 1 },
-            new NumberingInstance(new AbstractNumId { Val = 1 }) { NumberID = 1 });
+            headings,
+            new NumberingInstance(new AbstractNumId { Val = 1 }) { NumberID = 1 },
+            new NumberingInstance(new AbstractNumId { Val = HeadingNumbering }) { NumberID = HeadingNumbering });
         part.Numbering.Save();
     }
 }

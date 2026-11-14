@@ -33,6 +33,14 @@ Changes on `main` since 1.1.0, not yet released.
   cyan between black bands and numbered, and small items are also
   shown zoomed. A finished task has an "Open in Word" button. See
   [the Android report](docs/architecture/android-report.md).
+- The Word document is written for the client's team: the title in
+  Word's Title style, a table of contents, headings numbered by Word's
+  heading styles, the title in each page's header and "Page 1 of 7" in
+  its footer, table captions, and links reading as their sources'
+  titles. It says once that AI is used in generating the report, for
+  the summary, and that the final report is manually inspected, and
+  does not otherwise mention models. The Markdown in the player's
+  reading view stays the auditor's, with the models' provenance.
 - Every fact the Android summary's model is given has an evidence
   reference, the screen, its app and the counts by success criterion
   included, so that a claim about any of them can cite it.
