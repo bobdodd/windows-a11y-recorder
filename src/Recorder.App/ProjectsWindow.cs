@@ -25,6 +25,10 @@ internal sealed class ProjectsWindow : Window
     private readonly Button _move;
     private readonly Button _renameRecording;
     private IReadOnlyList<ProjectRecordingSummary> _shown = [];
+
+    // Selecting a project and refreshing the window can both ask for the
+    // recordings while a read is under way; only the latest request fills the list.
+    private int _recordingsRequest;
     private readonly SelectableText _status;
     private IReadOnlyList<ProjectSummary> _list = [];
 
@@ -171,6 +175,7 @@ internal sealed class ProjectsWindow : Window
 
     private async Task ShowRecordingsAsync(Guid? select = null)
     {
+        var request = ++_recordingsRequest;
         _recordings.Items.Clear();
         _shown = [];
         if (SelectedProject is not { } project)
@@ -182,6 +187,11 @@ internal sealed class ProjectsWindow : Window
         try
         {
             var recordings = await _store.RecordingsOfAsync(project);
+            if (request != _recordingsRequest)
+            {
+                return;
+            }
+
             _shown = recordings;
             foreach (var recording in recordings)
             {
@@ -202,6 +212,11 @@ internal sealed class ProjectsWindow : Window
         }
         catch (NpgsqlException exception)
         {
+            if (request != _recordingsRequest)
+            {
+                return;
+            }
+
             _status.Text = "The project's recordings could not be read: " + exception.Message;
         }
 

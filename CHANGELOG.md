@@ -21,6 +21,9 @@ Changes on `main` since 1.1.0, not yet released.
   key do not change. See
   [recording names](docs/architecture/recording-names.md).
 - Database migration 0043 adds the recording's name.
+- Fixed: after a move, Projects and recordings could list a project's
+  recordings twice, because selecting the project and refreshing the
+  window both filled the list. Only the latest request fills it now.
 
 ### Projects
 
