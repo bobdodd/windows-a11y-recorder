@@ -16,6 +16,9 @@ rule applies: testing is AI-free as far as possible, with AI kept for
 summary reports and vision-centric tests, and OCR may be used in
 addition to the text the tree gives, saying when it is.
 
+Checks that need a vision model are planned separately, in
+`android-vision-checks.md` (preliminary, 2026-11-15).
+
 ## Already built
 
 The ATF checks (touch target 48dp, speakable text, duplicate speakable
