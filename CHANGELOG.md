@@ -8,6 +8,20 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Recording names
+
+- A recording can have a readable name. Start recording asks for one
+  each time, and it can be left empty; "Rename recording..." in
+  Projects and recordings, and "Rename the open recording..." in the
+  Project menu, rename it later or remove the name. No two recordings in
+  a project have the same name; moving a recording to a project that
+  has its name is refused, with the reason given. A named recording is
+  shown as its name and then its session key, in Projects and
+  recordings, the window's title, and reports; its folder and session
+  key do not change. See
+  [recording names](docs/architecture/recording-names.md).
+- Database migration 0043 adds the recording's name.
+
 ### Projects
 
 - Projects of several recordings. A new recording goes into the project

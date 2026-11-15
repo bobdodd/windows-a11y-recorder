@@ -10,8 +10,12 @@ namespace Recorder.Analysis.Android;
 /// <param name="Load">Reads a picture file's pixels; null when it cannot be read.</param>
 /// <param name="EvidenceKinds">What the recording holds, in words, such as "12 screenshots from the companion app".</param>
 /// <param name="Incomplete">Why the recording file was read only in part, when it was.</param>
+/// <param name="Recording">
+/// The recording as the report shows it: its name and then its session key,
+/// or its session key alone when it has no name (recording-names.md).
+/// </param>
 public sealed record AndroidReportInput(
-    string SessionKey,
+    string Recording,
     long DurationNanoseconds,
     PhoneScreenTimeline Screens,
     PhoneDeviceTimeline Device,
@@ -188,7 +192,7 @@ public static class AndroidReport
             }
             else
             {
-                Heading(1, (summary ? "Android accessibility summary: " : "Android accessibility report: ") + (_project ? "project " + projectName : parts[0].SessionKey));
+                Heading(1, (summary ? "Android accessibility summary: " : "Android accessibility report: ") + (_project ? "project " + projectName : parts[0].Recording));
                 Paragraph(summary
                     ? "The findings in this summary are the recorder's own checks of the recording, with no model. The summaries of the app and of each screen are a model's inferences from those findings, and say so where they appear."
                     : "Every finding in this report is the recorder's own check of the recording; no model wrote any of it.");
@@ -240,7 +244,7 @@ public static class AndroidReport
             Heading(2, "About this recording");
             var rows = new List<(string, string)>
             {
-                ("Recording", input.SessionKey),
+                ("Recording", input.Recording),
                 ("Length", WindowsPreferenceTimeline.ClockOf(input.DurationNanoseconds)),
             };
             foreach (var app in input.Screens.Screens.Select(screen => screen.Package).Distinct(StringComparer.Ordinal))
@@ -310,7 +314,7 @@ public static class AndroidReport
             Table(["Number", "Recording", "Started", "Length", "Screens and visits", "Evidence in the recording"], parts.Select((part, index) => (IReadOnlyList<string>)
             [
                 (index + 1).ToString(CultureInfo.InvariantCulture),
-                part.SessionKey,
+                part.Recording,
                 part.StartedUtc is { } started ? started.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture) : "Not known",
                 WindowsPreferenceTimeline.ClockOf(part.DurationNanoseconds),
                 Count(part.Screens.Screens.Count, "screen", "screens") + ", " + Count(part.Screens.Visits.Count, "visit", "visits"),

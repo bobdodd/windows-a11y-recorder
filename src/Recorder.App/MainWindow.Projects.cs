@@ -17,6 +17,7 @@ namespace Recorder.App;
 public partial class MainWindow
 {
     private Guid? _openProjectId;
+    private const string AppTitle = "Windows Accessibility Recorder";
     private Guid? _projectShownFor;
     private bool _showingProjects;
 
@@ -165,11 +166,78 @@ public partial class MainWindow
         }
     }
 
-    // The open recording's project, shown in the Analysis tab, whose tasks
-    // are listed with the recording's.
+    // Asks for the name of the recording about to start, in the project
+    // chosen for it; null when the auditor cancels, so it does not start.
+    private (string? Name, Guid Project)? AskRecordingName()
+    {
+        if (_database is not { } database)
+        {
+            return null;
+        }
+
+        var project = SelectedProjectId ?? database.ProjectId;
+        var projectName = (ProjectComboBox.SelectedItem as ComboBoxItem)?.Content as string ?? SessionDatabase.DefaultProjectName;
+        var dialog = new RecordingNameDialog(
+            this,
+            "Name this recording",
+            $"The recording goes into the project {projectName}. Give it a name to know it by, such as the task it records, or leave the name empty to know it by its session key. " +
+                "No two recordings in a project can have the same name. You can rename it later, from the Project menu or in Projects and recordings.",
+            "",
+            "_Start recording",
+            name => database.Store.RecordingNameTakenAsync(project, name));
+        return dialog.ShowDialog() == true ? (dialog.RecordingName, project) : null;
+    }
+
+    // Renames the open recording (recording-names.md), from the Project menu.
+    private async void RenameOpenRecordingMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (_database is not { } database || _analysisRecordingId is not { } recording || _openProjectId is not { } project)
+        {
+            MessageBox.Show(this, "Open a recording that is in the catalog to rename it.", "Rename the open recording", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            var current = await database.Store.RecordingNameAsync(recording);
+            var dialog = new RecordingNameDialog(
+                this,
+                "Rename the open recording",
+                "Give the recording a new name, or leave it empty to know it by its session key. Its folder and session key do not change.",
+                current,
+                "_Save",
+                name => database.Store.RecordingNameTakenAsync(project, name, recording));
+            if (dialog.ShowDialog() != true || dialog.RecordingName == current)
+            {
+                return;
+            }
+
+            var result = await database.Store.RenameRecordingAsync(recording, dialog.RecordingName);
+            var message = result switch
+            {
+                RecordingRename.Renamed => dialog.RecordingName is { } named ? $"The recording was renamed {named}." : "The recording's name was removed; it is known by its session key.",
+                RecordingRename.NameTaken => $"A recording named {dialog.RecordingName} is already in this project, so the recording was not renamed.",
+                _ => "The recording is no longer in the catalog.",
+            };
+            ShowAnalysisStatus(message);
+            _busy.AnnounceCompleted(message);
+            _projectShownFor = null;
+            await ReadAnalysisAsync();
+        }
+        catch (NpgsqlException exception)
+        {
+            ShowAnalysisStatus("The recording could not be renamed: " + exception.Message);
+        }
+    }
+
+    // The open recording's name and project, shown in the window's title
+    // and the Analysis tab, whose project's tasks are listed with the
+    // recording's.
     private async Task ShowOpenProjectAsync(AnalysisCatalog catalog, Guid recording)
     {
         _projectShownFor = recording;
+        var named = await catalog.RecordingAsync(recording, CancellationToken.None);
+        Title = named is { } shown ? $"{shown.Label}, {AppTitle}" : AppTitle;
         var project = await catalog.ProjectOfAsync(recording, CancellationToken.None);
         _openProjectId = project?.ProjectId;
         if (project is not { } found)
@@ -180,7 +248,7 @@ public partial class MainWindow
 
         var all = await catalog.ProjectAsync(found.ProjectId, CancellationToken.None);
         var count = all?.Recordings.Count ?? 0;
-        AnalysisProjectTextBlock.Text = $"This recording is in the project {found.Name}, with {count} {(count == 1 ? "recording" : "recordings")}. " +
+        AnalysisProjectTextBlock.Text = $"This recording, {named?.Label ?? "unnamed"}, is in the project {found.Name}, with {count} {(count == 1 ? "recording" : "recordings")}. " +
             "The project's tasks are listed with this recording's.";
         AnalysisProjectTextBlock.Visibility = Visibility.Visible;
         UpdateAnalysisControls();

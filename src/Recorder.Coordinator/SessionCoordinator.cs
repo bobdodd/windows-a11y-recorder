@@ -144,7 +144,8 @@ public sealed class SessionCoordinator : IAsyncDisposable
                     RuntimeInformation.OSDescription,
                     RuntimeInformation.FrameworkDescription,
                     RuntimeInformation.ProcessArchitecture.ToString(),
-                    CaptureSettings(options)),
+                    CaptureSettings(options),
+                    options.Name),
                 _sessionDirectory,
                 cancellationToken: cancellationToken,
                 projectId: options.ProjectId).ConfigureAwait(false);

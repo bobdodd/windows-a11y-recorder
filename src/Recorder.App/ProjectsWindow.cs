@@ -10,8 +10,9 @@ namespace Recorder.App;
 
 /// <summary>
 /// The projects and their recordings (projects.md): a project's recordings
-/// listed in the order they were made, new projects, renaming, and moving
-/// recordings from one project to another. Every target is at least 44
+/// listed in the order they were made, by name and session key
+/// (recording-names.md), new projects, renaming projects and recordings,
+/// and moving recordings from one project to another. Every target is at least 44
 /// pixels high, and the text wraps rather than scrolling sideways.
 /// </summary>
 internal sealed class ProjectsWindow : Window
@@ -22,6 +23,8 @@ internal sealed class ProjectsWindow : Window
     private readonly ComboBox _target;
     private readonly Button _rename;
     private readonly Button _move;
+    private readonly Button _renameRecording;
+    private IReadOnlyList<ProjectRecordingSummary> _shown = [];
     private readonly SelectableText _status;
     private IReadOnlyList<ProjectSummary> _list = [];
 
@@ -76,6 +79,10 @@ internal sealed class ProjectsWindow : Window
         Add(root, 5, _recordings);
 
         var moveRow = new WrapPanel { Margin = new Thickness(0, 8, 0, 8) };
+        _renameRecording = Button("Rename recor_ding...", "Rename the selected recording");
+        _renameRecording.Click += async (_, _) => await RenameRecordingAsync();
+        _renameRecording.Margin = new Thickness(0, 0, 24, 8);
+        moveRow.Children.Add(_renameRecording);
         _target = new ComboBox { MinWidth = 220, MinHeight = 44, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 8) };
         AutomationProperties.SetName(_target, "Project to move the selected recordings to");
         _target.SelectionChanged += (_, _) => UpdateButtons();
@@ -102,7 +109,7 @@ internal sealed class ProjectsWindow : Window
         };
     }
 
-    /// <summary>Whether a project was made, renamed, or recordings moved, so the side panel lists them again.</summary>
+    /// <summary>Whether a project was made or renamed, or recordings renamed or moved, so the side panel lists them again.</summary>
     public bool Changed { get; private set; }
 
     private static void Add(Grid grid, int row, UIElement element)
@@ -162,9 +169,10 @@ internal sealed class ProjectsWindow : Window
         await ShowRecordingsAsync();
     }
 
-    private async Task ShowRecordingsAsync()
+    private async Task ShowRecordingsAsync(Guid? select = null)
     {
         _recordings.Items.Clear();
+        _shown = [];
         if (SelectedProject is not { } project)
         {
             UpdateButtons();
@@ -174,11 +182,17 @@ internal sealed class ProjectsWindow : Window
         try
         {
             var recordings = await _store.RecordingsOfAsync(project);
+            _shown = recordings;
             foreach (var recording in recordings)
             {
                 var started = recording.StartedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.CurrentCulture);
                 var length = recording.DurationNanoseconds is { } duration ? ", " + WindowsPreferenceTimeline.ClockOf(duration)[..8] : "";
-                _recordings.Items.Add(Item($"{recording.SessionKey}, started {started}{length}, {Status(recording.Status)}", recording.RecordingId));
+                var item = Item($"{recording.Label}, started {started}{length}, {Status(recording.Status)}", recording.RecordingId);
+                _recordings.Items.Add(item);
+                if (recording.RecordingId == select)
+                {
+                    _recordings.SelectedItem = item;
+                }
             }
 
             if (recordings.Count == 0)
@@ -209,6 +223,7 @@ internal sealed class ProjectsWindow : Window
     private void UpdateButtons()
     {
         _rename.IsEnabled = SelectedProject is not null;
+        _renameRecording.IsEnabled = _recordings.SelectedItems.Count == 1;
         var target = (_target.SelectedItem as ComboBoxItem)?.Tag as Guid?;
         _move.IsEnabled = _recordings.SelectedItems.Count > 0 && target is not null && target != SelectedProject;
     }
@@ -280,15 +295,64 @@ internal sealed class ProjectsWindow : Window
         var chosen = _recordings.SelectedItems.OfType<ListBoxItem>().Select(item => (Guid)item.Tag).ToList();
         try
         {
-            var moved = await _store.MoveRecordingsAsync(chosen, target);
+            var move = await _store.MoveRecordingsAsync(chosen, target);
             Changed = true;
             var name = _list.FirstOrDefault(item => item.ProjectId == target)?.Name ?? "the chosen project";
-            _status.Text = $"{Count(moved, "recording was", "recordings were")} moved to {name}, with their analysis.";
+            _status.Text = $"{Count(move.Moved, "recording was", "recordings were")} moved to {name}, with their analysis." +
+                (move.Refused.Count == 0 ? "" : $" Not moved, as {name} already has a recording of the same name: {string.Join("; ", move.Refused)}. Rename them first to move them.");
             await ShowProjectsAsync(project);
         }
         catch (NpgsqlException exception)
         {
             _status.Text = "The recordings could not be moved: " + exception.Message;
+        }
+    }
+
+    private async Task RenameRecordingAsync()
+    {
+        if (SelectedProject is not { } project || _recordings.SelectedItems.Count != 1 ||
+            (_recordings.SelectedItem as ListBoxItem)?.Tag is not Guid recording ||
+            _shown.FirstOrDefault(item => item.RecordingId == recording) is not { } current)
+        {
+            return;
+        }
+
+        var dialog = new RecordingNameDialog(
+            this,
+            "Rename recording",
+            $"Give {current.Label} a new name, or leave it empty to know it by its session key. Its folder and session key do not change.",
+            current.Name,
+            "_Save",
+            name => _store.RecordingNameTakenAsync(project, name, recording));
+        if (dialog.ShowDialog() != true || dialog.RecordingName == current.Name)
+        {
+            return;
+        }
+
+        try
+        {
+            switch (await _store.RenameRecordingAsync(recording, dialog.RecordingName))
+            {
+                case RecordingRename.Renamed:
+                    Changed = true;
+                    _status.Text = dialog.RecordingName is { } named
+                        ? $"{current.Label} was renamed {named}."
+                        : $"{current.Label} has no name now, and is known by its session key.";
+                    break;
+                case RecordingRename.NameTaken:
+                    _status.Text = $"A recording named {dialog.RecordingName} is already in this project, so {current.Label} was not renamed.";
+                    break;
+                default:
+                    _status.Text = $"{current.Label} is no longer in the catalog.";
+                    break;
+            }
+
+            await ShowRecordingsAsync(recording);
+            _recordings.Focus();
+        }
+        catch (NpgsqlException exception)
+        {
+            _status.Text = "The recording could not be renamed: " + exception.Message;
         }
     }
 }

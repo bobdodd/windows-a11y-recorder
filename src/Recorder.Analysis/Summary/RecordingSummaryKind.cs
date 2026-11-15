@@ -167,7 +167,7 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
         var recording = await context.Catalog.RecordingAsync(task.Recording, cancellationToken).ConfigureAwait(false);
         var attempts = await context.Catalog.AttemptsAsync(task.TaskId, cancellationToken).ConfigureAwait(false);
         var report = SummaryReport.Write(
-            recording?.SessionKey ?? Path.GetFileName(Path.TrimEndingDirectorySeparator(session)),
+            recording?.Label ?? Path.GetFileName(Path.TrimEndingDirectorySeparator(session)),
             collation,
             capabilities,
             visits,

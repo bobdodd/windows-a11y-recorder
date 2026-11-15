@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Npgsql;
 using NpgsqlTypes;
+using Recorder.Database;
 
 namespace Recorder.Analysis;
 
@@ -62,7 +63,11 @@ public sealed record AnalysisTask(
 }
 
 /// <summary>One of a project's recordings, as a project's task reads them.</summary>
-public sealed record ProjectRecording(Guid RecordingId, string SessionKey, DateTime StartedUtc, bool Ended, string? RecordingFile);
+public sealed record ProjectRecording(Guid RecordingId, string SessionKey, DateTime StartedUtc, bool Ended, string? RecordingFile, string? Name = null)
+{
+    /// <summary>Its name and session key, or its session key alone (recording-names.md).</summary>
+    public string Label => RecordingNames.Label(Name, SessionKey);
+}
 
 /// <summary>A description of the participant's capabilities, and when it was written.</summary>
 public sealed record CapabilityDescription(Guid CapabilityId, string Description, DateTime WrittenUtc);
@@ -303,7 +308,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
 
             await using var command = new NpgsqlCommand(
                 "SELECT r.recording_id, r.session_key, r.started_utc, r.recording_status_id, " +
-                "(SELECT f.path FROM recording_files f WHERE f.recording_id = r.recording_id LIMIT 1) " +
+                "(SELECT f.path FROM recording_files f WHERE f.recording_id = r.recording_id LIMIT 1), r.name " +
                 "FROM recordings r WHERE r.project_id = $1 ORDER BY r.started_utc, r.session_key",
                 connection);
             command.Parameters.AddWithValue(projectId);
@@ -316,7 +321,8 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
                     reader.GetString(1),
                     DateTime.SpecifyKind(reader.GetDateTime(2), DateTimeKind.Utc),
                     reader.GetInt16(3) != 1,
-                    reader.IsDBNull(4) ? null : reader.GetString(4)));
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    reader.IsDBNull(5) ? null : reader.GetString(5)));
             }
 
             return (name, recordings);
@@ -962,17 +968,26 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             return (bool)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
         }, cancellationToken);
 
-    /// <summary>A recording's session key and start, for a report's heading.</summary>
-    public Task<(string SessionKey, DateTime StartedUtc)?> RecordingAsync(Guid recordingId, CancellationToken cancellationToken) =>
-        UseAsync<(string, DateTime)?>(async connection =>
+    /// <summary>
+    /// A recording's session key, start and name, for a report's heading;
+    /// its label is its name and session key, or its session key alone
+    /// (recording-names.md).
+    /// </summary>
+    public Task<(string SessionKey, DateTime StartedUtc, string? Name, string Label)?> RecordingAsync(Guid recordingId, CancellationToken cancellationToken) =>
+        UseAsync<(string, DateTime, string?, string)?>(async connection =>
         {
             await using var command = new NpgsqlCommand(
-                "SELECT session_key, started_utc FROM recordings WHERE recording_id = $1", connection);
+                "SELECT session_key, started_utc, name FROM recordings WHERE recording_id = $1", connection);
             command.Parameters.AddWithValue(recordingId);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
-                ? (reader.GetString(0), reader.GetDateTime(1))
-                : null;
+            if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                return null;
+            }
+
+            var key = reader.GetString(0);
+            var name = reader.IsDBNull(2) ? null : reader.GetString(2);
+            return (key, reader.GetDateTime(1), name, RecordingNames.Label(name, key));
         }, cancellationToken);
 
     /// <summary>The attempts of a task, in order, for a report's account of how it was made.</summary>

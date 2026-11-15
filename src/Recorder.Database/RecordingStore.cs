@@ -28,7 +28,8 @@ public sealed record RecordingDefinition(
     string OperatingSystem,
     string Runtime,
     string Architecture,
-    RecordingCaptureSettings Capture);
+    RecordingCaptureSettings Capture,
+    string? Name = null);
 
 public sealed record CollectorRegistration(
     CollectorDescriptor Descriptor,
@@ -40,8 +41,43 @@ public sealed record CollectorRegistration(
 /// <summary>A project as the app lists it.</summary>
 public sealed record ProjectSummary(Guid ProjectId, string Name, DateTime CreatedUtc, int Recordings);
 
-/// <summary>One of a project's recordings as the app lists it.</summary>
-public sealed record ProjectRecordingSummary(Guid RecordingId, string SessionKey, DateTime StartedUtc, long? DurationNanoseconds, RecordingStatus Status);
+/// <summary>One of a project's recordings as the app lists it; its name is null when it has none.</summary>
+public sealed record ProjectRecordingSummary(Guid RecordingId, string SessionKey, DateTime StartedUtc, long? DurationNanoseconds, RecordingStatus Status, string? Name = null)
+{
+    /// <summary>Its name and session key, as "Sign in (20261114-…)", or its session key alone.</summary>
+    public string Label => RecordingNames.Label(Name, SessionKey);
+}
+
+/// <summary>What moving recordings to a project did: how many moved, and those left where they were because the project has a recording of the same name.</summary>
+public sealed record RecordingMove(int Moved, IReadOnlyList<string> Refused);
+
+/// <summary>Whether a recording was renamed (recording-names.md).</summary>
+public enum RecordingRename
+{
+    Renamed,
+    NameTaken,
+    Missing
+}
+
+/// <summary>
+/// Recordings' readable names (recording-names.md; owner, 2026-11-14): a
+/// recording may have a name, unique within its project, and is shown as
+/// its name and then its session key, or its session key alone when it has
+/// none. The session key stays its identity and its folder's name.
+/// </summary>
+public static class RecordingNames
+{
+    /// <summary>A name as typed, with spaces at either end removed; null when nothing is left, for a recording with no name.</summary>
+    public static string? Normalize(string? typed) =>
+        string.IsNullOrWhiteSpace(typed) ? null : typed.Trim();
+
+    /// <summary>The recording as lists and reports show it: "Sign in (20261114-…)", or the session key alone.</summary>
+    public static string Label(string? name, string sessionKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        return Normalize(name) is { } named ? $"{named} ({sessionKey})" : sessionKey;
+    }
+}
 
 public sealed record RecordingCompletion(
     RecordingStatus Status,
@@ -129,7 +165,7 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = new NpgsqlCommand(
-            "SELECT recording_id, session_key, started_utc, duration_nanoseconds, recording_status_id FROM recordings " +
+            "SELECT recording_id, session_key, started_utc, duration_nanoseconds, recording_status_id, name FROM recordings " +
             "WHERE project_id = $1 ORDER BY started_utc, session_key",
             connection);
         command.Parameters.AddWithValue(projectId);
@@ -139,28 +175,116 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
         {
             recordings.Add(new ProjectRecordingSummary(reader.GetGuid(0), reader.GetString(1),
                 DateTime.SpecifyKind(reader.GetDateTime(2), DateTimeKind.Utc),
-                reader.IsDBNull(3) ? null : reader.GetInt64(3), (RecordingStatus)reader.GetInt16(4)));
+                reader.IsDBNull(3) ? null : reader.GetInt64(3), (RecordingStatus)reader.GetInt16(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5)));
         }
 
         return recordings;
     }
 
-    /// <summary>Moves recordings to a project, with their analysis; how many were moved.</summary>
-    public async Task<int> MoveRecordingsAsync(IReadOnlyCollection<Guid> recordingIds, Guid projectId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Moves recordings to a project, with their analysis. A recording whose
+    /// name the project already has is left where it is, as no two
+    /// recordings in a project share a name (recording-names.md); those are
+    /// returned by name and session key.
+    /// </summary>
+    public async Task<RecordingMove> MoveRecordingsAsync(IReadOnlyCollection<Guid> recordingIds, Guid projectId, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(recordingIds);
         if (recordingIds.Count == 0)
         {
-            return 0;
+            return new RecordingMove(0, []);
+        }
+
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        var refused = new List<string>();
+        await using (var taken = new NpgsqlCommand(
+            "SELECT r.name, r.session_key FROM recordings r WHERE r.recording_id = ANY($1) AND r.project_id <> $2 " +
+            "AND r.name IS NOT NULL AND EXISTS (SELECT 1 FROM recordings o WHERE o.project_id = $2 AND o.name = r.name) " +
+            "ORDER BY r.started_utc, r.session_key",
+            connection,
+            transaction))
+        {
+            taken.Parameters.AddWithValue(recordingIds.ToArray());
+            taken.Parameters.AddWithValue(projectId);
+            await using var reader = await taken.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                refused.Add(RecordingNames.Label(reader.GetString(0), reader.GetString(1)));
+            }
+        }
+
+        int moved;
+        await using (var command = new NpgsqlCommand(
+            "UPDATE recordings r SET project_id = $2 WHERE r.recording_id = ANY($1) AND r.project_id <> $2 " +
+            "AND (r.name IS NULL OR NOT EXISTS (SELECT 1 FROM recordings o WHERE o.project_id = $2 AND o.name = r.name))",
+            connection,
+            transaction))
+        {
+            command.Parameters.AddWithValue(recordingIds.ToArray());
+            command.Parameters.AddWithValue(projectId);
+            moved = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return new RecordingMove(moved, refused);
+    }
+
+    /// <summary>
+    /// Whether a recording in the project has the name, other than the one
+    /// given; false for no name, which any number of recordings may have.
+    /// </summary>
+    public async Task<bool> RecordingNameTakenAsync(Guid projectId, string? name, Guid? except = null, CancellationToken cancellationToken = default)
+    {
+        if (RecordingNames.Normalize(name) is not { } trimmed)
+        {
+            return false;
         }
 
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = new NpgsqlCommand(
-            "UPDATE recordings SET project_id = $2 WHERE recording_id = ANY($1) AND project_id <> $2",
+            "SELECT EXISTS (SELECT 1 FROM recordings WHERE project_id = $1 AND name = $2 AND recording_id IS DISTINCT FROM $3)",
             connection);
-        command.Parameters.AddWithValue(recordingIds.ToArray());
         command.Parameters.AddWithValue(projectId);
-        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        command.Parameters.AddWithValue(trimmed);
+        command.Parameters.Add(new NpgsqlParameter { Value = except is { } id ? id : DBNull.Value, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Uuid });
+        return (bool)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+    }
+
+    /// <summary>
+    /// Names a recording, or removes its name when the name is empty, so it
+    /// is known by its session key again. A name another recording in its
+    /// project has is refused. Its folder and session key are unchanged.
+    /// </summary>
+    public async Task<RecordingRename> RenameRecordingAsync(Guid recordingId, string? name, CancellationToken cancellationToken = default)
+    {
+        var trimmed = RecordingNames.Normalize(name);
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = new NpgsqlCommand(
+            "UPDATE recordings r SET name = $2 WHERE r.recording_id = $1 " +
+            "AND ($2::text IS NULL OR NOT EXISTS (SELECT 1 FROM recordings o WHERE o.project_id = r.project_id AND o.name = $2 AND o.recording_id <> $1)) " +
+            "RETURNING 1",
+            connection);
+        command.Parameters.AddWithValue(recordingId);
+        command.Parameters.Add(new NpgsqlParameter { Value = trimmed is null ? DBNull.Value : trimmed, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Text });
+        if (await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is not null)
+        {
+            return RecordingRename.Renamed;
+        }
+
+        await using var exists = new NpgsqlCommand("SELECT EXISTS (SELECT 1 FROM recordings WHERE recording_id = $1)", connection);
+        exists.Parameters.AddWithValue(recordingId);
+        return (bool)(await exists.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))! ? RecordingRename.NameTaken : RecordingRename.Missing;
+    }
+
+    /// <summary>A recording's name, or null when it has none or is not in the catalog.</summary>
+    public async Task<string?> RecordingNameAsync(Guid recordingId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = new NpgsqlCommand("SELECT name FROM recordings WHERE recording_id = $1", connection);
+        command.Parameters.AddWithValue(recordingId);
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string;
     }
 
     /// <summary>The project a recording is in, by its session key, or null when it is not in the catalog.</summary>
@@ -193,14 +317,17 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        // The name is written only when there is one, so that a catalog
+        // older than migration 0043 can still be written to by its tests.
+        var name = RecordingNames.Normalize(definition.Name);
         Guid recordingId;
         await using (var insert = new NpgsqlCommand(
             "INSERT INTO recordings (project_id, session_key, recording_status_id, " +
             "started_utc, clock_frequency, clock_origin_timestamp, os_description, " +
             "framework_description, process_architecture, capture_keyboard_and_mouse, " +
             "capture_ui_automation, capture_foreground_window, capture_desktop_frames, " +
-            "frames_per_second, capture_microphone, capture_system_audio) " +
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) " +
+            "frames_per_second, capture_microphone, capture_system_audio" + (name is null ? "" : ", name") + ") " +
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16" + (name is null ? "" : ", $17") + ") " +
             "RETURNING recording_id",
             connection,
             transaction))
@@ -222,8 +349,20 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
             insert.Parameters.AddWithValue(capture.FramesPerSecond);
             insert.Parameters.AddWithValue(capture.CaptureMicrophone);
             insert.Parameters.AddWithValue(capture.CaptureSystemAudio);
-            recordingId = (Guid)(await insert.ExecuteScalarAsync(cancellationToken)
-                .ConfigureAwait(false))!;
+            if (name is not null)
+            {
+                insert.Parameters.AddWithValue(name);
+            }
+
+            try
+            {
+                recordingId = (Guid)(await insert.ExecuteScalarAsync(cancellationToken)
+                    .ConfigureAwait(false))!;
+            }
+            catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.UniqueViolation && exception.ConstraintName == "recordings_project_name")
+            {
+                throw new InvalidOperationException($"A recording named {name} is already in this project. Give this recording another name, or none.", exception);
+            }
         }
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);

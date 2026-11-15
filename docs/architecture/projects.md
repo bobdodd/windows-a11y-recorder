@@ -41,6 +41,9 @@ recording's, is made without AI, for cost and repeatability.
 
 ## Projects in the catalog
 
+A recording in a project may also have a readable name, unique within
+the project; see [recording names](recording-names.md).
+
 The catalog has had a projects table since the first migration, and
 every recording a project, "Default project" until now. So every
 recording made before this change is in "Default project", and a

@@ -9,6 +9,10 @@ public sealed record RecordingOptions
     // The project the recording goes into, or null for the database's
     // default project (projects.md).
     public Guid? ProjectId { get; init; }
+
+    // The recording's readable name, unique within its project, or null to
+    // know it by its session key (recording-names.md).
+    public string? Name { get; init; }
     public bool CaptureKeyboardAndMouse { get; init; } = true;
     public bool CaptureUiAutomation { get; init; } = true;
     public bool CaptureForegroundWindow { get; init; } = true;

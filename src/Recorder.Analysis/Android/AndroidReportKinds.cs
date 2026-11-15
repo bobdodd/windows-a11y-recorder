@@ -280,7 +280,7 @@ internal static class AndroidReportRun
             }
 
             var recording = await context.Catalog.RecordingAsync(task.Recording, cancellationToken).ConfigureAwait(false);
-            var input = Input(archive, audit, recording?.SessionKey ?? Path.GetFileName(Path.TrimEndingDirectorySeparator(session)), opened.Incomplete);
+            var input = Input(archive, audit, recording?.Label ?? Path.GetFileName(Path.TrimEndingDirectorySeparator(session)), opened.Incomplete);
             await WriteAsync(context, session, baseName, input, guidance, evidence, model, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -318,15 +318,16 @@ internal static class AndroidReportRun
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var key = recording.SessionKey;
+                var label = recording.Label;
                 if (!recording.Ended)
                 {
-                    skipped.Add($"{key}, as it was still being recorded.");
+                    skipped.Add($"{label}, as it was still being recorded.");
                     continue;
                 }
 
                 if (recording.RecordingFile is null)
                 {
-                    skipped.Add($"{key}, as its events are in the database's evidence tables, not a recording file.");
+                    skipped.Add($"{label}, as its events are in the database's evidence tables, not a recording file.");
                     continue;
                 }
 
@@ -334,7 +335,7 @@ internal static class AndroidReportRun
                 var filePath = Path.GetFullPath(Path.Combine(session, recording.RecordingFile));
                 if (!File.Exists(filePath))
                 {
-                    skipped.Add($"{key}, as its recording file is not in {root}.");
+                    skipped.Add($"{label}, as its recording file is not in {root}.");
                     continue;
                 }
 
@@ -343,7 +344,7 @@ internal static class AndroidReportRun
                 if (!archive.PhoneScreens.Recorded)
                 {
                     (archive.Timeline as IDisposable)?.Dispose();
-                    skipped.Add($"{key}, as it has no phone screens.");
+                    skipped.Add($"{label}, as it has no phone screens.");
                     continue;
                 }
 
@@ -351,7 +352,7 @@ internal static class AndroidReportRun
                 var audit = await Task.Run(
                     () => AndroidAudit.Run(archive, settings, new WindowsPhoneTextReader(), PhonePictures.Load, cancellationToken),
                     cancellationToken).ConfigureAwait(false);
-                parts.Add(Input(archive, audit, key, opened.Incomplete) with { StartedUtc = new DateTimeOffset(recording.StartedUtc, TimeSpan.Zero) });
+                parts.Add(Input(archive, audit, label, opened.Incomplete) with { StartedUtc = new DateTimeOffset(recording.StartedUtc, TimeSpan.Zero) });
             }
 
             if (parts.Count == 0)
@@ -376,7 +377,7 @@ internal static class AndroidReportRun
         }
     }
 
-    internal static AndroidReportInput Input(SessionPlaybackArchive archive, AndroidAudit audit, string sessionKey, string? incomplete)
+    internal static AndroidReportInput Input(SessionPlaybackArchive archive, AndroidAudit audit, string recording, string? incomplete)
     {
         var kinds = new List<string>();
         if (archive.PhoneScreenshots.Count > 0)
@@ -392,7 +393,7 @@ internal static class AndroidReportRun
         kinds.Add(archive.PhoneTouches.Recorded ? "touches" : "no touches");
         kinds.Add(archive.PhoneSettings.Recorded ? "the phone's settings" : "no settings");
         return new AndroidReportInput(
-            sessionKey,
+            recording,
             archive.DurationNanoseconds,
             archive.PhoneScreens,
             archive.PhoneDevice,

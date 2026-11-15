@@ -87,6 +87,7 @@ public partial class MainWindow
         _analysisRecordingId = null;
         _openProjectId = null;
         _projectShownFor = null;
+        Title = AppTitle;
         AnalysisProjectTextBlock.Visibility = Visibility.Collapsed;
         _analysisSessionDirectory = _playbackArchive?.SessionDirectory;
         _analysisTasks = null;

@@ -7,6 +7,7 @@ using Recorder.Analysis;
 using Recorder.Analysis.Android;
 using Recorder.Collectors.Android;
 using Recorder.Contracts;
+using Recorder.Database;
 using Recorder.Session;
 using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
 
@@ -416,6 +417,20 @@ public sealed class AndroidReportTests : IDisposable
         Assert.Contains("On visits 1 and 3 of the screen. Seen 3 times.", screenInput, StringComparison.Ordinal);
         Assert.Contains(first, references);
         Assert.Contains(second, references);
+    }
+
+    // recording-names.md: a named recording's report gives its name, then its session key.
+    [Fact]
+    public void ANamedRecordingsReport_GivesItsNameThenItsSessionKey()
+    {
+        var (input, guidance, evidence) = Recording(sessionKey: RecordingNames.Label("Sign in", "s"));
+
+        var markdown = AndroidReport.Write(input, guidance, evidence, null, Path.Combine(_folder, "pictures"), "pictures", DateTime.UtcNow);
+
+        var document = ReportDocument.Parse(markdown);
+        Assert.Equal("Android accessibility report: Sign in (s)", document.Title);
+        var about = document.Blocks.First(block => block.Kind == ReportBlockKind.Table && block.Rows.Any(row => row[0] == "Recording"));
+        Assert.Equal("Sign in (s)", about.Rows.Single(row => row[0] == "Recording")[1]);
     }
 
     [Fact]

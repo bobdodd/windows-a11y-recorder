@@ -250,6 +250,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        // The recording's readable name, asked for each time (owner,
+        // 2026-11-14: "Prompt on Start"); it may be left empty, and one
+        // another recording in the project has is refused before it starts
+        // (recording-names.md).
+        if (AskRecordingName() is not { } naming)
+        {
+            return;
+        }
+
         PausePlayback();
         _transitioning = true;
         SetConfigurationEnabled(false);
@@ -270,6 +279,7 @@ public partial class MainWindow : Window
             {
                 OutputRoot = OutputRootTextBox.Text,
                 ProjectId = SelectedProjectId,
+                Name = naming.Name,
                 CaptureKeyboardAndMouse = !android && InputCheckBox.IsChecked == true,
                 CaptureUiAutomation = !android && AutomationCheckBox.IsChecked == true,
                 CaptureForegroundWindow = !android && WindowCheckBox.IsChecked == true,
@@ -291,7 +301,7 @@ public partial class MainWindow : Window
             _statusTimer.Start();
             RefreshStatus();
             busy.Dispose();
-            _busy.AnnounceCompleted("Recording started.");
+            _busy.AnnounceCompleted(naming.Name is { } named ? $"Recording {named} started." : "Recording started.");
             StopButton.Focus();
         }
         catch (Exception exception)

@@ -235,6 +235,11 @@
                 Style="{StaticResource AnalysisMenuItem}"
                 Header="_New project..."
                 Click="NewProjectButton_Click" />
+      <!-- A recording's readable name (recording-names.md). -->
+      <MenuItem x:Name="RenameOpenRecordingMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="_Rename the open recording..."
+                Click="RenameOpenRecordingMenuItem_Click" />
     </MenuItem>
     <MenuItem x:Name="AndroidMenu"
               Header="An_droid"
