@@ -39,8 +39,8 @@ or cloud models:
 2. **A switch turns off AI analysis.** With it off, no request is sent to
    any model, local or cloud, and the checks that need one are not run.
    The report lists them as not run, so a missing finding is not read as
-   a pass. Where the switch sits, and whether it also covers the
-   summaries, are open questions below.
+   a pass. Where it sits and what it covers are decisions 5 and 6
+   below.
 3. **A report that uses AI says so.** Any report with a finding or text
    from a model says, once, that AI was used in the testing, and whether
    the model was a cloud or a local one. A report that used none says
@@ -65,6 +65,11 @@ Given by the owner on 2026-11-15, in answer to the open questions:
    really AI only when non-AI cannot do the test. The biggest group is
    vision AI." A model is used only for a test that cannot be done
    without one, whether it reads pictures or text.
+5. **Where the switch sits.** One setting in the analysis settings turns
+   AI analysis on or off, and each report has a checkbox that starts
+   from that setting, so a single report can be run without AI.
+6. **What the switch covers.** It also turns off the summaries, so that
+   off means no model at all.
 
 ## What a model adds
 
@@ -202,8 +207,6 @@ The probe and its copies are deleted afterwards, as before.
 
 ## Open questions for the owner
 
-1. Where the switch that turns off AI analysis sits. The suggestion is
-   one setting in the analysis settings, with a checkbox for each report
-   that starts from it.
-2. Whether the switch also turns off the summaries. The suggestion is
-   that it does, so that off means no model at all.
+None at present. The owner answered the questions on 2026-11-15
+(decisions 1 to 6 above). New questions will come from measuring each
+check on the recordings before its rules are set.
