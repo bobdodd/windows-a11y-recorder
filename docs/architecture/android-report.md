@@ -75,7 +75,7 @@ and evidence:
 | | The auditor's Markdown | The client's Word document |
 | --- | --- | --- |
 | Title | "Android accessibility report:" or "Android accessibility summary:" and the recording's name | "Accessibility report:" and the app's package name |
-| Opening paragraph | That the findings are the recorder's own checks, and that the summaries are a model's inferences | That the report gives the results of automated accessibility checks of a recording of the app; for the summary, that AI is used in generating it; and that the final report is manually inspected |
+| Opening paragraph | That the findings are the recorder's own checks, and that the summaries are a cloud or a local model's inferences | That the report gives the results of automated accessibility checks of a recording of the app; for the summary, that AI is used in generating it, with a cloud or a local model; and that the final report is manually inspected |
 | Summary headings | "Overview, inferred by a model", "The app, inferred", "Summary of the screen, inferred by a model" | "Overview", "The app", "Summary of the screen" |
 | "How the summaries were written" | The model, profile and attempts of each step | Left out |
 | Guidance row | Version and SHA-256 | Version |
@@ -374,7 +374,31 @@ Each statement is a claim citing its evidence, or says what is unknown
 or that there is no evidence, as in the recording summary. The
 auditor's Markdown labels each summary as inferred by a model; the
 client's Word document says once, at its start, that AI is used in
-generating the report (see "Two readers").
+generating the report, and whether with a cloud or a local model (see
+"Two readers" and "Cloud or local").
+
+## Cloud or local
+
+The owner asked on 2026-11-15 for "a note in any report that uses it to
+say that AI was used in the testing, and whether a cloud or local model
+was used" (`android-vision-checks.md`, requirement 3). The summary's
+opening sentence names the kind of model that wrote its accepted
+answers:
+
+| Accepted answers from | The client's sentence |
+| --- | --- |
+| A local model | "AI is used in generating this report, with a local model, and the final report is manually inspected." |
+| A cloud model | "AI is used in generating this report, with a cloud model, and the final report is manually inspected." |
+| Both | "AI is used in generating this report, with cloud and local models, and the final report is manually inspected." |
+| No attempt recorded | "AI is used in generating this report, though whether its model was cloud or local was not recorded, and the final report is manually inspected." |
+
+The auditor's Markdown says the same in its opening paragraph, such as
+"a cloud model's inferences". A cloud model's attempt is one with no
+model file, whose SHA-256 basis is the service's (`cloud-models.md`); a
+reused answer counts as the model that wrote it, as its copy keeps that
+model. Failed attempts do not count, as none of their text is in the
+report. A summary with nothing written, as for a recording with no
+findings, used no AI, so the client's document says nothing of it.
 
 ## Limits
 

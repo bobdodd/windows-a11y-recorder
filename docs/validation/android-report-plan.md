@@ -154,7 +154,9 @@ recorder's findings to the profile's model.
    section with its summary.
 
 **On screen:** the first page's paragraph ends "AI is used in
-generating this report, and the final report is manually inspected."
+generating this report, with a cloud model, and the final report is
+manually inspected." for a Claude profile, or "with a local model" for
+a local one.
 After "How to read this report" comes a numbered heading "Overview".
 Each screen with findings has "Summary of the screen" before its first
 visit, with references such as [E3] in its statements. The findings
@@ -204,3 +206,17 @@ entries with three numbers, such as "5.1.1 Visit 1", indented further,
 each with a dotted line to its page number at the right margin. No
 entry has four numbers. The click moves to that visit's heading, on the
 page its entry gave.
+
+## Test 11: cloud or local in the summary
+
+Added 2026-11-15. Use the summary from test 8, then queue it again with
+a profile of the other kind, local or Claude, on the same recording.
+
+1. In the new task's row, choose "Open in Word".
+2. Take a screenshot of the first page's paragraph.
+
+**On screen:** the paragraph ends "AI is used in generating this
+report, with a local model, and the final report is manually
+inspected." for a local profile, or "with a cloud model" for Claude:
+the other kind from test 8's. No other sentence on the page mentions a
+model.

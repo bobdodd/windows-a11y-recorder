@@ -44,10 +44,9 @@ or cloud models:
 3. **A report that uses AI says so.** Any report with a finding or text
    from a model says, once, that AI was used in the testing, and whether
    the model was a cloud or a local one. A report that used none says
-   nothing about AI. This applies to the summaries as well: their
-   client report says now that "AI is used in generating this report"
-   (`android-report.md`) but not yet whether the model was cloud or
-   local.
+   nothing about AI. This applies to the summaries as well, whose
+   reports say so since 2026-11-15 (`android-report.md`, "Cloud or
+   local").
 
 ## Owner's decisions
 

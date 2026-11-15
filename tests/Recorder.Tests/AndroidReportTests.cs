@@ -290,8 +290,12 @@ public sealed class AndroidReportTests : IDisposable
         Assert.Contains("The final report is manually inspected.", body.InnerText, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void ClientSummary_SaysOnlyThatAiIsUsed_AndThatTheReportIsManuallyInspected()
+    [Theory]
+    [InlineData(new[] { "local" }, "AI is used in generating this report, with a local model, and the final report is manually inspected.")]
+    [InlineData(new[] { "cloud" }, "AI is used in generating this report, with a cloud model, and the final report is manually inspected.")]
+    [InlineData(new[] { "cloud", "local" }, "AI is used in generating this report, with cloud and local models, and the final report is manually inspected.")]
+    [InlineData(new string[0], "AI is used in generating this report, though whether its model was cloud or local was not recorded, and the final report is manually inspected.")]
+    public void ClientSummary_SaysThatAiIsUsed_WithACloudOrLocalModel_AndThatTheReportIsManuallyInspected(string[] kinds, string sentence)
     {
         var (input, guidance, evidence) = Recording();
         var screen = Assert.Single(input.Screens.Screens);
@@ -300,7 +304,15 @@ public sealed class AndroidReportTests : IDisposable
             [new Claim("screen", 0, 0, Claim.ClaimKind, "Inferring from its heading, the screen holds the phone's settings.", ["E5"])]);
         var overall = new AcceptedStep(Guid.NewGuid(), "", empty,
             [new Claim("app", 0, 0, Claim.ClaimKind, "The app holds the phone's settings.", ["E4"])]);
-        var model = new AndroidModelText(overall, new Dictionary<PhoneScreen, AcceptedStep> { [screen] = screenStep }, []);
+        // A failed cloud attempt does not count: only accepted answers are in the report.
+        var attempts = kinds.Select((kind, index) => Attempt(index == 0 ? "recording" : "screen-0001", kind, AttemptOutcomes.Accepted))
+            .Append(Attempt("screen-0001", "cloud", AttemptOutcomes.Failed)).ToList();
+        if (kinds.Length == 0)
+        {
+            attempts.Clear();
+        }
+
+        var model = new AndroidModelText(overall, new Dictionary<PhoneScreen, AcceptedStep> { [screen] = screenStep }, attempts);
 
         var markdown = AndroidReport.Write(input, guidance, evidence, model, Path.Combine(_folder, "pictures"), "pictures", DateTime.UtcNow, ReportAudience.Client);
 
@@ -310,10 +322,44 @@ public sealed class AndroidReportTests : IDisposable
         Assert.Contains("Summary of the screen", headings);
         Assert.DoesNotContain("How the summaries were written", headings);
         Assert.DoesNotContain(guidance.Sha256, markdown, StringComparison.Ordinal);
-        var sentences = markdown.Split('.').Where(sentence => sentence.Contains("model", StringComparison.OrdinalIgnoreCase)).ToList();
-        Assert.Empty(sentences);
-        Assert.Contains("AI is used in generating this report, and the final report is manually inspected.", markdown, StringComparison.Ordinal);
+        Assert.Contains(sentence, markdown, StringComparison.Ordinal);
+        // The model is named in that sentence, once, and nowhere else.
+        Assert.Equal(2, markdown.Split(sentence).Length);
+        Assert.DoesNotContain("model", markdown.Replace(sentence, "", StringComparison.Ordinal), StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void ClientSummary_WithNothingWritten_SaysNothingOfAi()
+    {
+        var (input, guidance, evidence) = Recording();
+        var model = new AndroidModelText(null, new Dictionary<PhoneScreen, AcceptedStep>(), []);
+
+        var markdown = AndroidReport.Write(input, guidance, evidence, model, Path.Combine(_folder, "pictures"), "pictures", DateTime.UtcNow, ReportAudience.Client);
+
+        Assert.DoesNotMatch(@"\bAI\b", markdown);
+        Assert.Contains("The final report is manually inspected.", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AuditorSummary_SaysWhetherTheSummariesWereACloudOrLocalModelsInferences()
+    {
+        var (input, guidance, evidence) = Recording();
+        var screen = Assert.Single(input.Screens.Screens);
+        var empty = JsonDocument.Parse("{}").RootElement;
+        var overall = new AcceptedStep(Guid.NewGuid(), "", empty,
+            [new Claim("app", 0, 0, Claim.ClaimKind, "The app holds the phone's settings.", ["E4"])]);
+        var model = new AndroidModelText(overall, new Dictionary<PhoneScreen, AcceptedStep>(), [Attempt("recording", "cloud", AttemptOutcomes.Accepted)]);
+
+        var markdown = AndroidReport.Write(input, guidance, evidence, model, Path.Combine(_folder, "pictures"), "pictures", DateTime.UtcNow);
+
+        Assert.Contains("The summaries of the app and of each screen are a cloud model's inferences from those findings", markdown, StringComparison.Ordinal);
+    }
+
+    // An attempt of a cloud model, which has no model file, or of a local one.
+    private static AttemptRecord Attempt(string step, string kind, string outcome) =>
+        new(step, 1, outcome, null, kind == "cloud" ? "Claude" : "Local", kind == "cloud" ? "claude-opus" : "qwen",
+            kind == "cloud" ? null : "qwen.gguf", kind == "cloud" ? null : "Q4_K_M", kind == "cloud" ? null : new string('a', 64),
+            kind == "cloud" ? AnalysisWorker.ServiceBasis : "hashed", "b1", "{}", "android-summary", 1, null, null, null, null);
 
     [Fact]
     public void Summary_GivesTheModelEachScreensFindings_AndWritesItsStatementsWithTheirReferences()

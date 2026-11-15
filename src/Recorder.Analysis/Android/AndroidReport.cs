@@ -56,7 +56,35 @@ public enum ReportAudience
 public sealed record AndroidModelText(
     AcceptedStep? Overall,
     IReadOnlyDictionary<PhoneScreen, AcceptedStep> Screens,
-    IReadOnlyList<AttemptRecord> Attempts);
+    IReadOnlyList<AttemptRecord> Attempts)
+{
+    /// <summary>Whether any summary was written, so that the report used AI at all.</summary>
+    public bool Written => Overall is not null || Screens.Count > 0;
+
+    /// <summary>
+    /// Whether the accepted answers came from a cloud model, a local one or
+    /// both: "cloud", "local" or "cloud and local"; null when no accepted
+    /// attempt is recorded. A cloud model's attempt has no model file, so
+    /// its SHA-256's basis is the service's (cloud-models.md). A reused
+    /// answer is copied as accepted with its model, so it counts as the
+    /// model that wrote it.
+    /// </summary>
+    public string? Kind
+    {
+        get
+        {
+            var accepted = Attempts.Where(attempt => attempt.Outcome == AttemptOutcomes.Accepted).ToList();
+            if (accepted.Count == 0)
+            {
+                return null;
+            }
+
+            var cloud = accepted.Any(attempt => attempt.ModelSha256Basis == AnalysisWorker.ServiceBasis);
+            var local = accepted.Any(attempt => attempt.ModelSha256Basis != AnalysisWorker.ServiceBasis);
+            return cloud && local ? "cloud and local" : cloud ? "cloud" : "local";
+        }
+    }
+}
 
 /// <summary>
 /// Writes the Android report as Markdown, by screen, with the pictures it
@@ -183,18 +211,20 @@ public static class AndroidReport
             var summary = model is not null;
             if (_client)
             {
-                // For the client's team, only that AI is used and that the
-                // report is manually inspected (owner, 2026-11-14).
+                // For the client's team, only that AI is used, whether its
+                // model was cloud or local, and that the report is manually
+                // inspected (owner, 2026-11-14 and 2026-11-15). A summary
+                // with nothing written used no AI, so it says nothing of it.
                 Heading(1, ClientTitle(Apps));
-                Paragraph(summary
-                    ? $"This report gives the results of automated accessibility checks of {Of}, with summaries of the app and of each screen. AI is used in generating this report, and the final report is manually inspected."
+                Paragraph(model is { Written: true }
+                    ? $"This report gives the results of automated accessibility checks of {Of}, with summaries of the app and of each screen. {UsedAi(model.Kind)}"
                     : $"This report gives the results of automated accessibility checks of {Of}. The final report is manually inspected.");
             }
             else
             {
                 Heading(1, (summary ? "Android accessibility summary: " : "Android accessibility report: ") + (_project ? "project " + projectName : parts[0].Recording));
                 Paragraph(summary
-                    ? "The findings in this summary are the recorder's own checks of the recording, with no model. The summaries of the app and of each screen are a model's inferences from those findings, and say so where they appear."
+                    ? $"The findings in this summary are the recorder's own checks of the recording, with no model. The summaries of the app and of each screen are {Inferences(model!.Kind)} from those findings, and say so where they appear."
                     : "Every finding in this report is the recorder's own check of the recording; no model wrote any of it.");
             }
 
@@ -350,6 +380,22 @@ public static class AndroidReport
                 ? "References such as [E3] are to the evidence list at the end, which gives each one's recording and its time in that recording."
                 : "References such as [E3] are to the evidence list at the end, which gives each one's time in the recording.");
         }
+
+        // The client's sentence on AI, with the kind of model that wrote the
+        // summaries (android-vision-checks.md, requirement 3).
+        private static string UsedAi(string? kind) => kind switch
+        {
+            null => "AI is used in generating this report, though whether its model was cloud or local was not recorded, and the final report is manually inspected.",
+            "cloud and local" => "AI is used in generating this report, with cloud and local models, and the final report is manually inspected.",
+            _ => $"AI is used in generating this report, with a {kind} model, and the final report is manually inspected.",
+        };
+
+        private static string Inferences(string? kind) => kind switch
+        {
+            null => "a model's inferences",
+            "cloud and local" => "cloud and local models' inferences",
+            _ => $"a {kind} model's inferences",
+        };
 
         private void Overview(AndroidModelText text)
         {

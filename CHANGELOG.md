@@ -96,8 +96,10 @@ Changes on `main` since 1.1.0, not yet released.
   heading styles, the title in each page's header and "Page 1 of 7" in
   its footer, table captions, and links reading as their sources'
   titles. It says once that AI is used in generating the report, for
-  the summary, and that the final report is manually inspected, and
-  does not otherwise mention models. The Markdown in the player's
+  the summary, with a cloud or a local model, and that the final report
+  is manually inspected, and does not otherwise mention models. A
+  summary with nothing written, as for a recording with no findings,
+  says nothing of AI. The Markdown in the player's
   reading view stays the auditor's, with the models' provenance.
 - A finding seen on more than one visit to the same screen, the same
   check at the same level on the same item, is given once, under
