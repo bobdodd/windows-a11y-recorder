@@ -122,26 +122,71 @@ By screen, as the owner decided (decision 2):
 6. "Across the app": findings about the app as a whole, such as no live
    region anywhere in it.
 7. "Screen n: name" for each screen, in the order first visited; in the
-   summary, "Summary of the screen, inferred by a model"; then each visit
-   with its picture, and each finding of the visit as "Finding n: title:
-   item".
+   summary, "Summary of the screen, inferred by a model"; then, if any,
+   "Findings on more than one visit"; then each visit with its picture,
+   and each finding of the visit as "Finding n: title: item".
 8. "Limits".
 9. In the summary only, "How the summaries were written", the model and
    attempts, as in the recording summary.
 10. "Evidence": each visit and finding cited, with its time.
 
-A finding belongs to the visit where it was first seen. Findings are
+A finding belongs to the visit where it was first seen, unless it was
+seen on more than one visit to its screen (see below). Findings are
 numbered through the report: the app's, then each screen's in turn,
-within a visit by impact, highest first, then by level, then in the
-guidance file's order, then by first time.
+those on more than one visit first, then each visit's, each group by
+impact, highest first, then by level, then in the guidance file's
+order, then by first time.
+
+### Findings on more than one visit
+
+The owner asked, on 2026-11-14: "Where it is basically the same issue
+on multiple visits to the same screen, I would like to try and group
+the issues so we don't report the same issue multiple times". Asked
+what makes two findings the same issue, where the grouped finding goes
+and how its item is pictured, the owner chose:
+
+- Same issue: "Same check, level and item", whatever was measured. The
+  item is the finding's identity in the checks, the item's tree key or,
+  for a finding about the whole screen, the screen.
+- Placement: "Under the screen". A screen with such findings has a
+  section "Findings on more than one visit" after its paragraph and
+  summary and before its visits, with each finding given once.
+- Zoom: "One per visit". The grouped finding has a zoomed picture of
+  its item from each visit it was seen on, and each of those visits'
+  pictures outlines the item with the finding's one number.
+
+Before deciding, the latest client recording's report was measured:
+69 findings on 5 screens in 7 visits, with 16 findings seen on 2
+visits each, 32 findings in all, so 53 after grouping. Of the 16, 14
+measured the same on both visits, and 2, both event checks, differed
+only in their numbers. 6 more had the same check and item on
+different screens; those are not grouped, as the request was for the
+same screen.
+
+A grouped finding's table gives what was measured once if it was the
+same on each visit, or each visit's, "Visit 1: ...; Visit 7: ...", if
+not, and its Seen row gives each visit's times with that visit's own
+reference: "On 2 visits: visit 1, twice, at 00:00:01.500 [E7]; visit
+3, once, at 00:00:08.500 [E8]". Each visit then says which of its
+findings are under "Findings on more than one visit". The screen's
+first paragraph says how many of its findings were seen on more than
+one visit, and the counts at a glance count a grouped finding once.
+
+This is the report only. The checks, the player's Checks tab, and the
+findings' data stay per visit, as the owner decided on 2026-11-12, so
+that a visit's findings are still each visit's in the player. The
+summary's model is given a grouped finding once, with each visit's
+reference, the visits it was on and its times in all; the templates
+are version 3.
 
 ### Evidence references
 
 References such as [E3] are numbered in this order: each app, with its
 version and framework; the recorder's counts of findings by WCAG
 success criterion; the app's findings; then for each screen the screen
-itself, with how the recorder named it, each visit, and that visit's
-findings. The "Evidence" list at the end gives each cited reference's
+itself, with how the recorder named it, then each finding on more than
+one visit once for each visit it was on ("Finding 3, on visit 1: ..."),
+then each visit and that visit's own findings. The "Evidence" list at the end gives each cited reference's
 time in the recording, "Whole recording" for an app and for the counts,
 and what it is, so that the player can go to it. A model's statements
 in the summary cite the same references.

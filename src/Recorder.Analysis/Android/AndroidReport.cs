@@ -109,6 +109,10 @@ public static class AndroidReport
         private readonly HashSet<string> _cited = new(StringComparer.Ordinal);
         private readonly Dictionary<PhoneFinding, string> _placed = [];
         private readonly Dictionary<PhoneFinding, (PhonePixels Pixels, PictureBox Box)> _zoomable = [];
+        private readonly Dictionary<PhoneVisit, List<Block>> _overviews = [];
+
+        // A paragraph, or a picture with its alternative text, written later.
+        private sealed record Block(string Text, string? Picture);
 
         public string Write(DateTime writtenUtc)
         {
@@ -210,6 +214,7 @@ public static class AndroidReport
                 Item($"{step.Label}: {step.Meaning}");
             }
 
+            Paragraph("A finding seen on more than one visit to a screen, the same check at the same level on the same item, is given once, under \"Findings on more than one visit\" before the screen's visits, with what was measured and when it was seen on each visit.");
             Paragraph("In the pictures, each item is outlined in cyan between two black bands, with the finding's number in black on cyan beside it. A small item also has a zoomed picture, taken from the picture at full size. A finding about the whole screen has no outline.");
             Paragraph("The remediation is given for Android's own Views and Jetpack Compose, and also for Flutter or React Native when the recorder found that framework's library in the app. The recorder reads which libraries are bundled in the app's files, not which framework drew each screen, and not finding one does not mean the app is native Android.");
             Paragraph("References such as [E3] are to the evidence list at the end, which gives each one's time in the recording.");
@@ -319,7 +324,7 @@ public static class AndroidReport
             Paragraph("These findings are about the app as a whole, not one screen.");
             foreach (var finding in evidence.App)
             {
-                Finding(finding, null);
+                Finding(finding, 3, pictures: false);
             }
         }
 
@@ -334,8 +339,10 @@ public static class AndroidReport
         {
             Heading(ScreenLevel, ScreenHeading(screen));
             var findings = evidence.For(screen).ToList();
+            var repeated = evidence.Repeated(screen);
+            var several = repeated.Count == 0 ? "" : $", {repeated.Count.ToString(CultureInfo.InvariantCulture)} of them seen on more than one visit";
             Paragraph(string.Create(CultureInfo.InvariantCulture,
-                $"The app {screen.Package}; the screen is {screen.NamedBy}. Visited {Times(screen.Visits.Count)}, with {Count(findings.Count, "finding", "findings")}.{Refs(evidence.ScreenReference(screen))}"));
+                $"The app {screen.Package}; the screen is {screen.NamedBy}. Visited {Times(screen.Visits.Count)}, with {Count(findings.Count, "finding", "findings")}{several}.{Refs(evidence.ScreenReference(screen))}"));
             if (model is not null && (!_client || model.Screens.ContainsKey(screen)))
             {
                 Heading(ScreenLevel + 1, _client ? "Summary of the screen" : "Summary of the screen, inferred by a model");
@@ -352,6 +359,23 @@ public static class AndroidReport
                 else
                 {
                     Paragraph("No summary was asked for, as the screen has no findings.");
+                }
+            }
+
+            // The visits' pictures are drawn first, as a finding on more
+            // than one visit shows its item zoomed from each.
+            foreach (var visit in screen.Visits)
+            {
+                _overviews[visit] = Overviews(visit);
+            }
+
+            if (repeated.Count > 0)
+            {
+                Heading(ScreenLevel + 1, "Findings on more than one visit");
+                Paragraph("Each of these was found on more than one visit to the screen: the same check, at the same level, on the same item. It is given once here, and each visit's picture outlines it with the same number.");
+                foreach (var finding in repeated)
+                {
+                    Finding(finding, ScreenLevel + 2, pictures: true);
                 }
             }
 
@@ -378,8 +402,8 @@ public static class AndroidReport
         {
             Heading(ScreenLevel + 1, $"Visit {visit.Number.ToString(CultureInfo.InvariantCulture)}, {visit.When}");
             Paragraph($"{Sentence(visit.CauseText)}.{Refs(evidence.VisitReference(visit))}");
-            var findings = evidence.For(visit);
-            if (findings.Count == 0)
+            var on = evidence.On(visit);
+            if (on.Count == 0)
             {
                 if (visit.IsReturn)
                 {
@@ -389,7 +413,7 @@ public static class AndroidReport
 
                 if (FirstPicture(visit) is { } picture)
                 {
-                    Overview(visit, picture, []);
+                    Write(Overview(visit, picture, []));
                 }
                 else
                 {
@@ -402,29 +426,62 @@ public static class AndroidReport
                 return;
             }
 
-            var groups = findings
-                .Select(finding => (Finding: finding, Picture: PictureOf(finding.Finding)))
-                .GroupBy(pair => pair.Picture?.AbsolutePath ?? "", StringComparer.Ordinal)
+            Write(_overviews.GetValueOrDefault(visit) ?? []);
+            var elsewhere = on.Where(pair => pair.Numbered.OnSeveralVisits).Select(pair => pair.Numbered.Number.ToString(CultureInfo.InvariantCulture)).ToList();
+            if (elsewhere.Count > 0)
+            {
+                Paragraph(elsewhere.Count == 1
+                    ? $"Finding {elsewhere[0]} on this visit is under \"Findings on more than one visit\" for the screen, as it was seen on other visits too."
+                    : $"Findings {List(elsewhere)} on this visit are under \"Findings on more than one visit\" for the screen, as they were seen on other visits too.");
+            }
+
+            foreach (var finding in evidence.For(visit))
+            {
+                Finding(finding, ScreenLevel + 2, pictures: true);
+            }
+        }
+
+        // The pictures of a visit with every finding seen on it outlined,
+        // those grouped under the screen included, one picture for each
+        // time the findings were first seen at.
+        private List<Block> Overviews(PhoneVisit visit)
+        {
+            var blocks = new List<Block>();
+            var groups = evidence.On(visit)
+                .Select(pair => (Number: pair.Numbered.Number, pair.Seen.Finding, Picture: PictureOf(pair.Seen.Finding)))
+                .GroupBy(item => item.Picture?.AbsolutePath ?? "", StringComparer.Ordinal)
                 .ToList();
             foreach (var group in groups)
             {
                 var picture = group.First().Picture;
                 if (picture is null)
                 {
-                    foreach (var (finding, _) in group)
+                    foreach (var item in group)
                     {
-                        _placed[finding.Finding] = "No picture of this time was recorded.";
+                        _placed[item.Finding] = "No picture of this time was recorded.";
                     }
 
                     continue;
                 }
 
-                Overview(visit, picture, [.. group.Select(pair => pair.Finding)]);
+                blocks.AddRange(Overview(visit, picture, [.. group.Select(item => (item.Number, item.Finding))]));
             }
 
-            foreach (var finding in findings)
+            return blocks;
+        }
+
+        private void Write(IEnumerable<Block> blocks)
+        {
+            foreach (var block in blocks)
             {
-                Finding(finding, visit);
+                if (block.Picture is { } name)
+                {
+                    Image(block.Text, name);
+                }
+                else
+                {
+                    Paragraph(block.Text);
+                }
             }
         }
 
@@ -449,18 +506,17 @@ public static class AndroidReport
 
         // A picture of a visit at half size, with the findings shown on it
         // outlined and numbered.
-        private void Overview(PhoneVisit visit, PhoneContrastPicture picture, IReadOnlyList<NumberedFinding> findings)
+        private List<Block> Overview(PhoneVisit visit, PhoneContrastPicture picture, IReadOnlyList<(int Number, PhoneFinding Finding)> findings)
         {
             var pixels = input.Load(picture.AbsolutePath);
             if (pixels is null)
             {
-                Paragraph($"The picture at {WindowsPreferenceTimeline.ClockOf(picture.Time)} could not be read.");
                 foreach (var finding in findings)
                 {
                     _placed[finding.Finding] = "The picture of this time could not be read.";
                 }
 
-                return;
+                return [new Block($"The picture at {WindowsPreferenceTimeline.ClockOf(picture.Time)} could not be read.", null)];
             }
 
             var divisor = Math.Max(1, pixels.Width / 540);
@@ -514,7 +570,7 @@ public static class AndroidReport
                 1 => $", with finding {outlined[0].ToString(CultureInfo.InvariantCulture)} outlined in cyan and numbered.",
                 _ => $", with findings {List(outlined.Select(number => number.ToString(CultureInfo.InvariantCulture)).ToList())} outlined in cyan and numbered.",
             };
-            Image(alt, name);
+            return [new Block(alt, name)];
         }
 
         // Bounds in the phone's screen pixels scaled to a picture's; null
@@ -540,12 +596,35 @@ public static class AndroidReport
             return box.IsEmpty ? null : box;
         }
 
-        private void Finding(NumberedFinding numbered, PhoneVisit? visit)
+        // What was measured on one visit, the first time it was seen.
+        private static string MeasuredOn(PhoneFinding finding)
+        {
+            var first = finding.Times[0];
+            return first.Measured +
+                (finding.Times.Skip(1).Any(time => time.Measured != first.Measured) ? " (other values at other times)" : "") +
+                (first.State is null ? "" : $"; {first.State}");
+        }
+
+        // When it was seen on one visit. Two snapshots can be shown by the
+        // same picture, when the video did not change between them; each
+        // time is listed once.
+        private string SeenOn(FindingVisit seen)
+        {
+            var finding = seen.Finding;
+            var distinct = finding.Times.Select(time => time.Time).Distinct().ToList();
+            var shown = distinct.Take(10).Select(WindowsPreferenceTimeline.ClockOf).ToList();
+            return Sentence(Times(finding.Times.Count)) +
+                (distinct.Count < finding.Times.Count ? ", in " + Count(distinct.Count, "picture", "pictures") : "") +
+                ", at " + string.Join(", ", shown) +
+                (distinct.Count > shown.Count ? $" and {(distinct.Count - shown.Count).ToString(CultureInfo.InvariantCulture)} more" : "") +
+                Refs(seen.Reference);
+        }
+
+        private void Finding(NumberedFinding numbered, int headingLevel, bool pictures)
         {
             var finding = numbered.Finding;
             var check = numbered.Guidance;
-            Heading(visit is null ? 3 : ScreenLevel + 2, numbered.Heading);
-            var first = finding.Times[0];
+            Heading(headingLevel, numbered.Heading);
             var impact = numbered.Impact is not { } step ? "Not given: the guidance does not cover this check"
                 : step.Label + (finding.Level == PhoneCheckLevel.Error ? "" : ", if confirmed");
             var level = finding.Level switch
@@ -555,18 +634,14 @@ public static class AndroidReport
                 PhoneCheckLevel.Info => "Information, for a person to judge",
                 _ => "Not run",
             };
-            var measured = first.Measured +
-                (finding.Times.Skip(1).Any(time => time.Measured != first.Measured) ? " (other values at other times)" : "") +
-                (first.State is null ? "" : $"; {first.State}");
-            // Two snapshots can be shown by the same picture, when the video
-            // did not change between them; each time is listed once.
-            var distinct = finding.Times.Select(time => time.Time).Distinct().ToList();
-            var shown = distinct.Take(10).Select(WindowsPreferenceTimeline.ClockOf).ToList();
-            var seen = Sentence(Times(finding.Times.Count)) +
-                (distinct.Count < finding.Times.Count ? ", in " + Count(distinct.Count, "picture", "pictures") : "") +
-                ", at " + string.Join(", ", shown) +
-                (distinct.Count > shown.Count ? $" and {(distinct.Count - shown.Count).ToString(CultureInfo.InvariantCulture)} more" : "") +
-                Refs(numbered.Reference);
+            // On more than one visit, what was measured is given once if
+            // the same on each, and each visit's when seen.
+            var measures = numbered.Visits.Select(seen => MeasuredOn(seen.Finding)).ToList();
+            var measured = measures.Distinct(StringComparer.Ordinal).Count() == 1 ? measures[0]
+                : string.Join("; ", numbered.Visits.Select((seen, index) => $"Visit {seen.Visit.Number.ToString(CultureInfo.InvariantCulture)}: {measures[index]}"));
+            var seen = !numbered.OnSeveralVisits ? SeenOn(numbered.Visits[0])
+                : $"On {Count(numbered.Visits.Count, "visit", "visits")}: " + string.Join("; ", numbered.Visits.Select(on =>
+                    $"visit {on.Visit.Number.ToString(CultureInfo.InvariantCulture)}, {Lower(SeenOn(on))}"));
             var rows = new List<IReadOnlyList<string>>
             {
                 new[] { "Level", level },
@@ -578,9 +653,12 @@ public static class AndroidReport
                 new[] { "Check", PhoneCheckNames.Title(finding.Check) + (check is null ? "" : ". " + check.Basis) },
             };
             Table(["Field", "Value"], rows);
-            if (visit is not null)
+            if (pictures)
             {
-                Picture(numbered, visit);
+                foreach (var on in numbered.Visits)
+                {
+                    Picture(numbered, on);
+                }
             }
 
             if (check is null)
@@ -643,9 +721,11 @@ public static class AndroidReport
             return framework is { Status: "detected" } ? new HashSet<string>(framework.Names, StringComparer.Ordinal) : [];
         }
 
-        private void Picture(NumberedFinding numbered, PhoneVisit visit)
+        private void Picture(NumberedFinding numbered, FindingVisit seen)
         {
-            var finding = numbered.Finding;
+            var finding = seen.Finding;
+            var visit = seen.Visit;
+            var number = visit.Number.ToString(CultureInfo.InvariantCulture);
             if (_zoomable.TryGetValue(finding, out var zoom))
             {
                 var (crop, scale) = ReportPictures.ZoomOf(zoom.Box, zoom.Pixels.Width, zoom.Pixels.Height);
@@ -658,17 +738,22 @@ public static class AndroidReport
                     var unit = Math.Max(2, ReportPictures.Unit(canvas.Width, canvas.Height));
                     var outline = ReportPictures.Outline(canvas, item, unit);
                     ReportPictures.Badge(canvas, numbered.Number, outline, unit);
-                    var name = string.Create(CultureInfo.InvariantCulture, $"finding-{numbered.Number:D4}.png");
+                    var name = string.Create(CultureInfo.InvariantCulture, $"finding-{numbered.Number:D4}-visit-{visit.Number:D4}.png");
                     Save(name, canvas);
                     var times = scale == 1 ? "at full size" : $"zoomed {scale.ToString(CultureInfo.InvariantCulture)} times";
+                    var where = numbered.OnSeveralVisits ? $"on the screen {visit.Screen.Name} in visit {number}" : $"on the screen {visit.Screen.Name}";
                     Paragraph("Picture: " + _placed[finding]);
-                    Image($"Finding {numbered.Number.ToString(CultureInfo.InvariantCulture)}, {finding.Label}, on the screen {visit.Screen.Name}, {times}, outlined in cyan.", name);
+                    Image($"Finding {numbered.Number.ToString(CultureInfo.InvariantCulture)}, {finding.Label}, {where}, {times}, outlined in cyan.", name);
                     return;
                 }
             }
 
-            Paragraph("Picture: " + (_placed.GetValueOrDefault(finding) ?? "No picture of this time was recorded."));
+            var placed = _placed.GetValueOrDefault(finding) ?? "No picture of this time was recorded.";
+            Paragraph("Picture: " + (numbered.OnSeveralVisits && !placed.Contains("visit ", StringComparison.Ordinal) ? $"On visit {number}: {Lower(placed)}" : placed));
         }
+
+        private static string Lower(string text) =>
+            text.Length == 0 ? text : char.ToLowerInvariant(text[0]) + text[1..];
 
         private void Limits()
         {

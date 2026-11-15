@@ -13,7 +13,9 @@ finding's fields, the Word document against Office 2016's schema with
 its title, numbered headings, table of contents, header and footer with
 page numbers, header rows, table captions, pictures with alternative
 text, links and language, that the client's version does not mention
-models, and the model's input and statements in the summary. The rest
+models, the model's input and statements in the summary, and a finding
+seen on two visits to a screen given once under the screen, with a
+zoomed picture and a reference for each visit. The rest
 of the tests pass, except the 10 browser tests that need Windows, as
 before. A Word document made by the tests was converted to PDF with
 LibreOffice and looked at page by page.
@@ -163,3 +165,26 @@ model.
 
 If the task fails, choose "Why it failed" and take a screenshot of the
 message.
+
+## Test 9: a finding on more than one visit
+
+Use a recording with a return visit to a screen, such as the client
+recording of 2026-11-12, and the Android report from test 3, queued
+again with this version.
+
+1. Open the report in Word, with View, then Navigation Pane.
+2. Under a "Screen" heading with two visits, choose "Findings on more
+   than one visit".
+3. Take a screenshot of the section's first finding, its table and
+   its pictures.
+4. Choose the first "Visit" heading under the same screen and take a
+   screenshot of its picture and the paragraph after it.
+
+**On screen:** the section comes before the screen's first visit. The
+finding's Seen row begins "On 2 visits:", with each visit's times and
+its own reference, such as [E7]. There is one "Picture:" paragraph
+and zoomed picture for each visit. The visit's picture outlines the
+item with the same number as the finding's heading, and the paragraph
+after it says the finding is under "Findings on more than one visit".
+In the Navigation Pane, the finding's heading appears once for the
+screen, not under each visit.

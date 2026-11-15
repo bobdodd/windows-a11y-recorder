@@ -366,10 +366,62 @@ public sealed class AndroidReportTests : IDisposable
         return canvas;
     }
 
+    [Fact]
+    public void AFindingOnAReturnVisit_IsGivenOnceUnderTheScreen_WithEachVisitsPictureAndWhenSeen()
+    {
+        var (input, guidance, evidence) = Recording(returns: true);
+        var settings = input.Screens.Screens.Single(screen => screen.Package == Settings);
+        Assert.Equal(2, settings.Visits.Count);
+
+        var repeated = Assert.Single(evidence.Repeated(settings));
+        Assert.Equal(PhoneCheckNames.TouchTarget, repeated.Finding.Check);
+        Assert.True(repeated.OnSeveralVisits);
+        Assert.Equal(settings.Visits, repeated.Visits.Select(on => on.Visit));
+        Assert.All(settings.Visits, visit => Assert.Empty(evidence.For(visit)));
+        Assert.All(settings.Visits, visit => Assert.Equal(repeated.Number, Assert.Single(evidence.On(visit)).Numbered.Number));
+        Assert.Single(evidence.For(settings));
+
+        var markdown = AndroidReport.Write(input, guidance, evidence, null, Path.Combine(_folder, "pictures"), "pictures", DateTime.UtcNow);
+        var document = ReportDocument.Parse(markdown);
+        var headings = document.Blocks.Where(block => block.Kind == ReportBlockKind.Heading).Select(block => (block.Level, block.Text)).ToList();
+        var section = headings.IndexOf((3, "Findings on more than one visit"));
+        Assert.True(section > 0);
+        Assert.Equal((4, repeated.Heading), headings[section + 1]);
+        Assert.Single(headings, heading => heading.Text == repeated.Heading);
+        // The grouped finding comes before the screen's visits.
+        Assert.True(headings.FindIndex(heading => heading.Text.StartsWith("Visit 1", StringComparison.Ordinal)) > section);
+
+        var first = repeated.Visits[0].Reference;
+        var second = repeated.Visits[1].Reference;
+        Assert.NotEqual(first, second);
+        var table = document.Blocks.Single(block => block.Kind == ReportBlockKind.Table && block.Rows.Any(row => row[0] == "Item" && row[1].StartsWith("Button", StringComparison.Ordinal)));
+        var seen = table.Rows.Single(row => row[0] == "Seen")[1];
+        Assert.Equal($"On 2 visits: visit 1, twice, in 1 picture, at 00:00:01.500 [{first}]; visit 3, once, at 00:00:08.500 [{second}]", seen);
+        // The same measurement on both visits is given once.
+        Assert.DoesNotContain("Visit 1:", table.Rows.Single(row => row[0] == "Measured")[1], StringComparison.Ordinal);
+        Assert.StartsWith($"Finding {repeated.Number}, on visit 1", document.Evidence[first].Text, StringComparison.Ordinal);
+        Assert.StartsWith($"Finding {repeated.Number}, on visit 3", document.Evidence[second].Text, StringComparison.Ordinal);
+
+        // A zoomed picture for each visit, and each visit's picture outlines it.
+        var images = document.Blocks.Where(block => block.Kind == ReportBlockKind.Image).Select(block => block.Text).ToList();
+        Assert.Contains($"Finding {repeated.Number}, Button \"Save\", on the screen Settings in visit 1, zoomed 3 times, outlined in cyan.", images);
+        Assert.Contains($"Finding {repeated.Number}, Button \"Save\", on the screen Settings in visit 3, zoomed 3 times, outlined in cyan.", images);
+        Assert.Equal(2, images.Count(text => text.StartsWith("The screen Settings at", StringComparison.Ordinal) && text.EndsWith($"with finding {repeated.Number} outlined in cyan and numbered.", StringComparison.Ordinal)));
+        var paragraphs = document.Blocks.Where(block => block.Kind == ReportBlockKind.Paragraph).Select(block => block.Text).ToList();
+        Assert.Equal(2, paragraphs.Count(text => text.StartsWith($"Finding {repeated.Number} on this visit is under", StringComparison.Ordinal)));
+
+        // A screen summary's request is given the finding once, with both references.
+        var (screenInput, references) = AndroidSummaryKind.ScreenInput(settings, evidence, guidance, input.Device);
+        Assert.Contains($"[{first}] [{second}] Finding {repeated.Number}, error", screenInput, StringComparison.Ordinal);
+        Assert.Contains("On visits 1 and 3 of the screen. Seen 3 times.", screenInput, StringComparison.Ordinal);
+        Assert.Contains(first, references);
+        Assert.Contains(second, references);
+    }
+
     // The Settings window taken at 1 second and again at 3, its button
     // moved down 10 pixels, listed at 5 without being taken; a white frame
     // of the phone at 1.5 seconds.
-    private (AndroidReportInput Input, AndroidGuidance Guidance, AndroidEvidence Evidence) Recording()
+    private (AndroidReportInput Input, AndroidGuidance Guidance, AndroidEvidence Evidence) Recording(bool returns = false)
     {
         List<(long Time, string Channel, string EventType, object Payload)> records =
         [
@@ -379,6 +431,13 @@ public sealed class AndroidReportTests : IDisposable
             (At(3), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(2, Items(10))),
             (At(5), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(3, null)),
         ];
+        if (returns)
+        {
+            // The launcher in front at 6 seconds, then Settings again at 8.
+            records.Add((At(6), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(4, Launcher(), "Home")));
+            records.Add((At(8), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(5, Items(0))));
+        }
+
         var builder = new PlaybackIndexBuilder(10_000_000, TimeSpan.Zero);
         var recording = new FakeRecords();
         var sequence = 0UL;
@@ -401,7 +460,14 @@ public sealed class AndroidReportTests : IDisposable
 
         var framePath = Path.Combine(_folder, "frame.png");
         File.WriteAllBytes(framePath, ReportPictures.Png(White(1080, 2404)));
-        var pictures = PhoneSnapshotPictures.OfFrames([new SessionVideoFrame(At(1.5), "frame.png", framePath, 1080, 2404)], archive.PhoneAccessibility);
+        List<SessionVideoFrame> frames = [new SessionVideoFrame(At(1.5), "frame.png", framePath, 1080, 2404)];
+        if (returns)
+        {
+            frames.Add(new SessionVideoFrame(At(6.5), "frame.png", framePath, 1080, 2404));
+            frames.Add(new SessionVideoFrame(At(8.5), "frame.png", framePath, 1080, 2404));
+        }
+
+        var pictures = PhoneSnapshotPictures.OfFrames(frames, archive.PhoneAccessibility);
         var device = Device();
         var tree = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, device, recording, pictures, TestContext.Current.CancellationToken);
         var audit = AndroidAudit.Of(tree, PhoneAuditLevel.AA, 5, null, null, archive.PhoneScreens, device);
@@ -446,13 +512,31 @@ public sealed class AndroidReportTests : IDisposable
             },
             JsonSerializerOptions.Web)!;
 
-    private static AndroidAccessibilityTree Tree(long index, JsonNode? items)
+    private static JsonNode Launcher() =>
+        JsonSerializer.SerializeToNode(
+            new AndroidTreeNode[]
+            {
+                new()
+                {
+                    Index = 0, WindowId = 512, PackageName = "com.google.android.apps.nexuslauncher", ClassName = "android.widget.FrameLayout",
+                    Bounds = new AndroidNodeBounds(0, 0, 1080, 2404), Checked = "unchecked",
+                    ImportantForAccessibility = true, VisibleToUser = true,
+                },
+            },
+            JsonSerializerOptions.Web)!;
+
+    private static AndroidAccessibilityTree Tree(long index, JsonNode? items, string? title = null)
     {
         var tree = JsonNode.Parse(AndroidAccessibilityTreeTests.TreeLine(
             index: index,
             everyWindow: index == 1,
             reason: index == 1 ? "requested" : "content-change"))!.AsObject();
         tree["windows"]![0]!["items"] = items;
+        if (title is not null)
+        {
+            tree["windows"]![0]!["title"] = title;
+        }
+
         var (read, problem) = CompanionProtocol.ReadTree(tree.ToJsonString());
         Assert.Null(problem);
         return read!;

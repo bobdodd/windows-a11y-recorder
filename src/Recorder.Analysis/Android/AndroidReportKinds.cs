@@ -45,7 +45,7 @@ public sealed class AndroidSummaryKind : IAnalysisTaskKind
 
     // Version 2: every fact has a reference, the screen and its app
     // included (target machine, 2026-11-14).
-    public const int TemplateVersion = 2;
+    public const int TemplateVersion = 3;
 
     public static readonly IReadOnlyList<string> ScreenSections = ["screen", "issues"];
 
@@ -112,6 +112,13 @@ public sealed class AndroidSummaryKind : IAnalysisTaskKind
         var input = new StringBuilder()
             .Append(CultureInfo.InvariantCulture, $"[{screenReference}] The recorder found the screen \"{screen.Name}\" of the app {screen.Package}, {screen.NamedBy}.\n")
             .Append(CultureInfo.InvariantCulture, $"[{appReference}] The app {screen.Package}: {device.DescribeFramework(screen.Package)}\n");
+        foreach (var finding in evidence.Repeated(screen))
+        {
+            var seen = finding.Visits.Select(on => on.Reference).ToList();
+            references.UnionWith(seen);
+            input.Append(CultureInfo.InvariantCulture, $"{string.Join(" ", seen.Select(reference => $"[{reference}]"))} {FindingLine(finding, guidance)}\n");
+        }
+
         foreach (var visit in screen.Visits)
         {
             var reference = evidence.VisitReference(visit);
@@ -143,8 +150,12 @@ public sealed class AndroidSummaryKind : IAnalysisTaskKind
         var criteria = check is null || check.Criteria.Count == 0 ? "no WCAG success criterion, best practice" : "WCAG " + string.Join("; ", check.Criteria.Select(guidance.CriterionText));
         var affects = check is null ? "" : " Affects: " + string.Join("; ", check.Affects) + ".";
         var first = finding.Finding.Times[0];
+        var visits = finding.OnSeveralVisits
+            ? $" On visits {string.Join(" and ", finding.Visits.Select(on => on.Visit.Number.ToString(CultureInfo.InvariantCulture)))} of the screen."
+            : "";
+        var times = finding.Visits.Sum(on => on.Finding.Times.Count);
         return string.Create(CultureInfo.InvariantCulture,
-            $"Finding {finding.Number}, {level}, impact {impact}, {criteria}: {check?.Title ?? PhoneCheckNames.Title(finding.Finding.Check)}. Item: {finding.Finding.Label}. Measured: {first.Measured}.{(first.State is null ? "" : " State: " + first.State + ".")} Seen {Count(finding.Finding.Times.Count, "time", "times")}.{affects}");
+            $"Finding {finding.Number}, {level}, impact {impact}, {criteria}: {check?.Title ?? PhoneCheckNames.Title(finding.Finding.Check)}. Item: {finding.Finding.Label}. Measured: {first.Measured}.{(first.State is null ? "" : " State: " + first.State + ".")}{visits} Seen {Count(times, "time", "times")}.{affects}");
     }
 
     /// <summary>The whole app's request: the apps, the counts by criterion, the app's findings, and each screen as a model summarised it.</summary>

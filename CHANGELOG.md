@@ -42,6 +42,12 @@ Changes on `main` since 1.1.0, not yet released.
   the summary, and that the final report is manually inspected, and
   does not otherwise mention models. The Markdown in the player's
   reading view stays the auditor's, with the models' provenance.
+- A finding seen on more than one visit to the same screen, the same
+  check at the same level on the same item, is given once, under
+  "Findings on more than one visit" before the screen's visits, with
+  each visit's times and reference and a zoomed picture of its item
+  from each visit, as the owner decided; the checks and the player's
+  Checks tab stay per visit.
 - Every fact the Android summary's model is given has an evidence
   reference, the screen, its app and the counts by success criterion
   included, so that a claim about any of them can cite it.
