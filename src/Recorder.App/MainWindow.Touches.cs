@@ -10,7 +10,8 @@ namespace Recorder.App;
 // docs/architecture/android-recording.md, "Touches"): a circle for each
 // finger while it is down, numbered when there is more than one, with its
 // path over the last second. The touches are drawn by the player over the
-// frame; the frames are not changed, and an MP4 export does not draw them.
+// frame; the frames are not changed. An MP4 export draws them the same way,
+// without the focus and finding outlines (mp4-export.md, "Touches").
 // The circles are about a fingertip across on the phone's picture, and at
 // least MinimumTouchRadius across on this PC's screen, so they stay
 // visible when the picture is shown small (test 46, 2026-11-10).
@@ -187,7 +188,7 @@ public partial class MainWindow
     // frame's pixels, are drawn under the fingers: the focus's in yellow over
     // black on its bounds, the finding's as a thick cyan band between black
     // ones, set back from the item (AddFindingOutline).
-    private static ImageSource WithTouches(ImageSource frameImage, int width, int height, double shown, PhoneTouches? touches, Rect? focus, Rect? finding)
+    internal static ImageSource WithTouches(ImageSource frameImage, int width, int height, double shown, PhoneTouches? touches, Rect? focus, Rect? finding)
     {
         var whole = new Rect(0, 0, width, height);
         var group = new DrawingGroup();

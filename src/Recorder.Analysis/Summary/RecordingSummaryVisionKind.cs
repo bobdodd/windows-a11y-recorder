@@ -855,14 +855,15 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                     scopes.Add(new MomentScope(visit.Visit.Number, moment.Number, frame.Time, scope, cut?.Path));
                 }
 
-                var frameReference = register.Add(frame.Time, FrameText(frame, scope, cut?.Path, painted), null, $"frame:{frame.Time.ToString(CultureInfo.InvariantCulture)}");
+                var frameReference = register.Add(frame.Time, FrameText(frame, scope, cut?.Path, painted), null, $"frame:{frame.Time.ToString(CultureInfo.InvariantCulture)}", "frame");
                 pictures[frameReference] = new ReportPicture(frameReference, cut?.Path ?? frame.Path,
                     cut is null ? $"The captured frame at {SummaryCollator.Time(frame.Time)}" : $"The captured frame at {SummaryCollator.Time(frame.Time)}, cut to the browser's window and NVDA's windows");
                 var reasonReferences = moment.Reasons.Select(reason => register.Add(
                     reason.Time,
                     "Derived by the recorder, a reason for a moment: " + reason.Text,
                     reason.EventId,
-                    $"moment:{visit.Visit.Number}:{reason.Kind}:{reason.Time.ToString(CultureInfo.InvariantCulture)}")).ToList();
+                    $"moment:{visit.Visit.Number}:{reason.Kind}:{reason.Time.ToString(CultureInfo.InvariantCulture)}",
+                    "reason for a moment")).ToList();
                 var (input, references) = MomentInput(collation, visit, moment, frameReference, reasonReferences, previous);
                 input = WithScope(input, browserOnly);
                 var key = $"{RecordingSummaryKind.VisitStepKey(visit)}-moment-{moment.Number.ToString("D2", CultureInfo.InvariantCulture)}";
@@ -1041,7 +1042,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
                 Settings = settings,
                 SettingReferences = settingReferences
             });
-        await RecordingSummaryKind.WriteReportAsync(context, session, FileName, report, cancellationToken).ConfigureAwait(false);
+        await RecordingSummaryKind.WriteReportAsync(context, session, FileName, report, collation.Evidence, cancellationToken).ConfigureAwait(false);
     }
 
     // A moment's record for the index: its frame and the step that
@@ -1193,7 +1194,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
 
         var tileReferences = page.Tiles.Select(tile => register.Add(
             frame.Time, TileText(moment, page, tile) + (sameAs.TryGetValue(tile.Number, out var same) ? ". " + same : ""), null,
-            $"tile:{frame.Time.ToString(CultureInfo.InvariantCulture)}:{tile.Number.ToString(CultureInfo.InvariantCulture)}")).ToList();
+            $"tile:{frame.Time.ToString(CultureInfo.InvariantCulture)}:{tile.Number.ToString(CultureInfo.InvariantCulture)}", "page tile")).ToList();
         var pageSteps = new List<PageGroupDescription>();
         var notSent = new List<GroupNotSent>();
         for (var index = 0; index < groups.Count; index++)
@@ -1596,7 +1597,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
         {
             if (!references.ContainsKey(source.Key))
             {
-                references[source.Key] = register.Add(source.Time, source.Text, source.EventId, source.Key);
+                references[source.Key] = register.Add(source.Time, source.Text, source.EventId, source.Key, "setting");
             }
         }
 

@@ -1,7 +1,9 @@
 # MP4 export of a recording
 
-Proposed and agreed 2026-11-07. Built 2026-11-07. Captions and
-annotations come later and are not part of this design (see "Later").
+Proposed and agreed 2026-11-07. Built 2026-11-07. Evidence numbers,
+chapters and touches added 2026-11-15 (see "Evidence numbers" and
+"Touches"). Captions come later and are not part of this design (see
+"Later").
 
 ## Purpose
 
@@ -16,6 +18,15 @@ reader's speech as options.
 | 1. System sound with a separate screen reader track | "option a" | The system sound leaves out NVDA, which is recorded on its own track. The player has a third volume slider for it. |
 | 2. Sound tracks in the file | "option b" | The MP4 has one track of the chosen sounds mixed, then each chosen sound as its own extra track. |
 | 3. Part of the recording | "Whole recording - editing is not part of this tool." | The export is always the whole recording. There is no start or end to choose. |
+
+| Question (2026-11-15) | Owner's answer (2026-11-15) | What it means |
+| --- | --- | --- |
+| 4. Evidence numbers on the picture | "I want the number in the bottom left corner of the frame and for it to last 4 seconds from the time the evidence is recorded against." | Each Exx number of a report is drawn at the bottom left of the picture from its time for 4 seconds. |
+| 5. Chapters | "I also want a table of contents in the MP4 file for each annotation." | The MP4 has a chapter for each number shown. |
+| 6. Which player | "I am targeting VLC primarily" | The chapters are written in the forms VLC reads, and checked with VLC 3. |
+| 7. Which report's numbers | "A report chosen at export" | The export window lists the recording's finished reports, and the numbers come from the one chosen. Numbers differ from report to report, so they are never guessed. |
+| 8. Chapter names | "Number and kind only" | A chapter is named by its number and what kind of evidence it is, such as "E12, finding 3", not the evidence's full text. |
+| 9. Touches | "I want exported MP4 files to include the touch indicators" | A phone recording's export draws the touches as the player draws them. |
 
 ## What a recording holds
 
@@ -113,6 +124,11 @@ reader cannot be separated and recordings behave as before.
   with system sound but no screen reader track says that any speech is in
   the system sound. A recording of a phone offers "Phone sound" in the
   system sound's place, mixed at the "Phone sound" slider's level.
+- **Evidence numbers.** "Evidence numbers from" lists None and each of
+  the recording's finished reports, its own and its projects', newest
+  first, by kind and when it finished. The newest with an evidence list
+  is chosen. The text below says how many numbers will be shown and how
+  many are left out. See "Evidence numbers".
 - **File.** The default is the recording folder's name with `.mp4`, in
   the Windows Videos folder, with Browse to choose another.
 - **Saving.** Save starts the export on a thread of its own, with a
@@ -245,6 +261,123 @@ The records are read in bulk: from the recording file
   The export then says "Windows Media Foundation is not installed. On an
   N edition of Windows, install the Media Feature Pack."
 
+## Evidence numbers
+
+### The evidence list
+
+- A report's numbers, such as E12, are numbered as the report is written,
+  so each report has its own. Every report now writes `evidence.json`
+  next to its Markdown and Word files (`ReportEvidenceList`): the format
+  `windows-a11y-recorder.report-evidence/1` and, for each reference the
+  report's evidence table lists, the reference, the recording's session
+  key, its time in nanoseconds, or null, and its kind.
+- What the table lists is read back from the report's Markdown: the rows
+  starting with a reference under its last heading ending in "Evidence".
+  Evidence given to a model but not cited is not listed in the report, so
+  it is not shown on the video either.
+- The file is not one of the task's reports in the catalog, so the
+  player's reading view does not open it.
+- A report written before this has no list. Choosing it says so and asks
+  for it to be run again from the Analysis tab.
+
+### Kinds
+
+The kind is a few words for a chapter's name:
+
+- Android report: "app" and the package, "counts of findings", "screen
+  N" and its label, "visit N to" and the screen, and "finding N", with
+  ", on visit N" where the finding was seen on more than one visit. In a
+  project's report, visits are "recording R, visit N".
+- Recording summary: "navigation", "input before the visit", "programs
+  running", "page as recorded", "page text", "in-page jump", "keys
+  pressed", "NVDA command", "click", "focus moved", "text typed", "NVDA
+  announcement", "live region change", "popup opened", "popup closed",
+  "NVDA window", "scroll", "key", "window in front" and "capabilities";
+  with vision, also "frame", "reason for a moment", "page tile" and
+  "setting".
+
+### On the picture
+
+- Only the chosen report's entries for this recording, by session key,
+  are used. Entries with no time, such as an app, the counts of findings
+  or the participant's capabilities, cannot be placed, and the window
+  says how many are left out. So are times before the start or after the
+  end.
+- A number is shown on each video sample whose middle is from its time
+  to 4 seconds after it (`ExportAnnotations.Plan`), as a frame is shown
+  from the sample nearest its time, so it appears with the picture it is
+  about.
+- The numbers are drawn at the bottom left of the export's picture:
+  white text on black boxes, a contrast of 21 to 1, in number order from
+  the left. The text is a 28th of the picture's shorter side high, and at
+  least 20 pixels: about 37 pixels for a phone held upright (1034 by 2304), about 39
+  for 1920 by 1080. Rows wrap upwards within 60% of the picture's width,
+  so the rest of the picture stays clear.
+- A sample is drawn again where its frame, its numbers, or its touches
+  are not the sample before's; otherwise the picture is repeated, as
+  before.
+
+### Measured on the owner's recordings
+
+On 2026-11-15, the Android report's evidence was built for the 20 phone
+recordings on the owner's PC made from 2026-11-10 to 2026-11-14, one of
+which had no screens:
+
+- 6 to 97 entries a recording, 2 to 6 of them with no time.
+- Up to 9 entries at exactly the same time, as a visit, its screen and
+  its findings are all at the visit's start.
+- Up to 18 entries within 4 seconds, so as many numbers can be shown at
+  once, which is why the rows wrap.
+- The longest entry's text was 529 characters, too long for a chapter's
+  name, which is one reason for naming chapters by kind.
+
+The probe and the recordings' copies were deleted afterwards.
+
+### Chapters
+
+- One chapter for each number shown, in time order and then number
+  order. Chapters at the same time start a millisecond apart, so each is
+  a chapter of its own.
+- FFmpeg writes chapters in two forms: a Nero `chpl` box in the movie's
+  user data, of at most 255 chapters with titles of at most 255 bytes,
+  and a QuickTime chapter track, a text track referred to from another
+  track by a `chap` track reference
+  ([FFmpeg, movenc.c](https://raw.githubusercontent.com/FFmpeg/FFmpeg/master/libavformat/movenc.c)).
+  Apple describes the chapter track as a text track with one sample for
+  each chapter, normally not enabled
+  ([Apple, chapter lists](https://developer.apple.com/documentation/quicktime-file-format/chapter_lists)).
+- VLC 3 reads the `chpl` box first, and the chapter track only where
+  there is none, and then only a tx3g text track
+  ([VLC 3.0, mp4.c](https://raw.githubusercontent.com/videolan/vlc-3.0/master/modules/demux/mp4/mp4.c)).
+  VLC 4 reads the chapter track first, as "Nero chpl is limited to 255
+  chapters"
+  ([VLC, mp4.c](https://raw.githubusercontent.com/videolan/vlc/master/modules/demux/mp4/mp4.c)).
+  Both read 256 bytes of a chapter's sample, 2 of them its length, so
+  titles are cut to 250 bytes at a character's end, with "...".
+- So the export writes both, as FFmpeg does (`Mp4Chapters`): a disabled
+  tx3g track with FFmpeg's sample entry, each sample the title in UTF-8
+  and FFmpeg's `encd` box, with a `chap` reference from the video track,
+  and the `chpl` box where there are 255 chapters or fewer. With more,
+  only the track is written, and VLC 3 reads every chapter from it.
+- Where the first chapter is after the start, the track begins with an
+  empty sample, which VLC does not list.
+- The chapters' text is written after the media in the file, with a new
+  movie box after it, so the picture's and the sound's chunk offsets do
+  not change. Where the movie box is the file's last box it is replaced;
+  otherwise it is renamed `free`.
+
+## Touches
+
+- A phone recording's export draws the touches as the player draws them
+  (`MainWindow.WithTouches`): a circle for each finger while it is down,
+  numbered when there is more than one, with its path over the last
+  second. They are sized for the export's pixels, as the player sizes
+  them for the PC's screen.
+- The accessibility focus outline and the chosen finding's outline are
+  not drawn: they depend on what the player shows at the time, not on the
+  recording alone.
+- Before this, the export did not draw touches.
+
 ## Checks made
 
 - Unit tests (`Mp4ExportTests`): sound placement (straight-through runs,
@@ -254,6 +387,19 @@ The records are read in bulk: from the recording file
   the mix (levels, mono to stereo, resampling, silence), buffer records
   read back from a recording file, the screen reader events accepted by
   the validator, and the track marks.
+- Unit tests (`Mp4AnnotationTests`): when each number is shown, the
+  number order, times outside the recording, the chapters' order and
+  same-time chapters, cut titles, the chapter track, the `chap`
+  reference, the `chpl` box and unmoved media with the movie box last and
+  first, more than 255 chapters, and the evidence list. The Android
+  report's and the summary's tests check that each entry has a kind.
+- 2026-11-15, in the development sandbox: `Mp4Chapters` was applied to
+  MP4s made by FFmpeg with the movie box last and first. FFmpeg's
+  `ffprobe -show_chapters` listed each chapter and the video and sound
+  still decoded. VLC 3.0.23, through its library, listed 3 chapters with
+  their titles and times, from the `chpl` box, and no extra subtitle
+  track. With 300 chapters, VLC listed all 300 from the chapter track,
+  without the empty leading sample.
 - On the owner's PC (Windows 10 build 19045), 2026-11-07, with a test
   program using the export code outside the app:
   - Generated frames and sound: H.264 High 1366 by 768 at 20 frames a
@@ -263,6 +409,9 @@ The records are read in bulk: from the recording file
     card's encoder allowed, in 0.8 s.
   - A 20.7 s recording with microphone and system sound: 1920 by 1080,
     three sound tracks, written in 7.9 s.
+- Not checked yet: the numbers and touches drawn by the app, the chapters
+  in VLC on Windows, and in Windows' own players. See
+  [the evidence numbers validation plan](../validation/mp4-annotations-plan.md).
 - Not checked yet: the export window in the app, a recording with a
   screen reader track (needs Windows build 20348 or later, for example
   Windows 11), and an N edition. See
@@ -282,6 +431,5 @@ The records are read in bulk: from the recording file
 
 ## Later
 
-Captions and annotations can be added to the same export: captions as an
-MP4 text track or burned into the picture, and annotations drawn onto the
-frames before encoding. Neither is designed here.
+Captions can be added to the same export, as an MP4 text track or burned
+into the picture. They are not designed here.

@@ -512,6 +512,26 @@ public sealed class AndroidReportTests : IDisposable
     }
 
     [Fact]
+    public void EachEvidenceEntry_HasAKindForAnMp4sChapters_AndTheReportListsItsTablesRows()
+    {
+        var (input, guidance, evidence) = Recording(returns: true);
+        var markdown = AndroidReport.Write(input, guidance, evidence, null, Path.Combine(_folder, "pictures"), "pictures", DateTime.UtcNow);
+
+        Assert.All(evidence.Entries, entry => Assert.False(string.IsNullOrWhiteSpace(entry.Kind)));
+        Assert.Contains(evidence.Entries, entry => entry.Kind == "counts of findings" && entry.Time is null);
+        Assert.Contains(evidence.Entries, entry => entry.Kind.StartsWith("app ", StringComparison.Ordinal) && entry.Time is null);
+        Assert.Contains(evidence.Entries, entry => entry.Kind.StartsWith("screen 1, ", StringComparison.Ordinal));
+        Assert.Contains(evidence.Entries, entry => entry.Kind.StartsWith("visit 1 to ", StringComparison.Ordinal));
+        Assert.Contains(evidence.Entries, entry => entry.Kind.StartsWith("finding 1", StringComparison.Ordinal));
+        Assert.Contains(evidence.Entries, entry => entry.Kind.StartsWith("finding ", StringComparison.Ordinal) && entry.Kind.Contains(", on visit ", StringComparison.Ordinal));
+
+        var listed = ReportEvidenceList.Listed(markdown);
+        var section = markdown[markdown.LastIndexOf("## Evidence", StringComparison.Ordinal)..];
+        Assert.Equal(section.Split('\n').Count(line => System.Text.RegularExpressions.Regex.IsMatch(line, @"^\| E\d+ \|")), listed.Count);
+        Assert.All(listed, reference => Assert.Contains($"| {reference} |", section, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ARecordingsOwnReport_IsUnchanged_ByTheProjectsGrouping()
     {
         var (input, guidance, evidence) = Recording(returns: true);

@@ -8,21 +8,34 @@ public interface IExportFrameRenderer
 {
     /// <summary>
     /// Fills <paramref name="destination"/>, <paramref name="width"/> times
-    /// <paramref name="height"/> times 4 bytes, with the frame's picture as
-    /// 32-bit blue, green, red, and unused bytes, top row first.
+    /// <paramref name="height"/> times 4 bytes, with the frame's picture,
+    /// or black where there is no frame yet, as 32-bit blue, green, red,
+    /// and unused bytes, top row first, with the overlay's evidence
+    /// numbers and whatever else the renderer draws at the time, such as
+    /// the phone's touches, over it.
     /// </summary>
-    void Render(SessionVideoFrame frame, int width, int height, byte[] destination);
+    void Render(SessionVideoFrame? frame, long timeNanoseconds, ExportOverlay overlay, int width, int height, byte[] destination);
+
+    /// <summary>
+    /// A value that differs from one time to another when what the
+    /// renderer draws over the frame, beyond the overlay, differs, such as
+    /// the phone's touches; null where it draws nothing more. A sample is
+    /// drawn again when its value is not equal to the sample before's.
+    /// </summary>
+    object? DrawnAt(long timeNanoseconds);
 }
 
 /// <summary>What an export writes: the whole recording, with the chosen sounds.</summary>
 /// <param name="Audio">The sounds, in the order their own tracks follow the mixed track.</param>
 /// <param name="FrameSource">What the frames show, which sets the export's size and rate.</param>
+/// <param name="Annotations">A report's evidence numbers to show on the picture and name chapters after; none by default.</param>
 public sealed record Mp4ExportRequest(
     string OutputPath,
     IReadOnlyList<SessionVideoFrame> Frames,
     long DurationNanoseconds,
     IReadOnlyList<ExportAudioSource> Audio,
-    SessionFrameSource FrameSource = SessionFrameSource.Desktop);
+    SessionFrameSource FrameSource = SessionFrameSource.Desktop,
+    IReadOnlyList<ExportAnnotation>? Annotations = null);
 
 /// <summary>How far an export has got, in the recording's time.</summary>
 public readonly record struct Mp4ExportProgress(long DoneNanoseconds, long TotalNanoseconds);
@@ -36,7 +49,11 @@ public sealed record Mp4ExportResult(
     int AudioTracks,
     string Encoder,
     IReadOnlyList<string> EarlierFailures,
-    IReadOnlyDictionary<string, AudioPlacementPlan> Placements);
+    IReadOnlyDictionary<string, AudioPlacementPlan> Placements)
+{
+    /// <summary>The chapters written, one for each evidence number within the recording.</summary>
+    public int Chapters { get; init; }
+}
 
 /// <summary>
 /// Writes a whole recording as an MP4 file: the frames as H.264 video on
@@ -77,6 +94,10 @@ public static class Mp4Exporter
             throw new InvalidOperationException("The recording has no frames to export.");
         }
 
+        var annotations = request.Annotations ?? [];
+        var overlays = ExportAnnotations.Plan(schedule, annotations);
+        var end = Math.Max(schedule[^1].StartNanoseconds + schedule[^1].DurationNanoseconds, request.DurationNanoseconds);
+        var chapters = ExportAnnotations.Chapters(annotations, end);
         var temporary = request.OutputPath + ".partial";
         var failures = new List<string>();
         for (var attempt = 0; attempt < Attempts.Length; attempt++)
@@ -84,11 +105,13 @@ public static class Mp4Exporter
             var (hardware, settings, name) = Attempts[attempt];
             try
             {
-                var placements = Write(temporary, request, schedule, format, renderer, hardware, settings, progress, cancellationToken);
+                var placements = Write(temporary, request, schedule, overlays, format, renderer, hardware, settings, progress, cancellationToken);
                 if (request.Audio.Count > 0)
                 {
                     Mp4TrackGroups.Apply(temporary);
                 }
+
+                var chaptered = Mp4Chapters.Apply(temporary, chapters);
 
                 File.Move(temporary, request.OutputPath, overwrite: true);
                 return new Mp4ExportResult(
@@ -97,7 +120,10 @@ public static class Mp4Exporter
                     request.Audio.Count == 0 ? 0 : request.Audio.Count + 1,
                     name,
                     failures,
-                    placements);
+                    placements)
+                {
+                    Chapters = chaptered ? chapters.Count : 0
+                };
             }
             catch (COMException exception) when (attempt + 1 < Attempts.Length && !cancellationToken.IsCancellationRequested)
             {
@@ -118,6 +144,7 @@ public static class Mp4Exporter
         string path,
         Mp4ExportRequest request,
         IReadOnlyList<ScheduledFrame> schedule,
+        IReadOnlyList<ExportOverlay> overlays,
         VideoFormat format,
         IExportFrameRenderer renderer,
         bool hardware,
@@ -159,22 +186,34 @@ public static class Mp4Exporter
             }
         }
 
-        foreach (var sample in schedule)
+        ExportOverlay? previousOverlay = null;
+        object? previousDrawn = null;
+        for (var index = 0; index < schedule.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var sample = schedule[index];
             var sampleEnd = sample.StartNanoseconds + sample.DurationNanoseconds;
             WriteAudioUntil(sampleEnd);
-            if (!sample.Repeat)
+
+            // A sample is drawn again where its frame, its evidence numbers
+            // or the touches drawn on it are not the sample before's.
+            var middle = sample.StartNanoseconds + (sample.DurationNanoseconds / 2);
+            var overlay = overlays[index];
+            var drawn = renderer.DrawnAt(middle);
+            if (index == 0 || !sample.Repeat || !ReferenceEquals(overlay, previousOverlay) || !Equals(drawn, previousDrawn))
             {
-                if (sample.Frame is null)
+                if (sample.Frame is null && overlay.References.Count == 0 && drawn is null)
                 {
                     Array.Clear(pixels);
                 }
                 else
                 {
-                    renderer.Render(sample.Frame, format.Width, format.Height, pixels);
+                    renderer.Render(sample.Frame, middle, overlay, format.Width, format.Height, pixels);
                 }
             }
+
+            previousOverlay = overlay;
+            previousDrawn = drawn;
 
             writer.WriteVideo(pixels, sample.StartNanoseconds, sample.DurationNanoseconds);
             progress?.Report(new Mp4ExportProgress(sampleEnd, total));

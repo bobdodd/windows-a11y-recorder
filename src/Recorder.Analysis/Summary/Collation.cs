@@ -89,7 +89,8 @@ public interface ISummaryEvidence
 
 /// <summary>An entry of the evidence list: its reference, time, what it is, and its record.</summary>
 /// <param name="Time">The time in the recording; null for evidence that is not of the recording, such as the auditor's description.</param>
-public sealed record EvidenceEntry(string Reference, long? Time, string Text, string? EventId);
+/// <param name="Kind">What kind of evidence it is in a few words, such as "click", for an MP4's chapter names (mp4-export.md, "Evidence numbers").</param>
+public sealed record EvidenceEntry(string Reference, long? Time, string Text, string? EventId, string Kind = "evidence");
 
 /// <summary>Numbers the evidence the facts cite, E1 upward, once for each record or fact.</summary>
 public sealed class EvidenceRegister
@@ -99,7 +100,7 @@ public sealed class EvidenceRegister
 
     public IReadOnlyList<EvidenceEntry> Entries => _entries;
 
-    public string Add(long? time, string text, string? eventId, string? key = null)
+    public string Add(long? time, string text, string? eventId, string? key = null, string kind = "evidence")
     {
         key ??= eventId;
         if (key is not null && _byKey.TryGetValue(key, out var existing))
@@ -108,7 +109,7 @@ public sealed class EvidenceRegister
         }
 
         var reference = "E" + (_entries.Count + 1).ToString(CultureInfo.InvariantCulture);
-        _entries.Add(new EvidenceEntry(reference, time, text, eventId));
+        _entries.Add(new EvidenceEntry(reference, time, text, eventId, kind));
         if (key is not null)
         {
             _byKey[key] = reference;
@@ -285,20 +286,20 @@ public static class SummaryCollator
         var lines = new List<string>();
         var references = new HashSet<string>(StringComparer.Ordinal);
         var start = visit.Start;
-        string Cite(long time, string text, string? eventId, string? key = null)
+        string Cite(long time, string text, string? eventId, string? key, string kind)
         {
-            var reference = register.Add(time, text, eventId, key);
+            var reference = register.Add(time, text, eventId, key, kind);
             references.Add(reference);
             return reference;
         }
 
         var timeline = new List<TimedLine>();
-        void Line(long time, string text, string? eventId, string? key = null) =>
-            lines.Add($"[{Cite(time, text, eventId, key)}] {Time(time)} {text}");
+        void Line(long time, string text, string? eventId, string kind, string? key = null) =>
+            lines.Add($"[{Cite(time, text, eventId, key, kind)}] {Time(time)} {text}");
 
-        void Timed(long time, string text, string? eventId, bool input = false, string? key = null)
+        void Timed(long time, string text, string? eventId, string kind, bool input = false, string? key = null)
         {
-            var line = $"[{Cite(time, text, eventId, key)}] {Time(time)} {text}";
+            var line = $"[{Cite(time, text, eventId, key, kind)}] {Time(time)} {text}";
             lines.Add(line);
             timeline.Add(new TimedLine(time, line, input));
         }
@@ -315,7 +316,7 @@ public static class SummaryCollator
             false => "Chromium classified it as not started by the page's content",
             null => "whether the page's content started it is not recorded"
         };
-        Line(start.Time, $"Navigation committed, {how}, {start.Url}. {initiated}." + (start.ErrorPage ? " It ended in an error page." : ""), start.EventId);
+        Line(start.Time, $"Navigation committed, {how}, {start.Url}. {initiated}." + (start.ErrorPage ? " It ended in an error page." : ""), start.EventId, "navigation");
         if (visit.ReturnOf is { } earlier)
         {
             lines.Add($"(A return to the URL of visit {earlier.ToString(CultureInfo.InvariantCulture)}, by URL alone.)");
@@ -327,7 +328,7 @@ public static class SummaryCollator
             .MaxBy(fact => fact.Time);
         if (before is not null)
         {
-            Line(before.Time, $"The participant's last input before it: {before.Text}.", before.EventId);
+            Line(before.Time, $"The participant's last input before it: {before.Text}.", before.EventId, "input before the visit");
         }
         else
         {
@@ -338,7 +339,7 @@ public static class SummaryCollator
         // statement resting on it can cite it (target machine, 2026-10-14).
         foreach (var running in evidence.AssistiveTechnologyAt(start.Time))
         {
-            Line(start.Time, $"Observed running at the visit's start: {running}.", null, $"running:{start.Time}:{running}");
+            Line(start.Time, $"Observed running at the visit's start: {running}.", null, "programs running", $"running:{start.Time}:{running}");
         }
 
         // The page at the end of the visit: its title, structure, and text.
@@ -355,7 +356,7 @@ public static class SummaryCollator
             var basis = page.HasAccessibility
                 ? "roles and names as Chromium's accessibility records give them"
                 : "Chromium's accessibility records are not recorded, so roles and names are read from the tags";
-            var structure = Cite(endTime, $"The page as recorded at the end of visit {visit.Number}", null, $"structure:{visit.Number}");
+            var structure = Cite(endTime, $"The page as recorded at the end of visit {visit.Number}", null, $"structure:{visit.Number}", "page as recorded");
             lines.Add($"[{structure}] {Time(endTime)} The page as recorded at the end of the visit ({basis}):");
             lines.Add(title is null ? "  Title: none recorded." : $"  Title: {Quote(title)}.");
             var landmarks = page.Landmarks;
@@ -407,7 +408,7 @@ public static class SummaryCollator
             {
                 var (text, _) = page.TextOf(container, int.MaxValue);
                 var where = page.Main is not null ? "the main landmark" : "the page, which has no main landmark";
-                var reference = Cite(endTime, $"The text of {where}, at the end of visit {visit.Number}", null, $"text:{visit.Number}");
+                var reference = Cite(endTime, $"The text of {where}, at the end of visit {visit.Number}", null, $"text:{visit.Number}", "page text");
                 lines.Add(text.Length == 0
                     ? $"[{reference}] The text of {where}: none."
                     : $"[{reference}] The text of {where}, in full: {Quote(text)}");
@@ -418,7 +419,7 @@ public static class SummaryCollator
         foreach (var step in visit.Steps)
         {
             var link = step.LinkName is { Length: > 0 } name ? $" {Quote(name)}" : "";
-            Timed(step.Commit.Time, $"In-page jump to #{step.Fragment}, {step.Target}: a {step.Name}{link} ({step.Rule}).", step.Commit.EventId);
+            Timed(step.Commit.Time, $"In-page jump to #{step.Fragment}, {step.Target}: a {step.Name}{link} ({step.Rule}).", step.Commit.EventId, "in-page jump");
         }
 
         bool Within(long time) => time >= start.Time && time < visit.End;
@@ -431,7 +432,7 @@ public static class SummaryCollator
                 .OrderByDescending(group => group.Count())
                 .ThenBy(group => group.Key, StringComparer.Ordinal)
                 .ToList();
-            var reference = Cite(keys[0].Time, $"The keys pressed in visit {visit.Number}", keys[0].EventId, $"keys:{visit.Number}");
+            var reference = Cite(keys[0].Time, $"The keys pressed in visit {visit.Number}", keys[0].EventId, $"keys:{visit.Number}", "keys pressed");
             lines.Add($"[{reference}] Keys pressed during the visit, {keys.Count.ToString(CultureInfo.InvariantCulture)} in all: " +
                 string.Join("; ", kinds.Select(group => $"{group.Key} x{group.Count().ToString(CultureInfo.InvariantCulture)}")) + ".");
         }
@@ -443,13 +444,13 @@ public static class SummaryCollator
         var commands = evidence.Commands.Where(fact => Within(fact.Time)).ToList();
         foreach (var command in commands)
         {
-            Timed(command.Time, command.Text, command.EventId);
+            Timed(command.Time, command.Text, command.EventId, "NVDA command");
         }
 
         var clicks = evidence.Clicks.Where(fact => Within(fact.Time)).ToList();
         foreach (var click in clicks)
         {
-            Timed(click.Time, click.Text, click.EventId, input: true);
+            Timed(click.Time, click.Text, click.EventId, "click", input: true);
         }
 
         if (start.DocumentToken is { } document)
@@ -460,7 +461,7 @@ public static class SummaryCollator
                 var what = change.NodeId is { } node && page?.Node(node) is { } focused
                     ? Describe(page, focused)
                     : change.NodeId is null ? "the document itself" : "an element no longer in the page at the visit's end";
-                Timed(change.Time, $"The page's focus moved to {what}.", change.EventId);
+                Timed(change.Time, $"The page's focus moved to {what}.", change.EventId, "focus moved");
             }
 
             // Text typed: each text control whose value at the end differs
@@ -476,7 +477,7 @@ public static class SummaryCollator
             {
                 var field = page?.Node(control.NodeId) is { } node ? Describe(page, node) : "a text field";
                 var kind = control.ControlType is { Length: > 0 } type ? $" (type {type})" : "";
-                Line(endTime, $"Text in {field}{kind} at the end of the visit: {Quote(control.Value!)}.", null, $"typed:{visit.Number}:{control.NodeId}");
+                Line(endTime, $"Text in {field}{kind} at the end of the visit: {Quote(control.Value!)}.", null, "text typed", $"typed:{visit.Number}:{control.NodeId}");
             }
 
         }
@@ -484,7 +485,7 @@ public static class SummaryCollator
         var announcements = evidence.Announcements.Where(fact => Within(fact.Time)).ToList();
         foreach (var announcement in announcements)
         {
-            Timed(announcement.Time, announcement.Text, announcement.EventId);
+            Timed(announcement.Time, announcement.Text, announcement.EventId, "NVDA announcement");
         }
 
         var changes = Changes(evidence, visit, page, settings, Cite);
@@ -495,7 +496,7 @@ public static class SummaryCollator
         // is one input, citing its first key.
         foreach (var (time, text, eventId) in KeyInputs(keys))
         {
-            var line = $"[{Cite(time, text, eventId, $"key:{time.ToString(CultureInfo.InvariantCulture)}")}] {Time(time)} {text}";
+            var line = $"[{Cite(time, text, eventId, $"key:{time.ToString(CultureInfo.InvariantCulture)}", "key")}] {Time(time)} {text}";
             timeline.Add(new TimedLine(time, line, true));
         }
 
@@ -570,28 +571,28 @@ public static class SummaryCollator
     // the setting being one movement (owner, 2026-10-16; recording-summary.md,
     // "The page's changes during a visit").
     private static List<(long Time, string Line)> Changes(
-        ISummaryEvidence evidence, Visit visit, PageSnapshot? page, CollationSettings settings, Func<long, string, string?, string?, string> cite)
+        ISummaryEvidence evidence, Visit visit, PageSnapshot? page, CollationSettings settings, Func<long, string, string?, string?, string, string> cite)
     {
         var start = visit.Start;
         bool Within(long time) => time >= start.Time && time < visit.End;
-        var changes = new List<(long Time, string Text, string? EventId, string? Key)>();
+        var changes = new List<(long Time, string Text, string? EventId, string? Key, string Kind)>();
         var token = start.DocumentToken;
         if (token is not null)
         {
             foreach (var change in evidence.LiveRegions.Where(fact => fact.DocumentToken == token && Within(fact.Time)))
             {
-                changes.Add((change.Time, LiveRegionChanges.Reason(change) + $" Its politeness: {change.Politeness}.", change.EventId, null));
+                changes.Add((change.Time, LiveRegionChanges.Reason(change) + $" Its politeness: {change.Politeness}.", change.EventId, null, "live region change"));
             }
         }
 
         foreach (var popup in evidence.Popups.Where(fact => Within(fact.Time)))
         {
-            changes.Add((popup.Time, popup.Text, popup.EventId, null));
+            changes.Add((popup.Time, popup.Text, popup.EventId, null, "popup opened"));
         }
 
         foreach (var popup in evidence.PopupsClosed.Where(fact => Within(fact.Time)))
         {
-            changes.Add((popup.Time, popup.Text, popup.EventId, null));
+            changes.Add((popup.Time, popup.Text, popup.EventId, null, "popup closed"));
         }
 
         foreach (var window in evidence.NvdaWindows)
@@ -599,22 +600,23 @@ public static class SummaryCollator
             if (Within(window.Start))
             {
                 changes.Add((window.Start, $"NVDA's window {Quote(window.Name)} came to the front.", window.StartEventId,
-                    window.StartEventId ?? $"nvda-window:{window.Start}:{window.Name}"));
+                    window.StartEventId ?? $"nvda-window:{window.Start}:{window.Name}", "NVDA window"));
             }
 
             if (Within(window.End) && window.End > window.Start)
             {
                 changes.Add((window.End, $"NVDA's window {Quote(window.Name)} left the front.", window.EndEventId,
-                    window.EndEventId ?? $"nvda-window-end:{window.End}:{window.Name}"));
+                    window.EndEventId ?? $"nvda-window-end:{window.End}:{window.Name}", "NVDA window"));
             }
         }
 
         if (token is not null)
         {
-            changes.AddRange(ScrollMovements(evidence, token, start.Time, visit.End, page, settings));
+            changes.AddRange(ScrollMovements(evidence, token, start.Time, visit.End, page, settings)
+                .Select(scroll => (scroll.Time, scroll.Text, scroll.EventId, scroll.Key, "scroll")));
         }
 
-        return [.. changes.OrderBy(change => change.Time).Select(change => (change.Time, $"[{cite(change.Time, change.Text, change.EventId, change.Key)}] {Time(change.Time)} {change.Text}"))];
+        return [.. changes.OrderBy(change => change.Time).Select(change => (change.Time, $"[{cite(change.Time, change.Text, change.EventId, change.Key, change.Kind)}] {Time(change.Time)} {change.Text}"))];
     }
 
     // Each scroll as a movement: one scroller's records with no pause
@@ -700,7 +702,7 @@ public static class SummaryCollator
 
             var end = index + 1 < records.Count ? records[index + 1].Time : evidence.Duration;
             var title = record.Title ?? "no title recorded";
-            var reference = register.Add(record.Time, $"{record.Process ?? "A program"} came to the front: {Quote(title)}", record.EventId);
+            var reference = register.Add(record.Time, $"{record.Process ?? "A program"} came to the front: {Quote(title)}", record.EventId, kind: "window in front");
             windows.Add(new OtherWindow(reference, record.Time, end, record.Process ?? "not recorded", title));
         }
 
@@ -715,7 +717,7 @@ public static class SummaryCollator
             var written = capabilities.WrittenUtc is { } when
                 ? when.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
                 : "an unrecorded date";
-            var reference = register.Add(null, $"The participant's capabilities, as the auditor reported them on {written}", null, "capabilities");
+            var reference = register.Add(null, $"The participant's capabilities, as the auditor reported them on {written}", null, "capabilities", "capabilities");
             lines.Add($"[{reference}] The participant's capabilities, reported by the auditor on {written}, a person's statement and not an observation: {Quote(description)}");
         }
         else
@@ -732,7 +734,7 @@ public static class SummaryCollator
         if (running.Count > 0)
         {
             var observed = "Observed running at the start of the recording: " + string.Join("; ", running);
-            var reference = register.Add(0, observed, null, "running:start");
+            var reference = register.Add(0, observed, null, "running:start", "programs running");
             lines.Add($"[{reference}] {observed}. This shows what was running, not what the participant is able to do.");
         }
 

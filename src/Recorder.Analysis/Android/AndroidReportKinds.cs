@@ -310,6 +310,7 @@ internal static class AndroidReportRun
         var settings = PhoneCheckSettings.Load(PhoneCheckSettings.DefaultPath);
         var guidance = AndroidGuidance.Load();
         var parts = new List<AndroidReportInput>();
+        var keys = new List<string>();
         var skipped = new List<string>();
         var open = new List<SessionPlaybackArchive>();
         try
@@ -353,6 +354,7 @@ internal static class AndroidReportRun
                     () => AndroidAudit.Run(archive, settings, new WindowsPhoneTextReader(), PhonePictures.Load, cancellationToken),
                     cancellationToken).ConfigureAwait(false);
                 parts.Add(Input(archive, audit, label, opened.Incomplete) with { StartedUtc = new DateTimeOffset(recording.StartedUtc, TimeSpan.Zero) });
+                keys.Add(key);
             }
 
             if (parts.Count == 0)
@@ -366,7 +368,7 @@ internal static class AndroidReportRun
             var input = new AndroidProjectInput(project.Name, parts, skipped);
             await WriteFilesAsync(context, root, AndroidProjectReportKind.FolderOf(projectId, task.TaskId), baseName,
                 (pictures, written, audience) => AndroidReport.Write(input, guidance, evidence, pictures, "pictures", written, audience),
-                cancellationToken).ConfigureAwait(false);
+                evidence, keys, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -458,16 +460,21 @@ internal static class AndroidReportRun
     {
         await WriteFilesAsync(context, session, Path.Combine("analysis", context.Task.TaskId.ToString("D")), baseName,
             (pictures, written, audience) => AndroidReport.Write(input, guidance, evidence, model, pictures, "pictures", written, audience),
-            cancellationToken).ConfigureAwait(false);
+            evidence, [Path.GetFileName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(session)))], cancellationToken).ConfigureAwait(false);
     }
 
-    // The reports, written to a folder relative to the task's folder.
+    // The reports, written to a folder relative to the task's folder, with
+    // the evidence the Markdown lists for an MP4 export (mp4-export.md,
+    // "Evidence numbers"); keys are the session keys of the report's
+    // recordings, in their numbers' order.
     private static async Task WriteFilesAsync(
         AnalysisTaskContext context,
         string session,
         string folderRelative,
         string baseName,
         Func<string, DateTime, ReportAudience, string> write,
+        AndroidEvidence evidence,
+        IReadOnlyList<string> keys,
         CancellationToken cancellationToken)
     {
         var folder = Path.Combine(session, folderRelative);
@@ -484,9 +491,19 @@ internal static class AndroidReportRun
         var markdown = write(pictures, written, ReportAudience.Auditor);
         var client = write(pictures, written, ReportAudience.Client);
         var word = WordReport.Write(client, folder, AndroidReport.Labels);
+        var listed = ReportEvidenceList.Listed(markdown);
+        await ReportEvidenceList.WriteAsync(folder, evidence.Entries
+            .Where(entry => listed.Contains(entry.Reference))
+            .Select(entry => new ReportEvidenceItem(entry.Reference, EvidenceRecording(entry.Recording, keys), entry.Time, entry.Kind)),
+            cancellationToken).ConfigureAwait(false);
         await AddAsync(context, folder, folderRelative, baseName + ".docx", word, cancellationToken).ConfigureAwait(false);
         await AddAsync(context, folder, folderRelative, baseName + ".md", new UTF8Encoding(false).GetBytes(markdown), cancellationToken).ConfigureAwait(false);
     }
+
+    // A recording's session key from its number, from 1; one report's
+    // evidence about every recording is about its one recording.
+    internal static string? EvidenceRecording(int recording, IReadOnlyList<string> keys) =>
+        recording >= 1 && recording <= keys.Count ? keys[recording - 1] : keys.Count == 1 ? keys[0] : null;
 
     private static async Task AddAsync(AnalysisTaskContext context, string folder, string folderRelative, string fileName, byte[] bytes, CancellationToken cancellationToken)
     {

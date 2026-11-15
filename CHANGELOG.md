@@ -8,6 +8,20 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Evidence numbers, chapters and touches in MP4s
+
+- "Save as MP4..." can show a report's evidence numbers, such as E12, at
+  the bottom left of the picture for 4 seconds from each one's time, and
+  adds a chapter for each, named by number and kind, such as "E12,
+  finding 3", that VLC lists in Playback, Chapter. "Evidence numbers
+  from" chooses the report, or None; the newest with an evidence list is
+  chosen. Entries with no time are left out. See
+  [the MP4 export design](docs/architecture/mp4-export.md).
+- Every report now writes `evidence.json` beside it, listing the
+  evidence its table lists, with each entry's recording, time and kind.
+  Reports written before this have none and need running again.
+- A phone recording's export draws the touches as the player draws them.
+
 ### Recording names
 
 - A recording can have a readable name. Start recording asks for one

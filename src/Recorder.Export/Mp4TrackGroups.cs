@@ -23,7 +23,7 @@ internal static class Mp4TrackGroups
     public static int Apply(string path)
     {
         using var file = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-        var (start, length) = FindTopLevel(file, "moov"u8);
+        var (start, length) = Mp4Boxes.FindTopLevel(file, "moov"u8);
         if (length <= 0 || length > int.MaxValue)
         {
             return 0;
@@ -46,7 +46,7 @@ internal static class Mp4TrackGroups
     public static int Mark(Span<byte> movie)
     {
         var sounds = 0;
-        foreach (var (trackStart, trackLength) in Children(movie, HeaderOf(movie), "trak"u8))
+        foreach (var (trackStart, trackLength) in Mp4Boxes.Children(movie, Mp4Boxes.HeaderOf(movie), "trak"u8))
         {
             var track = movie.Slice(trackStart, trackLength);
             if (!IsSound(track))
@@ -54,7 +54,7 @@ internal static class Mp4TrackGroups
                 continue;
             }
 
-            var header = Children(track, 8, "tkhd"u8).FirstOrDefault();
+            var header = Mp4Boxes.Children(track, 8, "tkhd"u8).FirstOrDefault();
             if (header.Length < 8 + 48)
             {
                 continue;
@@ -78,10 +78,10 @@ internal static class Mp4TrackGroups
     // A track is sound when its media's handler is "soun".
     private static bool IsSound(ReadOnlySpan<byte> track)
     {
-        foreach (var (mediaStart, mediaLength) in Children(track, 8, "mdia"u8))
+        foreach (var (mediaStart, mediaLength) in Mp4Boxes.Children(track, 8, "mdia"u8))
         {
             var media = track.Slice(mediaStart, mediaLength);
-            foreach (var (handlerStart, handlerLength) in Children(media, 8, "hdlr"u8))
+            foreach (var (handlerStart, handlerLength) in Mp4Boxes.Children(media, 8, "hdlr"u8))
             {
                 // Size, type, version and flags, pre-defined, then the type.
                 if (handlerLength >= 20 && media.Slice(handlerStart + 16, 4).SequenceEqual("soun"u8))
@@ -92,84 +92,5 @@ internal static class Mp4TrackGroups
         }
 
         return false;
-    }
-
-    // The bytes of a box's own header: 16 with a 64-bit size, else 8.
-    private static int HeaderOf(ReadOnlySpan<byte> box) =>
-        BinaryPrimitives.ReadUInt32BigEndian(box) == 1 ? 16 : 8;
-
-    // The boxes of a type directly within a box, from the offset its
-    // children start at.
-    private static List<(int Start, int Length)> Children(ReadOnlySpan<byte> parent, int offset, ReadOnlySpan<byte> type)
-    {
-        var found = new List<(int, int)>();
-        var at = offset;
-        while (at + 8 <= parent.Length)
-        {
-            long size = BinaryPrimitives.ReadUInt32BigEndian(parent[at..]);
-            if (size == 1)
-            {
-                if (at + 16 > parent.Length)
-                {
-                    break;
-                }
-
-                size = (long)BinaryPrimitives.ReadUInt64BigEndian(parent[(at + 8)..]);
-            }
-            else if (size == 0)
-            {
-                size = parent.Length - at;
-            }
-
-            if (size < 8 || at + size > parent.Length)
-            {
-                break;
-            }
-
-            if (parent.Slice(at + 4, 4).SequenceEqual(type))
-            {
-                found.Add((at, (int)size));
-            }
-
-            at += (int)size;
-        }
-
-        return found;
-    }
-
-    // Where a top-level box of a type is in the file, and its length.
-    private static (long Start, long Length) FindTopLevel(FileStream file, ReadOnlySpan<byte> type)
-    {
-        Span<byte> header = stackalloc byte[16];
-        var at = 0L;
-        while (at + 8 <= file.Length)
-        {
-            file.Position = at;
-            file.ReadExactly(header[..8]);
-            long size = BinaryPrimitives.ReadUInt32BigEndian(header);
-            if (size == 1)
-            {
-                file.ReadExactly(header[8..16]);
-                size = (long)BinaryPrimitives.ReadUInt64BigEndian(header[8..]);
-            }
-            else if (size == 0)
-            {
-                size = file.Length - at;
-            }
-
-            if (size < 8 || at + size > file.Length)
-            {
-                break;
-            }
-
-            if (header.Slice(4, 4).SequenceEqual(type))
-            {
-                return (at, size);
-            }
-
-            at += size;
-        }
-
-        return (0, 0);
     }
 }

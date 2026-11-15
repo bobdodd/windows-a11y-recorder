@@ -777,6 +777,24 @@ public sealed class RecordingSummaryTests
         Assert.Equal(2, register.Entries.Count);
     }
 
+    [Fact]
+    public void EachCollatedEntry_HasAKindForAnMp4sChapters_AndTheListHasTheReportsRowsOfItsRecording()
+    {
+        var evidence = new FakeSummaryEvidence();
+        evidence.Running.Add("NVDA 2026.2");
+        evidence.CommitList.Add(Commit(1, "https://example.test/a"));
+        var collation = SummaryCollator.Collate(evidence, new ParticipantCapabilities("Uses NVDA.", new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc)));
+
+        Assert.All(collation.Evidence.Entries, entry => Assert.NotEqual("evidence", entry.Kind));
+        Assert.Contains(collation.Evidence.Entries, entry => entry.Kind == "navigation");
+        Assert.Contains(collation.Evidence.Entries, entry => entry.Kind == "capabilities");
+
+        var navigation = collation.Evidence.Entries.First(entry => entry.Kind == "navigation");
+        var report = $"## Evidence\n\n| Ref | Time | Evidence |\n| --- | --- | --- |\n| {navigation.Reference} | 00:00:01 | Navigation. |\n";
+        var listed = Assert.Single(RecordingSummaryKind.EvidenceList(report, collation.Evidence, Path.Combine(Path.GetTempPath(), "20261115-101500")));
+        Assert.Equal(new Recorder.Analysis.ReportEvidenceItem(navigation.Reference, "20261115-101500", navigation.Time, "navigation"), listed);
+    }
+
     private static AcceptedStep Accepted(params Claim[] claims) =>
         new(Guid.NewGuid(), "input", JsonDocument.Parse("{}").RootElement.Clone(), claims);
 

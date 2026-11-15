@@ -116,7 +116,7 @@ public sealed record ReportPart(PhoneScreenTimeline Screens, AndroidAudit Audit,
 /// </summary>
 public sealed class AndroidEvidence
 {
-    private readonly List<(string Reference, long? Time, string Text, int Recording)> _entries = [];
+    private readonly List<(string Reference, long? Time, string Text, int Recording, string Kind)> _entries = [];
     private readonly Dictionary<string, string> _apps = new(StringComparer.Ordinal);
     private readonly Dictionary<ReportScreen, string> _screens = [];
     private readonly Dictionary<PhoneScreen, ReportScreen> _screenOf = [];
@@ -135,10 +135,12 @@ public sealed class AndroidEvidence
 
     /// <summary>
     /// Each reference, its time in its recording, or null for one about
-    /// the whole recording or project, what it is, and its recording's
-    /// number, from 1, or 0 for one about every recording.
+    /// the whole recording or project, what it is, its recording's
+    /// number, from 1, or 0 for one about every recording, and what kind
+    /// of evidence it is in a few words, such as "visit 2 to Settings",
+    /// for an MP4's chapter names (mp4-export.md, "Evidence numbers").
     /// </summary>
-    public IReadOnlyList<(string Reference, long? Time, string Text, int Recording)> Entries => _entries;
+    public IReadOnlyList<(string Reference, long? Time, string Text, int Recording, string Kind)> Entries => _entries;
 
     /// <summary>How many recordings the report covers.</summary>
     public int Recordings { get; private set; }
@@ -259,10 +261,10 @@ public sealed class AndroidEvidence
                     .Where(pair => pair.part.Screens.Screens.Any(screen => screen.Package == app))
                     .Select(pair => $"In recording {(pair.index + 1).ToString(CultureInfo.InvariantCulture)}, {pair.part.Device.DescribeVersion(app)}. {pair.part.Device.DescribeFramework(app)}"))
                 : $"The app {app}: {parts[0].Device.DescribeVersion(app)}. {parts[0].Device.DescribeFramework(app)}";
-            evidence._apps[app] = evidence.Reference(null, described, 0);
+            evidence._apps[app] = evidence.Reference(null, described, 0, $"app {app}");
         }
 
-        evidence.CountsReference = evidence.Reference(null, "The recorder's counts of findings by WCAG success criterion, as in \"At a glance\"", 0);
+        evidence.CountsReference = evidence.Reference(null, "The recorder's counts of findings by WCAG success criterion, as in \"At a glance\"", 0, "counts of findings");
 
         // A finding of the app as a whole, once for the same app, check,
         // level and item across the recordings.
@@ -281,7 +283,8 @@ public sealed class AndroidEvidence
             evidence._screens[screen] = evidence.Reference(start,
                 $"Screen {screen.Number.ToString(CultureInfo.InvariantCulture)}, {screen.Label}: the screen is {screen.NamedBy}" +
                 (project ? $"; seen in {Recordings(screen)}" : ""),
-                visits.Count == 0 ? 0 : evidence.RecordingOf(visits[0]));
+                visits.Count == 0 ? 0 : evidence.RecordingOf(visits[0]),
+                $"screen {screen.Number.ToString(CultureInfo.InvariantCulture)}, {screen.Label}");
 
             // The same check, level and item on more than one visit is one
             // finding, numbered before the visits' own, in the order of its
@@ -298,7 +301,8 @@ public sealed class AndroidEvidence
             {
                 var reference = evidence.Reference(visit.Start,
                     $"{Sentence(evidence.VisitName(visit))} to the screen {screen.Label}, {visit.When}: {visit.CauseText}",
-                    evidence.RecordingOf(visit));
+                    evidence.RecordingOf(visit),
+                    $"{evidence.VisitName(visit)} to {screen.Label}");
                 evidence._visits[visit] = reference;
                 evidence._byVisit[visit] = [.. Ordered(audits[visit].For(visit).Where(finding => !grouped.Contains(finding)), guidance).Select(finding => evidence.Add([finding], guidance))];
             }
@@ -324,12 +328,15 @@ public sealed class AndroidEvidence
     {
         var number = _all.Count + 1;
         var several = findings.Count > 1;
+        var name = $"finding {number.ToString(CultureInfo.InvariantCulture)}";
         var seen = findings
-            .Select(finding => new FindingVisit(finding, Reference(First(finding) == long.MaxValue ? finding.Visit.Start : First(finding),
+            .Select(finding => (finding, on: app ? $"recording {RecordingOf(finding.Visit).ToString(CultureInfo.InvariantCulture)}" : VisitName(finding.Visit)))
+            .Select(pair => new FindingVisit(pair.finding, Reference(First(pair.finding) == long.MaxValue ? pair.finding.Visit.Start : First(pair.finding),
                 several
-                    ? $"Finding {number.ToString(CultureInfo.InvariantCulture)}, on {(app ? $"recording {RecordingOf(finding.Visit).ToString(CultureInfo.InvariantCulture)}" : VisitName(finding.Visit))}: {finding.Text}"
-                    : $"Finding {number.ToString(CultureInfo.InvariantCulture)}: {finding.Text}",
-                RecordingOf(finding.Visit))))
+                    ? $"{Sentence(name)}, on {pair.on}: {pair.finding.Text}"
+                    : $"{Sentence(name)}: {pair.finding.Text}",
+                RecordingOf(pair.finding.Visit),
+                several ? $"{name}, on {pair.on}" : name)))
             .ToList();
         var check = guidance.For(findings[0].Check);
         var rank = guidance.Rank(check?.Impact);
@@ -350,10 +357,10 @@ public sealed class AndroidEvidence
         return numbered;
     }
 
-    private string Reference(long? time, string text, int recording)
+    private string Reference(long? time, string text, int recording, string kind)
     {
         var reference = "E" + (_entries.Count + 1).ToString(CultureInfo.InvariantCulture);
-        _entries.Add((reference, time, text, recording));
+        _entries.Add((reference, time, text, recording, kind));
         return reference;
     }
 

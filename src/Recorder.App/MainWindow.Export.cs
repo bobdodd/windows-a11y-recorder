@@ -27,6 +27,6 @@ public partial class MainWindow
             [Recorder.Contracts.AndroidSoundRecords.StreamName] = SystemAudioVolumeSlider.Value,
             ["screen-reader"] = ScreenReaderVolumeSlider.Value
         };
-        new ExportMp4Window(this, archive, _showWholeScreen, gains).ShowDialog();
+        new ExportMp4Window(this, archive, _showWholeScreen, gains, AnalysisCatalogOrNull).ShowDialog();
     }
 }

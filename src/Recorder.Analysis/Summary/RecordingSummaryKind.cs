@@ -175,7 +175,7 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
             attempts,
             Collation,
             DateTime.UtcNow);
-        await WriteReportAsync(context, session, FileName, report, cancellationToken).ConfigureAwait(false);
+        await WriteReportAsync(context, session, FileName, report, collation.Evidence, cancellationToken).ConfigureAwait(false);
     }
 
     internal static IEnumerable<string> CapabilityReferences(RecordingCollation collation) =>
@@ -274,12 +274,25 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
         return described is null ? ParticipantCapabilities.Unknown : new ParticipantCapabilities(described.Description, described.WrittenUtc);
     }
 
-    /// <summary>Writes a report to the task's folder and records it in the catalog.</summary>
-    internal static async Task WriteReportAsync(AnalysisTaskContext context, string session, string fileName, string report, CancellationToken cancellationToken)
+    /// <summary>
+    /// Writes a report to the task's folder and records it in the catalog,
+    /// with the evidence it lists beside it for an MP4 export
+    /// (mp4-export.md, "Evidence numbers").
+    /// </summary>
+    internal static IEnumerable<ReportEvidenceItem> EvidenceList(string report, EvidenceRegister evidence, string session)
+    {
+        var key = Path.GetFileName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(session)));
+        var listed = ReportEvidenceList.Listed(report);
+        return evidence.Entries.Where(entry => listed.Contains(entry.Reference))
+            .Select(entry => new ReportEvidenceItem(entry.Reference, key, entry.Time, entry.Kind));
+    }
+
+    internal static async Task WriteReportAsync(AnalysisTaskContext context, string session, string fileName, string report, EvidenceRegister evidence, CancellationToken cancellationToken)
     {
         var relative = Path.Combine("analysis", context.Task.TaskId.ToString("D"), fileName);
         var path = Path.Combine(session, relative);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await ReportEvidenceList.WriteAsync(Path.GetDirectoryName(path)!, EvidenceList(report, evidence, session), cancellationToken).ConfigureAwait(false);
         var bytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(report);
         await File.WriteAllBytesAsync(path, bytes, cancellationToken).ConfigureAwait(false);
         await context.Catalog.AddReportAsync(context.Task.TaskId, fileName, relative, Convert.ToHexStringLower(SHA256.HashData(bytes)), cancellationToken)

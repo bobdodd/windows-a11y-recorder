@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
+using Recorder.Analysis;
 using Recorder.Export;
 using Recorder.Session;
 
@@ -19,7 +20,10 @@ namespace Recorder.App;
 /// and where available screen-reader audio", and "Whole recording - editing
 /// is not part of this tool"). The picture is the player's view; the sound
 /// is one track of the chosen sounds mixed at the player's levels and then
-/// each chosen sound's own track. See docs/architecture/mp4-export.md.
+/// each chosen sound's own track. A report's evidence numbers can be drawn
+/// on the picture and named as chapters, and a phone's touches are drawn
+/// as the player draws them (owner, 2026-11-15). See
+/// docs/architecture/mp4-export.md.
 /// </summary>
 internal sealed class ExportMp4Window : Window
 {
@@ -46,6 +50,9 @@ internal sealed class ExportMp4Window : Window
     private readonly Button _browse;
     private readonly ProgressBar _progress;
     private readonly SelectableText _status;
+    private readonly AnalysisCatalog? _catalog;
+    private readonly ComboBox _evidence;
+    private readonly SelectableText _evidenceText;
     private CancellationTokenSource? _running;
     private int _announcedTenth = -1;
 
@@ -53,10 +60,12 @@ internal sealed class ExportMp4Window : Window
         Window owner,
         SessionPlaybackArchive archive,
         bool showWholeScreen,
-        IReadOnlyDictionary<string, double> gains)
+        IReadOnlyDictionary<string, double> gains,
+        AnalysisCatalog? catalog)
     {
         Owner = owner;
         _archive = archive;
+        _catalog = catalog;
         _showWholeScreen = showWholeScreen;
         _gains = gains;
         Title = "Save as MP4";
@@ -86,8 +95,30 @@ internal sealed class ExportMp4Window : Window
                 : "Picture: the participant's view, the part of the screen Magnifier showed in the colors it showed, as " +
                   "the player shows it now. To save the whole screen instead, close this window and turn on Whole screen."
             : phone
-                ? "Picture: the phone's screen as recorded, each picture as large as fits, upright as the phone was held."
+                ? "Picture: the phone's screen as recorded, each picture as large as fits, upright as the phone was held, " +
+                  "with the touches drawn as the player draws them."
                 : "Picture: the screen as captured."));
+
+        page.Children.Add(Heading("Evidence numbers", 2));
+        page.Children.Add(Paragraph(
+            "A report's evidence numbers, such as E12, can be shown at the bottom left of the picture for 4 seconds " +
+            "from each one's time, with a chapter named after each, such as \"E12, finding 3\", for moving between " +
+            "them in VLC and other players that read MP4 chapters."));
+        _evidence = new ComboBox { MinHeight = 44, VerticalContentAlignment = VerticalAlignment.Center };
+        _evidence.Items.Add(new ComboBoxItem { Content = "None", Tag = null });
+        _evidence.SelectedIndex = 0;
+        _evidence.SelectionChanged += (_, _) => DescribeEvidence();
+        AutomationProperties.SetName(_evidence, "Evidence numbers from");
+        var evidenceRow = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 4, 0, 4) };
+        var evidenceLabel = new Label { Content = "_Evidence numbers from:", Target = _evidence, VerticalAlignment = VerticalAlignment.Center };
+        DockPanel.SetDock(evidenceLabel, Dock.Left);
+        evidenceRow.Children.Add(evidenceLabel);
+        evidenceRow.Children.Add(_evidence);
+        page.Children.Add(evidenceRow);
+        _evidenceText = Paragraph(catalog is null
+            ? "There are no reports to choose: the analysis catalog is not available."
+            : "Reading this recording's reports.");
+        page.Children.Add(_evidenceText);
 
         page.Children.Add(Heading("Sound", 2));
         var tracks = archive.AudioTracks.ToDictionary(track => track.Stream, StringComparer.Ordinal);
@@ -165,7 +196,127 @@ internal sealed class ExportMp4Window : Window
 
         Content = new ScrollViewer { Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         Closing += OnClosing;
+        Loaded += async (_, _) => await ReadReportsAsync();
     }
+
+    private string SessionKey => Path.GetFileName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(_archive.SessionDirectory)));
+
+    // A finished report of the recording or one of its projects, and its
+    // evidence list, null where it has none.
+    private sealed record ReportChoice(string Name, IReadOnlyList<ReportEvidenceItem>? Entries);
+
+    // The recording's finished reports, newest first, each with its
+    // evidence list where it has one; the newest with a list is chosen.
+    private async Task ReadReportsAsync()
+    {
+        if (_catalog is null)
+        {
+            return;
+        }
+
+        var choices = new List<ReportChoice>();
+        try
+        {
+            var recording = await _catalog.RecordingIdAsync(SessionKey, CancellationToken.None);
+            if (recording is null)
+            {
+                _evidenceText.Text = "There are no reports to choose: this recording is not in the catalog.";
+                return;
+            }
+
+            var tasks = await _catalog.TasksAsync(recording.Value, CancellationToken.None);
+            foreach (var task in tasks
+                .Where(task => task.State == AnalysisTaskStates.Done)
+                .OrderByDescending(task => task.FinishedUtc ?? task.QueuedUtc))
+            {
+                var folder = task.ProjectId is not null ? task.SessionDirectory : _archive.SessionDirectory;
+                var reports = await _catalog.ReportsAsync(task.TaskId, CancellationToken.None);
+                if (folder is null || reports.Count == 0)
+                {
+                    continue;
+                }
+
+                var reportFolder = Path.GetDirectoryName(Path.Combine(folder, reports[0].RelativePath));
+                var finished = (task.FinishedUtc ?? task.QueuedUtc).ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.CurrentCulture);
+                var entries = reportFolder is null ? null : await Task.Run(() => ReportEvidenceList.Read(reportFolder));
+                choices.Add(new ReportChoice($"{AnalysisPlayer.KindName(task.Kind)}, finished {finished}", entries));
+            }
+        }
+        catch (Exception exception) when (exception is Npgsql.NpgsqlException or InvalidOperationException or IOException)
+        {
+            _evidenceText.Text = $"The reports could not be read: {exception.Message}";
+            return;
+        }
+
+        foreach (var choice in choices)
+        {
+            _evidence.Items.Add(new ComboBoxItem
+            {
+                Content = choice.Entries is null ? choice.Name + ", no evidence list" : choice.Name,
+                Tag = choice
+            });
+        }
+
+        var newest = choices.FindIndex(choice => choice.Entries is not null);
+        if (newest >= 0)
+        {
+            _evidence.SelectedIndex = newest + 1;
+        }
+
+        DescribeEvidence();
+    }
+
+    private ReportChoice? ChosenReport => (_evidence.SelectedItem as ComboBoxItem)?.Tag as ReportChoice;
+
+    // What the chosen report's numbers add to the MP4.
+    private void DescribeEvidence()
+    {
+        if (ChosenReport is not { } report)
+        {
+            _evidenceText.Text = _evidence.Items.Count > 1
+                ? "No evidence numbers or chapters are added."
+                : _catalog is null
+                    ? "There are no reports to choose: the analysis catalog is not available."
+                    : "There are no finished reports of this recording to choose, so no evidence numbers are added.";
+            return;
+        }
+
+        if (report.Entries is null)
+        {
+            _evidenceText.Text = "This report has no evidence list for MP4s, as it was written before reports had one. " +
+                "Run it again from the Analysis tab to use its numbers, or choose another.";
+            return;
+        }
+
+        var (timed, untimed) = ReportEvidenceList.ForRecording(report.Entries, SessionKey);
+        var within = timed.Count(entry => entry.TimeNanoseconds >= 0 && entry.TimeNanoseconds < _archive.DurationNanoseconds);
+        var parts = new List<string>
+        {
+            within == 1
+                ? "1 evidence number of this recording is shown, with a chapter."
+                : $"{within} evidence numbers of this recording are shown, with a chapter each."
+        };
+        if (untimed > 0)
+        {
+            parts.Add(untimed == 1
+                ? "1 is about the whole recording or project, with no time, so it is left out."
+                : $"{untimed} are about the whole recording or project, with no time, so they are left out.");
+        }
+
+        if (timed.Count > within)
+        {
+            parts.Add($"{timed.Count - within} with times outside the recording are left out.");
+        }
+
+        _evidenceText.Text = string.Join(" ", parts);
+    }
+
+    // The chosen report's numbers of this recording, for the export.
+    private IReadOnlyList<ExportAnnotation> Annotations() =>
+        ChosenReport is { Entries: { } entries }
+            ? [.. ReportEvidenceList.ForRecording(entries, SessionKey).Timed
+                .Select(entry => new ExportAnnotation(entry.Reference, entry.TimeNanoseconds!.Value, ReportEvidenceList.TitleOf(entry)))]
+            : [];
 
     private string DefaultPath()
     {
@@ -237,7 +388,14 @@ internal sealed class ExportMp4Window : Window
             return;
         }
 
+        if (ChosenReport is { Entries: null })
+        {
+            Say("The chosen report has no evidence list for MP4s. Run it again from the Analysis tab, or choose another report or None.");
+            return;
+        }
+
         var chosen = _choices.Where(choice => choice.Choose.IsChecked == true).ToList();
+        var annotations = Annotations();
         using var running = new CancellationTokenSource();
         _running = running;
         SetRunning(true);
@@ -264,8 +422,8 @@ internal sealed class ExportMp4Window : Window
                         gains.TryGetValue(choice.Track.Stream, out var gain) ? gain : 0))
                     .ToList();
                 completion.TrySetResult(Mp4Exporter.Export(
-                    new Mp4ExportRequest(path, archive.Frames, archive.DurationNanoseconds, sources, archive.FrameSource),
-                    new WpfFrameRenderer(wholeScreen),
+                    new Mp4ExportRequest(path, archive.Frames, archive.DurationNanoseconds, sources, archive.FrameSource, annotations),
+                    new WpfFrameRenderer(archive, wholeScreen),
                     progress,
                     token));
             }
@@ -285,7 +443,7 @@ internal sealed class ExportMp4Window : Window
         {
             var result = await completion.Task;
             _progress.Value = _progress.Maximum;
-            Say(Describe(result, chosen.Select(choice => (choice.Track.Stream, choice.Name)).ToList()));
+            Say(Describe(result, chosen.Select(choice => (choice.Track.Stream, choice.Name)).ToList(), annotations.Count > 0));
         }
         catch (OperationCanceledException)
         {
@@ -307,7 +465,7 @@ internal sealed class ExportMp4Window : Window
         }
     }
 
-    private static string Describe(Mp4ExportResult result, IReadOnlyList<(string Stream, string Name)> chosen)
+    private static string Describe(Mp4ExportResult result, IReadOnlyList<(string Stream, string Name)> chosen, bool numbered)
     {
         var lines = new List<string>
         {
@@ -317,6 +475,13 @@ internal sealed class ExportMp4Window : Window
                 : $"{result.AudioTracks} sound tracks: mixed, then {string.Join(", ", chosen.Select(sound => sound.Name.ToLowerInvariant()))}.") +
             $" Encoded with the {result.Encoder}."
         };
+        if (numbered)
+        {
+            lines.Add(result.Chapters == 1
+                ? "1 evidence number is shown on the picture, with a chapter."
+                : $"{result.Chapters} evidence numbers are shown on the picture, with a chapter each.");
+        }
+
         if (result.EarlierFailures.Count > 0)
         {
             lines.Add("Earlier attempts failed: " + string.Join(" ", result.EarlierFailures));
@@ -377,6 +542,7 @@ internal sealed class ExportMp4Window : Window
         _save.IsEnabled = !running;
         _browse.IsEnabled = !running;
         _file.IsEnabled = !running;
+        _evidence.IsEnabled = !running;
         foreach (var choice in _choices)
         {
             choice.Choose.IsEnabled = !running;
@@ -458,13 +624,81 @@ internal sealed class ExportMp4Window : Window
 /// <summary>
 /// Draws a frame for an MP4 export as the player draws it, with
 /// <see cref="MainWindow.FrameImage(SessionVideoFrame, BitmapSource, bool, out string)"/>,
-/// scaled to the export's size with its shape kept and black around it.
-/// Must be used on a thread in a single-threaded apartment.
+/// scaled to the export's size with its shape kept and black around it,
+/// with a phone's touches drawn on it as the player draws them and the
+/// evidence numbers shown at the bottom left (mp4-export.md, "Evidence
+/// numbers" and "Touches"). Must be used on a thread in a single-threaded
+/// apartment.
 /// </summary>
-internal sealed class WpfFrameRenderer(bool showWholeScreen) : IExportFrameRenderer
+internal sealed class WpfFrameRenderer(SessionPlaybackArchive archive, bool showWholeScreen) : IExportFrameRenderer
 {
-    public void Render(SessionVideoFrame frame, int width, int height, byte[] destination)
+    // The numbers' boxes take at most this share of the picture's width,
+    // so the picture is not covered.
+    private const double NumbersWidthShare = 0.6;
+
+    private static readonly Typeface NumberFace = new(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
+
+    private SessionVideoFrame? _decoded;
+    private ImageSource? _decodedImage;
+
+    private bool Touches => archive.FrameSource == SessionFrameSource.Phone && archive.PhoneTouches.Recorded;
+
+    public object? DrawnAt(long timeNanoseconds)
     {
+        if (!Touches || archive.PhoneTouches.At(timeNanoseconds) is not { Fingers.Count: > 0 } touches)
+        {
+            return null;
+        }
+
+        // The touches drawn change when a report comes or a point of a
+        // finger's path falls out of the last second.
+        return string.Create(CultureInfo.InvariantCulture,
+            $"{touches.Time}:{string.Join(",", touches.Fingers.Select(finger => finger.Path.Count))}");
+    }
+
+    public void Render(SessionVideoFrame? frame, long timeNanoseconds, ExportOverlay overlay, int width, int height, byte[] destination)
+    {
+        var visual = new DrawingVisual();
+        RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.HighQuality);
+        using (var context = visual.RenderOpen())
+        {
+            context.DrawRectangle(Brushes.Black, null, new Rect(0, 0, width, height));
+            if (frame is not null)
+            {
+                var source = Decoded(frame);
+                // The bitmap's own size in pixels, not in WPF's units, which
+                // depend on the resolution written in the PNG.
+                var (sourceWidth, sourceHeight) = source is BitmapSource drawn
+                    ? ((double)drawn.PixelWidth, (double)drawn.PixelHeight)
+                    : (source.Width, source.Height);
+                var (x, y, drawnWidth, drawnHeight) = VideoSchedule.Placement(sourceWidth, sourceHeight, width, height);
+                if (Touches && frame.Width > 0 && frame.Height > 0 &&
+                    archive.PhoneTouches.At(timeNanoseconds) is { Fingers.Count: > 0 } touches)
+                {
+                    // The touches are sized for the export's pixels, as the
+                    // player sizes them for this PC's.
+                    source = MainWindow.WithTouches(source, frame.Width, frame.Height, drawnWidth / frame.Width, touches, null, null);
+                }
+
+                context.DrawImage(source, new Rect(x, y, drawnWidth, drawnHeight));
+            }
+
+            DrawNumbers(context, overlay.References, width, height);
+        }
+
+        var target = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        target.Render(visual);
+        target.CopyPixels(destination, width * 4, 0);
+    }
+
+    // The frame as the player shows it, decoded once while it is shown.
+    private ImageSource Decoded(SessionVideoFrame frame)
+    {
+        if (ReferenceEquals(frame, _decoded) && _decodedImage is not null)
+        {
+            return _decodedImage;
+        }
+
         BitmapSource bitmap;
         using (var stream = new FileStream(frame.AbsolutePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
         {
@@ -477,23 +711,66 @@ internal sealed class WpfFrameRenderer(bool showWholeScreen) : IExportFrameRende
             bitmap = image;
         }
 
-        var source = MainWindow.FrameImage(frame, bitmap, showWholeScreen, out _);
-        // The bitmap's own size in pixels, not in WPF's units, which
-        // depend on the resolution written in the PNG.
-        var (sourceWidth, sourceHeight) = source is BitmapSource drawn
-            ? ((double)drawn.PixelWidth, (double)drawn.PixelHeight)
-            : (source.Width, source.Height);
-        var (x, y, drawnWidth, drawnHeight) = VideoSchedule.Placement(sourceWidth, sourceHeight, width, height);
-        var visual = new DrawingVisual();
-        RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.HighQuality);
-        using (var context = visual.RenderOpen())
+        _decoded = frame;
+        _decodedImage = MainWindow.FrameImage(frame, bitmap, showWholeScreen, out _);
+        return _decodedImage;
+    }
+
+    /// <summary>
+    /// The evidence numbers at the bottom left of the picture: white on
+    /// black boxes, 21 to 1, in number order from the left, in rows that
+    /// wrap upwards within 60% of the picture's width. The text is about a
+    /// 28th of the picture's shorter side high, and at least 20 pixels.
+    /// </summary>
+    internal static void DrawNumbers(DrawingContext context, IReadOnlyList<string> references, int width, int height)
+    {
+        if (references.Count == 0)
         {
-            context.DrawRectangle(Brushes.Black, null, new Rect(0, 0, width, height));
-            context.DrawImage(source, new Rect(x, y, drawnWidth, drawnHeight));
+            return;
         }
 
-        var target = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-        target.Render(visual);
-        target.CopyPixels(destination, width * 4, 0);
+        var size = Math.Max(20.0, Math.Min(width, height) / 28.0);
+        var padding = size * 0.35;
+        var gap = size * 0.25;
+        var limit = Math.Max(size * 4, width * NumbersWidthShare);
+        var texts = references
+            .Select(reference => new FormattedText(reference, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, NumberFace, size, Brushes.White, 1.0))
+            .ToList();
+        var boxHeight = texts.Max(text => text.Height) + (padding * 2);
+
+        // Rows from the bottom: each as many as fit in the width allowed.
+        var rows = new List<List<FormattedText>>();
+        var row = new List<FormattedText>();
+        var used = 0.0;
+        foreach (var text in texts)
+        {
+            var boxWidth = text.WidthIncludingTrailingWhitespace + (padding * 2);
+            if (row.Count > 0 && used + gap + boxWidth > limit)
+            {
+                rows.Add(row);
+                row = [];
+                used = 0;
+            }
+
+            used += (row.Count > 0 ? gap : 0) + boxWidth;
+            row.Add(text);
+        }
+
+        rows.Add(row);
+        var margin = gap * 2;
+        var top = height - margin - boxHeight;
+        foreach (var line in rows)
+        {
+            var left = margin;
+            foreach (var text in line)
+            {
+                var boxWidth = text.WidthIncludingTrailingWhitespace + (padding * 2);
+                context.DrawRectangle(Brushes.Black, null, new Rect(left, top, boxWidth, boxHeight));
+                context.DrawText(text, new Point(left + padding, top + ((boxHeight - text.Height) / 2)));
+                left += boxWidth + gap;
+            }
+
+            top -= boxHeight + gap;
+        }
     }
 }
