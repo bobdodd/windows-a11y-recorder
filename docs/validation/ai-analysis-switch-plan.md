@@ -3,7 +3,8 @@
 These tests check the switch that turns AI analysis off
 ([the analysis runner](../architecture/analysis-runner.md), "Turning AI
 analysis off"): the setting "Use AI in analysis" in the Analysis menu,
-the checkbox "Use AI in this report" in the Analysis tab, and the worker
+the same setting as "Use AI in checks" in the Checks tab, the checkbox
+"Use AI in this report" in the Analysis tab, and the worker
 refusing to ask a model while either is off.
 
 What was checked before these tests, in the Linux build environment: the
@@ -110,3 +111,25 @@ This uses your local model's profile. The setting is on.
 **On screen:**
 - The reason ends "AI analysis is off in the analysis settings, so no
   model was asked."
+
+## Test 7: the same switch in the Checks tab
+
+The setting is on.
+
+1. With the phone recording open, choose the "Checks" tab, then the
+   button on the tab that opens Checks in its own window.
+2. In the Checks window, uncheck "Use AI in checks", and take a
+   screenshot of the whole screen.
+3. Open the "Analysis" menu in the main window, and take a screenshot of
+   the whole screen.
+4. Choose "Use AI in analysis" in the menu, and look at the Checks
+   window.
+
+**On screen:**
+- After step 1, "Use AI in checks" is checked, on the row with "Audit
+  level:" and "Phone turned for:", which wrap if the window is narrow.
+- After step 3, "Use AI in analysis" has no check mark, and the Analysis
+  tab's checkbox reads "Use AI in this report (AI analysis is off in the
+  Analysis menu)".
+- After step 4, "Use AI in checks" is checked again.
+- No horizontal scrollbar.

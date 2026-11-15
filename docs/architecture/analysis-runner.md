@@ -843,6 +843,12 @@ all, cloud or local, for checks and summaries alike.
   at once in the analysis settings file as `"aiAnalysis"`. It is on by
   default, as the recorder was before the switch. A value that is not
   true or false is reported as a problem and read as on.
+- **The same setting in the Checks tab.** "Use AI in checks", in the
+  Checks tab, is that setting, not a second one: checking it there checks
+  the menu item, and the other way round. It is there because a
+  torn-out Checks window has no menu, and the checks that need a model
+  will run from that tab (owner, 2026-11-15). No check there uses a
+  model yet, so for now it changes nothing in the list.
 - **The report's checkbox.** "Use AI in this report", in the Analysis
   tab, starts from the setting each time the settings are read and after
   each report is queued, so that one report can be made without AI. With

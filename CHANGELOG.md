@@ -12,7 +12,9 @@ Changes on `main` since 1.1.0, not yet released.
 
 - "Use AI in analysis", in the Analysis menu, turns off every use of a
   model, cloud or local, for checks and summaries alike. It is on by
-  default and saved in the analysis settings.
+  default and saved in the analysis settings. "Use AI in checks", in the
+  Checks tab, is the same setting, so it can be changed from a torn-out
+  Checks window.
 - "Use AI in this report", in the Analysis tab, starts from the setting,
   so that one report can be made without AI. A task queued without AI
   says "Without AI." in the Analysis tab.

@@ -1722,6 +1722,20 @@
                             AutomationProperties.HelpText="How long the phone must be held turned, with Auto-rotate on, before a screen that did not turn with it is an orientation finding (WCAG 1.3.4)."
                             SelectionChanged="OrientationHoldComboBox_SelectionChanged" />
                 </StackPanel>
+                <!-- "Use AI in analysis" from the Analysis menu, shown here as
+                     well because a torn-out Checks window has no menu and
+                     the vision checks will run from this tab (owner,
+                     2026-11-15). One setting: checking it here checks the
+                     menu item, and the other way round. -->
+                <CheckBox x:Name="ChecksUseAiCheckBox"
+                          MinHeight="44"
+                          Margin="16,0,0,0"
+                          VerticalContentAlignment="Center"
+                          Foreground="#CDCCCA"
+                          IsChecked="True"
+                          Content="Use AI in checks"
+                          AutomationProperties.HelpText="The same setting as Use AI in analysis in the Analysis menu. Off, no model is asked, cloud or local, by any check or report, and a check that needs a model is listed as not run."
+                          Click="ChecksUseAiCheckBox_Click" />
               </WrapPanel>
               <local:SelectableText x:Name="ChecksStatusTextBlock"
                          Grid.Row="1"

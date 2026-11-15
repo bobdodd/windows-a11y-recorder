@@ -67,6 +67,7 @@ public partial class MainWindow
         (_analysisSettings, _analysisSettingsProblems) = AnalysisSettingsFile.Read(AnalysisSettingsFile.DefaultPath);
         BrowserOnlyMenuItem.IsChecked = _analysisSettings.BrowserOnly;
         AiAnalysisMenuItem.IsChecked = _analysisSettings.AiAnalysis;
+        ChecksUseAiCheckBox.IsChecked = _analysisSettings.AiAnalysis;
         ResetUseAi();
         var chosen = (ProfileComboBox.SelectedItem as ComboBoxItem)?.Tag as string;
         ProfileComboBox.Items.Clear();
@@ -720,10 +721,16 @@ public partial class MainWindow
     // "Use AI in analysis", saved in the analysis settings file at once.
     // The worker reads it at each step, so turning it off also stops a
     // task already queued or running from asking a model.
-    private void AiAnalysisMenuItem_Click(object sender, RoutedEventArgs e)
+    private void AiAnalysisMenuItem_Click(object sender, RoutedEventArgs e) =>
+        SaveAiAnalysis(AiAnalysisMenuItem.IsChecked);
+
+    // "Use AI in checks" in the Checks tab is the same setting.
+    private void ChecksUseAiCheckBox_Click(object sender, RoutedEventArgs e) =>
+        SaveAiAnalysis(ChecksUseAiCheckBox.IsChecked == true);
+
+    private void SaveAiAnalysis(bool on)
     {
         var path = AnalysisSettingsFile.DefaultPath;
-        var on = AiAnalysisMenuItem.IsChecked;
         try
         {
             var text = File.Exists(path) ? File.ReadAllText(path) : null;
