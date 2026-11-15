@@ -158,6 +158,33 @@ The report's title is "Android accessibility report: project" and the
 project's name; the client's Word document is titled by the apps it
 covers, as a recording's is.
 
+## Measured on the development phone's recordings (2026-11-14)
+
+The rule was run, without a model and without the pictures, on every
+phone recording made on the development PC from 2026-11-09 to
+2026-11-14, as one project.
+
+- Of 43 phone recordings, 23 had no phone screens in their recording
+  file and would be left out of a project's report, with that reason.
+- The other 20 had 58 screens between them, which became 31 report
+  screens; 14 of those were seen in more than one recording. Their 195
+  findings, without the contrast checks, became 117.
+- Screens named by a window title matched well across recordings: the
+  launcher's Home in six recordings, Gmail's Mail in three, Settings in
+  three, and Settings screens such as Colour and motion, Colour
+  inversion, and Display size and text in two each.
+- A client app named only by its screens' first fixed text, under a
+  shared app title, also matched: one screen in five recordings, one in
+  four, and two in three, one of those named by an emoji, its first
+  fixed text.
+- The limit above was seen. The launcher's Home was named by its
+  window title in six recordings and by its first fixed text, under a
+  shared title, in two others, so the report gives it as three screens
+  (the same text under two different shared titles in those two); All
+  apps as two. The client app's Sleep Learning, seen once, did not
+  match its Sleep Learning Library, seen in four; whether they are one
+  screen the rule cannot say.
+
 ## Limits
 
 - A screen named from its own text, when no window title names it, can
