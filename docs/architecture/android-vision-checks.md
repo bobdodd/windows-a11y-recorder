@@ -18,6 +18,34 @@ The guidance in "Keeping it repeatable" was adopted by the owner on
 2026-11-15: "I like your "Keeping it repeatable" comments and we should
 follow that guidance."
 
+## Owner's requirements
+
+Set by the owner on 2026-11-15, in answer to the open question of local
+or cloud models:
+
+> "Sending confidential information to the cloud requires client
+> approval, testing of public interfaces does not. That concern is
+> outside of the scope of this work as it varies from client to client.
+> What I do need is a switch to turn off AI analysis, and a note in any
+> report that uses it to say that AI was used in the testing, and
+> whether a cloud or local model was used."
+
+1. **Client approval is out of scope.** Whether a client's frames may go
+   to a cloud model varies from client to client and is the tester's
+   decision. The recorder does not ask for or record it.
+2. **A switch turns off AI analysis.** With it off, no request is sent to
+   any model, local or cloud, and the checks that need one are not run.
+   The report lists them as not run, so a missing finding is not read as
+   a pass. Where the switch sits, and whether it also covers the
+   summaries, is to be settled when it is built.
+3. **A report that uses AI says so.** Any report with a finding or text
+   from a model says, once, that AI was used in the testing, and whether
+   the model was a cloud or a local one. A report that used none says
+   nothing about AI. This applies to the summaries as well: their
+   client report says now that "AI is used in generating this report"
+   (`android-report.md`) but not yet whether the model was cloud or
+   local.
+
 ## What a model adds
 
 The checks built so far test whether something is there, can be
@@ -116,7 +144,8 @@ Adopted by the owner, 2026-11-15. The same approach as the summaries
 3. **Fixed settings.** A local model is run at temperature 0 with a fixed
    seed. Claude has neither (`cloud-models.md`, "Repeatability"), so with
    a Claude profile repeatability rests on reuse alone, and the report
-   says which profile answered.
+   says which profile answered, and whether it was cloud or local
+   (requirement 3).
 4. **Each answer reused.** An answer is kept by the picture's SHA-256, the
    question and its version, the model (the file's SHA-256 and the
    server's build for a local model, the model ID and API version for
@@ -152,12 +181,9 @@ The probe and its copies are deleted afterwards, as before.
 
 1. Which checks first? Settling the existing warnings is likely the
    cheapest and most useful start.
-2. A local model, Claude, or either? Sending a client's frames to Claude
-   needs the client's agreement; choosing a cloud profile does not give
-   it.
-3. How a model's findings appear in the client's report: with their own
-   impact, High, Medium or Low, as other findings, and how the report says
-   they were inferred and then inspected.
-4. Whether "cannot tell" is reported, and as what.
-5. Whether the text-only checks are wanted, which would extend the
+2. How a model's findings appear in the client's report: with their own
+   impact, High, Medium or Low, as other findings, and whether each is
+   marked as inferred beyond the report's note that AI was used.
+3. Whether "cannot tell" is reported, and as what.
+4. Whether the text-only checks are wanted, which would extend the
    standing rule.
