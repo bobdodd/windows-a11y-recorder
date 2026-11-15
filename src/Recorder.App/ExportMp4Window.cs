@@ -203,7 +203,14 @@ internal sealed class ExportMp4Window : Window
 
     // A finished report of the recording or one of its projects, and its
     // evidence list, null where it has none.
-    private sealed record ReportChoice(string Name, IReadOnlyList<ReportEvidenceItem>? Entries);
+    // Described is how the MP4's comment names it, in UTC as the report's
+    // "Written" row is.
+    private sealed record ReportChoice(string Name, string Described, IReadOnlyList<ReportEvidenceItem>? Entries);
+
+    // The recording's name from the catalog: null for none, and unknown
+    // until it has been read.
+    private string? _recordingName;
+    private bool _recordingNameKnown;
 
     // The recording's finished reports, newest first, each with its
     // evidence list where it has one; the newest with a list is chosen.
@@ -224,6 +231,12 @@ internal sealed class ExportMp4Window : Window
                 return;
             }
 
+            if (await _catalog.RecordingAsync(recording.Value, CancellationToken.None) is { } shown)
+            {
+                _recordingName = shown.Name;
+                _recordingNameKnown = true;
+            }
+
             var tasks = await _catalog.TasksAsync(recording.Value, CancellationToken.None);
             foreach (var task in tasks
                 .Where(task => task.State == AnalysisTaskStates.Done)
@@ -237,9 +250,14 @@ internal sealed class ExportMp4Window : Window
                 }
 
                 var reportFolder = Path.GetDirectoryName(Path.Combine(folder, reports[0].RelativePath));
-                var finished = (task.FinishedUtc ?? task.QueuedUtc).ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.CurrentCulture);
+                var finishedUtc = task.FinishedUtc ?? task.QueuedUtc;
+                var finished = finishedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.CurrentCulture);
+                var kind = AnalysisPlayer.KindName(task.Kind);
                 var entries = reportFolder is null ? null : await Task.Run(() => ReportEvidenceList.Read(reportFolder));
-                choices.Add(new ReportChoice($"{AnalysisPlayer.KindName(task.Kind)}, finished {finished}", entries));
+                choices.Add(new ReportChoice(
+                    $"{kind}, finished {finished}",
+                    $"{kind}, finished {finishedUtc.ToUniversalTime().ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture)}",
+                    entries));
             }
         }
         catch (Exception exception) when (exception is Npgsql.NpgsqlException or InvalidOperationException or IOException)
@@ -396,6 +414,7 @@ internal sealed class ExportMp4Window : Window
 
         var chosen = _choices.Where(choice => choice.Choose.IsChecked == true).ToList();
         var annotations = Annotations();
+        var metadata = Mp4Metadata.Of(SessionKey, _recordingName, _recordingNameKnown, ChosenReport?.Described);
         using var running = new CancellationTokenSource();
         _running = running;
         SetRunning(true);
@@ -422,7 +441,7 @@ internal sealed class ExportMp4Window : Window
                         gains.TryGetValue(choice.Track.Stream, out var gain) ? gain : 0))
                     .ToList();
                 completion.TrySetResult(Mp4Exporter.Export(
-                    new Mp4ExportRequest(path, archive.Frames, archive.DurationNanoseconds, sources, archive.FrameSource, annotations),
+                    new Mp4ExportRequest(path, archive.Frames, archive.DurationNanoseconds, sources, archive.FrameSource, annotations, metadata),
                     new WpfFrameRenderer(archive, wholeScreen),
                     progress,
                     token));
@@ -480,6 +499,11 @@ internal sealed class ExportMp4Window : Window
             lines.Add(result.Chapters == 1
                 ? "1 evidence number is shown on the picture, with a chapter."
                 : $"{result.Chapters} evidence numbers are shown on the picture, with a chapter each.");
+        }
+
+        if (result.Metadata is { } metadata)
+        {
+            lines.Add($"Its title is \"{metadata.Title}\", and its comment reads \"{metadata.Comment}\"");
         }
 
         if (result.EarlierFailures.Count > 0)

@@ -29,13 +29,15 @@ public interface IExportFrameRenderer
 /// <param name="Audio">The sounds, in the order their own tracks follow the mixed track.</param>
 /// <param name="FrameSource">What the frames show, which sets the export's size and rate.</param>
 /// <param name="Annotations">A report's evidence numbers to show on the picture and name chapters after; none by default.</param>
+/// <param name="Metadata">The MP4's title and comment, naming its recording and report; none by default.</param>
 public sealed record Mp4ExportRequest(
     string OutputPath,
     IReadOnlyList<SessionVideoFrame> Frames,
     long DurationNanoseconds,
     IReadOnlyList<ExportAudioSource> Audio,
     SessionFrameSource FrameSource = SessionFrameSource.Desktop,
-    IReadOnlyList<ExportAnnotation>? Annotations = null);
+    IReadOnlyList<ExportAnnotation>? Annotations = null,
+    Mp4Metadata? Metadata = null);
 
 /// <summary>How far an export has got, in the recording's time.</summary>
 public readonly record struct Mp4ExportProgress(long DoneNanoseconds, long TotalNanoseconds);
@@ -53,6 +55,9 @@ public sealed record Mp4ExportResult(
 {
     /// <summary>The chapters written, one for each evidence number within the recording.</summary>
     public int Chapters { get; init; }
+
+    /// <summary>The title and comment written, or null for none.</summary>
+    public Mp4Metadata? Metadata { get; init; }
 }
 
 /// <summary>
@@ -112,6 +117,7 @@ public static class Mp4Exporter
                 }
 
                 var chaptered = Mp4Chapters.Apply(temporary, chapters);
+                var titled = request.Metadata is { } metadata && Mp4MetadataWriter.Apply(temporary, metadata);
 
                 File.Move(temporary, request.OutputPath, overwrite: true);
                 return new Mp4ExportResult(
@@ -122,7 +128,8 @@ public static class Mp4Exporter
                     failures,
                     placements)
                 {
-                    Chapters = chaptered ? chapters.Count : 0
+                    Chapters = chaptered ? chapters.Count : 0,
+                    Metadata = titled ? request.Metadata : null
                 };
             }
             catch (COMException exception) when (attempt + 1 < Attempts.Length && !cancellationToken.IsCancellationRequested)

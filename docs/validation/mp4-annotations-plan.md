@@ -1,10 +1,11 @@
-# Validation plan: evidence numbers, chapters and touches in an MP4
+# Validation plan: evidence numbers, chapters, touches and title in an MP4
 
 These tests are for "Evidence numbers" and "Touches" in
 [the MP4 export design](../architecture/mp4-export.md): a report's
 evidence numbers drawn at the bottom left of the picture for 4 seconds
-each, a chapter for each in the MP4, and a phone's touches drawn as the
-player draws them.
+each, a chapter for each in the MP4, a phone's touches drawn as the
+player draws them, and the MP4's title and comment naming its recording
+and report.
 
 What was checked before these tests, in the Linux build environment: the
 solution builds with no warnings, and the new tests pass
@@ -144,6 +145,31 @@ not in the MP4.
 
 **On screen:** no numbers on the picture, and Chapter is greyed out or
 missing in the Playback menu. The touches are still drawn.
+
+## Test 10: the title and comment in VLC
+
+Use a recording with a name; give it one with "Rename the open
+recording..." in the Project menu if it has none.
+
+1. Save it as an MP4 with a report chosen in "Evidence numbers from".
+2. Read the status line's last line.
+3. Open the MP4 in VLC, then Tools, Media Information.
+4. Take a screenshot of the General tab.
+
+**On screen:** the status line reads "Its title is" then the
+recording's name and session key, and "its comment reads" then the
+comment. VLC's "Title" is the name and then the session key in brackets.
+"Comments" reads "Recording name:", the name, "Session key:", the key,
+and "Evidence numbers from:" and the report's kind and when it finished,
+in UTC. VLC's window title shows the same title as "Title".
+
+## Test 11: no report in the comment
+
+1. Open the MP4 from test 9 in VLC.
+2. Open Tools, Media Information.
+3. Take a screenshot of the General tab.
+
+**On screen:** "Comments" ends "Evidence numbers: none."
 
 ## Not covered
 

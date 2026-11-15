@@ -1,8 +1,8 @@
 # MP4 export of a recording
 
 Proposed and agreed 2026-11-07. Built 2026-11-07. Evidence numbers,
-chapters and touches added 2026-11-15 (see "Evidence numbers" and
-"Touches"). Captions come later and are not part of this design (see
+chapters, touches, and the title and comment added 2026-11-15 (see
+"Evidence numbers", "Touches" and "Title and comment"). Captions come later and are not part of this design (see
 "Later").
 
 ## Purpose
@@ -27,6 +27,7 @@ reader's speech as options.
 | 7. Which report's numbers | "A report chosen at export" | The export window lists the recording's finished reports, and the numbers come from the one chosen. Numbers differ from report to report, so they are never guessed. |
 | 8. Chapter names | "Number and kind only" | A chapter is named by its number and what kind of evidence it is, such as "E12, finding 3", not the evidence's full text. |
 | 9. Touches | "I want exported MP4 files to include the touch indicators" | A phone recording's export draws the touches as the player draws them. |
+| 10. Which recording and report | "Write the recording name, session key and report into the MP4's title and comment" | The MP4's title is the recording's name and session key, and its comment names the recording, its session key and the report the numbers came from. |
 
 ## What a recording holds
 
@@ -378,6 +379,33 @@ The probe and the recordings' copies were deleted afterwards.
   recording alone.
 - Before this, the export did not draw touches.
 
+## Title and comment
+
+- The report does not name an MP4, as an export can be saved under any
+  name, so the MP4 names its recording and report instead (decision 10).
+- The title is the recording as lists and reports show it: its name and
+  then its session key, such as "Sign in (20261114-...)", or its session
+  key alone when it has no name.
+- The comment reads, for example, "Recording name: Sign in. Session key:
+  20261114-.... Evidence numbers from: Android report, finished
+  2026-11-15 15:30 UTC." With no name it says "Recording name: none", and
+  "not known" where the catalog could not be read; with None chosen it
+  says "Evidence numbers: none." The time is in UTC, as the report's
+  "Written" row is, so the two can be matched.
+- Neither holds a folder or path, as an MP4 may be given to a client.
+- They are written as FFmpeg writes them (`Mp4MetadataWriter`): `©nam`
+  and `©cmt` items, each a UTF-8 `data` box, in an `ilst` list within a
+  `meta` box with an `mdir` handler, in the movie's user data. VLC 3 reads
+  `©nam` as the title and `©cmt` as the description
+  ([VLC 3.0, meta.c](https://raw.githubusercontent.com/videolan/vlc-3.0/master/modules/demux/mp4/meta.c)),
+  which Tools, Media Information shows as "Title" and "Comments"
+  ([VLC 3.0, info_panels.cpp](https://raw.githubusercontent.com/videolan/vlc-3.0/master/modules/gui/qt/components/info_panels.cpp)).
+  VLC also shows the title in its playlist and window in place of the
+  file's name.
+- Other user data and other items are kept. The movie box is replaced as
+  for the chapters, so the media does not move.
+- The result message gives the title and the comment.
+
 ## Checks made
 
 - Unit tests (`Mp4ExportTests`): sound placement (straight-through runs,
@@ -400,6 +428,16 @@ The probe and the recordings' copies were deleted afterwards.
   their titles and times, from the `chpl` box, and no extra subtitle
   track. With 300 chapters, VLC listed all 300 from the chapter track,
   without the empty leading sample.
+- Unit tests (`Mp4AnnotationTests`): the title and comment with and
+  without a name and a report, the title matching the recordings list's,
+  and the items in the user data with the movie box last and first,
+  written twice, keeping the chapters and the media.
+- 2026-11-15, in the development sandbox: the title and comment were
+  written after chapters into MP4s made by FFmpeg, with the movie box last
+  and first. `ffprobe` gave both, in UTF-8, with FFmpeg's own encoder tag
+  kept, and the chapters; the video and sound still decoded. VLC 3.0.23,
+  through its library, read the title and the description, and the
+  chapters.
 - On the owner's PC (Windows 10 build 19045), 2026-11-07, with a test
   program using the export code outside the app:
   - Generated frames and sound: H.264 High 1366 by 768 at 20 frames a

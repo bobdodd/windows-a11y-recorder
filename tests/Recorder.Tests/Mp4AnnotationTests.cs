@@ -175,6 +175,64 @@ public sealed class Mp4AnnotationTests : IDisposable
     }
 
     [Fact]
+    public void TheTitle_IsTheRecordingAsReportsShowIt_AndTheCommentNamesItsNameKeyAndReport()
+    {
+        const string key = "20261115-101500-abc";
+
+        var named = Mp4Metadata.Of(key, "Sign in", nameKnown: true, "Android report, finished 2026-11-15 15:30 UTC");
+        Assert.Equal(Recorder.Database.RecordingNames.Label("Sign in", key), named.Title);
+        Assert.Equal("Sign in (20261115-101500-abc)", named.Title);
+        Assert.Equal("Recording name: Sign in. Session key: 20261115-101500-abc. Evidence numbers from: Android report, finished 2026-11-15 15:30 UTC.", named.Comment);
+
+        var unnamed = Mp4Metadata.Of(key, null, nameKnown: true, null);
+        Assert.Equal(key, unnamed.Title);
+        Assert.Equal("Recording name: none. Session key: 20261115-101500-abc. Evidence numbers: none.", unnamed.Comment);
+
+        Assert.StartsWith("Recording name: not known.", Mp4Metadata.Of(key, null, nameKnown: false, null).Comment, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TheTitleAndComment_AreItemsOfTheMoviesUserData_KeepingTheChaptersAndMedia(bool movieLast)
+    {
+        var path = Path.Combine(_directory, "titled.mp4");
+        var media = Enumerable.Repeat((byte)0xCD, 64).ToArray();
+        var (file, mediaOffset) = Movie(media, movieLast);
+        File.WriteAllBytes(path, file);
+        Assert.True(Mp4Chapters.Apply(path, [new Mp4Chapter(0, "E1, app com.example")]));
+
+        Assert.True(Mp4MetadataWriter.Apply(path, new Mp4Metadata("Old", "Old comment")));
+        Assert.True(Mp4MetadataWriter.Apply(path, new Mp4Metadata("Caf\u00e9 (20261115-101500-abc)", "Recording name: Caf\u00e9.")));
+
+        var written = File.ReadAllBytes(path);
+        Assert.Equal(media, written.AsSpan(mediaOffset, media.Length).ToArray());
+        var top = Boxes(written, 0, written.Length);
+        Assert.Single(top, box => box.Type == "moov");
+        var movie = top.Single(box => box.Type == "moov");
+        Assert.Equal(2, Boxes(written, movie.Start + 8, movie.End).Count(box => box.Type == "trak"));
+        var udta = Find(written, movie, "udta");
+        Assert.Single(Boxes(written, udta.Start + 8, udta.End), box => box.Type == "chpl");
+        var meta = Find(written, udta, "meta");
+
+        // A full box: its handler and list follow its version and flags.
+        var inMeta = Boxes(written, meta.Start + 12, meta.End);
+        Assert.Equal("mdir", Encoding.Latin1.GetString(written, inMeta.Single(box => box.Type == "hdlr").Start + 16, 4));
+        var items = Boxes(written, inMeta.Single(box => box.Type == "ilst").Start + 8, inMeta.Single(box => box.Type == "ilst").End);
+        Assert.Equal(["\u00A9nam", "\u00A9cmt"], items.Select(item => item.Type).ToArray());
+        Assert.Equal("Caf\u00e9 (20261115-101500-abc)", Text(written, items[0]));
+        Assert.Equal("Recording name: Caf\u00e9.", Text(written, items[1]));
+
+        // UTF-8 text, type 1, with no locale.
+        static string Text(byte[] file, Found item)
+        {
+            var data = Boxes(file, item.Start + 8, item.End).Single(box => box.Type == "data");
+            Assert.Equal(1u, BinaryPrimitives.ReadUInt32BigEndian(file.AsSpan(data.Start + 8)));
+            return Encoding.UTF8.GetString(file, data.Start + 16, data.End - data.Start - 16);
+        }
+    }
+
+    [Fact]
     public void AReportsEvidenceList_IsTheRowsOfItsEvidenceTable_AndReadsBack()
     {
         const string markdown = """

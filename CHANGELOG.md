@@ -8,7 +8,7 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
-### Evidence numbers, chapters and touches in MP4s
+### Evidence numbers, chapters, touches and title in MP4s
 
 - "Save as MP4..." can show a report's evidence numbers, such as E12, at
   the bottom left of the picture for 4 seconds from each one's time, and
@@ -21,6 +21,9 @@ Changes on `main` since 1.1.0, not yet released.
   evidence its table lists, with each entry's recording, time and kind.
   Reports written before this have none and need running again.
 - A phone recording's export draws the touches as the player draws them.
+- An MP4's title is its recording's name and session key, and its
+  comment names the recording, its session key and the report its
+  evidence numbers came from, as VLC shows in Tools, Media Information.
 
 ### Recording names
 
