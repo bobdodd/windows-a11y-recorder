@@ -81,7 +81,9 @@ them.
    AI-free both for cost and repeatability, I expect to use AI to help
    with summary reports and vision-centric tests only" (owner). Every
    check in this plan is a rule applied by the recorder's own code; no
-   model is asked.
+   model is asked. The owner clarified the rule on 2026-11-15: "The rule
+   is really AI only when non-AI cannot do the test. The biggest group
+   is vision AI." (`android-vision-checks.md`)
 2. **Findings in the player only.** The findings are shown in a list in
    the player, which moves the playhead to each one. A findings report
    is later work.

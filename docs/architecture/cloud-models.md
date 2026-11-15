@@ -44,7 +44,9 @@ service: Claude through the Anthropic API, with the owner's own API key.
    to help with summary reports and vision-centric tests only" (owner).
    The Android checks are the recorder's own rules; a model is used for
    the summary reports and for tests that need a picture to be looked at,
-   decided test by test.
+   decided test by test. The owner clarified the rule on 2026-11-15:
+   "The rule is really AI only when non-AI cannot do the test. The
+   biggest group is vision AI." (`android-vision-checks.md`)
 4. **The API key is the owner's.** It is typed into the recorder on the
    PC that runs the worker, and kept there, protected with the Windows
    Data Protection API, as a network profile's key already is (checked

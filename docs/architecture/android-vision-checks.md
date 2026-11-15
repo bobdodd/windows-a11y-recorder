@@ -4,15 +4,18 @@
 
 Recorded 2026-11-15 at the owner's request, "so it doesn't get lost".
 This is a preliminary plan: the checks below are options, not decisions,
-until the owner chooses them. None is built. Each is to be measured on
+until the owner chooses them, apart from the decisions recorded under
+"Owner's decisions". None is built. Each is to be measured on
 the recordings to hand before its rules are set, as the earlier checks
 were (see `android-checks.md` and `android-checks-candidates.md`).
 
-The owner's standing rule applies: "As far as possible testing should
-be AI-free both for cost and repeatability, I expect to use AI to help
-with summary reports and vision-centric tests only". Almost everything
-here is vision-centric. The few that would need a model reading text
-alone are marked, and are outside the rule unless the owner extends it.
+The owner's standing rule was first stated as: "As far as possible
+testing should be AI-free both for cost and repeatability, I expect to
+use AI to help with summary reports and vision-centric tests only". On
+2026-11-15 the owner clarified it: "The rule is really AI only when
+non-AI cannot do the test. The biggest group is vision AI." Almost
+everything here is vision-centric. The few that need a model reading
+text alone are marked "text only", and are wanted as well.
 
 The guidance in "Keeping it repeatable" was adopted by the owner on
 2026-11-15: "I like your "Keeping it repeatable" comments and we should
@@ -37,7 +40,7 @@ or cloud models:
    any model, local or cloud, and the checks that need one are not run.
    The report lists them as not run, so a missing finding is not read as
    a pass. Where the switch sits, and whether it also covers the
-   summaries, is to be settled when it is built.
+   summaries, are open questions below.
 3. **A report that uses AI says so.** Any report with a finding or text
    from a model says, once, that AI was used in the testing, and whether
    the model was a cloud or a local one. A report that used none says
@@ -45,6 +48,23 @@ or cloud models:
    client report says now that "AI is used in generating this report"
    (`android-report.md`) but not yet whether the model was cloud or
    local.
+
+## Owner's decisions
+
+Given by the owner on 2026-11-15, in answer to the open questions:
+
+1. **Settling the existing warnings comes first:** logotypes in images
+   of text, the target-size exceptions, and whether a control's boundary
+   is needed to identify it. The owner accepted this suggestion.
+2. **Model findings are shown like the others.** Each has an impact of
+   High, Medium or Low, as other findings do, and is also marked as
+   inferred.
+3. **"Cannot tell" is a warning that needs manual review.** It is never
+   reported as a pass or a failure, and never left out.
+4. **The text-only checks are wanted.** "Yes I do want them. The rule is
+   really AI only when non-AI cannot do the test. The biggest group is
+   vision AI." A model is used only for a test that cannot be done
+   without one, whether it reads pictures or text.
 
 ## What a model adds
 
@@ -99,7 +119,7 @@ Each row is one issue, so that its remediation can be specific.
 | An error shown only by colour | 1.4.1 | Apart from colour, what shows this field is in error? | Fields whose colours change after input, with no error text |
 | Links shown only by colour | 1.4.1 | Apart from colour, what shows this text is a link? | Clickable text within other text |
 | A chart that relies on colour | 1.4.1 | Can the chart's series be told apart without colour? | The graphics found above that are charts |
-| Instructions that rely on shape, colour or place | 1.3.3 | Does this text refer to something only by its shape, colour or place? | Text with words such as "green", "round", "on the right"; text only, outside the standing rule |
+| Instructions that rely on shape, colour or place | 1.3.3 | Does this text refer to something only by its shape, colour or place? | Text with words such as "green", "round", "on the right"; text only |
 
 ## Settling existing warnings
 
@@ -114,16 +134,18 @@ without understanding the picture. A model could settle them:
   it? These are listed as info now.
 
 This mainly removes false positives rather than adding checks, and may be
-the best value for the cost.
+the best value for the cost. The owner chose it as the first to build
+(decision 1).
 
 ## Later, or text only
 
 - **Focus visible (2.4.7):** needs a Bluetooth keyboard, which the owner
   is waiting for. With one, a model can judge whether the focus is shown
   in the frames.
-- **Error messages that do not help (3.3.1, 3.3.3):** text only.
+- **Error messages that do not help (3.3.1, 3.3.3):** text only, and
+  wanted (decision 4).
 - **Link text that does not say where it goes (2.4.4):** text only, and
-  needs links' spans, which the companion app does not record yet.
+  wanted (decision 4), but needs links' spans, which the companion app does not record yet.
 - **Flashing (2.3.1):** better measured from the frames without a model.
 
 ## Keeping it repeatable
@@ -146,8 +168,9 @@ Adopted by the owner, 2026-11-15. The same approach as the summaries
    a Claude profile repeatability rests on reuse alone, and the report
    says which profile answered, and whether it was cloud or local
    (requirement 3).
-4. **Each answer reused.** An answer is kept by the picture's SHA-256, the
-   question and its version, the model (the file's SHA-256 and the
+4. **Each answer reused.** An answer is kept by the picture's SHA-256
+   (the text's, for a text-only check), the question and its version,
+   the model (the file's SHA-256 and the
    server's build for a local model, the model ID and API version for
    Claude) and the settings, as accepted steps are reused now. Running a
    report again asks nothing that has been asked, so it costs nothing and
@@ -179,11 +202,8 @@ The probe and its copies are deleted afterwards, as before.
 
 ## Open questions for the owner
 
-1. Which checks first? Settling the existing warnings is likely the
-   cheapest and most useful start.
-2. How a model's findings appear in the client's report: with their own
-   impact, High, Medium or Low, as other findings, and whether each is
-   marked as inferred beyond the report's note that AI was used.
-3. Whether "cannot tell" is reported, and as what.
-4. Whether the text-only checks are wanted, which would extend the
-   standing rule.
+1. Where the switch that turns off AI analysis sits. The suggestion is
+   one setting in the analysis settings, with a checkbox for each report
+   that starts from it.
+2. Whether the switch also turns off the summaries. The suggestion is
+   that it does, so that off means no model at all.
