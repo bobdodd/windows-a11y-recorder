@@ -315,9 +315,12 @@ Written with the Open XML SDK (`DocumentFormat.OpenXml` 3.5.1) from the
 client's Markdown (see "Two readers"):
 
 - the title in Word's Title style, then the opening paragraph, then
-  "Contents", a table of contents over Heading 1 and 2: each entry is a
-  link to its heading, with the heading's number and text, then a dotted
-  tab to its page number at the right margin;
+  "Contents", a table of contents over Heading 1 to 3, such as 1.5.2,
+  each level indented further: each entry is a link to its heading, with
+  the heading's number and text, then a dotted tab to its page number at
+  the right margin. It listed Heading 1 and 2 until the owner asked, on
+  2026-11-15: "we only show the first two levels of heading in the TOC
+  e.g. 1.5, I would like 3 levels please";
 - every other heading in Word's heading styles, Heading 1 to 6, a level
   below the Markdown's, numbered by the styles themselves, 1, 1.1, 1.1.1
   and so on, so that the numbers stay right if the document is edited;

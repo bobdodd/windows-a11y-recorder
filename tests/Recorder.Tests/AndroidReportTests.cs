@@ -228,6 +228,7 @@ public sealed class AndroidReportTests : IDisposable
         Assert.Contains("Heading3", styles);
         Assert.Contains("TOC1", styles);
         Assert.Contains("TOC2", styles);
+        Assert.Contains("TOC3", styles);
         Assert.Contains(body.Descendants<TableHeader>(), _ => true);
         // Every table has a caption, so a screen reader's list of tables names it.
         Assert.All(body.Descendants<Table>(), table => Assert.False(string.IsNullOrEmpty(table.GetFirstChild<TableProperties>()!.GetFirstChild<TableCaption>()?.Val?.Value)));
@@ -255,7 +256,13 @@ public sealed class AndroidReportTests : IDisposable
         Assert.DoesNotContain(body.Descendants<FieldCode>(), code => code.Text.Contains("TOC", StringComparison.Ordinal));
         var bookmarks = body.Descendants<BookmarkStart>().Select(mark => mark.Name!.Value).ToHashSet(StringComparer.Ordinal);
         var anchors = body.Descendants<Hyperlink>().Where(link => link.Anchor is not null).ToList();
-        Assert.Equal(11, anchors.Count);
+        // An entry for each Heading 1, 2 and 3, such as 1.5.2 (owner,
+        // 2026-11-15), and none for lower levels.
+        var listed = body.Descendants<Paragraph>().Count(paragraph =>
+            paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value is "Heading1" or "Heading2" or "Heading3");
+        Assert.Equal(listed, anchors.Count);
+        Assert.Contains(anchors, link => System.Text.RegularExpressions.Regex.IsMatch(link.InnerText, @"^\d+\.\d+\.\d+ "));
+        Assert.DoesNotContain(anchors, link => System.Text.RegularExpressions.Regex.IsMatch(link.InnerText, @"^\d+\.\d+\.\d+\.\d+ "));
         Assert.All(anchors, link =>
         {
             Assert.Contains(link.Anchor!.Value!, bookmarks);

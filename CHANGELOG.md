@@ -90,7 +90,8 @@ Changes on `main` since 1.1.0, not yet released.
   shown zoomed. A finished task has an "Open in Word" button. See
   [the Android report](docs/architecture/android-report.md).
 - The Word document is written for the client's team: the title in
-  Word's Title style, a table of contents whose entries link to their
+  Word's Title style, a table of contents of three heading levels, such
+  as 1.5.2, whose entries link to their
   sections and have their page numbers at the right margin, headings numbered by Word's
   heading styles, the title in each page's header and "Page 1 of 7" in
   its footer, table captions, and links reading as their sources'

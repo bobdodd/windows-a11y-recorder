@@ -188,3 +188,19 @@ item with the same number as the finding's heading, and the paragraph
 after it says the finding is under "Findings on more than one visit".
 In the Navigation Pane, the finding's heading appears once for the
 screen, not under each visit.
+
+## Test 10: three heading levels in the contents
+
+Added 2026-11-15. Use the Android report from test 3, queued again with
+this version.
+
+1. Choose "Open in Word" in the report's row.
+2. If asked whether to update the fields in the document, choose Yes.
+3. Take a screenshot of the contents.
+4. Hold Ctrl and click an entry with three numbers, such as "5.1.1".
+
+**On screen:** under each "Screen" entry, such as "5.1 Screen 1:",
+entries with three numbers, such as "5.1.1 Visit 1", indented further,
+each with a dotted line to its page number at the right margin. No
+entry has four numbers. The click moves to that visit's heading, on the
+page its entry gave.

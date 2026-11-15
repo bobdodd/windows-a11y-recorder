@@ -27,8 +27,8 @@ public static partial class WordReport
 {
     private const long EmuPerInch = 914400;
 
-    /// <summary>The heading levels the table of contents lists: Word's Heading 1 and 2.</summary>
-    public const int ContentsLevels = 2;
+    /// <summary>The heading levels the table of contents lists: Word's Heading 1 to 3, such as 1.5.2 (owner, 2026-11-15).</summary>
+    public const int ContentsLevels = 3;
 
     // A Markdown link, [text](address), or a web address on its own.
     [GeneratedRegex(@"\[([^\]]+)\]\((https?://[^)\s]+)\)|https?://[^\s)\]]+")]
@@ -203,7 +203,7 @@ public static partial class WordReport
             _lastHeading = block.Text;
         }
 
-        // The table of contents, Heading 1 and 2: each entry a link to its
+        // The table of contents, Heading 1 to 3: each entry a link to its
         // heading's bookmark, with its number and text, then a tab to the
         // right margin, dotted, and its page number as a PAGEREF field.
         // There is no TOC field round the entries: LibreOffice shows a TOC
