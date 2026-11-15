@@ -28,6 +28,33 @@ public sealed class AndroidReportKind : IAnalysisTaskKind
 }
 
 /// <summary>
+/// The project's Android report (projects.md): the Android report of every
+/// recording in a project with phone screens, taken together, with a
+/// screen seen in more than one recording given once and its findings
+/// grouped across them. No model is used.
+/// </summary>
+public sealed class AndroidProjectReportKind : IAnalysisTaskKind
+{
+    public const string Name = "android-project-report";
+
+    public const string BaseName = "android-project-report";
+
+    /// <summary>The folder, under the recordings' folder, that a project's reports are in.</summary>
+    public const string ProjectsFolder = "Projects";
+
+    public string Kind => Name;
+
+    public int Version => 1;
+
+    public Task RunAsync(AnalysisTaskContext context, CancellationToken cancellationToken) =>
+        AndroidReportRun.RunProjectAsync(context, BaseName, cancellationToken);
+
+    /// <summary>Where a project's task writes its reports, relative to the recordings' folder.</summary>
+    public static string FolderOf(Guid projectId, Guid taskId) =>
+        Path.Combine(ProjectsFolder, projectId.ToString("D"), "analysis", taskId.ToString("D"));
+}
+
+/// <summary>
 /// The Android summary (android-report.md, "The Android summary"): the
 /// Android report with a model's summary of each screen with findings and
 /// of the whole app, written from the findings. The findings themselves are
@@ -222,7 +249,7 @@ internal static class AndroidReportRun
         var task = context.Task;
         var session = task.SessionDirectory ??
             throw new StepFailedException("The task has no session folder, so the recording cannot be read.");
-        var recordingFile = await context.Catalog.RecordingFilePathAsync(task.RecordingId, cancellationToken).ConfigureAwait(false) ??
+        var recordingFile = await context.Catalog.RecordingFilePathAsync(task.Recording, cancellationToken).ConfigureAwait(false) ??
             throw new StepFailedException("This recording's events are in the database's evidence tables, not a recording file; the Android report reads recording files only.");
         var filePath = Path.GetFullPath(Path.Combine(session, recordingFile));
         if (!File.Exists(filePath))
@@ -252,7 +279,7 @@ internal static class AndroidReportRun
                 model = await SummarizeAsync(context, archive, evidence, guidance, cancellationToken).ConfigureAwait(false);
             }
 
-            var recording = await context.Catalog.RecordingAsync(task.RecordingId, cancellationToken).ConfigureAwait(false);
+            var recording = await context.Catalog.RecordingAsync(task.Recording, cancellationToken).ConfigureAwait(false);
             var input = Input(archive, audit, recording?.SessionKey ?? Path.GetFileName(Path.TrimEndingDirectorySeparator(session)), opened.Incomplete);
             await WriteAsync(context, session, baseName, input, guidance, evidence, model, cancellationToken).ConfigureAwait(false);
         }
@@ -260,6 +287,92 @@ internal static class AndroidReportRun
         {
             // The recording file stays open while its records are read.
             (archive.Timeline as IDisposable)?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// A project's report: each of its recordings, in the order they were
+    /// made, opened from its session folder in the recordings' folder the
+    /// task was queued with and checked as a recording's report checks it;
+    /// a recording not there, not ended, or with no phone screens is left
+    /// out and the report says why.
+    /// </summary>
+    public static async Task RunProjectAsync(AnalysisTaskContext context, string baseName, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var task = context.Task;
+        var projectId = task.ProjectId ??
+            throw new StepFailedException("This task is of one recording; the project's Android report is of a project.");
+        var root = task.SessionDirectory ??
+            throw new StepFailedException("The task has no recordings folder, so the project's recordings cannot be read.");
+        var project = await context.Catalog.ProjectAsync(projectId, cancellationToken).ConfigureAwait(false) ??
+            throw new StepFailedException("The project is no longer in the catalog.");
+        var settings = PhoneCheckSettings.Load(PhoneCheckSettings.DefaultPath);
+        var guidance = AndroidGuidance.Load();
+        var parts = new List<AndroidReportInput>();
+        var skipped = new List<string>();
+        var open = new List<SessionPlaybackArchive>();
+        try
+        {
+            foreach (var recording in project.Recordings)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var key = recording.SessionKey;
+                if (!recording.Ended)
+                {
+                    skipped.Add($"{key}, as it was still being recorded.");
+                    continue;
+                }
+
+                if (recording.RecordingFile is null)
+                {
+                    skipped.Add($"{key}, as its events are in the database's evidence tables, not a recording file.");
+                    continue;
+                }
+
+                var session = Path.Combine(root, key);
+                var filePath = Path.GetFullPath(Path.Combine(session, recording.RecordingFile));
+                if (!File.Exists(filePath))
+                {
+                    skipped.Add($"{key}, as its recording file is not in {root}.");
+                    continue;
+                }
+
+                var opened = await RecordingFilePlayback.OpenAsync(session, filePath, cancellationToken).ConfigureAwait(false);
+                var archive = opened.Archive;
+                if (!archive.PhoneScreens.Recorded)
+                {
+                    (archive.Timeline as IDisposable)?.Dispose();
+                    skipped.Add($"{key}, as it has no phone screens.");
+                    continue;
+                }
+
+                open.Add(archive);
+                var audit = await Task.Run(
+                    () => AndroidAudit.Run(archive, settings, new WindowsPhoneTextReader(), PhonePictures.Load, cancellationToken),
+                    cancellationToken).ConfigureAwait(false);
+                parts.Add(Input(archive, audit, key, opened.Incomplete) with { StartedUtc = new DateTimeOffset(recording.StartedUtc, TimeSpan.Zero) });
+            }
+
+            if (parts.Count == 0)
+            {
+                throw new StepFailedException(project.Recordings.Count == 0
+                    ? "The project has no recordings."
+                    : "None of the project's recordings could be reported on: " + string.Join(" ", skipped.Select(item => "Left out " + item)));
+            }
+
+            var evidence = AndroidEvidence.Build([.. parts.Select(part => new ReportPart(part.Screens, part.Audit, part.Device))], guidance);
+            var input = new AndroidProjectInput(project.Name, parts, skipped);
+            await WriteFilesAsync(context, root, AndroidProjectReportKind.FolderOf(projectId, task.TaskId), baseName,
+                (pictures, written, audience) => AndroidReport.Write(input, guidance, evidence, pictures, "pictures", written, audience),
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            foreach (var archive in open)
+            {
+                (archive.Timeline as IDisposable)?.Dispose();
+            }
         }
     }
 
@@ -342,7 +455,20 @@ internal static class AndroidReportRun
         AndroidModelText? model,
         CancellationToken cancellationToken)
     {
-        var folderRelative = Path.Combine("analysis", context.Task.TaskId.ToString("D"));
+        await WriteFilesAsync(context, session, Path.Combine("analysis", context.Task.TaskId.ToString("D")), baseName,
+            (pictures, written, audience) => AndroidReport.Write(input, guidance, evidence, model, pictures, "pictures", written, audience),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    // The reports, written to a folder relative to the task's folder.
+    private static async Task WriteFilesAsync(
+        AnalysisTaskContext context,
+        string session,
+        string folderRelative,
+        string baseName,
+        Func<string, DateTime, ReportAudience, string> write,
+        CancellationToken cancellationToken)
+    {
         var folder = Path.Combine(session, folderRelative);
         var pictures = Path.Combine(folder, "pictures");
         if (Directory.Exists(pictures))
@@ -354,8 +480,8 @@ internal static class AndroidReportRun
         // from; the Word document is the client's (android-report.md,
         // "Two readers"). Both write the same pictures.
         var written = DateTime.UtcNow;
-        var markdown = AndroidReport.Write(input, guidance, evidence, model, pictures, "pictures", written);
-        var client = AndroidReport.Write(input, guidance, evidence, model, pictures, "pictures", written, ReportAudience.Client);
+        var markdown = write(pictures, written, ReportAudience.Auditor);
+        var client = write(pictures, written, ReportAudience.Client);
         var word = WordReport.Write(client, folder, AndroidReport.Labels);
         await AddAsync(context, folder, folderRelative, baseName + ".docx", word, cancellationToken).ConfigureAwait(false);
         await AddAsync(context, folder, folderRelative, baseName + ".md", new UTF8Encoding(false).GetBytes(markdown), cancellationToken).ConfigureAwait(false);

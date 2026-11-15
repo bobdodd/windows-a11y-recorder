@@ -146,7 +146,8 @@ public sealed class SessionCoordinator : IAsyncDisposable
                     RuntimeInformation.ProcessArchitecture.ToString(),
                     CaptureSettings(options)),
                 _sessionDirectory,
-                cancellationToken: cancellationToken).ConfigureAwait(false);
+                cancellationToken: cancellationToken,
+                projectId: options.ProjectId).ConfigureAwait(false);
             _sink = _databaseRecording.Writer;
 
             _collectors.Clear();

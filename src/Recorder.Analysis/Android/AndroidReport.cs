@@ -20,7 +20,20 @@ public sealed record AndroidReportInput(
     Func<long, (int Width, int Height)?> ScreenAt,
     Func<string, PhonePixels?> Load,
     IReadOnlyList<string> EvidenceKinds,
-    string? Incomplete);
+    string? Incomplete)
+{
+    /// <summary>When the recording started, which a project's report lists its recordings by.</summary>
+    public DateTimeOffset? StartedUtc { get; init; }
+}
+
+/// <summary>
+/// A project's recordings for its Android report (projects.md), in the
+/// order they were made, and those left out, each with why.
+/// </summary>
+public sealed record AndroidProjectInput(
+    string Name,
+    IReadOnlyList<AndroidReportInput> Recordings,
+    IReadOnlyList<string> Skipped);
 
 /// <summary>
 /// Who a report is written for (android-report.md, "Two readers"): the
@@ -75,7 +88,32 @@ public static class AndroidReport
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(guidance);
         ArgumentNullException.ThrowIfNull(evidence);
-        var writer = new Writer(input, guidance, evidence, model, picturesFolder, picturesRelative, audience);
+        var writer = new Writer(null, [input], [], guidance, evidence, model, picturesFolder, picturesRelative, audience);
+        return writer.Write(writtenUtc);
+    }
+
+    /// <summary>
+    /// Writes a project's report, of its recordings taken together, with
+    /// the evidence built from them in the same order (projects.md).
+    /// </summary>
+    public static string Write(
+        AndroidProjectInput project,
+        AndroidGuidance guidance,
+        AndroidEvidence evidence,
+        string picturesFolder,
+        string picturesRelative,
+        DateTime writtenUtc,
+        ReportAudience audience = ReportAudience.Auditor)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(guidance);
+        ArgumentNullException.ThrowIfNull(evidence);
+        if (project.Recordings.Count == 0)
+        {
+            throw new ArgumentException("A project's report needs at least one recording.", nameof(project));
+        }
+
+        var writer = new Writer(project.Name, project.Recordings, project.Skipped, guidance, evidence, null, picturesFolder, picturesRelative, audience);
         return writer.Write(writtenUtc);
     }
 
@@ -83,7 +121,13 @@ public static class AndroidReport
     public static string ClientTitle(PhoneScreenTimeline screens)
     {
         ArgumentNullException.ThrowIfNull(screens);
-        var apps = screens.Screens.Select(screen => screen.Package).Distinct(StringComparer.Ordinal).ToList();
+        return ClientTitle(screens.Screens.Select(screen => screen.Package));
+    }
+
+    public static string ClientTitle(IEnumerable<string> packages)
+    {
+        ArgumentNullException.ThrowIfNull(packages);
+        var apps = packages.Distinct(StringComparer.Ordinal).ToList();
         return "Accessibility report: " + (apps.Count == 0 ? "Android app" : string.Join(", ", apps));
     }
 
@@ -96,7 +140,9 @@ public static class AndroidReport
     }
 
     private sealed class Writer(
-        AndroidReportInput input,
+        string? projectName,
+        IReadOnlyList<AndroidReportInput> parts,
+        IReadOnlyList<string> skipped,
         AndroidGuidance guidance,
         AndroidEvidence evidence,
         AndroidModelText? model,
@@ -105,6 +151,8 @@ public static class AndroidReport
         ReportAudience audience)
     {
         private readonly bool _client = audience == ReportAudience.Client;
+        private readonly bool _project = projectName is not null;
+        private readonly bool _several = parts.Count > 1;
         private readonly StringBuilder _text = new();
         private readonly HashSet<string> _cited = new(StringComparer.Ordinal);
         private readonly Dictionary<PhoneFinding, string> _placed = [];
@@ -114,6 +162,18 @@ public static class AndroidReport
         // A paragraph, or a picture with its alternative text, written later.
         private sealed record Block(string Text, string? Picture);
 
+        // The recording a visit is in.
+        private AndroidReportInput Part(PhoneVisit visit) => parts[evidence.RecordingOf(visit) - 1];
+
+        private IEnumerable<string> Apps => evidence.Screens.Select(screen => screen.Package).Distinct(StringComparer.Ordinal);
+
+        private string Of => _project ? "recordings of the app in a project" : "a recording of the app";
+
+        // A picture's file name, with its recording's number when the
+        // report has more than one.
+        private string Prefixed(PhoneVisit visit, string name) =>
+            _several ? string.Create(CultureInfo.InvariantCulture, $"recording-{evidence.RecordingOf(visit):D2}-{name}") : name;
+
         public string Write(DateTime writtenUtc)
         {
             var summary = model is not null;
@@ -121,14 +181,14 @@ public static class AndroidReport
             {
                 // For the client's team, only that AI is used and that the
                 // report is manually inspected (owner, 2026-11-14).
-                Heading(1, ClientTitle(input.Screens));
+                Heading(1, ClientTitle(Apps));
                 Paragraph(summary
-                    ? "This report gives the results of automated accessibility checks of a recording of the app, with summaries of the app and of each screen. AI is used in generating this report, and the final report is manually inspected."
-                    : "This report gives the results of automated accessibility checks of a recording of the app. The final report is manually inspected.");
+                    ? $"This report gives the results of automated accessibility checks of {Of}, with summaries of the app and of each screen. AI is used in generating this report, and the final report is manually inspected."
+                    : $"This report gives the results of automated accessibility checks of {Of}. The final report is manually inspected.");
             }
             else
             {
-                Heading(1, (summary ? "Android accessibility summary: " : "Android accessibility report: ") + input.SessionKey);
+                Heading(1, (summary ? "Android accessibility summary: " : "Android accessibility report: ") + (_project ? "project " + projectName : parts[0].SessionKey));
                 Paragraph(summary
                     ? "The findings in this summary are the recorder's own checks of the recording, with no model. The summaries of the app and of each screen are a model's inferences from those findings, and say so where they appear."
                     : "Every finding in this report is the recorder's own check of the recording; no model wrote any of it.");
@@ -149,7 +209,7 @@ public static class AndroidReport
                 Paragraph("Each screen in the order it was first visited, with its visits and each visit's findings.");
             }
 
-            foreach (var screen in input.Screens.Screens)
+            foreach (var screen in evidence.Screens)
             {
                 Screen(screen);
             }
@@ -170,6 +230,13 @@ public static class AndroidReport
 
         private void About(DateTime writtenUtc)
         {
+            if (_project)
+            {
+                ProjectAbout(writtenUtc);
+                return;
+            }
+
+            var input = parts[0];
             Heading(2, "About this recording");
             var rows = new List<(string, string)>
             {
@@ -181,7 +248,7 @@ public static class AndroidReport
                 rows.Add(($"App {app}", $"{input.Device.DescribeVersion(app)}. {input.Device.DescribeFramework(app)}{Refs(evidence.AppReference(app))}"));
             }
 
-            rows.Add(("Screens and visits", Count(input.Screens.Screens.Count, "screen", "screens") + ", " + Count(input.Screens.Visits.Count, "visit", "visits")));
+            rows.Add(("Screens and visits", Count(evidence.Screens.Count, "screen", "screens") + ", " + Count(input.Screens.Visits.Count, "visit", "visits")));
             rows.Add(("Audit level", $"WCAG {input.Audit.Level}; the phone had to be held turned for {input.Audit.HoldSeconds.ToString(CultureInfo.InvariantCulture)} seconds for the orientation check"));
             rows.Add(("Evidence in the recording", input.EvidenceKinds.Count == 0 ? "No phone evidence besides the accessibility tree" : string.Join("; ", input.EvidenceKinds)));
             rows.Add(("Text recognition", input.Audit.OcrEngines.Count > 0
@@ -201,6 +268,57 @@ public static class AndroidReport
             Table(["Item", "Value"], rows.Select(row => (IReadOnlyList<string>)[row.Item1, row.Item2]));
         }
 
+        // A project's recordings, each with its own row, and what they
+        // have in common once.
+        private void ProjectAbout(DateTime writtenUtc)
+        {
+            Heading(2, "About this project");
+            var rows = new List<(string, string)>
+            {
+                ("Project", projectName!),
+                ("Recordings", Count(parts.Count, "recording", "recordings") + (skipped.Count == 0 ? "" : ", and " + Count(skipped.Count, "recording", "recordings") + " left out, as given under \"Limits\"")),
+                ("Length", WindowsPreferenceTimeline.ClockOf(parts.Sum(part => part.DurationNanoseconds)) + " in all"),
+            };
+            foreach (var app in Apps)
+            {
+                var versions = parts.Select((part, index) => (part, index))
+                    .Where(pair => pair.part.Screens.Screens.Any(screen => screen.Package == app))
+                    .Select(pair => $"Recording {(pair.index + 1).ToString(CultureInfo.InvariantCulture)}: {pair.part.Device.DescribeVersion(app)}")
+                    .ToList();
+                var frameworks = parts.Where(part => part.Screens.Screens.Any(screen => screen.Package == app))
+                    .Select(part => part.Device.DescribeFramework(app)).Distinct(StringComparer.Ordinal).ToList();
+                rows.Add(($"App {app}", string.Join("; ", versions) + ". " + string.Join(" ", frameworks) + Refs(evidence.AppReference(app))));
+            }
+
+            var visits = parts.Sum(part => part.Screens.Visits.Count);
+            var shared = evidence.Screens.Count(screen => screen.Members.Count > 1);
+            rows.Add(("Screens and visits", Count(evidence.Screens.Count, "screen", "screens") + ", " + Count(visits, "visit", "visits") +
+                (_several ? $"; {Count(shared, "screen", "screens")} seen in more than one recording" : "")));
+            var levels = parts.Select(part => $"WCAG {part.Audit.Level}; the phone had to be held turned for {part.Audit.HoldSeconds.ToString(CultureInfo.InvariantCulture)} seconds for the orientation check").Distinct(StringComparer.Ordinal).ToList();
+            rows.Add(("Audit level", levels.Count == 1 ? levels[0]
+                : string.Join("; ", parts.Select((part, index) => $"Recording {(index + 1).ToString(CultureInfo.InvariantCulture)}: WCAG {part.Audit.Level}"))));
+            var engines = parts.SelectMany(part => part.Audit.OcrEngines).Distinct(StringComparer.Ordinal).ToList();
+            rows.Add(("Text recognition", engines.Count > 0 ? string.Join("; ", engines) : "Not used"));
+            rows.Add(("Guidance", _client
+                ? $"Version {guidance.Version.ToString(CultureInfo.InvariantCulture)}"
+                : $"Version {guidance.Version.ToString(CultureInfo.InvariantCulture)}, SHA-256 {guidance.Sha256}"));
+            rows.Add(("Written", writtenUtc.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture)));
+            Table(["Item", "Value"], rows.Select(row => (IReadOnlyList<string>)[row.Item1, row.Item2]));
+
+            Heading(3, "The recordings");
+            Paragraph("Each recording in the order it was made, with its number in this report.");
+            Table(["Number", "Recording", "Started", "Length", "Screens and visits", "Evidence in the recording"], parts.Select((part, index) => (IReadOnlyList<string>)
+            [
+                (index + 1).ToString(CultureInfo.InvariantCulture),
+                part.SessionKey,
+                part.StartedUtc is { } started ? started.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture) : "Not known",
+                WindowsPreferenceTimeline.ClockOf(part.DurationNanoseconds),
+                Count(part.Screens.Screens.Count, "screen", "screens") + ", " + Count(part.Screens.Visits.Count, "visit", "visits"),
+                (part.EvidenceKinds.Count == 0 ? "No phone evidence besides the accessibility tree" : string.Join("; ", part.EvidenceKinds)) +
+                    (part.Incomplete is { } incomplete ? ". Recording file read in part: " + incomplete : ""),
+            ]));
+        }
+
         private void HowToRead()
         {
             Heading(2, "How to read this report");
@@ -214,10 +332,19 @@ public static class AndroidReport
                 Item($"{step.Label}: {step.Meaning}");
             }
 
-            Paragraph("A finding seen on more than one visit to a screen, the same check at the same level on the same item, is given once, under \"Findings on more than one visit\" before the screen's visits, with what was measured and when it was seen on each visit.");
+            if (_several)
+            {
+                Paragraph("The project's recordings are taken together. A screen seen in more than one recording, in the same app, with the same title and activity, is one screen, numbered by its first visit in the first recording it was seen in. Its visits are named by their recording and their number in it, as \"Recording 2, visit 3\".");
+            }
+
+            Paragraph(_several
+                ? "A finding seen on more than one visit to a screen, in one recording or in several, the same check at the same level on the same item, is given once, under \"Findings on more than one visit\" before the screen's visits, with what was measured and when it was seen on each visit, and the app's version in each recording."
+                : "A finding seen on more than one visit to a screen, the same check at the same level on the same item, is given once, under \"Findings on more than one visit\" before the screen's visits, with what was measured and when it was seen on each visit.");
             Paragraph("In the pictures, each item is outlined in cyan between two black bands, with the finding's number in black on cyan beside it. A small item also has a zoomed picture, taken from the picture at full size. A finding about the whole screen has no outline.");
             Paragraph("The remediation is given for Android's own Views and Jetpack Compose, and also for Flutter or React Native when the recorder found that framework's library in the app. The recorder reads which libraries are bundled in the app's files, not which framework drew each screen, and not finding one does not mean the app is native Android.");
-            Paragraph("References such as [E3] are to the evidence list at the end, which gives each one's time in the recording.");
+            Paragraph(_several
+                ? "References such as [E3] are to the evidence list at the end, which gives each one's recording and its time in that recording."
+                : "References such as [E3] are to the evidence list at the end, which gives each one's time in the recording.");
         }
 
         private void Overview(AndroidModelText text)
@@ -290,7 +417,7 @@ public static class AndroidReport
                 rows.Add(["Across the app", "", .. Counts(evidence.App)]);
             }
 
-            foreach (var screen in input.Screens.Screens)
+            foreach (var screen in evidence.Screens)
             {
                 rows.Add([ScreenHeading(screen), screen.Visits.Count.ToString(CultureInfo.InvariantCulture), .. Counts([.. evidence.For(screen)])]);
             }
@@ -324,29 +451,31 @@ public static class AndroidReport
             Paragraph("These findings are about the app as a whole, not one screen.");
             foreach (var finding in evidence.App)
             {
-                Finding(finding, 3, pictures: false);
+                Finding(finding, 3, pictures: false, app: true);
             }
         }
 
-        private static string ScreenHeading(PhoneScreen screen) =>
+        private static string ScreenHeading(ReportScreen screen) =>
             $"Screen {screen.Number.ToString(CultureInfo.InvariantCulture)}: {screen.Name}";
 
         // In the client's report the screens are under "Findings by screen",
         // a level lower, so that no heading level is skipped.
         private int ScreenLevel => _client ? 3 : 2;
 
-        private void Screen(PhoneScreen screen)
+        private void Screen(ReportScreen screen)
         {
             Heading(ScreenLevel, ScreenHeading(screen));
             var findings = evidence.For(screen).ToList();
             var repeated = evidence.Repeated(screen);
             var several = repeated.Count == 0 ? "" : $", {repeated.Count.ToString(CultureInfo.InvariantCulture)} of them seen on more than one visit";
+            var where = _several ? $" Seen in {RecordingsOf(screen)}." : "";
             Paragraph(string.Create(CultureInfo.InvariantCulture,
-                $"The app {screen.Package}; the screen is {screen.NamedBy}. Visited {Times(screen.Visits.Count)}, with {Count(findings.Count, "finding", "findings")}{several}.{Refs(evidence.ScreenReference(screen))}"));
-            if (model is not null && (!_client || model.Screens.ContainsKey(screen)))
+                $"The app {screen.Package}; the screen is {screen.NamedBy}.{where} Visited {Times(screen.Visits.Count)}, with {Count(findings.Count, "finding", "findings")}{several}.{Refs(evidence.ScreenReference(screen))}"));
+            var summarized = model is null ? null : screen.Members.FirstOrDefault(model.Screens.ContainsKey);
+            if (model is not null && (!_client || summarized is not null))
             {
                 Heading(ScreenLevel + 1, _client ? "Summary of the screen" : "Summary of the screen, inferred by a model");
-                if (model.Screens.TryGetValue(screen, out var step))
+                if (summarized is not null && model.Screens.TryGetValue(summarized, out var step))
                 {
                     foreach (var section in new[] { "screen", "issues" })
                     {
@@ -372,7 +501,9 @@ public static class AndroidReport
             if (repeated.Count > 0)
             {
                 Heading(ScreenLevel + 1, "Findings on more than one visit");
-                Paragraph("Each of these was found on more than one visit to the screen: the same check, at the same level, on the same item. It is given once here, and each visit's picture outlines it with the same number.");
+                Paragraph(_several && screen.Members.Count > 1
+                    ? "Each of these was found on more than one visit to the screen, in one recording or in several: the same check, at the same level, on the same item. It is given once here, and each visit's picture outlines it with the same number."
+                    : "Each of these was found on more than one visit to the screen: the same check, at the same level, on the same item. It is given once here, and each visit's picture outlines it with the same number.");
                 foreach (var finding in repeated)
                 {
                     Finding(finding, ScreenLevel + 2, pictures: true);
@@ -383,6 +514,24 @@ public static class AndroidReport
             {
                 Visit(visit);
             }
+        }
+
+        // The recordings a screen was seen in, as "recordings 1 and 3".
+        private string RecordingsOf(ReportScreen screen)
+        {
+            var numbers = screen.Visits.Select(evidence.RecordingOf).Distinct().Select(number => number.ToString(CultureInfo.InvariantCulture)).ToList();
+            return numbers.Count == 1 ? "recording " + numbers[0] : "recordings " + List(numbers);
+        }
+
+        // The app's version in a visit's recording, as each finding in a
+        // project's report is labelled (owner, 2026-11-14).
+        private string VersionAt(PhoneVisit visit)
+        {
+            var part = Part(visit);
+            var app = visit.Screen.Package;
+            return !part.Device.VersionsRecorded ? "version not recorded"
+                : part.Device.VersionOf(app) is { Found: true, VersionName: { Length: > 0 } name } ? "version " + name
+                : "version not read";
         }
 
         private static string Count(int count, string one, string many) =>
@@ -400,7 +549,7 @@ public static class AndroidReport
 
         private void Visit(PhoneVisit visit)
         {
-            Heading(ScreenLevel + 1, $"Visit {visit.Number.ToString(CultureInfo.InvariantCulture)}, {visit.When}");
+            Heading(ScreenLevel + 1, $"{Sentence(evidence.VisitName(visit))}, {visit.When}");
             Paragraph($"{Sentence(visit.CauseText)}.{Refs(evidence.VisitReference(visit))}");
             var on = evidence.On(visit);
             if (on.Count == 0)
@@ -487,28 +636,31 @@ public static class AndroidReport
 
         private PhoneContrastPicture? FirstPicture(PhoneVisit visit)
         {
+            var pictures = Part(visit).Pictures;
             foreach (var settled in visit.SettledSnapshots)
             {
-                if (input.Pictures.Of(visit, settled) is { } picture)
+                if (pictures.Of(visit, settled) is { } picture)
                 {
                     return picture;
                 }
             }
 
-            return input.Pictures.Between(visit.Start, visit.End);
+            return pictures.Between(visit.Start, visit.End);
         }
 
         private PhoneContrastPicture? PictureOf(PhoneFinding finding)
         {
             var first = finding.Times[0];
-            return input.Pictures.Of(finding.Visit, first.Snapshot) ?? input.Pictures.Between(first.Time, finding.Visit.End);
+            var pictures = Part(finding.Visit).Pictures;
+            return pictures.Of(finding.Visit, first.Snapshot) ?? pictures.Between(first.Time, finding.Visit.End);
         }
 
         // A picture of a visit at half size, with the findings shown on it
         // outlined and numbered.
         private List<Block> Overview(PhoneVisit visit, PhoneContrastPicture picture, IReadOnlyList<(int Number, PhoneFinding Finding)> findings)
         {
-            var pixels = input.Load(picture.AbsolutePath);
+            var part = Part(visit);
+            var pixels = part.Load(picture.AbsolutePath);
             if (pixels is null)
             {
                 foreach (var finding in findings)
@@ -533,7 +685,7 @@ public static class AndroidReport
                     continue;
                 }
 
-                if (Scaled(first.Bounds, picture.Time, pixels.Width, pixels.Height) is not { } box)
+                if (Scaled(part, first.Bounds, picture.Time, pixels.Width, pixels.Height) is not { } box)
                 {
                     _placed[finding.Finding] = "Not outlined: the phone was turned between the snapshot and the picture.";
                     continue;
@@ -552,18 +704,19 @@ public static class AndroidReport
                 if (box.Area < ReportPictures.ZoomLimit * screen)
                 {
                     _zoomable[finding.Finding] = (pixels, box);
-                    _placed[finding.Finding] = $"Outlined as number {finding.Number.ToString(CultureInfo.InvariantCulture)} in the picture of visit {visit.Number.ToString(CultureInfo.InvariantCulture)}, and zoomed here.";
+                    _placed[finding.Finding] = $"Outlined as number {finding.Number.ToString(CultureInfo.InvariantCulture)} in the picture of {evidence.VisitName(visit)}, and zoomed here.";
                 }
                 else
                 {
-                    _placed[finding.Finding] = $"Outlined as number {finding.Number.ToString(CultureInfo.InvariantCulture)} in the picture of visit {visit.Number.ToString(CultureInfo.InvariantCulture)}.";
+                    _placed[finding.Finding] = $"Outlined as number {finding.Number.ToString(CultureInfo.InvariantCulture)} in the picture of {evidence.VisitName(visit)}.";
                 }
             }
 
-            var name = string.Create(CultureInfo.InvariantCulture, $"visit-{visit.Number:D4}-{picture.Time:D}.png");
+            var name = Prefixed(visit, string.Create(CultureInfo.InvariantCulture, $"visit-{visit.Number:D4}-{picture.Time:D}.png"));
             Save(name, canvas);
             var source = picture.Kind == PhonePictureKind.Screenshot ? "screenshot" : "video frame";
-            var alt = $"The screen {visit.Screen.Name} at {WindowsPreferenceTimeline.ClockOf(picture.Time)}, from a {source}";
+            var at = _several ? $"in recording {evidence.RecordingOf(visit).ToString(CultureInfo.InvariantCulture)} at" : "at";
+            var alt = $"The screen {evidence.ScreenOf(visit.Screen).Name} {at} {WindowsPreferenceTimeline.ClockOf(picture.Time)}, from a {source}";
             alt += outlined.Count switch
             {
                 0 => ".",
@@ -576,10 +729,10 @@ public static class AndroidReport
         // Bounds in the phone's screen pixels scaled to a picture's; null
         // when the picture and the screen are turned differently, as
         // ScaledToFrame in the player.
-        private PictureBox? Scaled(PhoneBounds bounds, long time, int width, int height)
+        private static PictureBox? Scaled(AndroidReportInput part, PhoneBounds bounds, long time, int width, int height)
         {
             double scaleX = 1, scaleY = 1;
-            if (input.ScreenAt(time) is { } screen && screen.Width > 0 && screen.Height > 0)
+            if (part.ScreenAt(time) is { } screen && screen.Width > 0 && screen.Height > 0)
             {
                 if (width > height != screen.Width > screen.Height)
                 {
@@ -620,7 +773,7 @@ public static class AndroidReport
                 Refs(seen.Reference);
         }
 
-        private void Finding(NumberedFinding numbered, int headingLevel, bool pictures)
+        private void Finding(NumberedFinding numbered, int headingLevel, bool pictures, bool app = false)
         {
             var finding = numbered.Finding;
             var check = numbered.Guidance;
@@ -636,12 +789,20 @@ public static class AndroidReport
             };
             // On more than one visit, what was measured is given once if
             // the same on each, and each visit's when seen.
+            // In a project's report each is labelled with the app's
+            // version in its recording; a finding of the app as a whole is
+            // seen once in each recording.
+            string Where(FindingVisit on) => app
+                ? $"recording {evidence.RecordingOf(on.Visit).ToString(CultureInfo.InvariantCulture)}"
+                : evidence.VisitName(on.Visit);
+            string Version(FindingVisit on) => _several ? $" ({VersionAt(on.Visit)})" : "";
             var measures = numbered.Visits.Select(seen => MeasuredOn(seen.Finding)).ToList();
             var measured = measures.Distinct(StringComparer.Ordinal).Count() == 1 ? measures[0]
-                : string.Join("; ", numbered.Visits.Select((seen, index) => $"Visit {seen.Visit.Number.ToString(CultureInfo.InvariantCulture)}: {measures[index]}"));
-            var seen = !numbered.OnSeveralVisits ? SeenOn(numbered.Visits[0])
-                : $"On {Count(numbered.Visits.Count, "visit", "visits")}: " + string.Join("; ", numbered.Visits.Select(on =>
-                    $"visit {on.Visit.Number.ToString(CultureInfo.InvariantCulture)}, {Lower(SeenOn(on))}"));
+                : string.Join("; ", numbered.Visits.Select((seen, index) => $"{Sentence(Where(seen))}: {measures[index]}"));
+            var seen = !numbered.OnSeveralVisits
+                ? (_several ? $"{Sentence(Where(numbered.Visits[0]))}{Version(numbered.Visits[0])}, {Lower(SeenOn(numbered.Visits[0]))}" : SeenOn(numbered.Visits[0]))
+                : (app ? $"In {Count(numbered.Visits.Count, "recording", "recordings")}: " : $"On {Count(numbered.Visits.Count, "visit", "visits")}: ") +
+                    string.Join("; ", numbered.Visits.Select(on => $"{Where(on)}{Version(on)}, {Lower(SeenOn(on))}"));
             var rows = new List<IReadOnlyList<string>>
             {
                 new[] { "Level", level },
@@ -715,17 +876,26 @@ public static class AndroidReport
                 : "None: best practice, related to " + string.Join("; ", check.Related.Select(guidance.CriterionText));
         }
 
+        // The frameworks found in the app in any of the report's recordings.
         private HashSet<string> Frameworks(string package)
         {
-            var framework = input.Device.VersionOf(package)?.Framework;
-            return framework is { Status: "detected" } ? new HashSet<string>(framework.Names, StringComparer.Ordinal) : [];
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var part in parts)
+            {
+                if (part.Device.VersionOf(package)?.Framework is { Status: "detected" } framework)
+                {
+                    names.UnionWith(framework.Names);
+                }
+            }
+
+            return names;
         }
 
         private void Picture(NumberedFinding numbered, FindingVisit seen)
         {
             var finding = seen.Finding;
             var visit = seen.Visit;
-            var number = visit.Number.ToString(CultureInfo.InvariantCulture);
+            var name2 = evidence.VisitName(visit);
             if (_zoomable.TryGetValue(finding, out var zoom))
             {
                 var (crop, scale) = ReportPictures.ZoomOf(zoom.Box, zoom.Pixels.Width, zoom.Pixels.Height);
@@ -738,10 +908,11 @@ public static class AndroidReport
                     var unit = Math.Max(2, ReportPictures.Unit(canvas.Width, canvas.Height));
                     var outline = ReportPictures.Outline(canvas, item, unit);
                     ReportPictures.Badge(canvas, numbered.Number, outline, unit);
-                    var name = string.Create(CultureInfo.InvariantCulture, $"finding-{numbered.Number:D4}-visit-{visit.Number:D4}.png");
+                    var name = Prefixed(visit, string.Create(CultureInfo.InvariantCulture, $"finding-{numbered.Number:D4}-visit-{visit.Number:D4}.png"));
                     Save(name, canvas);
                     var times = scale == 1 ? "at full size" : $"zoomed {scale.ToString(CultureInfo.InvariantCulture)} times";
-                    var where = numbered.OnSeveralVisits ? $"on the screen {visit.Screen.Name} in visit {number}" : $"on the screen {visit.Screen.Name}";
+                    var screenName = evidence.ScreenOf(visit.Screen).Name;
+                    var where = numbered.OnSeveralVisits || _several ? $"on the screen {screenName} in {name2}" : $"on the screen {screenName}";
                     Paragraph("Picture: " + _placed[finding]);
                     Image($"Finding {numbered.Number.ToString(CultureInfo.InvariantCulture)}, {finding.Label}, {where}, {times}, outlined in cyan.", name);
                     return;
@@ -749,7 +920,7 @@ public static class AndroidReport
             }
 
             var placed = _placed.GetValueOrDefault(finding) ?? "No picture of this time was recorded.";
-            Paragraph("Picture: " + (numbered.OnSeveralVisits && !placed.Contains("visit ", StringComparison.Ordinal) ? $"On visit {number}: {Lower(placed)}" : placed));
+            Paragraph("Picture: " + ((numbered.OnSeveralVisits || _several) && !placed.Contains("visit ", StringComparison.Ordinal) ? $"On {name2}: {Lower(placed)}" : placed));
         }
 
         private static string Lower(string text) =>
@@ -758,30 +929,63 @@ public static class AndroidReport
         private void Limits()
         {
             Heading(2, "Limits");
-            Item("The checks cover what the recording shows: the screens visited, in the states they were seen in. A screen or state not recorded is not checked.");
+            Item(_project
+                ? "The checks cover what the recordings show: the screens visited, in the states they were seen in. A screen or state not recorded is not checked."
+                : "The checks cover what the recording shows: the screens visited, in the states they were seen in. A screen or state not recorded is not checked.");
             Item("No finding on a screen does not show that it meets WCAG; many success criteria need a person's judgement or a test the recording cannot make.");
             Item("Warnings and information need a person to confirm them; their impact is given as if confirmed.");
             Item("The impact levels and the remediation are the recorder's guidance for each kind of issue, not advice written for this app.");
             Item("Colours measured on a video frame are approximate, as the video is compressed; those measured on the companion app's screenshots are exact.");
-            Item("The report covers the whole recording, whatever part of it was chosen when it was queued.");
-            if (input.Audit.MeasureProblem is { } problem)
+            if (_project)
             {
-                Item("The colours could not be measured, so the contrast, image of text and label in name checks did not run: " + problem);
+                Item("The report covers each of the project's recordings in whole.");
+                Item("A screen is one screen across the recordings when its app, title and activity are the same, as within a recording. A screen named from its own text can be named differently in two recordings, if that text was shared by other screens in one of them, and is then given as two screens.");
+                foreach (var left in skipped)
+                {
+                    Item("Left out: " + left);
+                }
+            }
+            else
+            {
+                Item("The report covers the whole recording, whatever part of it was chosen when it was queued.");
             }
 
-            foreach (var problem2 in input.Audit.Tree.Problems)
+            for (var index = 0; index < parts.Count; index++)
             {
-                Item("A check could not run: " + problem2);
+                var part = parts[index];
+                var of = _several ? $"In recording {(index + 1).ToString(CultureInfo.InvariantCulture)}, the" : "The";
+                var check = _several ? $"In recording {(index + 1).ToString(CultureInfo.InvariantCulture)}, a" : "A";
+                if (part.Audit.MeasureProblem is { } problem)
+                {
+                    Item($"{of} colours could not be measured, so the contrast, image of text and label in name checks did not run: " + problem);
+                }
+
+                foreach (var problem2 in part.Audit.Tree.Problems)
+                {
+                    Item($"{check} check could not run: " + problem2);
+                }
             }
         }
 
         private void Evidence()
         {
             Heading(2, "Evidence");
-            Paragraph("Each app, screen, visit and finding the report cites, with its time in the recording.");
-            Table(["Ref", "Time", "Evidence"], evidence.Entries
+            if (!_several)
+            {
+                Paragraph("Each app, screen, visit and finding the report cites, with its time in the recording.");
+                Table(["Ref", "Time", "Evidence"], evidence.Entries
+                    .Where(entry => _cited.Contains(entry.Reference))
+                    .Select(entry => (IReadOnlyList<string>)[entry.Reference, entry.Time is { } time ? WindowsPreferenceTimeline.ClockOf(time) : "Whole recording", entry.Text]));
+                return;
+            }
+
+            Paragraph("Each app, screen, visit and finding the report cites, with its recording and its time in that recording.");
+            Table(["Ref", "Recording and time", "Evidence"], evidence.Entries
                 .Where(entry => _cited.Contains(entry.Reference))
-                .Select(entry => (IReadOnlyList<string>)[entry.Reference, entry.Time is { } time ? WindowsPreferenceTimeline.ClockOf(time) : "Whole recording", entry.Text]));
+                .Select(entry => (IReadOnlyList<string>)[entry.Reference, When(entry.Recording, entry.Time), entry.Text]));
+
+            static string When(int recording, long? time) => recording == 0 ? "All recordings"
+                : $"Recording {recording.ToString(CultureInfo.InvariantCulture)}, " + (time is { } at ? WindowsPreferenceTimeline.ClockOf(at) : "whole recording");
         }
 
         private string Refs(params string[] references)

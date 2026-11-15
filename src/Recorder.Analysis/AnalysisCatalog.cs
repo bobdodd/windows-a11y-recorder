@@ -25,10 +25,14 @@ public static class AttemptOutcomes
     public const string Cancelled = "cancelled";
 }
 
-/// <summary>A queued or running task, as the worker reads it.</summary>
+/// <summary>
+/// A queued or running task, as the worker reads it: of one recording, or
+/// of a project's recordings taken together (projects.md), when
+/// <see cref="RecordingId"/> is null and <see cref="ProjectId"/> is not.
+/// </summary>
 public sealed record AnalysisTask(
     Guid TaskId,
-    Guid RecordingId,
+    Guid? RecordingId,
     string Kind,
     int KindVersion,
     long? ScopeStartNanoseconds,
@@ -48,7 +52,17 @@ public sealed record AnalysisTask(
     /// requests are reused, or null when it runs every step itself.
     /// </summary>
     public Guid? RerunOfTaskId { get; init; }
+
+    /// <summary>The project a project's task is of; null for a recording's.</summary>
+    public Guid? ProjectId { get; init; }
+
+    /// <summary>The recording a recording's task is of; a project's task has none.</summary>
+    public Guid Recording => RecordingId ??
+        throw new StepFailedException("This task is of a project, not of one recording.");
 }
+
+/// <summary>One of a project's recordings, as a project's task reads them.</summary>
+public sealed record ProjectRecording(Guid RecordingId, string SessionKey, DateTime StartedUtc, bool Ended, string? RecordingFile);
 
 /// <summary>A description of the participant's capabilities, and when it was written.</summary>
 public sealed record CapabilityDescription(Guid CapabilityId, string Description, DateTime WrittenUtc);
@@ -56,14 +70,21 @@ public sealed record CapabilityDescription(Guid CapabilityId, string Description
 /// <summary>A task as the player lists it.</summary>
 public sealed record AnalysisTaskSummary(
     Guid TaskId,
-    Guid RecordingId,
+    Guid? RecordingId,
     string Kind,
     string State,
     IReadOnlyDictionary<string, string> StageProfiles,
     DateTime QueuedUtc,
     DateTime? FinishedUtc,
     string? Failure,
-    DateTime? ReadUtc);
+    DateTime? ReadUtc)
+{
+    /// <summary>The project a project's task is of; null for a recording's.</summary>
+    public Guid? ProjectId { get; init; }
+
+    /// <summary>The folder the task's reports are named relative to, as queued.</summary>
+    public string? SessionDirectory { get; init; }
+}
 
 /// <summary>
 /// What a task's requests to a service such as Anthropic used, for the
@@ -221,6 +242,86 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             return (Guid)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
         }, cancellationToken);
 
+    /// <summary>
+    /// Queues a task of a project's recordings taken together
+    /// (projects.md), its reports under <paramref name="directory"/>.
+    /// </summary>
+    public Task<Guid> QueueProjectTaskAsync(
+        Guid projectId,
+        string kind,
+        int kindVersion,
+        IReadOnlyDictionary<string, string> stageProfiles,
+        string directory,
+        Guid? rerunOfTaskId = null,
+        CancellationToken cancellationToken = default) =>
+        UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "INSERT INTO analysis_tasks (project_id, kind, kind_version, stage_profiles, session_directory, rerun_of_task_id) " +
+                "VALUES ($1, $2, $3, $4, $5, $6) RETURNING task_id",
+                connection);
+            command.Parameters.AddWithValue(projectId);
+            command.Parameters.AddWithValue(kind);
+            command.Parameters.AddWithValue(kindVersion);
+            command.Parameters.Add(new NpgsqlParameter { Value = JsonSerializer.Serialize(stageProfiles), NpgsqlDbType = NpgsqlDbType.Jsonb });
+            command.Parameters.AddWithValue(directory);
+            command.Parameters.AddWithValue((object?)rerunOfTaskId ?? DBNull.Value);
+            return (Guid)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+        }, cancellationToken);
+
+    /// <summary>A recording's project, its ID and name, or null where the recording is not in the catalog.</summary>
+    public Task<(Guid ProjectId, string Name)?> ProjectOfAsync(Guid recordingId, CancellationToken cancellationToken) =>
+        UseAsync<(Guid, string)?>(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT p.project_id, p.name FROM recordings r JOIN projects p ON p.project_id = r.project_id WHERE r.recording_id = $1",
+                connection);
+            command.Parameters.AddWithValue(recordingId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? (reader.GetGuid(0), reader.GetString(1)) : null;
+        }, cancellationToken);
+
+    /// <summary>
+    /// A project's name and its recordings in the order they were made:
+    /// each one's ID, session key, start, whether it ended, and its
+    /// recording file, relative to its session folder, or null.
+    /// </summary>
+    public Task<(string Name, IReadOnlyList<ProjectRecording> Recordings)?> ProjectAsync(Guid projectId, CancellationToken cancellationToken) =>
+        UseAsync<(string, IReadOnlyList<ProjectRecording>)?>(async connection =>
+        {
+            string name;
+            await using (var named = new NpgsqlCommand("SELECT name FROM projects WHERE project_id = $1", connection))
+            {
+                named.Parameters.AddWithValue(projectId);
+                if (await named.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is not string found)
+                {
+                    return null;
+                }
+
+                name = found;
+            }
+
+            await using var command = new NpgsqlCommand(
+                "SELECT r.recording_id, r.session_key, r.started_utc, r.recording_status_id, " +
+                "(SELECT f.path FROM recording_files f WHERE f.recording_id = r.recording_id LIMIT 1) " +
+                "FROM recordings r WHERE r.project_id = $1 ORDER BY r.started_utc, r.session_key",
+                connection);
+            command.Parameters.AddWithValue(projectId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            var recordings = new List<ProjectRecording>();
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                recordings.Add(new ProjectRecording(
+                    reader.GetGuid(0),
+                    reader.GetString(1),
+                    DateTime.SpecifyKind(reader.GetDateTime(2), DateTimeKind.Utc),
+                    reader.GetInt16(3) != 1,
+                    reader.IsDBNull(4) ? null : reader.GetString(4)));
+            }
+
+            return (name, recordings);
+        }, cancellationToken);
+
     /// <summary>Whether any recording is in progress.</summary>
     public Task<bool> RecordingInProgressAsync(CancellationToken cancellationToken) =>
         UseAsync(async connection =>
@@ -245,7 +346,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             await using var command = new NpgsqlCommand(
                 "SELECT t.task_id, t.recording_id, t.kind, t.kind_version, t.scope_start_nanoseconds, " +
                 "t.scope_end_nanoseconds, t.after_task_id, a.state, t.stage_profiles::text, t.state, " +
-                "t.cancel_requested, t.queued_utc, t.session_directory, t.rerun_of_task_id FROM analysis_tasks t " +
+                "t.cancel_requested, t.queued_utc, t.session_directory, t.rerun_of_task_id, t.project_id FROM analysis_tasks t " +
                 "LEFT JOIN analysis_tasks a ON a.task_id = t.after_task_id " + where,
                 connection);
             if (taskId is { } id)
@@ -259,7 +360,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             {
                 tasks.Add(new AnalysisTask(
                     reader.GetGuid(0),
-                    reader.GetGuid(1),
+                    reader.IsDBNull(1) ? null : reader.GetGuid(1),
                     reader.GetString(2),
                     reader.GetInt32(3),
                     reader.IsDBNull(4) ? null : reader.GetInt64(4),
@@ -272,20 +373,26 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
                     reader.GetDateTime(11))
                 {
                     SessionDirectory = reader.IsDBNull(12) ? null : reader.GetString(12),
-                    RerunOfTaskId = reader.IsDBNull(13) ? null : reader.GetGuid(13)
+                    RerunOfTaskId = reader.IsDBNull(13) ? null : reader.GetGuid(13),
+                    ProjectId = reader.IsDBNull(14) ? null : reader.GetGuid(14)
                 });
             }
 
             return tasks;
         }, cancellationToken);
 
-    /// <summary>A recording's tasks, newest first, for the player.</summary>
+    /// <summary>
+    /// A recording's tasks with those of its project, newest first, for
+    /// the player (projects.md).
+    /// </summary>
     public Task<IReadOnlyList<AnalysisTaskSummary>> TasksAsync(Guid recordingId, CancellationToken cancellationToken) =>
         UseAsync<IReadOnlyList<AnalysisTaskSummary>>(async connection =>
         {
             await using var command = new NpgsqlCommand(
-                "SELECT task_id, recording_id, kind, state, stage_profiles::text, queued_utc, finished_utc, failure, read_utc " +
-                "FROM analysis_tasks WHERE recording_id = $1 ORDER BY queued_utc DESC, task_id DESC",
+                "SELECT task_id, recording_id, kind, state, stage_profiles::text, queued_utc, finished_utc, failure, read_utc, project_id, session_directory " +
+                "FROM analysis_tasks WHERE recording_id = $1 " +
+                "OR project_id = (SELECT project_id FROM recordings WHERE recording_id = $1) " +
+                "ORDER BY queued_utc DESC, task_id DESC",
                 connection);
             command.Parameters.AddWithValue(recordingId);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -294,14 +401,18 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             {
                 tasks.Add(new AnalysisTaskSummary(
                     reader.GetGuid(0),
-                    reader.GetGuid(1),
+                    reader.IsDBNull(1) ? null : reader.GetGuid(1),
                     reader.GetString(2),
                     reader.GetString(3),
                     Profiles(reader.GetString(4)),
                     reader.GetDateTime(5),
                     reader.IsDBNull(6) ? null : reader.GetDateTime(6),
                     reader.IsDBNull(7) ? null : reader.GetString(7),
-                    reader.IsDBNull(8) ? null : reader.GetDateTime(8)));
+                    reader.IsDBNull(8) ? null : reader.GetDateTime(8))
+                {
+                    ProjectId = reader.IsDBNull(9) ? null : reader.GetGuid(9),
+                    SessionDirectory = reader.IsDBNull(10) ? null : reader.GetString(10)
+                });
             }
 
             return tasks;

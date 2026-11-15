@@ -8,6 +8,28 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Projects
+
+- Projects of several recordings. A new recording goes into the project
+  chosen in the side panel's Project group, remembered between runs;
+  "Projects and recordings..." lists each project's recordings, makes
+  and renames projects, and moves recordings, with their analysis, to
+  another project. Recordings made before this change are in "Default
+  project". See [projects](docs/architecture/projects.md).
+- "Android report for the project, with no model": one report of every
+  recording in the open recording's project. A screen with the same
+  app, title and activity in more than one recording is one screen,
+  its visits named by recording, as "Recording 2, visit 3"; a finding
+  with the same check, level and item on several of its visits is given
+  once, listing each recording's visits with the app's version in each.
+  Recordings that cannot be read are left out, each with the reason.
+  The report of one recording is unchanged.
+- Database migration 0042 lets an analysis task be of a project rather
+  than one recording.
+- The Word document's table columns are now never narrower than their
+  longest word, so headers such as "Number" and times are not split
+  across lines.
+
 ### Android app metadata
 
 - Record Flutter and React Native bundled-library markers for apps seen

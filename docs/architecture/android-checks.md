@@ -102,7 +102,10 @@ them.
    dialog is normally a child state of the underlying view".
 7. **Within a recording first.** Screens are matched within one
    recording. Matching the same screen across recordings waits for the
-   test data model.
+   test data model. Replaced on 2026-11-14 for reports: a project's
+   report matches a screen across its recordings by the same screen
+   key, as the owner chose; the checks themselves stay within each
+   recording. See [projects](projects.md).
 8. **Findings belong to visits (2026-11-12).** A finding is listed
    under the visit it was seen in, as the screen's content can change
    between visits: "I expected the checks to relate to the visit in

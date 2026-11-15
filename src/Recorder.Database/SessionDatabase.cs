@@ -155,7 +155,8 @@ public sealed class SessionDatabase : IAsyncDisposable
         string sessionDirectory,
         RecordingEventWriterOptions? writerOptions = null,
         RecordingFileWriterOptions? fileOptions = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? projectId = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(definition);
@@ -167,7 +168,7 @@ public sealed class SessionDatabase : IAsyncDisposable
             Timings = new WriterTimings()
         };
         writerOptions = writerOptions with { WriterConnections = 1 };
-        var recordingId = await _store.CreateRecordingAsync(ProjectId, definition, cancellationToken)
+        var recordingId = await _store.CreateRecordingAsync(projectId ?? ProjectId, definition, cancellationToken)
             .ConfigureAwait(false);
         await _store.AddRecordingFileAsync(recordingId, RecordingFileName, cancellationToken)
             .ConfigureAwait(false);

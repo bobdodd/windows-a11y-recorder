@@ -164,7 +164,7 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
                 cancellationToken).ConfigureAwait(false);
         }
 
-        var recording = await context.Catalog.RecordingAsync(task.RecordingId, cancellationToken).ConfigureAwait(false);
+        var recording = await context.Catalog.RecordingAsync(task.Recording, cancellationToken).ConfigureAwait(false);
         var attempts = await context.Catalog.AttemptsAsync(task.TaskId, cancellationToken).ConfigureAwait(false);
         var report = SummaryReport.Write(
             recording?.SessionKey ?? Path.GetFileName(Path.TrimEndingDirectorySeparator(session)),
@@ -255,7 +255,7 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
         var task = context.Task;
         var session = task.SessionDirectory ??
             throw new StepFailedException("The task has no session folder, so the recording cannot be read.");
-        var recordingFile = await context.Catalog.RecordingFilePathAsync(task.RecordingId, cancellationToken).ConfigureAwait(false) ??
+        var recordingFile = await context.Catalog.RecordingFilePathAsync(task.Recording, cancellationToken).ConfigureAwait(false) ??
             throw new StepFailedException("This recording's events are in the database's evidence tables, not a recording file; the summary reads recording files only.");
         var filePath = Path.GetFullPath(Path.Combine(session, recordingFile));
         if (!File.Exists(filePath))
@@ -270,7 +270,7 @@ public sealed class RecordingSummaryKind : IAnalysisTaskKind
     /// <summary>The participant's capabilities as last described for the recording.</summary>
     internal static async Task<ParticipantCapabilities> CapabilitiesAsync(AnalysisTaskContext context, CancellationToken cancellationToken)
     {
-        var described = (await context.Catalog.CapabilitiesAsync(context.Task.RecordingId, cancellationToken).ConfigureAwait(false)).FirstOrDefault();
+        var described = (await context.Catalog.CapabilitiesAsync(context.Task.Recording, cancellationToken).ConfigureAwait(false)).FirstOrDefault();
         return described is null ? ParticipantCapabilities.Unknown : new ParticipantCapabilities(described.Description, described.WrittenUtc);
     }
 

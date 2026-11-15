@@ -23,6 +23,7 @@ public static class AnalysisPlayer
         Summary.RecordingSummaryKind.Name => "Recording summary",
         Summary.RecordingSummaryVisionKind.Name => "Summary with vision",
         Android.AndroidReportKind.Name => "Android report",
+        Android.AndroidProjectReportKind.Name => "Android report for the project",
         Android.AndroidSummaryKind.Name => "Android summary",
         _ => kind
     };

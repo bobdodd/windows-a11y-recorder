@@ -5,6 +5,10 @@ namespace Recorder.Coordinator;
 public sealed record RecordingOptions
 {
     public required string OutputRoot { get; init; }
+
+    // The project the recording goes into, or null for the database's
+    // default project (projects.md).
+    public Guid? ProjectId { get; init; }
     public bool CaptureKeyboardAndMouse { get; init; } = true;
     public bool CaptureUiAutomation { get; init; } = true;
     public bool CaptureForegroundWindow { get; init; } = true;

@@ -185,6 +185,12 @@
                 Style="{StaticResource AnalysisMenuItem}"
                 Header="Android summ_ary, with the chosen profile"
                 Click="AndroidSummaryMenuItem_Click" />
+      <!-- Every recording in the open recording's project, taken together
+           (projects.md). -->
+      <MenuItem x:Name="AndroidProjectReportMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="Android report for the _project, with no model"
+                Click="AndroidProjectReportMenuItem_Click" />
       <MenuItem x:Name="CapabilitiesMenuItem"
                 Style="{StaticResource AnalysisMenuItem}"
                 Header="_Describe the participant's capabilities..."
@@ -209,6 +215,26 @@
                 IsCheckable="True"
                 IsChecked="True"
                 Click="BrowserOnlyMenuItem_Click" />
+    </MenuItem>
+    <MenuItem x:Name="ProjectMenu"
+              Header="_Project"
+              MinHeight="44"
+              Margin="0,0,6,0"
+              Padding="14,0"
+              VerticalContentAlignment="Center"
+              Background="#2A2926"
+              BorderBrush="{StaticResource PanelBorder}"
+              BorderThickness="1"
+              FontWeight="SemiBold"
+              Foreground="#CDCCCA">
+      <MenuItem x:Name="ProjectsMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="_Projects and recordings..."
+                Click="ProjectsMenuItem_Click" />
+      <MenuItem x:Name="NewProjectMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="_New project..."
+                Click="NewProjectButton_Click" />
     </MenuItem>
     <MenuItem x:Name="AndroidMenu"
               Header="An_droid"
@@ -270,6 +296,34 @@
                  Choosing the Android device shows its checks panel in place
                  of the desktop's channels. Each choice is a 44 pixel high
                  target. -->
+            <!-- The project new recordings go into (projects.md): chosen
+                 here, remembered between runs, and new projects made here
+                 or in the Projects window. -->
+            <GroupBox Header="Project" Padding="10" Margin="0,0,0,12">
+              <StackPanel>
+                <Label Target="{Binding ElementName=ProjectComboBox}"
+                       Padding="0,0,0,4"
+                       Content="_Project for new recordings:" />
+                <ComboBox x:Name="ProjectComboBox"
+                          MinHeight="44"
+                          VerticalContentAlignment="Center"
+                          AutomationProperties.Name="Project for new recordings"
+                          SelectionChanged="ProjectComboBox_SelectionChanged" />
+                <WrapPanel Margin="0,8,0,0">
+                  <Button x:Name="NewProjectButton"
+                          Style="{StaticResource AnalysisButton}"
+                          Margin="0,0,8,8"
+                          Content="_New project..."
+                          Click="NewProjectButton_Click" />
+                  <Button x:Name="ProjectsButton"
+                          Style="{StaticResource AnalysisButton}"
+                          Margin="0,0,0,8"
+                          Content="Projects and recordings..."
+                          Click="ProjectsMenuItem_Click" />
+                </WrapPanel>
+              </StackPanel>
+            </GroupBox>
+
             <GroupBox Header="Recording target" Padding="10" Margin="0,0,0,12">
               <StackPanel>
                 <RadioButton x:Name="DesktopTargetRadioButton"
@@ -1753,6 +1807,7 @@
               <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
               </Grid.RowDefinitions>
               <local:SelectableText x:Name="WorkerStatusTextBlock"
@@ -1761,7 +1816,16 @@
                          TextWrapping="Wrap"
                          Text="The analysis worker is stopped."
                          AutomationProperties.Name="Analysis worker" />
-              <WrapPanel Grid.Row="1" Margin="0,0,0,8">
+              <!-- The open recording's project; its tasks are listed with
+                   the recording's (projects.md). -->
+              <local:SelectableText x:Name="AnalysisProjectTextBlock"
+                         Grid.Row="1"
+                         Margin="0,0,0,8"
+                         TextWrapping="Wrap"
+                         Text=""
+                         Visibility="Collapsed"
+                         AutomationProperties.Name="Project of this recording" />
+              <WrapPanel Grid.Row="2" Margin="0,0,0,8">
                 <Label Target="{Binding ElementName=ProfileComboBox}"
                        VerticalAlignment="Center"
                        Content="_Profile:" />
@@ -1783,12 +1847,16 @@
                         Style="{StaticResource AnalysisButton}"
                         Content="Queue Android summary"
                         Click="AndroidSummaryMenuItem_Click" />
+                <Button x:Name="QueueAndroidProjectReportButton"
+                        Style="{StaticResource AnalysisButton}"
+                        Content="Queue Android report for the project"
+                        Click="AndroidProjectReportMenuItem_Click" />
                 <Button x:Name="RefreshAnalysisButton"
                         Style="{StaticResource AnalysisButton}"
                         Content="_Read the queue again"
                         Click="RefreshAnalysisButton_Click" />
               </WrapPanel>
-              <ScrollViewer Grid.Row="2"
+              <ScrollViewer Grid.Row="3"
                             VerticalScrollBarVisibility="Auto"
                             HorizontalScrollBarVisibility="Disabled">
                 <StackPanel x:Name="AnalysisTasksPanel"

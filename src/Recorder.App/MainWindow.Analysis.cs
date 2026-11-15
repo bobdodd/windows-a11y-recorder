@@ -85,6 +85,9 @@ public partial class MainWindow
     private void BindAnalysis()
     {
         _analysisRecordingId = null;
+        _openProjectId = null;
+        _projectShownFor = null;
+        AnalysisProjectTextBlock.Visibility = Visibility.Collapsed;
         _analysisSessionDirectory = _playbackArchive?.SessionDirectory;
         _analysisTasks = null;
         _analysisTasksShown = "";
@@ -113,6 +116,10 @@ public partial class MainWindow
         AndroidReportMenuItem.IsEnabled = phone;
         QueueAndroidSummaryButton.IsEnabled = phone && ProfileComboBox.Items.Count > 0;
         AndroidSummaryMenuItem.IsEnabled = QueueAndroidSummaryButton.IsEnabled;
+        // The project's report needs only the open recording's project;
+        // the task leaves out its recordings with no phone screens.
+        QueueAndroidProjectReportButton.IsEnabled = open && _openProjectId is not null;
+        AndroidProjectReportMenuItem.IsEnabled = QueueAndroidProjectReportButton.IsEnabled;
         VisionMenuItem.IsEnabled = open && AnalysisPlayer.DefaultProfile(_analysisSettings, ModelCapabilities.Image) is not null;
         CapabilitiesMenuItem.IsEnabled = open;
     }
@@ -148,6 +155,11 @@ public partial class MainWindow
             {
                 ShowTasks([], "This recording is not in the catalog, so it cannot be analysed.");
                 return;
+            }
+
+            if (_projectShownFor != recording)
+            {
+                await ShowOpenProjectAsync(catalog, recording);
             }
 
             var tasks = await catalog.TasksAsync(recording, CancellationToken.None);
@@ -284,7 +296,7 @@ public partial class MainWindow
         Add(task.State == AnalysisTaskStates.Failed ? "Why it failed" : "Open result", "open",
             task.State == AnalysisTaskStates.Failed ? $"Why {label} failed" : $"Open the result of {label}",
             task.State is AnalysisTaskStates.Done or AnalysisTaskStates.Failed, () => OpenResultAsync(task));
-        if (task.Kind is AndroidReportKind.Name or AndroidSummaryKind.Name)
+        if (task.Kind is AndroidReportKind.Name or AndroidSummaryKind.Name or AndroidProjectReportKind.Name)
         {
             Add("Open in Word", "word", $"Open the Word document of {label}", task.State == AnalysisTaskStates.Done, () => OpenInWordAsync(task));
         }
@@ -384,7 +396,7 @@ public partial class MainWindow
     // files with (android-report.md, "Opening the report").
     private async Task OpenInWordAsync(AnalysisTaskSummary task)
     {
-        if (AnalysisCatalogOrNull is not { } catalog || _analysisSessionDirectory is not { } session)
+        if (AnalysisCatalogOrNull is not { } catalog || ReportsFolder(task) is not { } session)
         {
             return;
         }
@@ -484,12 +496,22 @@ public partial class MainWindow
     private Task RunAgainAsync(AnalysisTaskSummary task, bool reuse)
     {
         Guid? rerunOf = reuse ? task.TaskId : null;
+        if (task.ProjectId is not null)
+        {
+            return QueueProjectAsync(task.Kind, task.StageProfiles, rerunOf);
+        }
+
         return task.Kind == RecordingSummaryVisionKind.Name ? QueueVisionAsync(rerunOf) : QueueAsync(task.Kind, task.StageProfiles, rerunOfTaskId: rerunOf);
     }
 
+    // A recording's reports are in its session folder, as the player has
+    // it open; a project's in the recordings' folder it was queued with.
+    private string? ReportsFolder(AnalysisTaskSummary task) =>
+        task.ProjectId is not null ? task.SessionDirectory : _analysisSessionDirectory;
+
     private async Task OpenResultAsync(AnalysisTaskSummary task)
     {
-        if (AnalysisCatalogOrNull is not { } catalog || _analysisSessionDirectory is not { } session)
+        if (AnalysisCatalogOrNull is not { } catalog || ReportsFolder(task) is not { } session)
         {
             return;
         }

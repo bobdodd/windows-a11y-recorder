@@ -189,6 +189,7 @@ public partial class MainWindow : Window
             OpenRecordingButton.IsEnabled = _database is not null;
         }
 
+        await ShowProjectChoicesAsync();
         await StartAnalysisAsync();
         OfferModelSetup();
     }
@@ -268,6 +269,7 @@ public partial class MainWindow : Window
             var status = await _coordinator.StartAsync(new RecordingOptions
             {
                 OutputRoot = OutputRootTextBox.Text,
+                ProjectId = SelectedProjectId,
                 CaptureKeyboardAndMouse = !android && InputCheckBox.IsChecked == true,
                 CaptureUiAutomation = !android && AutomationCheckBox.IsChecked == true,
                 CaptureForegroundWindow = !android && WindowCheckBox.IsChecked == true,
@@ -1856,6 +1858,9 @@ public partial class MainWindow : Window
         CompanionButton.IsEnabled = enabled && !_companionSetupRunning;
         OutputRootTextBox.IsEnabled = enabled;
         BrowseButton.IsEnabled = enabled;
+        // The project is chosen before a recording starts.
+        ProjectComboBox.IsEnabled = enabled && _database is not null;
+        NewProjectButton.IsEnabled = enabled && _database is not null;
     }
 
     private bool AnyChannelSelected() =>

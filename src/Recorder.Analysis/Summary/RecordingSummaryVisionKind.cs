@@ -1025,7 +1025,7 @@ public sealed partial class RecordingSummaryVisionKind : IAnalysisTaskKind
             },
             cancellationToken).ConfigureAwait(false);
 
-        var recording = await context.Catalog.RecordingAsync(task.RecordingId, cancellationToken).ConfigureAwait(false);
+        var recording = await context.Catalog.RecordingAsync(task.Recording, cancellationToken).ConfigureAwait(false);
         var attempts = await context.Catalog.AttemptsAsync(task.TaskId, cancellationToken).ConfigureAwait(false);
         var report = LayeredReport.Write(
             recording?.SessionKey ?? Path.GetFileName(Path.TrimEndingDirectorySeparator(session)),

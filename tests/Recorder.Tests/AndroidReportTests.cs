@@ -418,11 +418,109 @@ public sealed class AndroidReportTests : IDisposable
         Assert.Contains(second, references);
     }
 
+    [Fact]
+    public void AProjectsReport_GroupsTheSameScreenAcrossRecordings_AndEachFindingsVisitsWithTheirVersions()
+    {
+        var (one, guidance, _) = Recording(sessionKey: "first", version: "1.0", within: "first");
+        var (two, _, _) = Recording(returns: true, sessionKey: "second", version: "1.1", within: "second");
+        var evidence = AndroidEvidence.Build(
+            [new ReportPart(one.Screens, one.Audit, one.Device), new ReportPart(two.Screens, two.Audit, two.Device)], guidance);
+        var project = new AndroidProjectInput("Checkout", [one, two], ["third: it has no recording file."]);
+        var markdown = AndroidReport.Write(project, guidance, evidence, Path.Combine(_folder, "pictures"), "pictures", DateTime.UtcNow);
+
+        // Settings in both recordings is one screen; the launcher is the second.
+        Assert.Equal(2, evidence.Recordings);
+        Assert.Equal(2, evidence.Screens.Count);
+        var settings = evidence.Screens[0];
+        Assert.Equal((1, "Settings", 2, 3), (settings.Number, settings.Name, settings.Members.Count, settings.Visits.Count));
+        Assert.Same(settings, evidence.ScreenOf(two.Screens.Screens.Single(screen => screen.Package == Settings)));
+        Assert.Equal(2, evidence.RecordingOf(settings.Visits[1]));
+        Assert.Equal("recording 2, visit 3", evidence.VisitName(settings.Visits[2]));
+
+        // The touch target is one finding, seen on all three visits.
+        var repeated = Assert.Single(evidence.Repeated(settings));
+        Assert.Equal(PhoneCheckNames.TouchTarget, repeated.Finding.Check);
+        Assert.Equal(settings.Visits, repeated.Visits.Select(on => on.Visit));
+
+        var document = ReportDocument.Parse(markdown);
+        Assert.Equal("Android accessibility report: project Checkout", document.Title);
+        Assert.DoesNotContain('\u2014', markdown);
+        var headings = document.Blocks.Where(block => block.Kind == ReportBlockKind.Heading).Select(block => (block.Level, block.Text)).ToList();
+        Assert.Contains((2, "About this project"), headings);
+        Assert.Contains((3, "The recordings"), headings);
+        Assert.Single(headings, heading => heading.Text.StartsWith("Screen 1: Settings", StringComparison.Ordinal));
+        Assert.Contains((3, "Recording 1, visit 1, 00:00:01.000 to 00:00:10.000"), headings);
+        Assert.Contains((3, "Recording 2, visit 3, 00:00:08.000 to 00:00:10.000"), headings);
+        Assert.Single(headings, heading => heading.Text == repeated.Heading);
+
+        var recordings = document.Blocks.Single(block => block.Kind == ReportBlockKind.Table && block.Rows[0][0] == "Number");
+        Assert.Equal([["1", "first"], ["2", "second"]], recordings.Rows.Skip(1).Select(row => row.Take(2).ToArray()));
+
+        // When it was seen, by recording and visit, with the app's version in each.
+        var table = document.Blocks.Single(block => block.Kind == ReportBlockKind.Table && block.Rows.Any(row => row[0] == "Item" && row[1].StartsWith("Button", StringComparison.Ordinal)));
+        var seen = table.Rows.Single(row => row[0] == "Seen")[1];
+        var references = repeated.Visits.Select(on => on.Reference).ToList();
+        Assert.Equal(
+            $"On 3 visits: recording 1, visit 1 (version 1.0), twice, in 1 picture, at 00:00:01.500 [{references[0]}]; " +
+            $"recording 2, visit 1 (version 1.1), twice, in 1 picture, at 00:00:01.500 [{references[1]}]; " +
+            $"recording 2, visit 3 (version 1.1), once, at 00:00:08.500 [{references[2]}]",
+            seen);
+        var about = document.Blocks.Single(block => block.Kind == ReportBlockKind.Table && block.Rows.Any(row => row[0] == "Project"));
+        Assert.StartsWith("Recording 1: version 1.0 (code 1), targets API 36; Recording 2: version 1.1 (code 1), targets API 36.",
+            about.Rows.Single(row => row[0] == "App " + Settings)[1], StringComparison.Ordinal);
+
+        // Each recording's pictures are named apart, and the evidence by recording.
+        var images = document.Blocks.Where(block => block.Kind == ReportBlockKind.Image).Select(block => block.Source!).ToList();
+        Assert.Contains("pictures/recording-01-visit-0001-1500000000.png", images);
+        Assert.Contains("pictures/recording-02-visit-0001-1500000000.png", images);
+        Assert.Equal(images.Count, images.Distinct(StringComparer.Ordinal).Count());
+        Assert.All(images, image => Assert.True(File.Exists(Path.Combine(_folder, image))));
+        Assert.Equal("Recording 2, 00:00:08.500", document.Evidence[references[2]].Time);
+        Assert.StartsWith("The app com.android.settings. In recording 1, version 1.0", document.Evidence["E1"].Text, StringComparison.Ordinal);
+        Assert.Contains("| Ref | Recording and time | Evidence |", markdown, StringComparison.Ordinal);
+        Assert.Contains("- Left out: third: it has no recording file.", markdown, StringComparison.Ordinal);
+
+        // The client's Word document of the project is valid too.
+        var client = AndroidReport.Write(project, guidance, evidence, Path.Combine(_folder, "pictures"), "pictures", DateTime.UtcNow, ReportAudience.Client);
+        var bytes = WordReport.Write(client, _folder, AndroidReport.Labels);
+        if (Environment.GetEnvironmentVariable("RECORDER_KEEP_PROJECT_DOCX") is { Length: > 0 } keep)
+        {
+            File.WriteAllBytes(keep, bytes);
+        }
+
+        using var stream = new MemoryStream(bytes);
+        using var word = WordprocessingDocument.Open(stream, false);
+        var errors = new OpenXmlValidator(DocumentFormat.OpenXml.FileFormatVersions.Office2016)
+            .Validate(word, TestContext.Current.CancellationToken)
+            .Select(error => error.Description + " at " + error.Path?.XPath);
+        Assert.Equal("", string.Join("\n", errors));
+    }
+
+    [Fact]
+    public void ARecordingsOwnReport_IsUnchanged_ByTheProjectsGrouping()
+    {
+        var (input, guidance, evidence) = Recording(returns: true);
+        var alone = AndroidEvidence.Build([new ReportPart(input.Screens, input.Audit, input.Device)], guidance);
+        var pictures = Path.Combine(_folder, "pictures");
+        var written = new DateTime(2026, 11, 14, 12, 0, 0, DateTimeKind.Utc);
+
+        var markdown = AndroidReport.Write(input, guidance, evidence, null, pictures, "pictures", written);
+
+        Assert.Equal(markdown, AndroidReport.Write(input, guidance, alone, null, pictures, "pictures", written));
+        Assert.Equal(1, evidence.Recordings);
+        Assert.DoesNotContain("Recording 1", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("recording-01-", markdown, StringComparison.Ordinal);
+        Assert.Contains("| Ref | Time | Evidence |", markdown, StringComparison.Ordinal);
+    }
+
     // The Settings window taken at 1 second and again at 3, its button
     // moved down 10 pixels, listed at 5 without being taken; a white frame
     // of the phone at 1.5 seconds.
-    private (AndroidReportInput Input, AndroidGuidance Guidance, AndroidEvidence Evidence) Recording(bool returns = false)
+    private (AndroidReportInput Input, AndroidGuidance Guidance, AndroidEvidence Evidence) Recording(
+        bool returns = false, string sessionKey = "s", string? version = null, string? within = null)
     {
+        var folder = within is null ? _folder : Path.Combine(_folder, within);
+        Directory.CreateDirectory(folder);
         List<(long Time, string Channel, string EventType, object Payload)> records =
         [
             (At(0.5), AndroidCompanionRecords.DisplayChannel, AndroidCompanionRecords.DisplayEventType,
@@ -444,21 +542,21 @@ public sealed class AndroidReportTests : IDisposable
         foreach (var (time, channel, eventType, payload) in records)
         {
             sequence++;
-            var record = RecorderEventFactory.Create("s", Collector, channel, sequence, time, eventType, payload);
+            var record = RecorderEventFactory.Create(sessionKey, Collector, channel, sequence, time, eventType, payload);
             recording.Add(time, record);
             builder.Add((long)sequence, record);
         }
 
-        var archiveBuilder = new SessionPlaybackArchiveBuilder(_folder, retainEvents: false);
+        var archiveBuilder = new SessionPlaybackArchiveBuilder(folder, retainEvents: false);
         archiveBuilder.AddIndex(builder.Build());
         var started = DateTimeOffset.UtcNow;
         var archive = archiveBuilder.Build(new SessionManifest(
-            "1.1", "s", "completed", started, started.AddSeconds(10), 10 * Second, 10_000_000, 1,
+            "1.1", sessionKey, "completed", started, started.AddSeconds(10), 10 * Second, 10_000_000, 1,
             "Windows", ".NET", "X64",
             new SessionRecordingConfiguration(true, true, true, false, 5, true, true),
             [], [], 1, 0, null));
 
-        var framePath = Path.Combine(_folder, "frame.png");
+        var framePath = Path.Combine(folder, "frame.png");
         File.WriteAllBytes(framePath, ReportPictures.Png(White(1080, 2404)));
         List<SessionVideoFrame> frames = [new SessionVideoFrame(At(1.5), "frame.png", framePath, 1080, 2404)];
         if (returns)
@@ -468,23 +566,37 @@ public sealed class AndroidReportTests : IDisposable
         }
 
         var pictures = PhoneSnapshotPictures.OfFrames(frames, archive.PhoneAccessibility);
-        var device = Device();
+        var device = Device(version);
         var tree = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, device, recording, pictures, TestContext.Current.CancellationToken);
         var audit = AndroidAudit.Of(tree, PhoneAuditLevel.AA, 5, null, null, archive.PhoneScreens, device);
         var guidance = AndroidGuidance.Load();
         var evidence = AndroidEvidence.Build(archive.PhoneScreens, audit, guidance, device);
-        var input = new AndroidReportInput("s", 10 * Second, archive.PhoneScreens, device, audit, pictures,
-            archive.PhoneAccessibility.ScreenAt, PhonePictures.Load, ["the phone's video, 1 frame"], null);
+        var input = new AndroidReportInput(sessionKey, 10 * Second, archive.PhoneScreens, device, audit, pictures,
+            archive.PhoneAccessibility.ScreenAt, PhonePictures.Load, ["the phone's video, 1 frame"], null)
+        {
+            StartedUtc = started,
+        };
         return (input, guidance, evidence);
     }
 
-    private static PhoneDeviceTimeline Device() =>
-        new(
-            [(0L, AndroidDeviceRecords.DensityEventType, JsonSerializer.SerializeToElement(
+    // The app's version, when given, read at the stop as the recorder does.
+    private static PhoneDeviceTimeline Device(string? version = null)
+    {
+        List<(long, string, JsonElement)> records =
+        [
+            (0L, AndroidDeviceRecords.DensityEventType, JsonSerializer.SerializeToElement(
                 new AndroidDisplayDensity("58191FDCQ00ABZ", AndroidDeviceRecords.StartReason, 390, null, [], null, 0, 0),
-                JsonSerializerOptions.Web))],
-            [],
-            10 * Second);
+                JsonSerializerOptions.Web)),
+        ];
+        if (version is not null)
+        {
+            records.Add((10 * Second, AndroidDeviceRecords.AppVersionsEventType, JsonSerializer.SerializeToElement(
+                new AndroidAppVersions("58191FDCQ00ABZ", [new AndroidAppVersion(Settings, true, version, 1, 24, 36, null, null, [])], [], 10 * Second, 10 * Second),
+                JsonSerializerOptions.Web)));
+        }
+
+        return new PhoneDeviceTimeline(records, [], 10 * Second);
+    }
 
     private static JsonNode Items(int moved) =>
         JsonSerializer.SerializeToNode(

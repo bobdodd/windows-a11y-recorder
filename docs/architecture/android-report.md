@@ -30,6 +30,10 @@ summary reports and vision. So the findings, their pictures and their
 text are the same in both reports, and only the summaries in the second
 are a model's.
 
+A report can also cover every recording in a project, with a screen
+seen in more than one recording given once; see
+[projects](projects.md).
+
 ## Two task kinds
 
 Both are queued from the player's Analysis menu or the Analysis panel,

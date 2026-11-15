@@ -37,6 +37,12 @@ public sealed record CollectorRegistration(
     CollectorLifecycleState LifecycleState,
     CollectorHealthState HealthState);
 
+/// <summary>A project as the app lists it.</summary>
+public sealed record ProjectSummary(Guid ProjectId, string Name, DateTime CreatedUtc, int Recordings);
+
+/// <summary>One of a project's recordings as the app lists it.</summary>
+public sealed record ProjectRecordingSummary(Guid RecordingId, string SessionKey, DateTime StartedUtc, long? DurationNanoseconds, RecordingStatus Status);
+
 public sealed record RecordingCompletion(
     RecordingStatus Status,
     DateTimeOffset? EndedUtc,
@@ -67,6 +73,110 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
             connection);
         command.Parameters.AddWithValue(name);
         return (Guid)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+    }
+
+    /// <summary>The projects, by name, each with how many recordings it has (projects.md).</summary>
+    public async Task<IReadOnlyList<ProjectSummary>> ProjectsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = new NpgsqlCommand(
+            "SELECT p.project_id, p.name, p.created_utc, count(r.recording_id) FROM projects p " +
+            "LEFT JOIN recordings r ON r.project_id = p.project_id " +
+            "GROUP BY p.project_id, p.name, p.created_utc ORDER BY lower(p.name), p.name",
+            connection);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        var projects = new List<ProjectSummary>();
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            projects.Add(new ProjectSummary(reader.GetGuid(0), reader.GetString(1),
+                DateTime.SpecifyKind(reader.GetDateTime(2), DateTimeKind.Utc), (int)reader.GetInt64(3)));
+        }
+
+        return projects;
+    }
+
+    /// <summary>
+    /// Adds a project, or returns null when one has that name already,
+    /// names compared as typed with spaces at either end removed.
+    /// </summary>
+    public async Task<Guid?> CreateProjectAsync(string name, CancellationToken cancellationToken = default)
+    {
+        var trimmed = ProjectName(name);
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = new NpgsqlCommand(
+            "INSERT INTO projects (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING project_id",
+            connection);
+        command.Parameters.AddWithValue(trimmed);
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as Guid?;
+    }
+
+    /// <summary>Renames a project; false when another project has that name, or the project is gone.</summary>
+    public async Task<bool> RenameProjectAsync(Guid projectId, string name, CancellationToken cancellationToken = default)
+    {
+        var trimmed = ProjectName(name);
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = new NpgsqlCommand(
+            "UPDATE projects SET name = $2 WHERE project_id = $1 " +
+            "AND NOT EXISTS (SELECT 1 FROM projects WHERE name = $2 AND project_id <> $1)",
+            connection);
+        command.Parameters.AddWithValue(projectId);
+        command.Parameters.AddWithValue(trimmed);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 1;
+    }
+
+    /// <summary>A project's recordings, in the order they were made.</summary>
+    public async Task<IReadOnlyList<ProjectRecordingSummary>> RecordingsOfAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = new NpgsqlCommand(
+            "SELECT recording_id, session_key, started_utc, duration_nanoseconds, recording_status_id FROM recordings " +
+            "WHERE project_id = $1 ORDER BY started_utc, session_key",
+            connection);
+        command.Parameters.AddWithValue(projectId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        var recordings = new List<ProjectRecordingSummary>();
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            recordings.Add(new ProjectRecordingSummary(reader.GetGuid(0), reader.GetString(1),
+                DateTime.SpecifyKind(reader.GetDateTime(2), DateTimeKind.Utc),
+                reader.IsDBNull(3) ? null : reader.GetInt64(3), (RecordingStatus)reader.GetInt16(4)));
+        }
+
+        return recordings;
+    }
+
+    /// <summary>Moves recordings to a project, with their analysis; how many were moved.</summary>
+    public async Task<int> MoveRecordingsAsync(IReadOnlyCollection<Guid> recordingIds, Guid projectId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(recordingIds);
+        if (recordingIds.Count == 0)
+        {
+            return 0;
+        }
+
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = new NpgsqlCommand(
+            "UPDATE recordings SET project_id = $2 WHERE recording_id = ANY($1) AND project_id <> $2",
+            connection);
+        command.Parameters.AddWithValue(recordingIds.ToArray());
+        command.Parameters.AddWithValue(projectId);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The project a recording is in, by its session key, or null when it is not in the catalog.</summary>
+    public async Task<Guid?> ProjectOfAsync(string sessionKey, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = new NpgsqlCommand("SELECT project_id FROM recordings WHERE session_key = $1", connection);
+        command.Parameters.AddWithValue(sessionKey);
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as Guid?;
+    }
+
+    private static string ProjectName(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        return name.Trim();
     }
 
     /// <summary>

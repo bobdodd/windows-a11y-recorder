@@ -1,0 +1,225 @@
+using System.IO;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using Npgsql;
+using Recorder.Analysis;
+using Recorder.Analysis.Android;
+using Recorder.Database;
+using Recorder.Session;
+
+namespace Recorder.App;
+
+// Projects with more than one recording (projects.md; owner, 2026-11-14):
+// the project new recordings go into, chosen in the side panel and
+// remembered between runs; new projects; the Projects window; and the
+// Android report of every recording in the open recording's project.
+public partial class MainWindow
+{
+    private Guid? _openProjectId;
+    private Guid? _projectShownFor;
+    private bool _showingProjects;
+
+    // The project last chosen, kept beside the player's layout.
+    private static string ProjectChoicePath =>
+        Path.Combine(Path.GetDirectoryName(PlayerLayout.DefaultPath) ?? ".", "project.txt");
+
+    private Guid? SelectedProjectId => (ProjectComboBox.SelectedItem as ComboBoxItem)?.Tag as Guid?;
+
+    // Lists the projects, choosing the one asked for, else the one last
+    // chosen, else the database's default project.
+    private async Task ShowProjectChoicesAsync(Guid? select = null)
+    {
+        if (_database is null)
+        {
+            ProjectComboBox.IsEnabled = false;
+            NewProjectButton.IsEnabled = false;
+            ProjectsButton.IsEnabled = false;
+            return;
+        }
+
+        IReadOnlyList<ProjectSummary> projects;
+        try
+        {
+            projects = await _database.Store.ProjectsAsync();
+        }
+        catch (NpgsqlException exception)
+        {
+            StatusTextBlock.Text = "The projects could not be read: " + exception.Message;
+            return;
+        }
+
+        select ??= SelectedProjectId ?? RememberedProject() ?? _database.ProjectId;
+        _showingProjects = true;
+        try
+        {
+            ProjectComboBox.Items.Clear();
+            foreach (var project in projects)
+            {
+                var item = new ComboBoxItem { Content = project.Name, Tag = project.ProjectId, MinHeight = 44, VerticalContentAlignment = VerticalAlignment.Center };
+                AutomationProperties.SetName(item, project.Name);
+                ProjectComboBox.Items.Add(item);
+            }
+
+            ProjectComboBox.SelectedItem = ProjectComboBox.Items.OfType<ComboBoxItem>().FirstOrDefault(item => (Guid)item.Tag == select)
+                ?? ProjectComboBox.Items.OfType<ComboBoxItem>().FirstOrDefault(item => (Guid)item.Tag == _database.ProjectId);
+        }
+        finally
+        {
+            _showingProjects = false;
+        }
+
+        var idle = !IsRecording && !_transitioning;
+        ProjectComboBox.IsEnabled = idle;
+        NewProjectButton.IsEnabled = idle;
+        ProjectsButton.IsEnabled = true;
+    }
+
+    private static Guid? RememberedProject()
+    {
+        try
+        {
+            return File.Exists(ProjectChoicePath) && Guid.TryParse(File.ReadAllText(ProjectChoicePath).Trim(), out var id) ? id : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private void ProjectComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_showingProjects)
+        {
+            RememberProject();
+        }
+    }
+
+    private void RememberProject()
+    {
+        if (SelectedProjectId is not { } project)
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ProjectChoicePath)!);
+            File.WriteAllText(ProjectChoicePath, project.ToString("D"));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            StatusTextBlock.Text = "The project chosen could not be remembered: " + exception.Message;
+        }
+    }
+
+    private async void NewProjectButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_database is null)
+        {
+            return;
+        }
+
+        var dialog = new ProjectNameDialog(this, "New project", "");
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            if (await _database.Store.CreateProjectAsync(dialog.ProjectName) is not { } created)
+            {
+                MessageBox.Show(this, $"A project named {dialog.ProjectName} already exists. Choose it from the list, or give the new project another name.",
+                    "New project", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            // A new project is chosen for the recordings that follow.
+            await ShowProjectChoicesAsync(created);
+            RememberProject();
+            StatusTextBlock.Text = $"The project {dialog.ProjectName} was made. New recordings go into it.";
+            _busy.AnnounceCompleted(StatusTextBlock.Text);
+        }
+        catch (NpgsqlException exception)
+        {
+            StatusTextBlock.Text = "The project could not be made: " + exception.Message;
+        }
+    }
+
+    private async void ProjectsMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (_database is null)
+        {
+            MessageBox.Show(this, DatabaseUnavailableText, "Projects and recordings", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var window = new ProjectsWindow(this, _database.Store, _openProjectId ?? SelectedProjectId);
+        window.ShowDialog();
+        if (window.Changed)
+        {
+            await ShowProjectChoicesAsync();
+            _projectShownFor = null;
+            await ReadAnalysisAsync();
+        }
+    }
+
+    // The open recording's project, shown in the Analysis tab, whose tasks
+    // are listed with the recording's.
+    private async Task ShowOpenProjectAsync(AnalysisCatalog catalog, Guid recording)
+    {
+        _projectShownFor = recording;
+        var project = await catalog.ProjectOfAsync(recording, CancellationToken.None);
+        _openProjectId = project?.ProjectId;
+        if (project is not { } found)
+        {
+            AnalysisProjectTextBlock.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var all = await catalog.ProjectAsync(found.ProjectId, CancellationToken.None);
+        var count = all?.Recordings.Count ?? 0;
+        AnalysisProjectTextBlock.Text = $"This recording is in the project {found.Name}, with {count} {(count == 1 ? "recording" : "recordings")}. " +
+            "The project's tasks are listed with this recording's.";
+        AnalysisProjectTextBlock.Visibility = Visibility.Visible;
+        UpdateAnalysisControls();
+    }
+
+    // Every recording in the open recording's project, taken together; the
+    // report is written under the recordings' folder, in Projects.
+    private async void AndroidProjectReportMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        ShowAnalysisTab();
+        await QueueProjectAsync(AndroidProjectReportKind.Name, new Dictionary<string, string>());
+    }
+
+    private async Task QueueProjectAsync(string kind, IReadOnlyDictionary<string, string> profiles, Guid? rerunOfTaskId = null)
+    {
+        if (AnalysisCatalogOrNull is not { } catalog || _openProjectId is not { } project || _analysisSessionDirectory is null)
+        {
+            ShowAnalysisStatus("Open a recording that is in the catalog to queue its project's analysis.");
+            return;
+        }
+
+        var folder = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(_analysisSessionDirectory)));
+        if (folder is null)
+        {
+            ShowAnalysisStatus("The recordings' folder could not be found from this recording's folder.");
+            return;
+        }
+
+        try
+        {
+            await catalog.QueueProjectTaskAsync(project, kind, KindVersion(kind), profiles, folder, rerunOfTaskId, CancellationToken.None);
+            ShowAnalysisStatus($"{AnalysisPlayer.KindName(kind)} queued; it uses no model. It reads the project's recordings from {folder}.");
+            _busy.AnnounceCompleted(AnalysisStatusTextBlock.Text);
+            StartWorker();
+            await ReadAnalysisAsync();
+        }
+        catch (NpgsqlException exception)
+        {
+            ShowAnalysisStatus($"The task could not be queued: {exception.Message}");
+        }
+    }
+}

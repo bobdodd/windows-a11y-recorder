@@ -284,6 +284,55 @@ public static partial class WordReport
 
         private static Text Text(string text) => new(text) { Space = SpaceProcessingModeValues.Preserve };
 
+        // The twentieths of a point a character of the tables' 10 point
+        // Calibri takes at most, bold, and a cell's left and right margins.
+        private const int CharacterWidth = 125;
+        private const int CellMargins = 260;
+
+        // Each column's share of the table's 6.5 inches, in fiftieths of a
+        // percent, by its weight, but no column narrower than its longest
+        // word, so that no word, such as a header or a time, is split
+        // across lines while another column has room to spare. Where the
+        // longest words cannot all fit, each column is shared by its own.
+        private static List<int> Widths(IReadOnlyList<IReadOnlyList<string>> rows, int columns, IReadOnlyList<int> weights)
+        {
+            var least = Enumerable.Range(0, columns)
+                .Select(column => rows.Max(row => column < row.Count
+                    ? row[column].Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(word => word.Length).DefaultIfEmpty(0).Max()
+                    : 0))
+                .Select(word => (int)Math.Ceiling(5000.0 * ((word * CharacterWidth) + CellMargins) / 9360))
+                .ToList();
+            List<int> widths;
+            if (least.Sum() >= 5000)
+            {
+                widths = [.. least.Select(width => 5000 * width / least.Sum())];
+            }
+            else
+            {
+                // Columns given their least keep it; the rest share what is left by weight.
+                var fixedColumns = new HashSet<int>();
+                double[] shares;
+                while (true)
+                {
+                    var left = 5000 - fixedColumns.Sum(column => least[column]);
+                    var weighed = Enumerable.Range(0, columns).Where(column => !fixedColumns.Contains(column)).Sum(column => weights[column]);
+                    shares = [.. Enumerable.Range(0, columns).Select(column => fixedColumns.Contains(column) ? least[column] : (double)left * weights[column] / weighed)];
+                    var narrow = Enumerable.Range(0, columns).Where(column => !fixedColumns.Contains(column) && shares[column] < least[column]).ToList();
+                    if (narrow.Count == 0)
+                    {
+                        break;
+                    }
+
+                    fixedColumns.UnionWith(narrow);
+                }
+
+                widths = [.. shares.Select(share => (int)Math.Floor(share))];
+            }
+
+            widths[^1] += 5000 - widths.Sum();
+            return widths;
+        }
+
         private Table Table(IReadOnlyList<IReadOnlyList<string>> rows)
         {
             var columns = rows.Count == 0 ? 1 : rows.Max(row => row.Count);
@@ -301,8 +350,7 @@ public static partial class WordReport
             var weights = Enumerable.Range(0, columns)
                 .Select(column => Math.Clamp(rows.Max(row => column < row.Count ? row[column].Length : 0), 6, 60))
                 .ToList();
-            var widths = weights.Select(weight => 5000 * weight / weights.Sum()).ToList();
-            widths[^1] += 5000 - widths.Sum();
+            var widths = Widths(rows, columns, weights);
             var grid = new TableGrid();
             for (var column = 0; column < columns; column++)
             {
