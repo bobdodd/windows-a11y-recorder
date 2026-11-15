@@ -75,6 +75,13 @@ public sealed class AnalysisTaskContext
     /// </summary>
     public Task<AcceptedStep> RunStepAsync(string stepKey, ModelRequest request, CancellationToken cancellationToken) =>
         _worker.RunStepAsync(Task, stepKey, request, cancellationToken);
+
+    /// <summary>
+    /// Why this task may not use a model, or null when it may. A check that
+    /// needs a model is listed as not run, with this reason, rather than
+    /// asked (analysis-runner.md, "Turning AI analysis off").
+    /// </summary>
+    public string? AiOff => _worker.AiOff(Task);
 }
 
 /// <summary>The worker's timing.</summary>
@@ -132,6 +139,7 @@ public sealed class AnalysisWorker
     private readonly ILocalServerHost? _localServer;
     private readonly AnalysisWorkerOptions _options;
     private readonly Action<string> _status;
+    private readonly Func<bool> _aiAnalysisOn;
     private readonly Dictionary<Guid, string> _waitingFor = [];
     private IReadOnlyList<AnalysisTask> _runnable = [];
     private ModelProfile? _loaded;
@@ -144,7 +152,8 @@ public sealed class AnalysisWorker
         IModelEndpoint endpoint,
         ILocalServerHost? localServer = null,
         AnalysisWorkerOptions? options = null,
-        Action<string>? status = null)
+        Action<string>? status = null,
+        Func<bool>? aiAnalysisOn = null)
     {
         ArgumentNullException.ThrowIfNull(kinds);
         Catalog = catalog;
@@ -154,7 +163,19 @@ public sealed class AnalysisWorker
         _localServer = localServer;
         _options = options ?? AnalysisWorkerOptions.Default;
         _status = status ?? (_ => { });
+        _aiAnalysisOn = aiAnalysisOn ?? (() => settings.AiAnalysis);
     }
+
+    /// <summary>
+    /// Why a task may not use a model now, or null when it may: it was
+    /// queued with AI analysis off, or the setting is off now, as read at
+    /// each step, so that turning it off stops tasks already queued
+    /// (analysis-runner.md, "Turning AI analysis off").
+    /// </summary>
+    internal string? AiOff(AnalysisTask task) =>
+        !task.AiAnalysis ? "AI analysis was off for this task when it was queued, so no model was asked."
+        : !_aiAnalysisOn() ? "AI analysis is off in the analysis settings, so no model was asked."
+        : null;
 
     public AnalysisCatalog Catalog { get; }
 
@@ -289,6 +310,13 @@ public sealed class AnalysisWorker
         ModelRequest request,
         CancellationToken cancellationToken)
     {
+        // Off means no model at all (owner, 2026-11-15): no request, and no
+        // earlier answer reused, before anything else, trials included.
+        if (AiOff(task) is { } off)
+        {
+            throw new StepFailedException(off);
+        }
+
         if (_trial is { } trial)
         {
             return await TrialStepAsync(task, stepKey, request, trial, cancellationToken).ConfigureAwait(false);

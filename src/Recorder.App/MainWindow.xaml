@@ -215,6 +215,16 @@
                 IsCheckable="True"
                 IsChecked="True"
                 Click="BrowserOnlyMenuItem_Click" />
+      <!-- On by default; saved in the analysis settings file as
+           "aiAnalysis". Off, no model is used at all, cloud or local, and
+           the summaries cannot be queued (analysis-runner.md, "Turning AI
+           analysis off"). -->
+      <MenuItem x:Name="AiAnalysisMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="Use A_I in analysis"
+                IsCheckable="True"
+                IsChecked="True"
+                Click="AiAnalysisMenuItem_Click" />
     </MenuItem>
     <MenuItem x:Name="ProjectMenu"
               Header="_Project"
@@ -1840,6 +1850,17 @@
                           Margin="0,0,8,0"
                           VerticalContentAlignment="Center"
                           AutomationProperties.Name="Profile to use" />
+                <!-- Starts from "Use AI in analysis", for each report, so
+                     that one report can be made without AI; it cannot turn
+                     AI on while the setting is off (analysis-runner.md,
+                     "Turning AI analysis off"). -->
+                <CheckBox x:Name="UseAiCheckBox"
+                          MinHeight="44"
+                          Margin="0,0,8,0"
+                          VerticalContentAlignment="Center"
+                          IsChecked="True"
+                          Content="Use AI in this report"
+                          Click="UseAiCheckBox_Click" />
                 <Button x:Name="QueueSummaryButton"
                         Style="{StaticResource AnalysisButton}"
                         Content="_Queue summary"

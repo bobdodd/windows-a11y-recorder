@@ -832,6 +832,46 @@ attempts marks each one reused.
   request sent; and a rerun of a rerun pointing to the attempt the model
   wrote. A report test for the reused steps listed.
 
+## Turning AI analysis off
+
+Built on 2026-11-15, from the owner's requirement of the same day: "What
+I do need is a switch to turn off AI analysis" (`android-vision-checks.md`,
+"Owner's requirements" and decisions 5 and 6). Off means no model at
+all, cloud or local, for checks and summaries alike.
+
+- **The setting.** "Use AI in analysis", in the Analysis menu, is saved
+  at once in the analysis settings file as `"aiAnalysis"`. It is on by
+  default, as the recorder was before the switch. A value that is not
+  true or false is reported as a problem and read as on.
+- **The report's checkbox.** "Use AI in this report", in the Analysis
+  tab, starts from the setting each time the settings are read and after
+  each report is queued, so that one report can be made without AI. With
+  the setting off it is unchecked and cannot be checked, and says that
+  AI analysis is off in the Analysis menu.
+- **The task records it.** Each task is queued with AI on only where the
+  setting and the checkbox both allow it, and keeps that in its row
+  (`ai_analysis`, migration 0044; tasks queued before it could use a
+  model). The Analysis tab says "Without AI." for a task queued with it
+  off, and a run again of one stays without AI.
+- **The summaries need a model**, so are not queued with AI off: Queue
+  summary, Queue Android summary, Summarise this recording, Add vision to
+  the summary and Android summary are greyed out. The Android reports
+  use no model, so are queued either way.
+- **The worker refuses.** A model step of a task queued with AI off, or
+  any model step while the setting is off, makes no request and reuses
+  no earlier answer: it fails the task saying why ("AI analysis was off
+  for this task when it was queued, so no model was asked", or "AI
+  analysis is off in the analysis settings, so no model was asked"). The
+  worker reads the setting at each step, so turning it off stops tasks
+  already queued or running from asking a model; trials are refused too.
+- **Checks that need a model** are told why they may not run
+  (`AnalysisTaskContext.AiOff`), so that the report lists them as not
+  run, with that reason, rather than leaving them out. None is built
+  yet; the first, images of text, is next (`android-vision-checks.md`,
+  decision 7).
+- **The reports.** A report made without AI says nothing about AI, as
+  before (`android-report.md`, "Cloud or local").
+
 ## Required tests
 
 - **Unit tests:** queue order and grouping by model; profile reading,

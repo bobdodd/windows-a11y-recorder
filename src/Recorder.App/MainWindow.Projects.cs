@@ -262,7 +262,7 @@ public partial class MainWindow
         await QueueProjectAsync(AndroidProjectReportKind.Name, new Dictionary<string, string>());
     }
 
-    private async Task QueueProjectAsync(string kind, IReadOnlyDictionary<string, string> profiles, Guid? rerunOfTaskId = null)
+    private async Task QueueProjectAsync(string kind, IReadOnlyDictionary<string, string> profiles, Guid? rerunOfTaskId = null, bool aiAllowed = true)
     {
         if (AnalysisCatalogOrNull is not { } catalog || _openProjectId is not { } project || _analysisSessionDirectory is null)
         {
@@ -279,7 +279,10 @@ public partial class MainWindow
 
         try
         {
-            await catalog.QueueProjectTaskAsync(project, kind, KindVersion(kind), profiles, folder, rerunOfTaskId, CancellationToken.None);
+            var ai = aiAllowed && UseAi;
+            await catalog.QueueProjectTaskAsync(project, kind, KindVersion(kind), profiles, folder, rerunOfTaskId, ai, CancellationToken.None);
+            ResetUseAi();
+            UpdateAnalysisControls();
             ShowAnalysisStatus($"{AnalysisPlayer.KindName(kind)} queued; it uses no model. It reads the project's recordings from {folder}.");
             _busy.AnnounceCompleted(AnalysisStatusTextBlock.Text);
             StartWorker();

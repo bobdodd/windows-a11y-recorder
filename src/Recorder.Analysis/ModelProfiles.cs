@@ -267,6 +267,16 @@ public sealed record AnalysisSettings(
     /// windows"). Written in the file as "reportBrowserOnly".
     /// </summary>
     public bool BrowserOnly { get; init; } = true;
+
+    /// <summary>
+    /// "Use AI in analysis": whether any model may be used, for checks and
+    /// summaries alike. Off, no request is made to any model, cloud or
+    /// local, and no model's earlier answer is reused; each report's own
+    /// checkbox starts from it (owner, 2026-11-15; analysis-runner.md,
+    /// "Turning AI analysis off"). On by default, as before the switch.
+    /// Written in the file as "aiAnalysis".
+    /// </summary>
+    public bool AiAnalysis { get; init; } = true;
 }
 
 /// <summary>
@@ -431,8 +441,30 @@ public static class AnalysisSettingsFile
             }
         }
 
-        return (new AnalysisSettings(profiles, defaults, localServer, maxAttempts) { BrowserOnly = browserOnly }, problems);
+        var aiAnalysis = true;
+        if (document[AiAnalysisName] is { } aiNode)
+        {
+            if (aiNode.GetValueKind() is JsonValueKind.True or JsonValueKind.False)
+            {
+                aiAnalysis = aiNode.GetValue<bool>();
+            }
+            else
+            {
+                problems.Add($"\"{AiAnalysisName}\" is not true or false, so AI analysis is on, the default.");
+            }
+        }
+
+        return (new AnalysisSettings(profiles, defaults, localServer, maxAttempts) { BrowserOnly = browserOnly, AiAnalysis = aiAnalysis }, problems);
     }
+
+    /// <summary>The name of the setting "Use AI in analysis" in the file.</summary>
+    public const string AiAnalysisName = "aiAnalysis";
+
+    /// <summary>
+    /// The settings file's text with "aiAnalysis" set, the rest as it was;
+    /// a file that is not a JSON object is left as it is, and null returned.
+    /// </summary>
+    public static string? WithAiAnalysis(string? text, bool on) => With(text, AiAnalysisName, on);
 
     /// <summary>The name of the setting "Limit the report to the browser while it is in front" in the file.</summary>
     public const string BrowserOnlyName = "reportBrowserOnly";
@@ -442,7 +474,9 @@ public static class AnalysisSettingsFile
     /// it was; a file that is not a JSON object is left as it is, and null
     /// returned.
     /// </summary>
-    public static string? WithBrowserOnly(string? text, bool on)
+    public static string? WithBrowserOnly(string? text, bool on) => With(text, BrowserOnlyName, on);
+
+    private static string? With(string? text, string name, bool on)
     {
         JsonObject document;
         try
@@ -456,7 +490,7 @@ public static class AnalysisSettingsFile
             return null;
         }
 
-        document[BrowserOnlyName] = on;
+        document[name] = on;
         return document.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }
 

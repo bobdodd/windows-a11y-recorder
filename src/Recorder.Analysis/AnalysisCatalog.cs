@@ -57,6 +57,13 @@ public sealed record AnalysisTask(
     /// <summary>The project a project's task is of; null for a recording's.</summary>
     public Guid? ProjectId { get; init; }
 
+    /// <summary>
+    /// Whether the task may use a model, as it was queued (analysis-runner.md,
+    /// "Turning AI analysis off"). Off, it makes no request to any model
+    /// and reuses no model's answer.
+    /// </summary>
+    public bool AiAnalysis { get; init; } = true;
+
     /// <summary>The recording a recording's task is of; a project's task has none.</summary>
     public Guid Recording => RecordingId ??
         throw new StepFailedException("This task is of a project, not of one recording.");
@@ -86,6 +93,13 @@ public sealed record AnalysisTaskSummary(
 {
     /// <summary>The project a project's task is of; null for a recording's.</summary>
     public Guid? ProjectId { get; init; }
+
+    /// <summary>
+    /// Whether the task may use a model, as it was queued (analysis-runner.md,
+    /// "Turning AI analysis off"). Off, it makes no request to any model
+    /// and reuses no model's answer.
+    /// </summary>
+    public bool AiAnalysis { get; init; } = true;
 
     /// <summary>The folder the task's reports are named relative to, as queued.</summary>
     public string? SessionDirectory { get; init; }
@@ -227,13 +241,14 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
         long? scopeEndNanoseconds = null,
         string? sessionDirectory = null,
         Guid? rerunOfTaskId = null,
+        bool aiAnalysis = true,
         CancellationToken cancellationToken = default) =>
         UseAsync(async connection =>
         {
             await using var command = new NpgsqlCommand(
                 "INSERT INTO analysis_tasks (recording_id, kind, kind_version, stage_profiles, after_task_id, " +
-                "scope_start_nanoseconds, scope_end_nanoseconds, session_directory, rerun_of_task_id) " +
-                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING task_id",
+                "scope_start_nanoseconds, scope_end_nanoseconds, session_directory, rerun_of_task_id, ai_analysis) " +
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING task_id",
                 connection);
             command.Parameters.AddWithValue(recordingId);
             command.Parameters.AddWithValue(kind);
@@ -244,6 +259,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             command.Parameters.AddWithValue((object?)scopeEndNanoseconds ?? DBNull.Value);
             command.Parameters.AddWithValue((object?)sessionDirectory ?? DBNull.Value);
             command.Parameters.AddWithValue((object?)rerunOfTaskId ?? DBNull.Value);
+            command.Parameters.AddWithValue(aiAnalysis);
             return (Guid)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
         }, cancellationToken);
 
@@ -258,12 +274,13 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
         IReadOnlyDictionary<string, string> stageProfiles,
         string directory,
         Guid? rerunOfTaskId = null,
+        bool aiAnalysis = true,
         CancellationToken cancellationToken = default) =>
         UseAsync(async connection =>
         {
             await using var command = new NpgsqlCommand(
-                "INSERT INTO analysis_tasks (project_id, kind, kind_version, stage_profiles, session_directory, rerun_of_task_id) " +
-                "VALUES ($1, $2, $3, $4, $5, $6) RETURNING task_id",
+                "INSERT INTO analysis_tasks (project_id, kind, kind_version, stage_profiles, session_directory, rerun_of_task_id, ai_analysis) " +
+                "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING task_id",
                 connection);
             command.Parameters.AddWithValue(projectId);
             command.Parameters.AddWithValue(kind);
@@ -271,6 +288,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             command.Parameters.Add(new NpgsqlParameter { Value = JsonSerializer.Serialize(stageProfiles), NpgsqlDbType = NpgsqlDbType.Jsonb });
             command.Parameters.AddWithValue(directory);
             command.Parameters.AddWithValue((object?)rerunOfTaskId ?? DBNull.Value);
+            command.Parameters.AddWithValue(aiAnalysis);
             return (Guid)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
         }, cancellationToken);
 
@@ -352,7 +370,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             await using var command = new NpgsqlCommand(
                 "SELECT t.task_id, t.recording_id, t.kind, t.kind_version, t.scope_start_nanoseconds, " +
                 "t.scope_end_nanoseconds, t.after_task_id, a.state, t.stage_profiles::text, t.state, " +
-                "t.cancel_requested, t.queued_utc, t.session_directory, t.rerun_of_task_id, t.project_id FROM analysis_tasks t " +
+                "t.cancel_requested, t.queued_utc, t.session_directory, t.rerun_of_task_id, t.project_id, t.ai_analysis FROM analysis_tasks t " +
                 "LEFT JOIN analysis_tasks a ON a.task_id = t.after_task_id " + where,
                 connection);
             if (taskId is { } id)
@@ -380,7 +398,8 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
                 {
                     SessionDirectory = reader.IsDBNull(12) ? null : reader.GetString(12),
                     RerunOfTaskId = reader.IsDBNull(13) ? null : reader.GetGuid(13),
-                    ProjectId = reader.IsDBNull(14) ? null : reader.GetGuid(14)
+                    ProjectId = reader.IsDBNull(14) ? null : reader.GetGuid(14),
+                    AiAnalysis = reader.GetBoolean(15)
                 });
             }
 
@@ -395,7 +414,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
         UseAsync<IReadOnlyList<AnalysisTaskSummary>>(async connection =>
         {
             await using var command = new NpgsqlCommand(
-                "SELECT task_id, recording_id, kind, state, stage_profiles::text, queued_utc, finished_utc, failure, read_utc, project_id, session_directory " +
+                "SELECT task_id, recording_id, kind, state, stage_profiles::text, queued_utc, finished_utc, failure, read_utc, project_id, session_directory, ai_analysis " +
                 "FROM analysis_tasks WHERE recording_id = $1 " +
                 "OR project_id = (SELECT project_id FROM recordings WHERE recording_id = $1) " +
                 "ORDER BY queued_utc DESC, task_id DESC",
@@ -417,7 +436,8 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
                     reader.IsDBNull(8) ? null : reader.GetDateTime(8))
                 {
                     ProjectId = reader.IsDBNull(9) ? null : reader.GetGuid(9),
-                    SessionDirectory = reader.IsDBNull(10) ? null : reader.GetString(10)
+                    SessionDirectory = reader.IsDBNull(10) ? null : reader.GetString(10),
+                    AiAnalysis = reader.GetBoolean(11)
                 });
             }
 

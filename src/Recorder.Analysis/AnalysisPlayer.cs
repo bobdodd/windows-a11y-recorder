@@ -29,6 +29,15 @@ public static class AnalysisPlayer
     };
 
     /// <summary>
+    /// Whether a kind of task cannot be made without a model: the summaries.
+    /// With AI analysis off they are not queued, as off means no model at
+    /// all (owner, 2026-11-15; analysis-runner.md, "Turning AI analysis off").
+    /// The Android reports use none, so are queued either way.
+    /// </summary>
+    public static bool NeedsModel(string kind) =>
+        kind is Summary.RecordingSummaryKind.Name or Summary.RecordingSummaryVisionKind.Name or Android.AndroidSummaryKind.Name;
+
+    /// <summary>
     /// Queues vision for a recording, from the beginning: a summary first,
     /// then vision after it, so that vision is added to a summary written
     /// from the recorder's facts as they are now. Where a summary is queued

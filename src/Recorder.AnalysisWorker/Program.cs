@@ -162,7 +162,10 @@ worker = new AnalysisWorker(
     {
         loaded = worker?.LoadedProfile;
         Status(message);
-    });
+    },
+    // Read at each step, so that turning AI analysis off stops tasks
+    // already queued (analysis-runner.md, "Turning AI analysis off").
+    aiAnalysisOn: () => AnalysisSettingsFile.Read(AnalysisSettingsFile.DefaultPath).Settings.AiAnalysis);
 
 var exitCode = 0;
 try

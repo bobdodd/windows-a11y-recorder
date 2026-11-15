@@ -66,6 +66,8 @@ public partial class MainWindow
     {
         (_analysisSettings, _analysisSettingsProblems) = AnalysisSettingsFile.Read(AnalysisSettingsFile.DefaultPath);
         BrowserOnlyMenuItem.IsChecked = _analysisSettings.BrowserOnly;
+        AiAnalysisMenuItem.IsChecked = _analysisSettings.AiAnalysis;
+        ResetUseAi();
         var chosen = (ProfileComboBox.SelectedItem as ComboBoxItem)?.Tag as string;
         ProfileComboBox.Items.Clear();
         foreach (var profile in _analysisSettings.Profiles.Where(profile => profile.Supports(ModelCapabilities.Text)))
@@ -104,10 +106,29 @@ public partial class MainWindow
         _ = ReadAnalysisAsync();
     }
 
+    // The report's checkbox starts from "Use AI in analysis" for each
+    // report; with the setting off it is unchecked and cannot be checked
+    // (owner, 2026-11-15; analysis-runner.md, "Turning AI analysis off").
+    private void ResetUseAi()
+    {
+        UseAiCheckBox.IsChecked = _analysisSettings.AiAnalysis;
+        UseAiCheckBox.IsEnabled = _analysisSettings.AiAnalysis;
+        UseAiCheckBox.Content = _analysisSettings.AiAnalysis
+            ? "Use AI in this report"
+            : "Use AI in this report (AI analysis is off in the Analysis menu)";
+    }
+
+    // Whether the next report may use a model.
+    private bool UseAi => _analysisSettings.AiAnalysis && UseAiCheckBox.IsChecked == true;
+
+    private void UseAiCheckBox_Click(object sender, RoutedEventArgs e) => UpdateAnalysisControls();
+
     private void UpdateAnalysisControls()
     {
         var open = _playbackArchive is not null && AnalysisCatalogOrNull is not null;
-        QueueSummaryButton.IsEnabled = open && ProfileComboBox.Items.Count > 0;
+        // The summaries need a model, so are queued only with AI on.
+        var ai = UseAi;
+        QueueSummaryButton.IsEnabled = open && ai && ProfileComboBox.Items.Count > 0;
         ProfileComboBox.IsEnabled = open && ProfileComboBox.Items.Count > 0;
         SummariseMenuItem.IsEnabled = QueueSummaryButton.IsEnabled;
         // The Android report needs phone screens, and the summary a profile
@@ -115,13 +136,13 @@ public partial class MainWindow
         var phone = open && _playbackArchive is { PhoneScreens.Recorded: true };
         QueueAndroidReportButton.IsEnabled = phone;
         AndroidReportMenuItem.IsEnabled = phone;
-        QueueAndroidSummaryButton.IsEnabled = phone && ProfileComboBox.Items.Count > 0;
+        QueueAndroidSummaryButton.IsEnabled = phone && ai && ProfileComboBox.Items.Count > 0;
         AndroidSummaryMenuItem.IsEnabled = QueueAndroidSummaryButton.IsEnabled;
         // The project's report needs only the open recording's project;
         // the task leaves out its recordings with no phone screens.
         QueueAndroidProjectReportButton.IsEnabled = open && _openProjectId is not null;
         AndroidProjectReportMenuItem.IsEnabled = QueueAndroidProjectReportButton.IsEnabled;
-        VisionMenuItem.IsEnabled = open && AnalysisPlayer.DefaultProfile(_analysisSettings, ModelCapabilities.Image) is not null;
+        VisionMenuItem.IsEnabled = open && ai && AnalysisPlayer.DefaultProfile(_analysisSettings, ModelCapabilities.Image) is not null;
         CapabilitiesMenuItem.IsEnabled = open;
     }
 
@@ -262,7 +283,8 @@ public partial class MainWindow
         var profileWord = distinct.Count > 1 ? "Profiles" : "Profile";
         var lines = new StackPanel();
         lines.Children.Add(new SelectableText { Text = $"{name}: {state}", FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-        var times = $"{profileWord} {profiles}. Queued {queued}" + (task.FinishedUtc is { } finished ? $", ended {Local(finished)}." : ".");
+        var times = $"{profileWord} {profiles}." + (task.AiAnalysis ? "" : " Without AI.") +
+            $" Queued {queued}" + (task.FinishedUtc is { } finished ? $", ended {Local(finished)}." : ".");
         lines.Children.Add(new SelectableText { Text = times, TextWrapping = TextWrapping.Wrap });
         if (_analysisUsage.TryGetValue(task.TaskId, out var usage))
         {
@@ -321,7 +343,9 @@ public partial class MainWindow
     private static int KindVersion(string kind) =>
         AnalysisTaskKinds.All.FirstOrDefault(item => item.Kind == kind)?.Version ?? 1;
 
-    private async Task QueueAsync(string kind, IReadOnlyDictionary<string, string> profiles, Guid? afterTaskId = null, Guid? rerunOfTaskId = null)
+    // A task is queued with AI on only where the setting and the report's
+    // checkbox both allow it; a run again keeps a task's AI off.
+    private async Task QueueAsync(string kind, IReadOnlyDictionary<string, string> profiles, Guid? afterTaskId = null, Guid? rerunOfTaskId = null, bool aiAllowed = true)
     {
         if (AnalysisCatalogOrNull is not { } catalog || _analysisRecordingId is not { } recording || _analysisSessionDirectory is null)
         {
@@ -329,9 +353,18 @@ public partial class MainWindow
             return;
         }
 
+        var ai = aiAllowed && UseAi;
+        if (!ai && AnalysisPlayer.NeedsModel(kind))
+        {
+            ShowAnalysisStatus(AiOffStatus(kind));
+            return;
+        }
+
         try
         {
-            await catalog.QueueTaskAsync(recording, kind, KindVersion(kind), profiles, afterTaskId: afterTaskId, sessionDirectory: _analysisSessionDirectory, rerunOfTaskId: rerunOfTaskId, cancellationToken: CancellationToken.None);
+            await catalog.QueueTaskAsync(recording, kind, KindVersion(kind), profiles, afterTaskId: afterTaskId, sessionDirectory: _analysisSessionDirectory, rerunOfTaskId: rerunOfTaskId, aiAnalysis: ai, cancellationToken: CancellationToken.None);
+            ResetUseAi();
+            UpdateAnalysisControls();
             ShowAnalysisStatus(profiles.Count == 0
                 ? $"{AnalysisPlayer.KindName(kind)} queued; it uses no model."
                 : $"{AnalysisPlayer.KindName(kind)} queued with " +
@@ -345,6 +378,10 @@ public partial class MainWindow
             ShowAnalysisStatus($"The task could not be queued: {exception.Message}");
         }
     }
+
+    private string AiOffStatus(string kind) =>
+        $"{AnalysisPlayer.KindName(kind)} needs a model, so it was not queued: " +
+        (_analysisSettings.AiAnalysis ? "Use AI in this report is not checked." : "AI analysis is off in the Analysis menu.");
 
     private void StartWorker()
     {
@@ -436,6 +473,12 @@ public partial class MainWindow
     // recording-summary.md, "Vision starts from the beginning").
     private async Task QueueVisionAsync(Guid? rerunOfTaskId = null)
     {
+        if (!UseAi)
+        {
+            ShowAnalysisStatus(AiOffStatus(RecordingSummaryVisionKind.Name));
+            return;
+        }
+
         if (AnalysisPlayer.DefaultProfile(_analysisSettings, ModelCapabilities.Image) is not { } profile)
         {
             ShowAnalysisStatus("There is no model profile for images. Open Model profiles... from the Analysis menu.");
@@ -459,6 +502,8 @@ public partial class MainWindow
         {
             var (_, _, summaryQueued) = await AnalysisPlayer.QueueVisionAsync(
                 catalog, recording, session, text, profile.Name, rerunOfTaskId, CancellationToken.None);
+            ResetUseAi();
+            UpdateAnalysisControls();
             ShowAnalysisStatus(summaryQueued
                 ? $"Recording summary queued, and Summary with vision after it, with {AnalysisPlayer.ProfileLabel(profile)}."
                 : $"Summary with vision queued with {AnalysisPlayer.ProfileLabel(profile)}, after the summary already queued.");
@@ -499,10 +544,10 @@ public partial class MainWindow
         Guid? rerunOf = reuse ? task.TaskId : null;
         if (task.ProjectId is not null)
         {
-            return QueueProjectAsync(task.Kind, task.StageProfiles, rerunOf);
+            return QueueProjectAsync(task.Kind, task.StageProfiles, rerunOf, task.AiAnalysis);
         }
 
-        return task.Kind == RecordingSummaryVisionKind.Name ? QueueVisionAsync(rerunOf) : QueueAsync(task.Kind, task.StageProfiles, rerunOfTaskId: rerunOf);
+        return task.Kind == RecordingSummaryVisionKind.Name ? QueueVisionAsync(rerunOf) : QueueAsync(task.Kind, task.StageProfiles, rerunOfTaskId: rerunOf, aiAllowed: task.AiAnalysis);
     }
 
     // A recording's reports are in its session folder, as the player has
@@ -656,6 +701,33 @@ public partial class MainWindow
         {
             var text = File.Exists(path) ? File.ReadAllText(path) : null;
             if (AnalysisSettingsFile.WithBrowserOnly(text, on) is not { } written)
+            {
+                throw new IOException("The analysis settings file is not a JSON object, so the setting was not saved.");
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, written);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, exception.Message, "The setting was not saved", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        ReadAnalysisSettings();
+        UpdateAnalysisControls();
+    }
+
+    // "Use AI in analysis", saved in the analysis settings file at once.
+    // The worker reads it at each step, so turning it off also stops a
+    // task already queued or running from asking a model.
+    private void AiAnalysisMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        var path = AnalysisSettingsFile.DefaultPath;
+        var on = AiAnalysisMenuItem.IsChecked;
+        try
+        {
+            var text = File.Exists(path) ? File.ReadAllText(path) : null;
+            if (AnalysisSettingsFile.WithAiAnalysis(text, on) is not { } written)
             {
                 throw new IOException("The analysis settings file is not a JSON object, so the setting was not saved.");
             }

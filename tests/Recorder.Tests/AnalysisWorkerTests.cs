@@ -71,6 +71,24 @@ internal sealed class StandInEndpoint : IModelEndpoint
             1500);
 }
 
+/// <summary>A task kind for the tests that uses no model, as the Android report, and notes whether it may.</summary>
+internal sealed class NoModelKind : IAnalysisTaskKind
+{
+    public const string Name = "no-model";
+
+    public string Kind => Name;
+
+    public int Version => 1;
+
+    public List<string?> Told { get; } = [];
+
+    public Task RunAsync(AnalysisTaskContext context, CancellationToken cancellationToken)
+    {
+        Told.Add(context.AiOff);
+        return Task.CompletedTask;
+    }
+}
+
 /// <summary>A task kind for the tests: one model step for each step key.</summary>
 internal sealed class StandInKind(params string[] steps) : IAnalysisTaskKind
 {
@@ -1660,6 +1678,76 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Assert.Equal(AnalysisTaskStates.Done, await StateAsync(cloud));
         Assert.Equal(["load This PC", "complete This PC", "complete Claude", "unload This PC"], endpoint.Calls);
     }
+    // Turning AI analysis off (analysis-runner.md, "Turning AI analysis
+    // off"): off means no model at all, cloud or local.
+    [Fact]
+    public async Task A_task_queued_with_AI_off_asks_no_model_and_fails_saying_why()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), aiAnalysis: false, cancellationToken: Token);
+        var endpoint = new StandInEndpoint();
+
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.False((await catalog.TaskAsync(task, Token))!.AiAnalysis);
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
+        Assert.Contains("AI analysis was off for this task when it was queued, so no model was asked.", await FailureAsync(task), StringComparison.Ordinal);
+        Assert.Empty(endpoint.Calls);
+        Assert.Empty(await AttemptsAsync(task));
+    }
+
+    [Fact]
+    public async Task Turning_the_setting_off_stops_a_task_already_queued_and_reuses_no_answer()
+    {
+        var catalog = await CatalogAsync();
+        var recording = await RecordingAsync();
+        var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), cancellationToken: Token);
+        var endpoint = new StandInEndpoint();
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(first));
+        var calls = endpoint.Calls.Count;
+
+        // Queued with AI on, as a run again that could reuse the answer;
+        // the setting is read as off when the step runs.
+        var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), rerunOfTaskId: first, cancellationToken: Token);
+        Assert.True((await catalog.TaskAsync(again, Token))!.AiAnalysis);
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast, aiAnalysisOn: () => false).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(again));
+        Assert.Contains("AI analysis is off in the analysis settings, so no model was asked.", await FailureAsync(again), StringComparison.Ordinal);
+        Assert.Equal(calls, endpoint.Calls.Count);
+    }
+
+    [Fact]
+    public async Task A_task_that_uses_no_model_runs_with_AI_off_and_is_told_why_it_may_not()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), NoModelKind.Name, 1, new Dictionary<string, string>(), aiAnalysis: false, cancellationToken: Token);
+        var kind = new NoModelKind();
+
+        await new AnalysisWorker(catalog, SettingsWith(), [kind], new StandInEndpoint(), options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
+        Assert.Equal(["AI analysis was off for this task when it was queued, so no model was asked."], kind.Told);
+        var listed = (await catalog.TasksAsync(await RecordingOfAsync(task), Token)).Single(item => item.TaskId == task);
+        Assert.False(listed.AiAnalysis);
+    }
+
+    [Fact]
+    public async Task A_task_is_queued_with_AI_on_unless_told_otherwise()
+    {
+        var catalog = await CatalogAsync();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), NoModelKind.Name, 1, new Dictionary<string, string>(), cancellationToken: Token);
+        var kind = new NoModelKind();
+
+        await new AnalysisWorker(catalog, SettingsWith(), [kind], new StandInEndpoint(), options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.True((await catalog.TaskAsync(task, Token))!.AiAnalysis);
+        Assert.Equal([null], kind.Told);
+    }
+
+    private async Task<Guid> RecordingOfAsync(Guid task) =>
+        (Guid)(await RowsAsync("SELECT recording_id FROM analysis_tasks WHERE task_id = $1", task))[0]["recording_id"]!;
 }
 
 /// <summary>The HTTP model endpoint against a stand-in server on loopback.</summary>
@@ -1967,4 +2055,5 @@ public sealed class HttpModelEndpointTests
 
         Assert.Contains("Recordings are not sent outside the local network.", failure.Message, StringComparison.Ordinal);
     }
+
 }

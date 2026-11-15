@@ -8,6 +8,20 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Turning AI analysis off
+
+- "Use AI in analysis", in the Analysis menu, turns off every use of a
+  model, cloud or local, for checks and summaries alike. It is on by
+  default and saved in the analysis settings.
+- "Use AI in this report", in the Analysis tab, starts from the setting,
+  so that one report can be made without AI. A task queued without AI
+  says "Without AI." in the Analysis tab.
+- With AI off the summaries cannot be queued, and the worker asks no
+  model and reuses no earlier answer: a task that needs one fails saying
+  why. Turning the setting off also stops tasks already queued. See
+  [the analysis runner](docs/architecture/analysis-runner.md), "Turning
+  AI analysis off".
+
 ### Evidence numbers, chapters, touches and title in MP4s
 
 - "Save as MP4..." can show a report's evidence numbers, such as E12, at

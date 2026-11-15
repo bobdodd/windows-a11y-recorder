@@ -5,7 +5,10 @@
 Recorded 2026-11-15 at the owner's request, "so it doesn't get lost".
 This is a preliminary plan: the checks below are options, not decisions,
 until the owner chooses them, apart from the decisions recorded under
-"Owner's decisions". None is built. Each is to be measured on
+"Owner's decisions". The switch that turns AI analysis off (decisions 5
+and 6, step 1 of the order in decision 7) was built on 2026-11-15; see
+`analysis-runner.md`, "Turning AI analysis off". No check is built. Each
+is to be measured on
 the recordings to hand before its rules are set, as the earlier checks
 were (see `android-checks.md` and `android-checks-candidates.md`).
 
@@ -69,6 +72,17 @@ Given by the owner on 2026-11-15, in answer to the open questions:
    from that setting, so a single report can be run without AI.
 6. **What the switch covers.** It also turns off the summaries, so that
    off means no model at all.
+7. **The order of building** (owner, 2026-11-15: "Yes, I accept the
+   order"), proposed from the measurements under "Settling existing
+   warnings":
+   1. the switch that turns AI analysis off, as it must be there before
+      any check that needs a model;
+   2. images of text: is the text a logotype, or essential? The one test
+      of the three that needs a picture to be understood;
+   3. the target-size exceptions, without a model, as each can be judged
+      from the tree, the pictures' text and the positions;
+   4. boundaries, with a model, last, as it would mostly confirm the
+      information items already there.
 
 ## What a model adds
 
@@ -141,6 +155,38 @@ This mainly removes false positives rather than adding checks, and may be
 the best value for the cost. The owner chose it as the first to build
 (decision 1).
 
+### Measured on 2026-11-15
+
+From the client's Android report of 2026-11-12, run with OCR and the
+pictures, and from the accessibility trees of the 20 phone recordings of
+2026-11-09 to 2026-11-14 with phone screens (6 of the client's app; the
+others of Settings, the Launcher, Chrome, Gmail and TalkBack), checked
+at AA and at AAA:
+
+- **Images of text:** 4 warnings, the four pictures of the client's
+  library cards, each with its title drawn in it. Whether the text is a
+  logotype or essential needs the picture understood, so this is the one
+  of the three that needs a model.
+- **Boundaries:** 21 information items, each a control identified by its
+  visible text or icon, such as the four tabs and the mood buttons. A
+  model would mostly confirm them. The 5 errors where a state is shown
+  only by its fill are measured, and need no model.
+- **Target size, 24 dp (2.5.8, AA):** no errors, and 2 not run, as the
+  item is against the edge of a list that scrolls.
+- **Target size, 44 dp (2.5.5, AAA):** 7 errors and 5 not run. Three of
+  the errors are on one screen of the client's app ("Forget Password?",
+  "Terms of Service", "Privacy Policy"), and four are text of the
+  Launcher's date and weather inside a larger item that can be tapped.
+
+Each target-size question can be answered without a model: whether
+other text shares the target's line, from the pictures' text and the
+positions; whether a large enough control with the same name is on the
+screen, from the tree; whether a larger item that can be tapped is the
+target; and, for an item against a scrolling list's edge, whether a
+later snapshot of the same visit shows it whole. By the owner's rule,
+"AI only when non-AI cannot do the test", they are built without one
+(decision 7).
+
 ## Later, or text only
 
 - **Focus visible (2.4.7):** needs a Bluetooth keyboard, which the owner
@@ -207,5 +253,5 @@ The probe and its copies are deleted afterwards, as before.
 ## Open questions for the owner
 
 None at present. The owner answered the questions on 2026-11-15
-(decisions 1 to 6 above). New questions will come from measuring each
+(decisions 1 to 7 above). New questions will come from measuring each
 check on the recordings before its rules are set.
