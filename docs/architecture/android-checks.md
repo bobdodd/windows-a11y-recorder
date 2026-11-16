@@ -1494,6 +1494,9 @@ were then looked at to check what the numbers meant.
   show a state. From the video, a ratio within 12% of 3:1 is a warning,
   as for text. The ratio is compared unrounded, and shown to three
   places when two would round it up to 3:1.
+  Text fields, and text OCR read with no word in the item's text in the
+  tree, were judged differently from 2026-11-16 (see "Step 18:
+  boundaries without a model").
 - **Findings.** Under each visit, as for text, with the controls
   measured in it; and in the summary line, "at AA, its only level", with
   "graphics with no item in the tree are not checked".
@@ -3227,6 +3230,115 @@ whole in another.
   judge.
 - One sized by Android and not by the app, and an essential
   presentation, are not judged.
+
+## Step 18: boundaries without a model
+
+### The owner's decisions (2026-11-16)
+
+Offered three rules from the measurement below, the owner chose all
+three: "1,2,3 together. 2 is an error. 3 is a warning." And: "If a field
+only has a bottom line then it should also get a warning related to WCAG
+5.2.4 as users on large magnification moving down the page may not
+immediately understand that the have found an editable field as the
+bottom line may be outside of the magnification window".
+
+1. **No model for boundaries.** The boundary info findings stay as they
+   are, judged without a model.
+2. **A text field's border, bottom line or background below 3:1 is an
+   error,** whatever text or icon it shows. From the video, a ratio
+   within 12% of 3:1 is a warning, as for the other controls.
+3. **Text OCR read counts as a control's own only when a word of it is
+   in the item's text in the tree.** Otherwise the finding is a warning:
+   the picture may not show the item, and whether it needs a boundary is
+   not judged.
+4. **A text field shown only by a bottom line is a warning,** whatever
+   the line's contrast, in a check of its own,
+   `field-bottom-line-only`, related to WCAG 2.2's conformance
+   requirement 5.2.4 and to 1.4.11.
+
+### What the standards say (checked in cited documents)
+
+- [Understanding SC 1.4.11](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html):
+  figures 31 and 32 show that a text field's indicator, a bottom border
+  or a full border, needs 3:1; figure 34 that a field shown only by its
+  background needs 3:1 for the background; and figure 45 that a field
+  with no label fails when its border is below 3:1. The document does
+  not say that a placeholder identifies a field.
+- [WCAG 2.2 conformance requirement 5.2.4](https://www.w3.org/TR/WCAG22/#cc4),
+  Only Accessibility-Supported Ways of Using Technologies, is a
+  conformance requirement, not a success criterion, so the new check
+  lists no criterion it fails and gives 5.2.4 and 1.4.11 as related.
+
+### Measured first (2026-11-16)
+
+On the 20 recordings with phone screens on the development PC, with
+OCR, the boundary findings were listed and each was asked of Claude
+Haiku 5.5 twice, "is the boundary needed to identify this control?",
+with the control's picture (measured):
+
+- 955 info findings: 560 with text, 395 with an icon of 3:1; 916 from
+  the video's frames.
+- Haiku said "identified without a boundary" on both runs for 908
+  (95%), "boundary needed" on both for 2, and differed or could not tell
+  for 45, mostly where the evidence was poor: bounds off the item, the
+  video behind the tree, or OCR reading garbage.
+- 1,910 requests cost about US$0.45, about 1,650 input tokens and 2.3 s
+  each.
+- In 150 of the 560 findings with text (27%), no OCR word was in the
+  item's text in the tree; Haiku still said "identified" for 135 of
+  them, so the model confirmed the wrong evidence.
+- 14 info findings were text fields, which needed 3:1 whatever text they
+  showed (figures 31, 32 and 34).
+
+### As built
+
+In `PhoneNonTextContrastRun` (`Recorder.Session`):
+
+- **Fields.** `Judge` judges an editable control by `JudgeField`, before
+  any text or icon: not run when no side was measured; otherwise the
+  ratio is the bottom line's when the field is shown only by one, else
+  the boundary's weakest side, judged by `Verdict` (an error below 3:1,
+  a warning near it from the video). Fields are not judged as showing a
+  state.
+- **A bottom line only.** `BottomLineOnly` is true for an editable
+  control whose bottom side has a drawn shape, whose top side was
+  measured, and whose other measured sides have nothing drawn.
+  `JudgeBottomLine` gives a warning under `field-bottom-line-only` with
+  the line's colours and ratio. Findings are keyed by check, so a field
+  can have both.
+- **OCR against the tree.** `TreeText` joins the text, description,
+  hint and state description of the item and its visible descendants.
+  `SharesAWord` lowers both and splits them into words of 2 or more
+  letters or digits; they match when a word is the same, or when a word
+  of 3 or more characters is inside the other, so OCR's "ouTube" matches
+  "YouTube". Text found without OCR comes from the tree and needs no
+  match.
+- **Passed** counts 1.4.11 only.
+- **Guidance.** `android-check-guidance.json` has the new check, impact
+  medium, with criterion "5.2.4" at level "Conformance requirement" and
+  its source, and the 1.4.11 basis says the field and OCR rules.
+- **The Checks tab** counts the two checks apart and says the field and
+  OCR rules.
+
+### Checked
+
+The solution builds with no warnings, and the tests pass, 2,607 of
+them, with the 10 that need Windows failing as before. The new tests
+cover a bottom line of 3:1 (passed, with the warning), one below 3:1
+(an error and the warning), a field shown by a pale background (an
+error) and one with a full border (no finding), OCR text not in the
+tree's text, OCR text matched by part of a word, an item with no text in
+the tree, and the word matching.
+
+### Limits
+
+- The bottom line is found only within 16 pixels of the bounds, as for
+  every side; a line drawn further in is not found.
+- A field whose bounds include its label above can be measured with
+  the label's area as its top, so a field with a line may not be found
+  as having only a line.
+- A word shared by chance, such as "Settings" in a row and its title,
+  still counts as the control's text.
 
 ## Decisions on the open questions (2026-11-11)
 

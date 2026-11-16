@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 
 namespace Recorder.Session;
 
@@ -354,6 +355,12 @@ public static class PhoneControlMeasuring
 /// the same class and size is drawn differently from the others. From the
 /// video, a ratio within 12% of 3:1 is a warning, near the limit, as for
 /// text. Graphics with no item in the tree are left for the vision model.
+/// By the owner's decisions of 2026-11-16, with no model: a text field's
+/// border, bottom line or background below 3:1 is an error, whatever text
+/// it shows; text OCR read with no word in the item's text in the tree is
+/// a warning, as the picture may not show the item; and a text field shown
+/// only by a bottom line is a warning of its own check,
+/// <see cref="PhoneCheckNames.FieldBottomLineOnly"/>.
 /// </summary>
 public sealed class PhoneNonTextContrastRun
 {
@@ -395,41 +402,54 @@ public sealed class PhoneNonTextContrastRun
         ArgumentNullException.ThrowIfNull(screens);
         var stopwatch = Stopwatch.StartNew();
         var run = new PhoneNonTextContrastRun();
-        var findings = new Dictionary<(PhoneVisit, PhoneCheckLevel, string), PhoneFinding>();
+        var findings = new Dictionary<(string, PhoneVisit, PhoneCheckLevel, string), PhoneFinding>();
         foreach (var snapshot in measured.Snapshots)
         {
             var visit = snapshot.Visit;
             var state = PhoneCheckRun.StateAt(visit, snapshot.Settled.MonotonicNanoseconds);
             var source = snapshot.Picture.Kind == PhonePictureKind.Screenshot ? "from the phone's screenshot" : "approximate, from the video";
             var states = States(snapshot.Controls);
+
+            void Add(string check, PhoneCheckItem item, PhoneCheckLevel level, string measured)
+            {
+                var key = (check, visit, level, item.Identity);
+                if (!findings.TryGetValue(key, out var finding))
+                {
+                    findings[key] = finding = new PhoneFinding(check, level, visit, item.Identity, item.Label);
+                }
+
+                if (finding._times.Count > 0 && finding._times[^1].Snapshot.EventId == snapshot.Settled.EventId)
+                {
+                    return;
+                }
+
+                finding._times.Add(new PhoneFindingTime(
+                    snapshot.Picture.Time, visit, snapshot.Settled, snapshot.TakenBy, visit.WindowId, item.Bounds, item.TreeKey,
+                    $"{measured}; {source}", state));
+            }
+
             foreach (var control in snapshot.Controls)
             {
                 run.Controls++;
                 run._controlsByVisit[visit] = run.ControlsIn(visit) + 1;
-                var judged = states.TryGetValue(control, out var shown)
+
+                // A text field is judged by its border, bottom line or
+                // background alone, never as a control showing a state.
+                var judged = !control.Item.Node.Editable && states.TryGetValue(control, out var shown)
                     ? JudgeState(control, shown, snapshot.Picture.Kind)
                     : Judge(control, snapshot.Picture.Kind, snapshot.Engine);
+                if (JudgeBottomLine(control) is { } line)
+                {
+                    Add(PhoneCheckNames.FieldBottomLineOnly, control.Item, line.Level, line.Measured);
+                }
+
                 if (judged is not { } result)
                 {
                     run.Passed++;
                     continue;
                 }
 
-                var item = control.Item;
-                var key = (visit, result.Level, item.Identity);
-                if (!findings.TryGetValue(key, out var finding))
-                {
-                    findings[key] = finding = new PhoneFinding(PhoneCheckNames.NonTextContrast, result.Level, visit, item.Identity, item.Label);
-                }
-
-                if (finding._times.Count > 0 && finding._times[^1].Snapshot.EventId == snapshot.Settled.EventId)
-                {
-                    continue;
-                }
-
-                finding._times.Add(new PhoneFindingTime(
-                    snapshot.Picture.Time, visit, snapshot.Settled, snapshot.TakenBy, visit.WindowId, item.Bounds, item.TreeKey,
-                    $"{result.Measured}; {source}", state));
+                Add(PhoneCheckNames.NonTextContrast, control.Item, result.Level, result.Measured);
             }
         }
 
@@ -621,10 +641,23 @@ public sealed class PhoneNonTextContrastRun
         return Verdict(ratio, kind) is { } level ? (level, measured + "; a state needs 3:1" + Near(ratio, kind)) : null;
     }
 
-    /// <summary>A control that does not show a state: what identifies it.</summary>
+    /// <summary>
+    /// A control that does not show a state: what identifies it. A text
+    /// field is identified only by its border, bottom line or background,
+    /// which needs 3:1 whatever text or icon it shows (W3C's Understanding
+    /// 1.4.11, figures 31, 32 and 34; owner, 2026-11-16): below, an error.
+    /// Text OCR read identifies a control only when a word of it is in the
+    /// item's text in the tree; else the picture may not show the item, a
+    /// warning (owner, 2026-11-16).
+    /// </summary>
     public static (PhoneCheckLevel Level, string Measured)? Judge(PhoneControlMeasure control, PhonePictureKind kind, string? engine)
     {
         ArgumentNullException.ThrowIfNull(control);
+        if (control.Item.Node.Editable)
+        {
+            return JudgeField(control, kind);
+        }
+
         var boundary = Boundary(control);
         if (control.VisibleText is { } text)
         {
@@ -636,6 +669,15 @@ public sealed class PhoneNonTextContrastRun
             var seen = control.TextFromOcr
                 ? $"has visible text, '{text}', found by {(string.IsNullOrEmpty(engine) ? "OCR" : $"OCR ({engine})")}"
                 : $"has text, '{text}', from the tree, as OCR was not used";
+            if (control.TextFromOcr && TreeText(control.Item) is var tree && !SharesAWord(text, tree))
+            {
+                var against = tree is null
+                    ? "the item has no text in the tree to confirm it by"
+                    : $"no word of it is in the item's text in the tree, '{tree}'";
+                return (PhoneCheckLevel.Warning,
+                    $"{seen}, but {against}, so the picture may not show this item, and whether it needs a boundary is not judged; {boundary}");
+            }
+
             return (PhoneCheckLevel.Info, $"{seen}, so needs no boundary; {boundary}");
         }
 
@@ -657,6 +699,146 @@ public sealed class PhoneNonTextContrastRun
         return control.Sides.Count == 0 || control.BoundaryRatio >= Limit
             ? null
             : (PhoneCheckLevel.Info, $"no visible text, but {icon}, so it needs no boundary; {boundary}");
+    }
+
+    // A text field: its bottom line when that is all that is drawn, else
+    // its weakest side, needs 3:1.
+    private static (PhoneCheckLevel Level, string Measured)? JudgeField(PhoneControlMeasure control, PhonePictureKind kind)
+    {
+        if (control.Sides.Count == 0)
+        {
+            return (PhoneCheckLevel.NotRun,
+                "a text field; no side could be measured, as each is cut off or under another window, so whether its border, bottom line or background meets 3:1 is not known");
+        }
+
+        var line = BottomLineOnly(control);
+        var ratio = line?.Ratio ?? control.BoundaryRatio;
+        if (Verdict(ratio, kind) is not { } level)
+        {
+            return null;
+        }
+
+        var shown = line is { } bottom
+            ? $"shown only by a line along its bottom, {PhoneColours.Hex(bottom.Shape!.Value)} against {PhoneColours.Hex(bottom.Adjacent)}, {Shown(bottom.Ratio)}:1"
+            : Boundary(control);
+        return (level, $"a text field; {shown}; a field's border, bottom line or background is what shows it is a field, and needs 3:1 whatever text or icon it shows{Near(ratio, kind)}");
+    }
+
+    /// <summary>
+    /// A text field shown only by a line along its bottom: its bottom side
+    /// has a line, its top side was measured, and nothing is drawn on any
+    /// other side measured. Null for any other control.
+    /// </summary>
+    public static PhoneControlSide? BottomLineOnly(PhoneControlMeasure control)
+    {
+        ArgumentNullException.ThrowIfNull(control);
+        if (!control.Item.Node.Editable)
+        {
+            return null;
+        }
+
+        var bottom = control.Sides.FirstOrDefault(side => side.Side == PhoneSide.Bottom);
+        if (bottom?.Shape is null || !control.Sides.Any(side => side.Side == PhoneSide.Top))
+        {
+            return null;
+        }
+
+        return control.Sides.All(side => side.Side == PhoneSide.Bottom || side.Shape is null) ? bottom : null;
+    }
+
+    /// <summary>
+    /// The warning for a text field shown only by a line along its bottom,
+    /// whatever the line's contrast (owner, 2026-11-16): with magnification,
+    /// a person moving down the screen can see the field's area without
+    /// its line, and not know it is a field. Null for any other control.
+    /// </summary>
+    public static (PhoneCheckLevel Level, string Measured)? JudgeBottomLine(PhoneControlMeasure control)
+    {
+        if (BottomLineOnly(control) is not { } bottom)
+        {
+            return null;
+        }
+
+        var others = control.Sides.Count - 1;
+        return (PhoneCheckLevel.Warning, string.Create(CultureInfo.CurrentCulture,
+            $"a text field shown only by a line along its bottom, {PhoneColours.Hex(bottom.Shape!.Value)} against {PhoneColours.Hex(bottom.Adjacent)}, {Shown(bottom.Ratio)}:1, " +
+            $"with nothing drawn on the other {others:N0} side{(others == 1 ? "" : "s")} measured; with magnification, the line can be outside the part of the screen shown, so the field may not be seen to be one"));
+    }
+
+    /// <summary>
+    /// The item's text in the tree: the text, content description, hint and
+    /// state description of it and of the items inside it that are seen, in
+    /// tree order, or null when there is none.
+    /// </summary>
+    public static string? TreeText(PhoneCheckItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        var parts = new List<string>();
+        var stack = new Stack<PhoneCheckItem>([item]);
+        while (stack.Count > 0)
+        {
+            var each = stack.Pop();
+            if (each.Node.VisibleToUser)
+            {
+                foreach (var part in new[] { each.Node.Text, each.Node.ContentDescription, each.Node.Hint, each.Node.StateDescription })
+                {
+                    if (!string.IsNullOrWhiteSpace(part) && part.Any(char.IsLetterOrDigit) && !parts.Contains(part, StringComparer.Ordinal))
+                    {
+                        parts.Add(part.Trim());
+                    }
+                }
+            }
+
+            for (var index = each.Children.Count - 1; index >= 0; index--)
+            {
+                stack.Push(each.Children[index]);
+            }
+        }
+
+        return parts.Count == 0 ? null : string.Join(", ", parts);
+    }
+
+    /// <summary>
+    /// Whether text OCR read shares a word with the tree's text: words are
+    /// runs of two or more letters or digits, compared ignoring case, and
+    /// match when the same, or when one of three or more is inside the
+    /// other, as OCR can cut a word at a control's edge ("ouTube").
+    /// </summary>
+    public static bool SharesAWord(string ocr, string? tree)
+    {
+        ArgumentNullException.ThrowIfNull(ocr);
+        if (tree is null)
+        {
+            return false;
+        }
+
+        var treeWords = Words(tree);
+        return Words(ocr).Any(word => treeWords.Any(other =>
+            string.Equals(word, other, StringComparison.Ordinal) ||
+            (Math.Min(word.Length, other.Length) >= 3 && (other.Contains(word, StringComparison.Ordinal) || word.Contains(other, StringComparison.Ordinal)))));
+    }
+
+    private static List<string> Words(string text)
+    {
+        var words = new List<string>();
+        var current = new StringBuilder();
+        foreach (var character in text + " ")
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                current.Append(char.ToLowerInvariant(character));
+                continue;
+            }
+
+            if (current.Length >= 2)
+            {
+                words.Add(current.ToString());
+            }
+
+            current.Clear();
+        }
+
+        return words;
     }
 
     // The boundary in words.

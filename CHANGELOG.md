@@ -8,6 +8,19 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Boundaries without a model
+
+- A text field's border, bottom line or background below 3:1 is an
+  error under the non-text contrast check (WCAG 1.4.11), whatever text
+  it shows; before, a field with text was information.
+- Text OCR read inside a control counts as its own only when a word of
+  it is in the item's text in the tree; otherwise the finding is a
+  warning, as the picture may not show the item.
+- A new check, "Text field shown only by a bottom line", is a warning
+  related to WCAG 2.2's conformance requirement 5.2.4, as with
+  magnification the line can be outside the part of the screen shown.
+- No model is used for boundaries, as measured with Claude Haiku 5.5.
+
 ### Target-size exceptions without a model
 
 - The WCAG target-size checks (2.5.8, and 2.5.5 at AAA) judge two

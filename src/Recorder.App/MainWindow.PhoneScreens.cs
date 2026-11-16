@@ -751,6 +751,9 @@ public partial class MainWindow
         : "Audit level AA: text contrast is held to WCAG 1.4.3, targets to 2.5.8, and images of text to 1.4.5. " + TargetExceptions;
 
     // The target-size exceptions judged from the tree (owner, 2026-11-16).
+    private const string NonTextRules =
+        "A text field needs its border, bottom line or background at 3:1 whatever text it shows, and text OCR read counts as a control's only when a word of it is in the item's text in the tree.";
+
     private const string TargetExceptions =
         "A target on a line of text passes as one in a sentence, and one with an equivalent target of the size and the same name passes, inferred from the name; " +
         "each is information for a person to judge. A target inside or around another target is a warning, as they are one target only if they do the same thing, which the tree does not say.";
@@ -921,12 +924,16 @@ public partial class MainWindow
             $"{title}: {findings}, from {Count(contrast.Lines, "line")} of text measured, {contrast.Passed:N0} passed, on {Count(measured.Snapshots.Count, "settled snapshot")} ({measured.FromScreenshots:N0} from the phone's screenshots, {measured.FromFrames:N0} from the video), in {measured.Elapsed.TotalSeconds:0.0} seconds.");
         if (_phoneNonTextContrast is { } nonText)
         {
-            var nonTextFindings = nonText.Findings.Count == 0
+            var ofCheck = nonText.Findings.Where(finding => finding.Check == PhoneCheckNames.NonTextContrast).ToList();
+            var bottomLines = nonText.Findings.Where(finding => finding.Check == PhoneCheckNames.FieldBottomLineOnly).ToList();
+            var nonTextFindings = ofCheck.Count == 0
                 ? "no findings"
-                : $"{Count(nonText.Findings.Count, "finding")} ({Levels(nonText.Findings)})";
+                : $"{Count(ofCheck.Count, "finding")} ({Levels(ofCheck)})";
+            var lineFindings = bottomLines.Count == 0 ? "no findings" : $"{Count(bottomLines.Count, "finding")} ({Levels(bottomLines)})";
             summary += string.Create(
                 CultureInfo.CurrentCulture,
-                $" {PhoneCheckNames.Title(PhoneCheckNames.NonTextContrast)}, at AA, its only level: {nonTextFindings}, from {Count(nonText.Controls, "control")} measured, {nonText.Passed:N0} passed; graphics with no item in the tree are not checked.");
+                $" {PhoneCheckNames.Title(PhoneCheckNames.NonTextContrast)}, at AA, its only level: {nonTextFindings}, from {Count(nonText.Controls, "control")} measured, {nonText.Passed:N0} passed; graphics with no item in the tree are not checked. " +
+                $"{NonTextRules} {PhoneCheckNames.Title(PhoneCheckNames.FieldBottomLineOnly)}: {lineFindings}.");
         }
 
         if (_phoneImagesOfText is { } images)

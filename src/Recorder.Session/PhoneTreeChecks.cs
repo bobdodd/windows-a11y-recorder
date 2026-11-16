@@ -65,6 +65,14 @@ public static class PhoneCheckNames
     public const string NonTextContrast = "non-text-contrast";
 
     /// <summary>
+    /// A text field shown only by a line along its bottom (step 5), a
+    /// warning related to WCAG 2.2's conformance requirement 5.2.4, whatever
+    /// the line's contrast: with magnification, the line can be outside the
+    /// part of the screen shown (owner, 2026-11-16). Not one of the tree's checks.
+    /// </summary>
+    public const string FieldBottomLineOnly = "field-bottom-line-only";
+
+    /// <summary>
     /// Images of text, from the words OCR read inside an image (step 8): WCAG
     /// 1.4.5 at AA, and 1.4.9 as well at the AAA audit level; not one of the
     /// tree's checks.
@@ -179,6 +187,7 @@ public static class PhoneCheckNames
         TextContrastAa => "Text contrast at AA (WCAG 1.4.3)",
         TextContrastAaa => "Text contrast at AAA (WCAG 1.4.6)",
         NonTextContrast => "Non-text contrast (WCAG 1.4.11)",
+        FieldBottomLineOnly => "Text field shown only by a bottom line (related to WCAG 5.2.4)",
         ImageOfText => "Image of text (WCAG 1.4.5)",
         ImageOfTextAaa => "Image of text (WCAG 1.4.9, AAA)",
         LabelNotInName => "Label not in name (WCAG 2.5.3)",

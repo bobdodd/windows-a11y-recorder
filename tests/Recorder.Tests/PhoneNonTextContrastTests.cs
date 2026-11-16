@@ -46,7 +46,8 @@ public sealed class PhoneNonTextContrastTests
 
     private static AndroidTreeNode Node(
         int index, int? parent, (int Left, int Top, int Right, int Bottom) bounds, string? description = null,
-        bool clickable = true, bool enabled = true, bool selected = false, bool scrolls = false, string className = "android.view.View") =>
+        bool clickable = true, bool enabled = true, bool selected = false, bool scrolls = false, string className = "android.view.View",
+        bool editable = false) =>
         new()
         {
             Index = index,
@@ -59,6 +60,7 @@ public sealed class PhoneNonTextContrastTests
             Enabled = enabled,
             Clickable = clickable,
             Selected = selected,
+            Editable = editable,
             Actions = scrolls ? [new AndroidNodeAction(0x1000, null)] : [],
             Checked = "unchecked",
         };
@@ -241,6 +243,92 @@ public sealed class PhoneNonTextContrastTests
             Assert.EndsWith("and it is near the limit, so it may fail or pass, as the video's colours are approximate", judged?.Measured, StringComparison.Ordinal);
         }
     }
+
+    // A text field at (100, 200, 600, 300) on white, with its words.
+    private static PhoneControlMeasure Field(Picture picture, string words = "Email")
+    {
+        picture.Fill(120, 230, 300, 260, Black);
+        return Assert.Single(Measure(
+            Window(Node(5, 1, (100, 200, 600, 300), "Email address", className: "android.widget.EditText", editable: true)),
+            picture, Text(words, 120, 230, 300, 260)));
+    }
+
+    [Fact]
+    public void Judge_AFieldShownOnlyByABottomLineOf3To1_Passes_ButIsWarnedOfForMagnification()
+    {
+        var field = Field(new Picture().Fill(0, 0, 1080, 1200, White).Fill(100, 297, 600, 300, 0x767676));
+
+        Assert.Null(PhoneNonTextContrastRun.Judge(field, PhonePictureKind.Screenshot, null));
+        var line = PhoneNonTextContrastRun.JudgeBottomLine(field);
+        Assert.Equal(PhoneCheckLevel.Warning, line?.Level);
+        Assert.Equal(
+            "a text field shown only by a line along its bottom, #767676 against #FFFFFF, 4.54:1, with nothing drawn on the other 3 sides measured; " +
+            "with magnification, the line can be outside the part of the screen shown, so the field may not be seen to be one",
+            line?.Measured);
+    }
+
+    [Fact]
+    public void Judge_AFieldsBottomLineBelow3To1_IsAnError_ThoughItShowsText()
+    {
+        var field = Field(new Picture().Fill(0, 0, 1080, 1200, White).Fill(100, 297, 600, 300, 0xCCCCCC));
+
+        var judged = PhoneNonTextContrastRun.Judge(field, PhonePictureKind.Screenshot, "Windows OCR, en-US");
+
+        Assert.Equal(PhoneCheckLevel.Error, judged?.Level);
+        Assert.Equal(
+            "a text field; shown only by a line along its bottom, #CCCCCC against #FFFFFF, 1.61:1; " +
+            "a field's border, bottom line or background is what shows it is a field, and needs 3:1 whatever text or icon it shows",
+            judged?.Measured);
+        Assert.Equal(PhoneCheckLevel.Warning, PhoneNonTextContrastRun.JudgeBottomLine(field)?.Level);
+    }
+
+    [Fact]
+    public void Judge_AFieldShownByAPaleBackground_IsAnError_AndABorderedFieldPasses()
+    {
+        var pale = Field(new Picture().Fill(0, 0, 1080, 1200, 0xEFEFED).Fill(100, 200, 600, 300, 0xFCFAF8), "Search in mail");
+        var judged = PhoneNonTextContrastRun.Judge(pale, PhonePictureKind.Screenshot, null);
+        Assert.Equal(PhoneCheckLevel.Error, judged?.Level);
+        Assert.StartsWith("a text field; ", judged?.Measured, StringComparison.Ordinal);
+        Assert.Null(PhoneNonTextContrastRun.JudgeBottomLine(pale));
+
+        var bordered = Field(new Picture().Fill(0, 0, 1080, 1200, White).Boxed(100, 200, 600, 300, 0x767676, 3, White));
+        Assert.Null(PhoneNonTextContrastRun.Judge(bordered, PhonePictureKind.Screenshot, null));
+        Assert.Null(PhoneNonTextContrastRun.JudgeBottomLine(bordered));
+    }
+
+    [Fact]
+    public void Judge_TextOcrReadWithNoWordInTheTreesText_IsAWarning()
+    {
+        // In a recording, a settings row was read with the row above's words.
+        var picture = new Picture().Fill(0, 0, 1080, 1200, White).Fill(300, 140, 500, 170, Black);
+        var window = Window(Node(5, 1, (100, 100, 600, 220), "Battery"), Node(6, 1, (100, 400, 600, 520), "YouTube"), Node(7, 1, (100, 700, 600, 820)));
+        picture.Fill(300, 440, 500, 470, Black).Fill(300, 740, 500, 770, Black);
+        var measures = Measure(window, picture,
+            Text("System gestures", 300, 140, 500, 170), Text("ouTube", 300, 440, 500, 470), Text("Settings", 300, 740, 500, 770));
+
+        var battery = PhoneNonTextContrastRun.Judge(Of(measures, "Battery"), PhonePictureKind.Screenshot, null);
+        Assert.Equal(PhoneCheckLevel.Warning, battery?.Level);
+        Assert.Equal(
+            "has visible text, 'System gestures', found by OCR, but no word of it is in the item's text in the tree, 'Battery', " +
+            "so the picture may not show this item, and whether it needs a boundary is not judged; no boundary is drawn on 4 of the 4 sides measured, against #FFFFFF",
+            battery?.Measured);
+
+        // A word OCR cut at the edge still matches; an item with no text cannot be confirmed.
+        Assert.Equal(PhoneCheckLevel.Info, PhoneNonTextContrastRun.Judge(Of(measures, "YouTube"), PhonePictureKind.Screenshot, null)?.Level);
+        var untitled = PhoneNonTextContrastRun.Judge(measures.Single(measure => measure.Item.Node.ContentDescription is null), PhonePictureKind.Screenshot, null);
+        Assert.Equal(PhoneCheckLevel.Warning, untitled?.Level);
+        Assert.Contains("but the item has no text in the tree to confirm it by,", untitled?.Measured, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("LEARN", "Learn", true)]
+    [InlineData("ouTube", "YouTube", true)]
+    [InlineData("Ph", "Photos", false)]
+    [InlineData("'YY9d)", "Wed, Nov 11", false)]
+    [InlineData("and hold", "Voice search", false)]
+    [InlineData("Search in mail Primary", "Search in mail", true)]
+    public void SharesAWord_MatchesWholeWords_OrOneOfThreeOrMoreInsideAnother(string ocr, string tree, bool expected) =>
+        Assert.Equal(expected, PhoneNonTextContrastRun.SharesAWord(ocr, tree));
 
     [Fact]
     public void Measure_LeavesOutInactiveControls_AndSidesWhereAListCutsTheControlOff()

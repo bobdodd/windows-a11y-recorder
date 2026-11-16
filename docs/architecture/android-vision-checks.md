@@ -94,6 +94,10 @@ Given by the owner on 2026-11-15, in answer to the open questions:
       from the tree, the pictures' text and the positions;
    4. boundaries, with a model, last, as it would mostly confirm the
       information items already there.
+   On 2026-11-16, measured with Claude Haiku 5.5, the model confirmed
+   95% of the boundary info findings on both of two runs and confirmed
+   wrong evidence as readily, so the owner chose rules without a model
+   (`android-checks.md`, "Step 18: boundaries without a model").
 8. **The project chooses the models** (owner, 2026-11-15): "Change it so
    that projects have settings and we can choose models (or no model)
    for report analysis, for text-based checks, for vision-based checks.
@@ -168,7 +172,9 @@ without understanding the picture. A model could settle them:
 - **Target size (2.5.5, 2.5.8):** does the exception for an equivalent
   target, or for a target in a line of text, apply?
 - **Boundaries (1.4.11):** is this control's boundary needed to identify
-  it? These are listed as info now.
+  it? These are listed as info now. Measured on 2026-11-16, the owner
+  chose no model for it (see `android-checks.md`, "Step 18: boundaries
+  without a model").
 
 This mainly removes false positives rather than adding checks, and may be
 the best value for the cost. The owner chose it as the first to build

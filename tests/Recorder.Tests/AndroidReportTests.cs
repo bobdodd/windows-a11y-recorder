@@ -43,7 +43,7 @@ public sealed class AndroidReportTests : IDisposable
 
         string[] measured =
         [
-            PhoneCheckNames.TextContrastAa, PhoneCheckNames.TextContrastAaa, PhoneCheckNames.NonTextContrast,
+            PhoneCheckNames.TextContrastAa, PhoneCheckNames.TextContrastAaa, PhoneCheckNames.NonTextContrast, PhoneCheckNames.FieldBottomLineOnly,
             PhoneCheckNames.ImageOfText, PhoneCheckNames.ImageOfTextAaa, PhoneCheckNames.LabelNotInName, PhoneCheckNames.LabelNotAtStart,
         ];
         var checks = PhoneCheckNames.All.Concat(measured).ToList();
