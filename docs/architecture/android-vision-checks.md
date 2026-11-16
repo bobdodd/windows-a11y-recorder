@@ -5,7 +5,8 @@
 Recorded 2026-11-15 at the owner's request, "so it doesn't get lost".
 This is a preliminary plan: the checks below are options, not decisions,
 until the owner chooses them, apart from the decisions recorded under
-"Owner's decisions". The switch that turns AI analysis off (decisions 5
+"Owner's decisions" and the rules for images of text chosen on
+2026-11-15. The switch that turns AI analysis off (decisions 5
 and 6, step 1 of the order in decision 7) was built on 2026-11-15, and
 replaced the same day by each project's models, chosen in its settings
 (decision 8; `projects.md`, "The project's models"). No check is built.
@@ -220,7 +221,10 @@ groups by what the tree and the pictures show:
 - **2, logotypes**, a search engine's and a store's.
 - **5, the preview in Settings' display size and text**, text drawn as an
   example, arguably essential.
-- **1, an illustration** with other content in a TalkBack setting.
+- **1, an illustration** with other content in a TalkBack setting, as
+  first read. Measured later the same day (below), the picture shows a
+  dialog over the setting's page that the tree does not hold, so this is
+  a picture out of step, and its text is the dialog's.
 - **16, the client's library cards**, each a picture whose description
   holds its text, from the app's framework. The pictures alone cannot
   tell whether the text is drawn in the picture or set over it, so a
@@ -246,6 +250,89 @@ TalkBack's caption and the out-of-step pictures without a model; list
 pictures whose description holds their text as needing a manual check;
 and ask the model a narrower question, or several yes or no questions,
 about the rest.
+
+### Images of text with Claude, and four rules, measured on 2026-11-15
+
+The same probe, on the same 44 candidates, then asked the model chosen
+for vision-based checks in the candidates' project (decision 8), with
+pictures cut and sent as before:
+
+- **Claude Haiku 5.5:** a median of 2.0 seconds a request, 3.4 minutes
+  for the 44, about US$0.024 for 158,684 tokens in and 16,876 out. 40 of
+  the 44 gave the same answer twice. For TalkBack's caption it answered
+  "cannot tell" 21 times and "could be text" 11 times, and 32 of its 34
+  reasons named the caption.
+- **Claude Sonnet 5.5:** a median of 2.3 seconds a request, 3.9 minutes,
+  about US$0.41 for 158,684 tokens in and 9,403 out. 40 of the 44 gave
+  the same answer twice. For TalkBack's caption it answered "picture with
+  other content" 22 times, and all 34 reasons named the caption; for the
+  Settings preview, "could be text" 9 times of 10, one reason saying a
+  label below an icon was clipped into the picture.
+
+Neither model was right for the groups a rule can settle, so the owner
+chose, on 2026-11-15, four rules without a model, applied before any
+question is asked, and a narrower question for the rest:
+
+1. **TalkBack's caption.** A line OCR read in the picture is left out
+   when its words are in what TalkBack said or was reading at the time:
+   TalkBack's own phrases (such as "Double-tap to activate") when the
+   recording holds TalkBack's speech or focus, the utterances of the ten
+   seconds before the picture, and the focused item's text, description
+   and label. A word within one letter of a word said also counts, as
+   OCR misreads the caption now and then ("Doublertap").
+2. **Picture out of step.** A picture is not judged when OCR read at
+   least 3 lines outside every image that are in no item's text, and
+   not TalkBack's, and those outnumber the text items OCR found where
+   the tree places them. Too few found alone is not enough: OCR misses
+   small labels over a photograph, so a first rule, under a third of the
+   tree's text found, also caught pictures in step. Measured: 13 to 38
+   such lines in the pictures out of step, 0 to 6 in the pictures in
+   step.
+3. **Clipped or neighbouring label.** Only lines wholly inside the
+   image's bounds count, and not a line a visible text item holds whose
+   bounds touch the image's, within a line's height.
+4. **The app draws its own text.** When the app's framework, as
+   detected at the recording's stop (`android-framework-metadata.md`), is
+   Flutter, a picture whose description holds every word left is
+   "cannot tell from the recording, check manually", without a model.
+   The owner decided that the framework is taken from the recording
+   itself only, with no match to other recordings: "We don't need to do
+   anything clever for Flutter. All real recordings going forward will
+   have the framework detection in place anyway". Recordings made before
+   the detection are left to the model.
+
+A line is left out by the rules in that order; a picture with fewer than
+3 letters or digits left is set aside by the rule that removed them.
+The question now names the app's package and the screen, and keeps its
+five answers: logotype, essential, picture with other content, could be
+text, and cannot tell. A sixth answer, "the text is not part of the
+image", was tried and dropped: with rules 1 and 3 it hardly ever applies
+to what is left, and Haiku chose it for cards whose text is inside the
+image's bounds, saying the picture held only the drawing.
+
+With the four rules, measured by the probe:
+
+| Group (of the first measurement) | Set aside without a model | Asked |
+|---|---|---|
+| TalkBack's caption, 17 | 15 by rule 1, 2 by rule 3 (a long caption past the icon's edge) | 0 |
+| Out of step, 3, and the dialog over a setting, 1 | 4 by rule 2 | 0 |
+| Logotypes, 2 | 1 by rule 2 (on the same picture out of step) | 1 |
+| Settings preview, 5 | 5 by rule 3 | 0 |
+| Library cards, 16 | 12 by rule 4, matched to the framework detected in a later recording of the same version | 4 |
+
+39 of the 44 were settled without a model; 5 were asked. Haiku 5.5 gave
+the same answer twice for all 5, about US$0.003 for 20,128 tokens in and
+1,575 out: logotype for the search engine's logo, which is right, and
+for the four cards from a recording made before the detection, "could
+be text" three times and "picture with other content" once, for the
+same kind of card. This confirms that the pictures alone cannot settle
+the cards. The match to a later recording was the probe's only; the
+rule as built takes the framework from the recording itself (rule 4).
+
+Still to build, from the order agreed: each request asked twice, with a
+finding only where both answers agree and "needs a manual check"
+otherwise; answers kept by the request's SHA-256 (point 4 under
+"Keeping it repeatable"); and the check in the Checks tab.
 
 ## Later, or text only
 
@@ -313,6 +400,7 @@ The probe and its copies are deleted afterwards, as before.
 ## Open questions for the owner
 
 The owner answered the earlier questions on 2026-11-15 (decisions 1 to
-8 above). Open now: the rule for images of text, from its options under
-"Images of text, measured on 2026-11-15". New questions will come from
-measuring each check on the recordings before its rules are set.
+8 above), and chose the rules for images of text the same day ("Images
+of text with Claude, and four rules, measured on 2026-11-15"). New
+questions will come from measuring each check on the recordings before
+its rules are set.
