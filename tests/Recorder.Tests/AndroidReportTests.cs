@@ -634,11 +634,45 @@ public sealed class AndroidReportTests : IDisposable
         Assert.DoesNotContain("AI is used", plainClient, StringComparison.Ordinal);
     }
 
+    // A finding of text shown as a heading follows the template of every
+    // finding: its table, the model's answer, the guidance's paragraphs and
+    // its sources, in the auditor's report and the client's.
+    [Fact]
+    public void Report_WithTextShownAsAHeading_GivesTheFindingByTheTemplate()
+    {
+        var inference = Recorder.Analysis.Android.AndroidHeadingLook.Interpret(
+            new("heading", "Large text above the section."), new("heading", "A section title."), "Claude Haiku 5.5", cloud: true);
+        var (input, guidance, evidence) = Recording(heading: inference);
+        var check = guidance.Checks.Single(entry => entry.Check == PhoneCheckNames.TextShownAsHeading);
+
+        var markdown = AndroidReport.Write(input, guidance, evidence, null, Path.Combine(_folder, "pictures"), "pictures", new DateTime(2026, 11, 16, 12, 0, 0, DateTimeKind.Utc));
+
+        var document = ReportDocument.Parse(markdown);
+        var table = document.Blocks.Single(block => block.Kind == ReportBlockKind.Table && block.Rows[0][0] == "Field" &&
+            block.Rows.Any(row => row[0] == "Model's answer"));
+        Assert.Equal("Error, inferred by a model, for a person to confirm", table.Rows.Single(row => row[0] == "Level")[1]);
+        Assert.Equal("Medium, if confirmed", table.Rows.Single(row => row[0] == "Impact")[1]);
+        Assert.StartsWith("1.3.1 Info and Relationships", table.Rows.Single(row => row[0] == "WCAG success criteria")[1], StringComparison.Ordinal);
+        Assert.StartsWith("its letters are 2 times as tall as the screen's body text", table.Rows.Single(row => row[0] == "Measured")[1], StringComparison.Ordinal);
+        Assert.Equal(inference.Text, table.Rows.Single(row => row[0] == "Model's answer")[1]);
+        Assert.Equal("Text shown as a heading, not marked as one (WCAG 1.3.1). " + check.Basis, table.Rows.Single(row => row[0] == "Check")[1]);
+        Assert.Contains("What the issue is: " + check.Issue, markdown, StringComparison.Ordinal);
+        Assert.Contains("Why it matters: " + check.Why, markdown, StringComparison.Ordinal);
+        Assert.Contains("Suggested remediation for Android: " + check.Android, markdown, StringComparison.Ordinal);
+        Assert.Contains(guidance.Sources["wcag-f2"].Url, markdown, StringComparison.Ordinal);
+        Assert.Contains("text-shown-as-heading check's model: 1 piece of text left by the rules was for the model for vision-based checks; 1 piece of text answered.", markdown, StringComparison.Ordinal);
+
+        var client = AndroidReport.Write(input, guidance, evidence, null, Path.Combine(_folder, "client"), "client", new DateTime(2026, 11, 16, 12, 0, 0, DateTimeKind.Utc), ReportAudience.Client);
+        Assert.Contains("What the issue is: " + check.Issue, client, StringComparison.Ordinal);
+        Assert.Contains("AI is used in generating this report, with a cloud model", client, StringComparison.Ordinal);
+    }
+
     // The Settings window taken at 1 second and again at 3, its button
     // moved down 10 pixels, listed at 5 without being taken; a white frame
     // of the phone at 1.5 seconds.
     private (AndroidReportInput Input, AndroidGuidance Guidance, AndroidEvidence Evidence) Recording(
-        bool returns = false, string sessionKey = "s", string? version = null, string? within = null, PhoneInference? imageOfText = null)
+        bool returns = false, string sessionKey = "s", string? version = null, string? within = null, PhoneInference? imageOfText = null,
+        PhoneInference? heading = null)
     {
         var folder = within is null ? _folder : Path.Combine(_folder, within);
         Directory.CreateDirectory(folder);
@@ -711,6 +745,35 @@ public sealed class AndroidReportTests : IDisposable
             audit = audit.WithImagesOfText(run.Judged(
                 new Dictionary<PhoneImageOfTextQuestion, PhoneInference> { [Assert.Single(run.Questions)] = imageOfText },
                 "1 image left by the rules was for the model for vision-based checks; 1 image answered"));
+        }
+
+        if (heading is not null)
+        {
+            // A large title over a line of body text, placed by OCR on the
+            // first settled snapshot, judged by the model's answer given.
+            var visit = archive.PhoneScreens.Visits[0];
+            var at = visit.SettledSnapshots[0];
+            var window = new PhoneCheckWindow(512, 1,
+            [
+                new AndroidTreeNode { Index = 0, ClassName = "android.widget.FrameLayout", Bounds = new AndroidNodeBounds(0, 0, 1080, 2404), Checked = "unchecked", ImportantForAccessibility = true, VisibleToUser = true },
+                new AndroidTreeNode { Index = 1, Parent = 0, ClassName = "android.widget.TextView", Text = "Your week", Bounds = new AndroidNodeBounds(100, 300, 900, 400), Checked = "unchecked", ImportantForAccessibility = true, VisibleToUser = true },
+                new AndroidTreeNode { Index = 2, Parent = 0, ClassName = "android.widget.TextView", Text = "A longer line of plain body text below it.", Bounds = new AndroidNodeBounds(100, 420, 900, 470), Checked = "unchecked", ImportantForAccessibility = true, VisibleToUser = true },
+            ]);
+            var swatch = new PhoneSwatch(0xFFFFFF, 0x000000, 21, 2, 2);
+            PhoneTextLine[] lines =
+            [
+                new(window.Items[1], window.Items[1], PhoneTextPlace.AppTextPlacedByOcr, "Your week", "Your week", new PhoneBounds(110, 310, 500, 380), swatch, 66, 60),
+                new(window.Items[2], window.Items[2], PhoneTextPlace.AppTextPlacedByOcr, "A longer line of plain body text below it.", "A longer line of plain body text below it.", new PhoneBounds(110, 425, 890, 465), swatch, 36, 30),
+            ];
+            var measured = PhoneContrastRun.Of(
+            [
+                new PhoneContrastSnapshot(visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                    new PhoneContrastPicture(PhonePictureKind.Frame, At(1.5), "frame.png", framePath), "Windows OCR, en-US", lines, null, window),
+            ]);
+            var run = PhoneHeadingLookRun.Run(measured, archive.PhoneScreens);
+            audit = audit.WithHeadingLook(run.Judged(
+                new Dictionary<PhoneHeadingQuestion, PhoneInference> { [Assert.Single(run.Questions)] = heading },
+                "1 piece of text left by the rules was for the model for vision-based checks; 1 piece of text answered"));
         }
 
         var guidance = AndroidGuidance.Load();

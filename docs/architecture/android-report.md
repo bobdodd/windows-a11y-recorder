@@ -251,7 +251,7 @@ picture, at 00:00:01.500".
 
 The fixed text of every check is in
 `src/Recorder.Analysis/Android/android-check-guidance.json`, embedded in
-the program. It holds, for each of the 41 checks: the title, the issue,
+the program. It holds, for each of the 43 checks: the title, the issue,
 why it matters, who it affects, the impact level, the WCAG success
 criteria and related ones, the basis, the remediation for Android,
 Flutter and React Native, and its sources. The sources and criteria are
@@ -261,6 +261,14 @@ resolves, and that the file holds no em dash.
 
 The report gives the file's version and SHA-256, so a report can be
 traced to the text it used.
+
+The version goes up when the text changes, as the client's report gives
+the version only. Version 3 (2026-11-16) added the checks of a field
+shown only by a bottom line and of text shown as a heading, and brought
+the bases of the non-text contrast, target-size and images-of-text
+checks up to their rules; a basis says what is judged, and from what,
+without naming the model, as the finding's level and its own row say
+where a model's answer was used.
 
 ### The impact levels
 

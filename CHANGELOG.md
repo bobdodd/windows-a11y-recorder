@@ -20,6 +20,8 @@ Changes on `main` since 1.1.0, not yet released.
   vision-based checks, it is asked whether the text is shown as a
   heading, and its answer makes the finding an error or information,
   marked as the model's inference.
+- The report's guidance is version 3: the new check's text, and the
+  bases of the images-of-text checks brought up to their rules.
 
 ### Boundaries without a model
 

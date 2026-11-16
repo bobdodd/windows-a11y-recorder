@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "note": "Fixed text for each Android check, shown with every finding in the Android report and summary (docs/architecture/android-report.md). The impact levels, high, medium and low as in the project's other tools, are the recorder's default judgement of an issue once confirmed; they are not measured. Each check's sources support its text.",
   "impact": [
     { "level": "high", "meaning": "Can stop the people it affects from completing a task, or make a task very hard for them or likely to fail." },
@@ -321,7 +321,7 @@
       "impact": "medium",
       "criteria": ["1.4.5"],
       "related": ["1.1.1"],
-      "basis": "WCAG 1.4.5, from text the PC's OCR read inside an image; a warning for a person to confirm, as logos and essential images are allowed.",
+      "basis": "WCAG 1.4.5, from text the PC's OCR read inside an image that no item's text holds, leaving out the screen reader's caption and text past the image's edge. A logotype and an essential presentation are allowed, and text that is part of a picture with significant other visual content is not an image of text; which applies is judged from the picture. Where the app draws its own text, an image whose description holds the words is a warning to check manually.",
       "android": "Show the words as real text, in a TextView or Compose Text, styled as needed. Keep images of text only for logos or where the look is essential, and give them a content description with the same words.",
       "flutter": "Show the words with a Text widget instead of an Image; for a logo, set the Image's semanticLabel to its words.",
       "reactNative": "Show the words with a Text element instead of an Image; for a logo, set accessibilityLabel to its words.",
@@ -336,7 +336,7 @@
       "impact": "low",
       "criteria": ["1.4.9"],
       "related": [],
-      "basis": "WCAG 1.4.9, run only at the AAA audit level.",
+      "basis": "WCAG 1.4.9, run only at the AAA audit level, judged as for 1.4.5; at AAA an image of text that can be customized is not allowed.",
       "android": "Show the words as real text; keep images of text only for logos or where the look is essential.",
       "flutter": "Show the words with a Text widget; keep images of text only for logos.",
       "reactNative": "Show the words with a Text element; keep images of text only for logos.",
@@ -351,11 +351,11 @@
       "impact": "medium",
       "criteria": ["1.3.1"],
       "related": [],
-      "basis": "WCAG 1.3.1, as failure F2 describes: a change in the look of text conveys structure without the markup. Found from the recorded picture and the tree: text at least 1.35 times as tall as the screen's body text, or one short line in capitals, that is not marked as a heading and is not inside a control. A warning for a person to confirm unless the project's model for vision-based checks was asked; its answer is the model's inference and says so.",
+      "basis": "WCAG 1.3.1 as WCAG2ICT applies it to software, and failure F2: a change in the look of text conveys structure without the markup. Found from the recorded picture and the tree: text at least 1.35 times as tall as the screen's body text, or one short line in capitals, that is not marked as a heading and is not inside a control or a field, or a field's label. Whether it is shown as a heading for the content after it is judged from the picture.",
       "android": "Mark the text as a heading with android:accessibilityHeading=\"true\" or ViewCompat.setAccessibilityHeading; in Compose, Modifier.semantics { heading() }.",
       "flutter": "Wrap the heading's Text in Semantics(header: true).",
       "reactNative": "Set accessibilityRole=\"header\" (or role=\"heading\") on the heading's Text.",
-      "sources": ["wcag-1.3.1", "wcag-f2", "android-views", "compose-semantics", "flutter-semantics", "rn-accessibility"]
+      "sources": ["wcag-1.3.1", "wcag2ict", "wcag-f2", "android-views", "compose-semantics", "flutter-semantics", "rn-accessibility"]
     },
     {
       "check": "label-not-in-name",

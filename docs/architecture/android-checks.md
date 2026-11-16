@@ -3467,8 +3467,10 @@ frames (measured).
   how many are for the model. "Ask the project's model" is enabled
   while an image or a piece of text has no answer from the project's
   model.
-- **Guidance.** `android-check-guidance.json` has the check, impact
-  medium, criterion 1.3.1, with failure F2 among its sources.
+- **Guidance.** `android-check-guidance.json`, version 3, has the
+  check, impact medium, criterion 1.3.1, with WCAG2ICT and failure F2
+  among its sources, so a finding in the report follows the template
+  of every finding (`android-report.md`, "Each finding").
 
 ### Checked
 
