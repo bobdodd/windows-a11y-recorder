@@ -8,6 +8,22 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Target-size exceptions without a model
+
+- The WCAG target-size checks (2.5.8, and 2.5.5 at AAA) judge two
+  exceptions from the tree: a target on a line of text, beside a text
+  item of the same height that is not a target, passes as one in a
+  sentence; a target with another of the size and the same name passes
+  as an equivalent, inferred from the name. Each is information for a
+  person to judge.
+- A target inside a larger tappable item (2.5.5), or whose 24 dp circle
+  meets only the tappable item it is in (2.5.8), is a warning, as WCAG
+  counts them as one target only when they do the same thing. At 2.5.8
+  these were passed before.
+- A target not run against the edge of a list that scrolls is dropped
+  when another snapshot of the same visit shows it whole, as it is
+  judged there; the Checks tab says how many.
+
 ### Images of text with the project's model
 
 - The images-of-text check (WCAG 1.4.5, and 1.4.9 at AAA) applies four

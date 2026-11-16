@@ -387,6 +387,60 @@ public sealed class PhoneCheckRunTests : IDisposable
             finding.Text);
     }
 
+    // A list that scrolls with a 16.4 dp tall "Reset" button in it, against
+    // the list's bottom edge, or moved up so it is seen whole.
+    private static JsonNode ListItems(bool atEdge) =>
+        JsonSerializer.SerializeToNode(
+            new AndroidTreeNode[]
+            {
+                new()
+                {
+                    Index = 0, WindowId = 512, PackageName = Settings, ClassName = "android.widget.FrameLayout",
+                    Bounds = new AndroidNodeBounds(0, 0, 1080, 2404), Checked = "unchecked",
+                    ImportantForAccessibility = true, VisibleToUser = true,
+                },
+                new()
+                {
+                    Index = 1, Parent = 0, Depth = 1, WindowId = 512, PackageName = Settings, ClassName = "androidx.recyclerview.widget.RecyclerView",
+                    Bounds = new AndroidNodeBounds(0, 0, 1080, 1000), Checked = "unchecked", Scrollable = true,
+                    Actions = [new AndroidNodeAction(0x1000, null)], ImportantForAccessibility = true, VisibleToUser = true,
+                },
+                new()
+                {
+                    Index = 2, Parent = 1, Depth = 2, WindowId = 512, PackageName = Settings, ClassName = "android.widget.Button",
+                    ViewId = "com.android.settings:id/reset", Text = "Reset",
+                    Bounds = atEdge ? new AndroidNodeBounds(100, 960, 600, 1000) : new AndroidNodeBounds(100, 500, 600, 540), Checked = "unchecked",
+                    ImportantForAccessibility = true, VisibleToUser = true, Enabled = true, Clickable = true, Focusable = true,
+                },
+            },
+            JsonSerializerOptions.Web)!;
+
+    // The owner, 2026-11-16: a target not run against the edge of a list
+    // that scrolls in one snapshot, but seen whole in another of the same
+    // visit, is judged by that sighting, so its not-run finding goes.
+    [Fact]
+    public void Run_ATargetCutOffInOneSnapshot_ButSeenWholeInAnother_IsJudgedWhole()
+    {
+        var archive = ArchiveOf(
+        [
+            (At(0.5), AndroidCompanionRecords.DisplayChannel, AndroidCompanionRecords.DisplayEventType,
+                new AndroidDisplayState(AndroidCompanionRecords.InitialReason, 0, 1080, 2404)),
+            (At(1), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(1, ListItems(atEdge: true))),
+            (At(3), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(2, ListItems(atEdge: false))),
+            (At(5), AndroidAccessibilityRecords.TreeChannel, AndroidAccessibilityRecords.TreeEventType, Tree(3, null)),
+        ], out var recording);
+
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, Device(), recording,
+            cancellationToken: TestContext.Current.CancellationToken, level: PhoneAuditLevel.AAA);
+
+        var enhanced = Assert.Single(run.Findings, finding => finding.Check == PhoneCheckNames.TouchTargetEnhanced);
+        Assert.Equal(PhoneCheckLevel.Error, enhanced.Level);
+        Assert.Equal(1, run.TargetsSeenWhole);
+
+        // ATF's own check is left as ATF has it.
+        Assert.Contains(run.Findings, finding => finding.Check == PhoneCheckNames.TouchTarget && finding.Level == PhoneCheckLevel.NotRun);
+    }
+
     // The owner, 2026-11-12: findings belong to the visit they were seen
     // in, as the screen's content can change between visits. Settings,
     // then the Clock app, then Settings again: the same button failing on

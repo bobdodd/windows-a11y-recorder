@@ -812,9 +812,11 @@ what ATF reads on the phone:
 - **The words** of Redundant description are ATF's English words, as the
   phone's language is not recorded. ATF gives a result for each word;
   the recorder gives one per item naming every word.
-- **The 24dp level** counts a target's own ancestors and descendants as
+- **The 24dp level** counted a target's own ancestors and descendants as
   the same place to touch, not as other targets (inference: WCAG 2.5.8
-  speaks of separate targets).
+  speaks of separate targets). Replaced on 2026-11-16 (step 17): as WCAG
+  counts overlapping targets as one only when they do the same thing,
+  a target whose circle meets only them is a warning.
 - **"Not run"** is listed only for the scrollable edge. ATF's other
   "not run" results (such as an item with no bounds) are left out, as
   they say nothing about the app.
@@ -1709,7 +1711,8 @@ pixels) and the standard (WCAG 2.5.5 applied directly) were accepted.
   "Audit level AAA: text contrast is held to WCAG 1.4.6, and targets to
   44 by 44 dp (WCAG 2.5.5) as well as 2.5.8; 2.5.5's exceptions (an
   equivalent target, a target in text, one sized by Android, an
-  essential presentation) are not judged."
+  essential presentation) are not judged." Since step 17, the line
+  says which exceptions are judged from the tree instead.
 - **Changing the level** works the text contrast findings out again
   from the same measurement, and runs the tree's checks again at the new
   level; if they are still running, they are run again when they end.
@@ -1727,9 +1730,10 @@ pixels) and the standard (WCAG 2.5.5 applied directly) were accepted.
   AA, a target 44 dp wide but 43.9 dp high, a 44 dp square passing, a
   target against a list's edge, no density, the run at AAA, and the old
   setting's name.
-- **Limits.** 2.5.5's exceptions are not judged: a target with an
+- **Limits.** 2.5.5's exceptions were not judged: a target with an
   equivalent of 44 dp, one in text, one sized by Android and one whose
-  size is essential are all reported, and need a person to set aside.
+  size is essential were all reported, and needed a person to set
+  aside. Step 17 judges a target in text and an equivalent target.
   Section headings (2.4.10) and other AAA criteria are not checked.
 
 ## Step 8: images of text
@@ -3092,6 +3096,137 @@ breaks a sentence. The rules as built find nothing in any of the 493.
   table with gaps on 2 or more lines is found as F33's columns.
 - Line breaks between words in a script with no case, such as Japanese,
   are not found, as the next line has no lowercase letter.
+
+## Step 17: target-size exceptions
+
+### The owner's decision (2026-11-16)
+
+Offered as the next check, "Target-size exceptions. Ok, let's do that":
+the exceptions of WCAG 2.5.8 and 2.5.5 are judged without a model, as
+decided in `android-vision-checks.md` (decision 7, step 3), by the rule
+"AI only when non-AI cannot do the test".
+
+### What the standards ask (checked in cited documents)
+
+- **2.5.8 Target Size (Minimum), AA:** a target of at least 24 by 24
+  CSS pixels, except for spacing, an equivalent control on the same page
+  that meets the size, a target in a sentence "or its size is otherwise
+  constrained by the line-height of non-target text", one sized by the
+  user agent, and an essential presentation
+  ([Understanding SC 2.5.8](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html)).
+- **2.5.5 Target Size (Enhanced), AAA:** 44 by 44 CSS pixels, with the
+  exceptions of an equivalent target, a target "in a sentence or block
+  of text", one sized by the user agent, and an essential presentation;
+  "If the target is the full sentence and the sentence is not in a
+  block of text, then the target needs to be at least 44 by 44"
+  ([Understanding SC 2.5.5](https://www.w3.org/WAI/WCAG22/Understanding/target-size-enhanced.html)).
+- **Overlapping targets.** WCAG's definition of a target's size: "If two
+  or more targets are overlapping, the overlapping area should not be
+  included in the measurement of the target size, except when the
+  overlapping targets perform the same action or open the same page"
+  (Understanding 2.5.8). Its Figure 9 shows a small target over a
+  larger one failing.
+
+### Measured first (2026-11-16)
+
+On the 43 recordings on the development PC, 20 of them with phone
+screens, checked at AA and AAA:
+
+- **24 dp (AA):** 2 not run, the same Settings row, 12 dp high, against
+  the edge of a list that scrolls, on two visits.
+- **44 dp (AAA), not run:** 5, each against the edge of a list that
+  scrolls, none seen whole in another snapshot of its visit.
+- **44 dp (AAA), errors:** 7. Four are the Launcher's date and weather
+  text, each inside a ViewGroup of 402.1 by 103.4 dp that can be tapped.
+  Two are links in a line of the client's sign-in text, each beside a
+  text item of the same height that is not a target ("and"). One is a
+  link alone on its line, with the nearest text 535 pixels away.
+- No undersized target had another target of the size with the same
+  name.
+
+### As built
+
+The rules are in `PhoneTreeChecks` (`TouchTargetWcag`,
+`TouchTargetEnhanced`, `TextOnLine`, `EquivalentTarget`,
+`LargerTargetAround`) and `PhoneCheckRun`. They are applied in this
+order to each undersized target, for both checks; the check names and
+their guidance are unchanged, and the ATF check (`touch-target-size`)
+is left as ATF has it.
+
+1. **A target in a line of text** passes, as information. From the
+   tree, not OCR, so it is exact and repeatable: a visible item with
+   text or a description holding a letter, not clickable or long
+   clickable and not inside the target, whose height is within 10% or
+   2 dp of the target's, which overlaps it vertically by at least 80%
+   of the smaller height, and is no further from it sideways than the
+   target's height. The target has text or a description, and is not
+   checkable, editable, a check box or a switch, as those sit beside
+   their labels without being in a sentence. Text drawn but not in the
+   tree is not counted, and the finding says so.
+2. **An equivalent target** passes, as information: another visible
+   target, not inside the target nor around it, of at least 24 by 24 or
+   44 by 44 dp, whose speakable name (`SpeakableText`, trimmed) is the
+   same, ignoring case. This is inferred from the name, as the tree does
+   not say what a target does, and the finding says so.
+3. **Against the edge of a list that scrolls,** not run, as before.
+4. **Inside another target.** For 2.5.5, a target inside a clickable
+   ancestor of 44 by 44 dp (clickable as the target is, as ATF takes
+   it) is a warning, not a pass. For 2.5.8, a target whose 24 dp circle
+   meets only its own clickable ancestors or descendants is a warning.
+   They are one target only if they do the same thing, which the tree
+   does not say, so a person confirms it.
+5. **Otherwise,** an error, as before.
+
+**Seen whole.** A 24 dp or 44 dp finding not run in one snapshot, as
+against the edge of a list that scrolls, is dropped when another
+snapshot of the same visit, with the density known, shows the same item
+as a target not against an edge, as that sighting is judged on its own.
+`PhoneCheckRun.TargetsSeenWhole` counts them, and the Checks tab says
+how many.
+
+**The Checks tab** says, at both levels, which exceptions are judged and
+how, and at AAA that a target sized by Android and an essential
+presentation are not judged.
+
+### A change to what was found before
+
+Before this step, the 24 dp check counted a target's own ancestors and
+descendants as the same place to touch, and passed it (see "Where the
+recorder differs from ATF"). As WCAG counts them as one only when they
+do the same thing, that case is now a warning. On the recordings
+measured, this adds a 24 dp warning for each of the two Launcher dates,
+22.6 dp high, whose circle meets the "At a glance" pager around them.
+
+### Run on the measured recordings
+
+- **AAA:** the two links in the line of sign-in text are information;
+  the four Launcher items are warnings; the link alone on its line is
+  still an error; the 5 not run stay not run.
+- **AA:** the 2 not run stay; the two Launcher dates are warnings.
+
+### Checked
+
+The solution builds with no warnings, and the tests pass, 2,596 of
+them, with the 10 that need Windows failing as before. The new tests
+cover a target meeting only its clickable parent at 2.5.8, a link on a
+line of text at both levels, text on another line and a check box
+beside its label, an equivalent target at both sizes, a target inside a
+clickable item of 44 dp, and a target cut off in one snapshot and seen
+whole in another.
+
+### Limits
+
+- Text drawn in a picture, or in an item missing from the tree, is not
+  counted as a line of text.
+- A block of several lines is found only one line at a time: a target
+  beside a line of a paragraph that is one item spanning lines, with a
+  height unlike the target's, is not found.
+- The equivalent target is judged by name only. Two controls with the
+  same name that do different things, such as a "Delete" on each row,
+  can be passed wrongly, which is why it is information for a person to
+  judge.
+- One sized by Android and not by the app, and an essential
+  presentation, are not judged.
 
 ## Decisions on the open questions (2026-11-11)
 

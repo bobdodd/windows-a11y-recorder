@@ -132,6 +132,13 @@ public sealed class PhoneCheckRun
     /// </summary>
     public int DensityChanged { get; private set; }
 
+    /// <summary>
+    /// Touch targets not run in one snapshot, as against the edge of a list
+    /// that scrolls, and so dropped, as another snapshot of the same visit
+    /// showed them whole and they were judged there.
+    /// </summary>
+    public int TargetsSeenWhole { get; private set; }
+
     /// <summary>The enabled clickable items the clickable but not focusable check looked at, once for each distinct sight of them.</summary>
     public int Clickable { get; private set; }
 
@@ -286,6 +293,9 @@ public sealed class PhoneCheckRun
         var checkedTakings = new HashSet<string>(StringComparer.Ordinal);
         var textFocus = new Dictionary<string, (int Text, int Focusable)>(StringComparer.Ordinal);
         var sightings = new List<(PhoneVisit Visit, SessionTimelineEvent Settled, SessionTimelineEvent Taking, PhoneCheckWindow Window, long ShownAt, string? State)>();
+        // The targets each visit showed whole, not against the edge of a
+        // list that scrolls, in a snapshot the touch target checks ran on.
+        var seenWhole = new HashSet<(PhoneVisit, string)>();
         foreach (var visit in screens.Visits)
         {
             // The results of each taking of the window's items in the visit.
@@ -398,6 +408,17 @@ public sealed class PhoneCheckRun
                 }
                 textFocus.TryGetValue(visit.Screen.Package, out var sofar);
                 textFocus[visit.Screen.Package] = (sofar.Text + focus.TextItems, sofar.Focusable + focus.FocusableTextItems);
+                if (density is not null)
+                {
+                    foreach (var target in done.Window.Items.Where(PhoneTreeChecks.IsTarget))
+                    {
+                        if (!PhoneTreeChecks.IsAgainstScrollableEdge(target))
+                        {
+                            seenWhole.Add((visit, target.Identity));
+                        }
+                    }
+                }
+
                 var items = done.Window.Items.GroupBy(item => item.Node.Index).ToDictionary(group => group.Key, group => group.First());
                 foreach (var result in done.Results)
                 {
@@ -415,6 +436,19 @@ public sealed class PhoneCheckRun
                     finding._times.Add(new PhoneFindingTime(shownAt, visit, settled, taking, visit.WindowId, item.Bounds, item.TreeKey, result.Measured, state));
                 }
             }
+        }
+
+        // A target not run against the edge of a list that scrolls in one
+        // snapshot, but seen whole in another of the same visit, is judged
+        // by that sighting (owner, 2026-11-16), so its not-run finding goes.
+        foreach (var key in findings.Keys
+            .Where(key => key.Item3 == PhoneCheckLevel.NotRun &&
+                (key.Item2 == PhoneCheckNames.TouchTargetWcag || key.Item2 == PhoneCheckNames.TouchTargetEnhanced) &&
+                seenWhole.Contains((key.Item1, key.Item4)))
+            .ToList())
+        {
+            findings.Remove(key);
+            run.TargetsSeenWhole++;
         }
 
         SharedTitles(sightings, findings);

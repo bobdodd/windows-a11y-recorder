@@ -204,7 +204,11 @@ screen, from the tree; whether a larger item that can be tapped is the
 target; and, for an item against a scrolling list's edge, whether a
 later snapshot of the same visit shows it whole. By the owner's rule,
 "AI only when non-AI cannot do the test", they are built without one
-(decision 7).
+(decision 7). Built on 2026-11-16 from the tree, not the pictures' text,
+as the tree's positions are exact and repeatable; a larger item that
+can be tapped is a warning, not a pass, as WCAG counts overlapping
+targets as one only when they do the same thing (android-checks.md,
+step 17).
 
 ### Images of text, measured on 2026-11-15
 

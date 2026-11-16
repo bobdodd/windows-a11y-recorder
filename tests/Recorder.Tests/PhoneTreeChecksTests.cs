@@ -145,15 +145,73 @@ public sealed class PhoneTreeChecksTests
         Assert.Empty(results);
     }
 
+    // The owner, 2026-11-16: target-size exceptions judged from the tree.
+    // WCAG counts overlapping targets as one only when they do the same
+    // thing, which the tree does not say, so a target whose circle meets
+    // only its own clickable parent is a warning, not a pass.
     [Fact]
-    public void Wcag_AnItemsOwnClickableParent_IsNotAnotherTarget()
+    public void Wcag_MeetingOnlyItsOwnClickableParent_IsAWarning()
     {
         var results = Wcag(Window(
             Page(),
             Item(1, 0, "android.widget.LinearLayout", (0, 400, 1080, 600), clickable: true),
             Item(2, 1, Button, (100, 450, 149, 499), text: "Info", clickable: true)));
 
-        Assert.Empty(results);
+        var result = Assert.Single(results);
+        Assert.Equal((PhoneCheckLevel.Warning, 2), (result.Level, result.Item));
+        Assert.Equal(
+            "20.1 by 20.1 dp, under 24 by 24 dp, and its 24dp circle meets LinearLayout containing \"Info\", which it is inside, and no other target: " +
+            "if both do the same thing they are one target and this passes, otherwise it fails; the tree does not say what they do, so a person should confirm",
+            result.Measured);
+    }
+
+    // A link on a line of text, 20.1 dp tall, whose circle meets the
+    // button below it: it passes as a target in a sentence.
+    private static AndroidTreeNode[] LinkInText(bool checkable = false, int textTop = 500) =>
+    [
+        Page(),
+        Item(1, 0, TextView, (100, textTop, 400, textTop + 49), text: "By signing in, you agree to our"),
+        Item(2, 0, Button, (400, 500, 600, 549), description: "Terms", clickable: true) with { Checkable = checkable },
+        Item(3, 0, Button, (100, 550, 1000, 700), text: "Sign in", clickable: true),
+    ];
+
+    [Fact]
+    public void Wcag_ALinkInALineOfText_PassesByTheException_AsInformation()
+    {
+        var result = Assert.Single(Wcag(Window(LinkInText())));
+
+        Assert.Equal((PhoneCheckLevel.Info, 2), (result.Level, result.Item));
+        Assert.Equal(
+            "82.1 by 20.1 dp, under 24 by 24 dp, and its 24dp circle meets Button \"Sign in\"; passes by 2.5.8's exception for a target in a sentence, " +
+            "as it is on a line of text with TextView \"By signing in, you agree to our\" beside it, which is not a target " +
+            "(from the tree; text drawn but not in the tree is not counted)",
+            result.Measured);
+    }
+
+    [Fact]
+    public void Wcag_TextOnAnotherLine_OrACheckBoxBesideItsLabel_IsNotInText()
+    {
+        var above = Assert.Single(Wcag(Window(LinkInText(textTop: 440))));
+        var checkBox = Assert.Single(Wcag(Window(LinkInText(checkable: true))));
+
+        Assert.Equal(PhoneCheckLevel.Error, above.Level);
+        Assert.Equal(PhoneCheckLevel.Error, checkBox.Level);
+    }
+
+    [Fact]
+    public void Wcag_AnEquivalentTargetOf24dp_WithTheSameName_PassesAsInformation()
+    {
+        var results = Wcag(Window(
+            Page(),
+            Item(1, 0, Button, (100, 500, 149, 549), text: "Help", clickable: true),
+            Item(2, 0, Button, (140, 500, 189, 549), text: "B", clickable: true),
+            Item(3, 0, Button, (100, 1000, 400, 1200), text: "help", clickable: true)));
+
+        Assert.Equal([(1, PhoneCheckLevel.Info), (2, PhoneCheckLevel.Error)], results.Select(result => (result.Item, result.Level)));
+        Assert.EndsWith(
+            "; passes by the exception for an equivalent target, as Button \"help\", of 123.1 by 82.1 dp, has the same name " +
+            "(inferred from the name: the tree does not say they do the same thing)",
+            results[0].Measured, StringComparison.Ordinal);
     }
 
     // Touch target under 44dp (WCAG 2.5.5, AAA), at the AAA audit level only
@@ -206,6 +264,47 @@ public sealed class PhoneTreeChecksTests
         var result = Assert.Single(PhoneTreeChecks.Run(window, PixelAaa), result => result.Check == PhoneCheckNames.TouchTargetEnhanced);
         Assert.Equal(PhoneCheckLevel.NotRun, result.Level);
         Assert.Equal("205.1 by 12.3 dp, too short; WCAG 2.5.5 needs 44 by 44 dp; not run, as it is against the edge of a list that scrolls, so may be cut off by it", result.Measured);
+    }
+
+    [Fact]
+    public void Enhanced_InsideAClickableItemOf44dp_IsAWarning()
+    {
+        var window = Window(
+            Page(),
+            Item(1, 0, "android.widget.LinearLayout", (0, 400, 1080, 600), clickable: true),
+            Item(2, 1, Button, (100, 450, 198, 548), text: "Info", clickable: true));
+
+        var result = Assert.Single(PhoneTreeChecks.Run(window, PixelAaa), result => result.Check == PhoneCheckNames.TouchTargetEnhanced);
+        Assert.Equal((PhoneCheckLevel.Warning, 2), (result.Level, result.Item));
+        Assert.Equal(
+            "40.2 by 40.2 dp, too narrow and too short; WCAG 2.5.5 needs 44 by 44 dp; it is inside LinearLayout containing \"Info\", of 443.1 by 82.1 dp, " +
+            "which can also be tapped: if both do the same thing they are one target, large enough, otherwise this fails; " +
+            "the tree does not say what they do, so a person should confirm",
+            result.Measured);
+    }
+
+    [Fact]
+    public void Enhanced_ALinkInALineOfText_PassesByTheException_AsInformation()
+    {
+        var window = Window(LinkInText());
+
+        var result = Assert.Single(PhoneTreeChecks.Run(window, PixelAaa), result => result.Check == PhoneCheckNames.TouchTargetEnhanced && result.Item == 2);
+        Assert.Equal(PhoneCheckLevel.Info, result.Level);
+        Assert.Contains("; passes by 2.5.5's exception for a target in a sentence or block of text, as it is on a line of text with TextView", result.Measured, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Enhanced_AnEquivalentTargetOf44dp_PassesAsInformation_ButOneOf24dpDoesNot()
+    {
+        var window = Window(
+            Page(),
+            Item(1, 0, Button, (100, 200, 198, 298), text: "Save", clickable: true),
+            Item(2, 0, Button, (100, 1000, 400, 1200), text: "Save", clickable: true),
+            Item(3, 0, Button, (600, 200, 698, 298), text: "Undo", clickable: true),
+            Item(4, 0, Button, (600, 1000, 700, 1080), text: "Undo", clickable: true));
+
+        var results = PhoneTreeChecks.Run(window, PixelAaa).Where(result => result.Check == PhoneCheckNames.TouchTargetEnhanced).ToList();
+        Assert.Equal([(1, PhoneCheckLevel.Info), (3, PhoneCheckLevel.Error), (4, PhoneCheckLevel.Error)], results.Select(result => (result.Item, result.Level)));
     }
 
     [Fact]

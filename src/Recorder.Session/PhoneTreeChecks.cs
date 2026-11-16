@@ -405,6 +405,7 @@ public static class PhoneTreeChecks
     private const string EditText = "android.widget.EditText";
     private const string WebView = "android.webkit.WebView";
     private const string Switch = "android.widget.Switch";
+    private const string CheckBox = "android.widget.CheckBox";
     private const string ToggleButton = "android.widget.ToggleButton";
     private const string ScrollingView = "androidx.core.view.ScrollingView";
 
@@ -674,18 +675,34 @@ public static class PhoneTreeChecks
 
     // ---- WCAG 2.5.8, the recorder's own level -------------------------------
 
+    // The items the WCAG target checks take as targets: clickable or
+    // long-clickable, visible, with bounds.
+    internal static bool IsTarget(PhoneCheckItem item) =>
+        (item.Node.Clickable || item.Node.LongClickable) && item.Node.VisibleToUser && !item.Bounds.IsEmpty;
+
     // A target under 24 by 24 dp fails unless a 24dp circle centred on its
     // bounds meets no other target and no other undersized target's circle
     // (WCAG 2.5.8's spacing exception). The targets are the items the touch
-    // target check takes: clickable or long-clickable and visible. An item's
-    // own ancestors and descendants are not counted as other targets, as one
-    // inside another is the same place to touch (inference: WCAG speaks of
-    // separate targets). A target against the edge of a list that scrolls is
-    // not run, as the touch target size check does.
+    // target check takes: clickable or long-clickable and visible.
+    //
+    // Its exceptions, judged from the tree before the spacing (owner,
+    // 2026-11-16: target-size exceptions without a model), in this order:
+    // a target in a line of text passes, as one in a sentence (Info); an
+    // equivalent target of 24 dp with the same name passes, inferred from
+    // the name (Info). A target against the edge of a list that scrolls is
+    // then not run, as the touch target size check does.
+    //
+    // WCAG counts overlapping targets as one only "when the overlapping
+    // targets perform the same action or open the same page"
+    // (Understanding 2.5.8, the definition of target), and a small target
+    // clipping a larger one fails (its Figure 9). The tree does not say
+    // what two targets do, so when the circle meets only the target's own
+    // clickable ancestors or descendants, it is a warning for a person to
+    // confirm, not a pass.
     internal static void TouchTargetWcag(PhoneCheckWindow window, PhoneCheckContext context, List<PhoneCheckResult> results)
     {
         var density = (double)context.Density;
-        var targets = window.Items.Where(item => (item.Node.Clickable || item.Node.LongClickable) && item.Node.VisibleToUser && !item.Bounds.IsEmpty).ToList();
+        var targets = window.Items.Where(IsTarget).ToList();
         var radius = WcagTargetMinimum / 2 * density;
         var small = targets
             .Where(item => item.Bounds.Width / density < WcagTargetMinimum || item.Bounds.Height / density < WcagTargetMinimum)
@@ -695,9 +712,10 @@ public static class PhoneTreeChecks
             var bounds = target.Bounds;
             var (cx, cy) = Centre(bounds);
             PhoneCheckItem? meets = null;
+            PhoneCheckItem? meetsRelated = null;
             foreach (var other in targets)
             {
-                if (ReferenceEquals(other, target) || Related(target, other))
+                if (ReferenceEquals(other, target))
                 {
                     continue;
                 }
@@ -705,12 +723,18 @@ public static class PhoneTreeChecks
                 var circleMeets = small.Contains(other) && Distance(cx, cy, Centre(other.Bounds)) < 2 * radius;
                 if (circleMeets || DistanceToRectangle(cx, cy, other.Bounds) < radius)
                 {
+                    if (Related(target, other))
+                    {
+                        meetsRelated ??= other;
+                        continue;
+                    }
+
                     meets = other;
                     break;
                 }
             }
 
-            if (meets is null)
+            if (meets is null && meetsRelated is null)
             {
                 continue;
             }
@@ -718,33 +742,53 @@ public static class PhoneTreeChecks
             var width = bounds.Width / density;
             var height = bounds.Height / density;
             var measured = string.Create(CultureInfo.InvariantCulture,
-                $"{width:0.#} by {height:0.#} dp, under 24 by 24 dp, and its 24dp circle meets {meets.Label}");
+                $"{width:0.#} by {height:0.#} dp, under 24 by 24 dp, and its 24dp circle meets {(meets ?? meetsRelated)!.Label}");
+            if (TargetException(target, window, targets, density, WcagTargetMinimum, "2.5.8's exception for a target in a sentence") is { } passes)
+            {
+                results.Add(new PhoneCheckResult(PhoneCheckNames.TouchTargetWcag, PhoneCheckLevel.Info, target.Node.Index, measured + "; " + passes));
+                continue;
+            }
 
             // As the touch target size check does, an item against the edge
             // of a list that scrolls may be cut off by it, so its size is
             // not its own.
-            var scrollEdge = IsAgainstScrollableEdge(target);
-            results.Add(new PhoneCheckResult(
-                PhoneCheckNames.TouchTargetWcag,
-                scrollEdge ? PhoneCheckLevel.NotRun : PhoneCheckLevel.Error,
-                target.Node.Index,
-                scrollEdge ? measured + "; not run, as it is against the edge of a list that scrolls, so may be cut off by it" : measured));
+            if (IsAgainstScrollableEdge(target))
+            {
+                results.Add(new PhoneCheckResult(PhoneCheckNames.TouchTargetWcag, PhoneCheckLevel.NotRun, target.Node.Index,
+                    measured + "; not run, as it is against the edge of a list that scrolls, so may be cut off by it"));
+                continue;
+            }
+
+            if (meets is not null)
+            {
+                results.Add(new PhoneCheckResult(PhoneCheckNames.TouchTargetWcag, PhoneCheckLevel.Error, target.Node.Index, measured));
+                continue;
+            }
+
+            var inside = IsAncestor(meetsRelated!, target) ? "which it is inside" : "which is inside it";
+            results.Add(new PhoneCheckResult(PhoneCheckNames.TouchTargetWcag, PhoneCheckLevel.Warning, target.Node.Index,
+                measured + $", {inside}, and no other target: if both do the same thing they are one target and this passes, otherwise it fails; the tree does not say what they do, so a person should confirm"));
         }
     }
 
     // ---- WCAG 2.5.5, at the AAA audit level ----------------------------------
 
     // A target under 44 by 44 dp fails (owner, 2026-11-12: the audit level
-    // guides the checks). 2.5.5 has no spacing exception. Its exceptions,
-    // an equivalent target of 44 dp on the screen, a target in a sentence
-    // or block of text, one sized by Android and not by the app, and an
-    // essential presentation, are not judged, as the tree does not say
-    // them; the summary says so. The targets are 2.5.8's, and a target
-    // against the edge of a list that scrolls is not run, as there.
+    // guides the checks). 2.5.5 has no spacing exception. Its exceptions
+    // judged from the tree (owner, 2026-11-16), in this order: a target in
+    // a line of text passes, as one in a sentence or block of text (Info);
+    // an equivalent target of 44 dp with the same name passes, inferred
+    // from the name (Info). A target against the edge of a list that
+    // scrolls is then not run, as there. A target inside a clickable
+    // ancestor of 44 dp is a warning, not a pass, as the two are one
+    // target only if they do the same thing, which the tree does not say.
+    // One sized by Android and not by the app, and an essential
+    // presentation, are not judged; the summary says so.
     internal static void TouchTargetEnhanced(PhoneCheckWindow window, PhoneCheckContext context, List<PhoneCheckResult> results)
     {
         var density = (double)context.Density;
-        foreach (var target in window.Items.Where(item => (item.Node.Clickable || item.Node.LongClickable) && item.Node.VisibleToUser && !item.Bounds.IsEmpty))
+        var targets = window.Items.Where(IsTarget).ToList();
+        foreach (var target in targets)
         {
             var width = target.Bounds.Width / density;
             var height = target.Bounds.Height / density;
@@ -755,13 +799,156 @@ public static class PhoneTreeChecks
 
             var measured = string.Create(CultureInfo.InvariantCulture,
                 $"{width:0.#} by {height:0.#} dp, {(width < EnhancedTargetMinimum && height < EnhancedTargetMinimum ? "too narrow and too short" : width < EnhancedTargetMinimum ? "too narrow" : "too short")}; WCAG 2.5.5 needs 44 by 44 dp");
-            var scrollEdge = IsAgainstScrollableEdge(target);
-            results.Add(new PhoneCheckResult(
-                PhoneCheckNames.TouchTargetEnhanced,
-                scrollEdge ? PhoneCheckLevel.NotRun : PhoneCheckLevel.Error,
-                target.Node.Index,
-                scrollEdge ? measured + "; not run, as it is against the edge of a list that scrolls, so may be cut off by it" : measured));
+            if (TargetException(target, window, targets, density, EnhancedTargetMinimum, "2.5.5's exception for a target in a sentence or block of text") is { } passes)
+            {
+                results.Add(new PhoneCheckResult(PhoneCheckNames.TouchTargetEnhanced, PhoneCheckLevel.Info, target.Node.Index, measured + "; " + passes));
+                continue;
+            }
+
+            if (IsAgainstScrollableEdge(target))
+            {
+                results.Add(new PhoneCheckResult(PhoneCheckNames.TouchTargetEnhanced, PhoneCheckLevel.NotRun, target.Node.Index,
+                    measured + "; not run, as it is against the edge of a list that scrolls, so may be cut off by it"));
+                continue;
+            }
+
+            if (LargerTargetAround(target, density, EnhancedTargetMinimum) is { } around)
+            {
+                var aroundWidth = around.Bounds.Width / density;
+                var aroundHeight = around.Bounds.Height / density;
+                results.Add(new PhoneCheckResult(PhoneCheckNames.TouchTargetEnhanced, PhoneCheckLevel.Warning, target.Node.Index,
+                    measured + string.Create(CultureInfo.InvariantCulture,
+                        $"; it is inside {around.Label}, of {aroundWidth:0.#} by {aroundHeight:0.#} dp, which can also be tapped: if both do the same thing they are one target, large enough, otherwise this fails; the tree does not say what they do, so a person should confirm")));
+                continue;
+            }
+
+            results.Add(new PhoneCheckResult(PhoneCheckNames.TouchTargetEnhanced, PhoneCheckLevel.Error, target.Node.Index, measured));
         }
+    }
+
+    // ---- The exceptions both criteria share -----------------------------------
+
+    // Why an undersized target passes by an exception judged from the tree,
+    // or null: one in a line of text, then an equivalent target.
+    private static string? TargetException(
+        PhoneCheckItem target, PhoneCheckWindow window, IReadOnlyList<PhoneCheckItem> targets, double density, double minimum, string inlineException)
+    {
+        if (TextOnLine(target, window, density) is { } beside)
+        {
+            return $"passes by {inlineException}, as it is on a line of text with {beside.Label} beside it, which is not a target (from the tree; text drawn but not in the tree is not counted)";
+        }
+
+        if (EquivalentTarget(target, targets, density, minimum) is { } equivalent)
+        {
+            return string.Create(CultureInfo.InvariantCulture,
+                $"passes by the exception for an equivalent target, as {equivalent.Label}, of {equivalent.Bounds.Width / density:0.#} by {equivalent.Bounds.Height / density:0.#} dp, has the same name (inferred from the name: the tree does not say they do the same thing)");
+        }
+
+        return null;
+    }
+
+    // A target in a line of text: a visible item with text that is not a
+    // target and not inside this one, of the same line height, on the same
+    // line, and beside it, no further than a line's height away. The target
+    // has text or a description, and is not a field, a check box or a
+    // switch, which sit beside their labels without being in a sentence.
+    internal static PhoneCheckItem? TextOnLine(PhoneCheckItem target, PhoneCheckWindow window, double density)
+    {
+        var node = target.Node;
+        if (!HasLetter(target.Text) && !HasLetter(node.ContentDescription))
+        {
+            return null;
+        }
+
+        if (node.Checkable || node.Editable || target.InstanceOf(EditText) || target.InstanceOf(Switch) || target.InstanceOf(CheckBox))
+        {
+            return null;
+        }
+
+        var t = target.Bounds;
+        foreach (var other in window.Items)
+        {
+            if (ReferenceEquals(other, target) || !other.Node.VisibleToUser || other.Bounds.IsEmpty ||
+                other.Node.Clickable || other.Node.LongClickable || IsAncestor(target, other))
+            {
+                continue;
+            }
+
+            if (!HasLetter(other.Text) && !HasLetter(other.Node.ContentDescription))
+            {
+                continue;
+            }
+
+            var o = other.Bounds;
+            var sameHeight = Math.Abs(o.Height - t.Height) <= Math.Max(t.Height * 0.1, 2 * density);
+            var overlap = Math.Min(t.Bottom, o.Bottom) - Math.Max(t.Top, o.Top);
+            var gap = Math.Max(o.Left - t.Right, t.Left - o.Right);
+            if (sameHeight && overlap >= 0.8 * Math.Min(t.Height, o.Height) && gap <= t.Height)
+            {
+                return other;
+            }
+        }
+
+        return null;
+    }
+
+    // An equivalent target: another visible target, not inside this one
+    // nor around it, with the same speakable name, of at least the size.
+    internal static PhoneCheckItem? EquivalentTarget(PhoneCheckItem target, IReadOnlyList<PhoneCheckItem> targets, double density, double minimum)
+    {
+        var name = SpeakableText(target).Trim();
+        if (name.Length == 0)
+        {
+            return null;
+        }
+
+        foreach (var other in targets)
+        {
+            if (ReferenceEquals(other, target) || Related(target, other) ||
+                other.Bounds.Width / density < minimum || other.Bounds.Height / density < minimum)
+            {
+                continue;
+            }
+
+            if (string.Equals(SpeakableText(other).Trim(), name, StringComparison.OrdinalIgnoreCase))
+            {
+                return other;
+            }
+        }
+
+        return null;
+    }
+
+    // The nearest clickable ancestor of at least the size, clickable as the
+    // target is (as ATF's hasQualifyingClickableAncestor takes it), or null.
+    internal static PhoneCheckItem? LargerTargetAround(PhoneCheckItem target, double density, double minimum)
+    {
+        for (var ancestor = target.Parent; ancestor is not null; ancestor = ancestor.Parent)
+        {
+            if (((ancestor.Node.Clickable && target.Node.Clickable) || (ancestor.Node.LongClickable && target.Node.LongClickable)) &&
+                ancestor.Node.VisibleToUser && ancestor.Bounds.Width / density >= minimum && ancestor.Bounds.Height / density >= minimum)
+            {
+                return ancestor;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool HasLetter(string? text) => text is not null && text.Any(char.IsLetter);
+
+    // Whether one is an ancestor of the other.
+    private static bool IsAncestor(PhoneCheckItem ancestor, PhoneCheckItem of)
+    {
+        for (var step = of.Parent; step is not null; step = step.Parent)
+        {
+            if (ReferenceEquals(step, ancestor))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool Related(PhoneCheckItem one, PhoneCheckItem other)

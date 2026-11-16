@@ -747,8 +747,13 @@ public partial class MainWindow
     // The audit level the checks were run at, and what it changes
     // (owner, 2026-11-12: the level guides the checks and their reporting).
     private string AuditSummary() => AuditLevel == PhoneAuditLevel.AAA
-        ? "Audit level AAA: text contrast is held to WCAG 1.4.6, targets to 44 by 44 dp (WCAG 2.5.5) as well as 2.5.8, and images of text to 1.4.9 as well as 1.4.5; 2.5.5's exceptions (an equivalent target, a target in text, one sized by Android, an essential presentation) are not judged."
-        : "Audit level AA: text contrast is held to WCAG 1.4.3, targets to 2.5.8, and images of text to 1.4.5.";
+        ? "Audit level AAA: text contrast is held to WCAG 1.4.6, targets to 44 by 44 dp (WCAG 2.5.5) as well as 2.5.8, and images of text to 1.4.9 as well as 1.4.5. " + TargetExceptions + " 2.5.5's exceptions for a target sized by Android and an essential presentation are not judged."
+        : "Audit level AA: text contrast is held to WCAG 1.4.3, targets to 2.5.8, and images of text to 1.4.5. " + TargetExceptions;
+
+    // The target-size exceptions judged from the tree (owner, 2026-11-16).
+    private const string TargetExceptions =
+        "A target on a line of text passes as one in a sentence, and one with an equivalent target of the size and the same name passes, inferred from the name; " +
+        "each is information for a person to judge. A target inside or around another target is a warning, as they are one target only if they do the same thing, which the tree does not say.";
 
     // What the checks found, or why they have not.
     private string ChecksSummary()
@@ -866,6 +871,11 @@ public partial class MainWindow
         if (run.WithoutDensity > 0)
         {
             summary += $" The touch target checks did not run on {Count(run.WithoutDensity, "settled snapshot")}, as no density was recorded for them.";
+        }
+
+        if (run.TargetsSeenWhole > 0)
+        {
+            summary += $" Touch target findings not run against the edge of a list that scrolls, dropped as another snapshot of the same visit showed the target whole and it was judged there: {run.TargetsSeenWhole:N0}.";
         }
 
         if (run.DensityChanged > 0)
