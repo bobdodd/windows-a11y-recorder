@@ -12,9 +12,10 @@ namespace Recorder.Analysis.Android;
 /// phone recording, written by screen as a Word document and as Markdown,
 /// with the screens' pictures. No model writes it; where the project
 /// chooses a model for vision-based checks, the images-of-text check asks
-/// it about the images its rules leave (AndroidImagesOfText), and the
-/// report says AI was used. With no model it gives the same report for the
-/// same recording, settings and guidance.
+/// it about the images its rules leave (AndroidImagesOfText), the check of
+/// text shown as a heading about the text its rules leave
+/// (AndroidHeadingLook), and the report says AI was used. With no model
+/// it gives the same report for the same recording, settings and guidance.
 /// </summary>
 public sealed class AndroidReportKind : IAnalysisTaskKind
 {
@@ -34,8 +35,9 @@ public sealed class AndroidReportKind : IAnalysisTaskKind
 /// The project's Android report (projects.md): the Android report of every
 /// recording in a project with phone screens, taken together, with a
 /// screen seen in more than one recording given once and its findings
-/// grouped across them. No model writes it; the images-of-text check asks
-/// the project's model for vision-based checks, where one is chosen.
+/// grouped across them. No model writes it; the images-of-text check and
+/// the check of text shown as a heading ask the project's model for
+/// vision-based checks, where one is chosen.
 /// </summary>
 public sealed class AndroidProjectReportKind : IAnalysisTaskKind
 {
@@ -247,8 +249,8 @@ public sealed class AndroidSummaryKind : IAnalysisTaskKind
 /// <summary>
 /// The model checks of a phone recording (android-vision-checks.md): the
 /// checks run as the Android report runs them, and the project's model for
-/// vision-based checks asked about each image of text its rules leave, as
-/// the Checks tab's "Ask the project's model" queues it. Its answers are
+/// vision-based checks asked about each image of text and each piece of
+/// text shown as a heading their rules leave, as the Checks tab's "Ask the project's model" queues it. Its answers are
 /// kept by their requests, so the Checks tab and a report show them
 /// without asking again. It writes the questions and answers as Markdown.
 /// </summary>
@@ -274,7 +276,7 @@ public sealed class AndroidModelChecksKind : IAnalysisTaskKind
             .Append(CultureInfo.InvariantCulture, $"# Model checks: {recording}\n\n");
         if (audit.ImagesOfText is not { } run)
         {
-            return text.Append("The colours could not be measured, so the images-of-text check did not run")
+            return text.Append("The colours could not be measured, so the images-of-text check and the check of text shown as a heading did not run")
                 .Append(audit.MeasureProblem is { } problem ? ": " + problem : "").Append(".\n").ToString();
         }
 
@@ -288,6 +290,26 @@ public sealed class AndroidModelChecksKind : IAnalysisTaskKind
 
         text.Append("\n\n");
         foreach (var finding in run.Findings.Where(finding => finding.Check == PhoneCheckNames.ImageOfText && finding.Inference is not null))
+        {
+            text.Append(CultureInfo.InvariantCulture,
+                $"- {finding.Screen.Package}, \"{finding.Screen.Name}\", visit {finding.Visit.Number}, {finding.Label}: {finding.Text}\n");
+        }
+
+        if (audit.HeadingLook is not { } headings)
+        {
+            return text.ToString();
+        }
+
+        text.Append("\n## Text shown as a heading\n\n")
+            .Append(CultureInfo.InvariantCulture,
+                $"Of {headings.Items} pieces of text OCR placed on the pictures it read, the rules left {headings.Questions.Count} for the model for vision-based checks.");
+        if (headings.ModelNote is { } headingNote)
+        {
+            text.Append(' ').Append(char.ToUpperInvariant(headingNote[0])).Append(headingNote.AsSpan(1)).Append('.');
+        }
+
+        text.Append("\n\n");
+        foreach (var finding in headings.Findings.Where(finding => finding.Inference is not null))
         {
             text.Append(CultureInfo.InvariantCulture,
                 $"- {finding.Screen.Package}, \"{finding.Screen.Name}\", visit {finding.Visit.Number}, {finding.Label}: {finding.Text}\n");
@@ -333,6 +355,7 @@ internal static class AndroidReportRun
                 () => AndroidAudit.Run(archive, settings, new WindowsPhoneTextReader(), PhonePictures.Load, cancellationToken),
                 cancellationToken).ConfigureAwait(false);
             audit = await AndroidImagesOfText.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
+            audit = await AndroidHeadingLook.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
             if (modelChecksOnly)
             {
                 var named = await context.Catalog.RecordingAsync(task.Recording, cancellationToken).ConfigureAwait(false);
@@ -427,6 +450,7 @@ internal static class AndroidReportRun
                     () => AndroidAudit.Run(archive, settings, new WindowsPhoneTextReader(), PhonePictures.Load, cancellationToken),
                     cancellationToken).ConfigureAwait(false);
                 audit = await AndroidImagesOfText.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
+                audit = await AndroidHeadingLook.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
                 parts.Add(Input(archive, audit, label, opened.Incomplete) with { StartedUtc = new DateTimeOffset(recording.StartedUtc, TimeSpan.Zero) });
                 keys.Add(key);
             }

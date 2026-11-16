@@ -401,9 +401,22 @@ repeatable".
   (decision 6): the client's report "AI is used in generating this
   report, with a cloud model" (or a local one, or both), and the
   auditor's that its findings are the recorder's own checks except where
-  the images-of-text check asked the model about an image. The auditor's findings mark each inferred level,
+  the images-of-text check, or the check of text shown as a heading,
+  asked the model about an image or a piece of text. The auditor's
+  findings mark each inferred level,
   give the model's answer in its own row, and add ", if confirmed" to the
   impact; "Limits" gives the check's note on the model.
+
+### Text shown as a heading, as built
+
+Built on 2026-11-16, at the owner's request, "Build rules 1 to 4 for the
+heading check as you described". Step 19 of `android-checks.md` has
+the measurement and the rules: candidates found without a model, and
+each asked of the project's model for vision-based checks as images of
+text are, with the same pictures, the same three-level answers and the
+same keeping by request. Picture B is the part of the screen from the
+text down, as whether text is a heading depends on the content after
+it. The reports' disclosure names both checks.
 
 ## Later, or text only
 

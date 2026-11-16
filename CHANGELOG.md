@@ -8,6 +8,19 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Text shown as a heading
+
+- A new check, "Text shown as a heading, not marked as one" (WCAG
+  1.3.1), finds an item's text, confirmed by OCR, that is not marked as
+  a heading and whose letters are at least 1.35 times as tall as the
+  screen's body text, or that is one short line in capitals. Text in a
+  control or a field, and a field's label in capitals, are left out and
+  counted.
+- Each finding is a warning; where the project chooses a model for
+  vision-based checks, it is asked whether the text is shown as a
+  heading, and its answer makes the finding an error or information,
+  marked as the model's inference.
+
 ### Boundaries without a model
 
 - A text field's border, bottom line or background below 3:1 is an

@@ -60,6 +60,14 @@ public partial class MainWindow
     private PhoneImagesOfTextRun? _phoneImagesOfTextRules;
     private (PhoneImagesOfTextRun Rules, IReadOnlyList<ImageOfTextRequest> Requests)? _imagesOfTextRequests;
     private int _imagesOfTextUnanswered;
+
+    // The check of text shown as a heading, the same way: as its rules
+    // left it, its requests, and the run shown with any kept answers
+    // (android-checks.md, step 19).
+    private PhoneHeadingLookRun? _phoneHeadingLook;
+    private PhoneHeadingLookRun? _phoneHeadingLookRules;
+    private (PhoneHeadingLookRun Rules, IReadOnlyList<HeadingLookRequest> Requests)? _headingLookRequests;
+    private int _headingLookUnanswered;
     private PhoneLabelInNameRun? _phoneLabelInName;
     private PhoneCheckSettings? _checkSettings;
 
@@ -112,6 +120,10 @@ public partial class MainWindow
             _phoneImagesOfTextRules = null;
             _imagesOfTextRequests = null;
             _imagesOfTextUnanswered = 0;
+            _phoneHeadingLook = null;
+            _phoneHeadingLookRules = null;
+            _headingLookRequests = null;
+            _headingLookUnanswered = 0;
             _phoneLabelInName = null;
             _shownFinding = null;
             if (_playbackArchive is { PhoneScreens.Recorded: true } opened)
@@ -215,6 +227,12 @@ public partial class MainWindow
 
         _phoneContrast = run;
         _phoneContrastProblem = problem;
+
+        // Text shown as a heading is level A, so the same at both audit
+        // levels; its kept answers are given with the images' below.
+        _phoneHeadingLookRules = run is null ? null : PhoneHeadingLookRun.Run(run, archive.PhoneScreens);
+        _phoneHeadingLook = _phoneHeadingLookRules;
+        _headingLookUnanswered = _phoneHeadingLookRules?.Questions.Count ?? 0;
         JudgeTextContrast();
 
         // Non-text contrast has one level, AA (WCAG 2.2's 1.4.11), so is
@@ -247,12 +265,18 @@ public partial class MainWindow
         _ = ApplyKeptAnswersAsync();
     }
 
-    // Gives the images-of-text check the answers the project's model for
-    // vision-based checks has given to its questions, in any task, as they
-    // are kept by their requests; the model is not asked here. With no
-    // model chosen, the images the rules leave stay warnings, and the
-    // summary says why.
+    // Gives the images-of-text check and the check of text shown as a
+    // heading the answers the project's model for vision-based checks has
+    // given to their questions, in any task, as they are kept by their
+    // requests; the model is not asked here. With no model chosen, what the
+    // rules leave stays a warning, and the summary says why.
     private async Task ApplyKeptAnswersAsync()
+    {
+        await ApplyKeptImageAnswersAsync();
+        await ApplyKeptHeadingAnswersAsync();
+    }
+
+    private async Task ApplyKeptImageAnswersAsync()
     {
         if (_phoneImagesOfTextRules is not { } rules)
         {
@@ -316,14 +340,73 @@ public partial class MainWindow
         ShowPhoneScreenRows();
     }
 
-    // "Ask the project's model" is for images the rules leave that the
-    // project's model for vision-based checks has not answered, while no
+    private async Task ApplyKeptHeadingAnswersAsync()
+    {
+        if (_phoneHeadingLookRules is not { } rules)
+        {
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        if (rules.Questions.Count == 0)
+        {
+            _headingLookUnanswered = 0;
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        var name = _openProjectModels?.VisionChecks;
+        var problem = name is null
+            ? "the project's settings choose no model for vision-based checks"
+            : ProjectModels.Problem(ProjectChoices, ModelUses.VisionChecks, name);
+        PhoneHeadingLookRun shown;
+        if (problem is not null || AnalysisCatalogOrNull is not { } catalog || ProjectChoices.Profile(name!) is not { } profile)
+        {
+            shown = rules.Judged(
+                new Dictionary<PhoneHeadingQuestion, PhoneInference>(),
+                AndroidHeadingLook.NotAsked(rules.Questions.Count, problem ?? "the analysis catalog is not open"));
+        }
+        else
+        {
+            try
+            {
+                if (_headingLookRequests is not { } made || !ReferenceEquals(made.Rules, rules))
+                {
+                    var requests = await Task.Run(() => AndroidHeadingLook.Requests(rules, PhonePictures.Load));
+                    made = (rules, requests);
+                    _headingLookRequests = made;
+                }
+
+                var keys = made.Requests.SelectMany(request => new[] { request.StepKey(1), request.StepKey(2) }).ToList();
+                var kept = await catalog.AcceptedAnswersAsync(keys, name!, profile.Model, CancellationToken.None);
+                shown = AndroidHeadingLook.FromKept(rules, made.Requests, kept, name!);
+            }
+            catch (Exception exception) when (exception is NpgsqlException or InvalidOperationException or IOException or ObjectDisposedException)
+            {
+                shown = rules.Judged(new Dictionary<PhoneHeadingQuestion, PhoneInference>(), $"the model's kept answers could not be read: {exception.Message}");
+            }
+        }
+
+        // The recording changed while the answers were read.
+        if (!ReferenceEquals(rules, _phoneHeadingLookRules))
+        {
+            return;
+        }
+
+        _phoneHeadingLook = shown;
+        _headingLookUnanswered = problem is not null ? 0 : shown.Findings.Count(finding => shown.QuestionOf(finding) is not null);
+        UpdateAskChecksModelButton();
+        ShowPhoneScreenRows();
+    }
+
+    // "Ask the project's model" is for images and text the rules leave that
+    // the project's model for vision-based checks has not answered, while no
     // model checks of the recording are queued or running.
     private void UpdateAskChecksModelButton()
     {
         var waiting = _analysisTasks?.Any(task => task.Kind == AndroidModelChecksKind.Name &&
             task.State is AnalysisTaskStates.Queued or AnalysisTaskStates.Running) == true;
-        AskChecksModelButton.IsEnabled = _imagesOfTextUnanswered > 0 && !waiting && _analysisRecordingId is not null &&
+        AskChecksModelButton.IsEnabled = _imagesOfTextUnanswered + _headingLookUnanswered > 0 && !waiting && _analysisRecordingId is not null &&
             _openProjectModels?.VisionChecks is { } name && ProjectModels.Problem(ProjectChoices, ModelUses.VisionChecks, name) is null;
     }
 
@@ -529,7 +612,7 @@ public partial class MainWindow
         if (visit.SettledSnapshots.Count == 0)
         {
             if (_phoneChecks is not null || _phoneTextContrast is not null || _phoneNonTextContrast is not null || _phoneImagesOfText is not null ||
-                _phoneLabelInName is not null)
+                _phoneLabelInName is not null || _phoneHeadingLook is not null)
             {
                 // The status message check follows every snapshot, settled
                 // or not, so can find a message in a visit too brief to
@@ -644,6 +727,31 @@ public partial class MainWindow
             else
             {
                 AddCheckRows(findings, $", from {Count(count, "image")} read by OCR");
+            }
+        }
+
+        if (_phoneHeadingLook is { SnapshotsRead: > 0 } headings)
+        {
+            var findings = headings.For(visit);
+            var title = PhoneCheckNames.Title(PhoneCheckNames.TextShownAsHeading);
+            var count = headings.ItemsIn(visit);
+            var text = !headings.Read(visit)
+                ? $"{title}: not checked, as OCR read no picture of this visit."
+                : count == 0
+                    ? $"{title}: no text placed by OCR in this visit."
+                    : findings.Count == 0
+                        ? $"{title}: no findings, from {Count(count, "piece")} of text placed by OCR."
+                        : null;
+            if (text is not null)
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, text, shownAt, null)
+                {
+                    IsCheck = true,
+                });
+            }
+            else
+            {
+                AddCheckRows(findings, $", from {Count(count, "piece")} of text placed by OCR");
             }
         }
 
@@ -953,6 +1061,21 @@ public partial class MainWindow
                     $"{Count(images.ManualChecks, "image")} {(images.ManualChecks == 1 ? "is" : "are")} for a manual check, as the app draws its own text with Flutter, " +
                     $"and {Count(images.Questions.Count, "image")} {(images.Questions.Count == 1 ? "is" : "are")} for the model for vision-based checks, whose answer decides the exceptions" +
                     (images.ModelNote is { } note ? $": {note}." : ".");
+        }
+
+        if (_phoneHeadingLook is { } headings)
+        {
+            var headingTitle = PhoneCheckNames.Title(PhoneCheckNames.TextShownAsHeading);
+            var headingFindings = headings.Findings.Count == 0
+                ? "no findings"
+                : $"{Count(headings.Findings.Count, "finding")} ({Levels(headings.Findings)})";
+            summary += headings.SnapshotsRead == 0
+                ? $" {headingTitle}: not checked, as it needs OCR's words."
+                : $" {headingTitle}: {headingFindings}, from {Count(headings.Items, "piece")} of text placed by OCR; " +
+                    $"text not marked as a heading whose letters are at least {PhoneHeadingLookRun.TallerBy.ToString("0.##", CultureInfo.CurrentCulture)} times as tall as the screen's body text, or one short line in capitals, is a probable heading. " +
+                    $"The rules left out {Count(headings.InControls, "piece")} of text inside an item that can be tapped or a field, as a control's text is its name, and {Count(headings.FieldLabels, "line")} in capitals directly above a field, as its label; " +
+                    $"{Count(headings.Questions.Count, "piece")} of text {(headings.Questions.Count == 1 ? "is" : "are")} for the model for vision-based checks" +
+                    (headings.ModelNote is { } headingNote ? $": {headingNote}." : ".");
         }
 
         if (_phoneLabelInName is { } labels)

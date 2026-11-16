@@ -146,7 +146,9 @@ public sealed class PhoneSnapshotPictures
 /// no item's text), the smallest item it is in, how it was found, the
 /// app's text and OCR's, its box in the screen's pixels, its colours, and
 /// the height of OCR's box round its words in the screen's pixels before
-/// the box was widened (0 when measured on an item's bounds).
+/// the box was widened (0 when measured on an item's bounds), and the
+/// height of its letters' ink on the picture, in the picture's pixels (0
+/// when measured on an item's bounds or not measured; step 19).
 /// </summary>
 public sealed record PhoneTextLine(
     PhoneCheckItem? Item,
@@ -156,7 +158,8 @@ public sealed record PhoneTextLine(
     string? OcrText,
     PhoneBounds Box,
     PhoneSwatch? Colours,
-    int WordsHeight = 0);
+    int WordsHeight = 0,
+    int InkHeight = 0);
 
 /// <summary>A settled snapshot's measurement: its picture, the lines of text measured on it, and its controls.</summary>
 public sealed record PhoneContrastSnapshot(
@@ -295,7 +298,16 @@ public sealed class PhoneContrastRun
                         .Select(entry => entry.Bounds)
                         .ToList();
                     var lines = PhoneTextMatching.Lines(window, app.Bounds, above, reading?.Words, scale)
-                        .Select(line => line with { Colours = PhoneColours.Measure(pixels, scale.ToPicture(line.Box)) })
+                        .Select(line =>
+                        {
+                            var box = scale.ToPicture(line.Box);
+                            var colours = PhoneColours.Measure(pixels, box);
+                            return line with
+                            {
+                                Colours = colours,
+                                InkHeight = colours is null || line.WordsHeight <= 0 ? 0 : PhoneColours.InkHeight(pixels, box, colours),
+                            };
+                        })
                         .ToList();
                     var controls = PhoneControlMeasuring.Measure(window, app.Bounds, above, lines, reading is not null, pixels, scale);
                     measured.Add(new PhoneContrastSnapshot(visit, settled, taking, picture, reading?.Engine, lines, controls, window));

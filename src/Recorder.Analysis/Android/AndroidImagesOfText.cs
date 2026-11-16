@@ -357,7 +357,7 @@ public static class AndroidImagesOfText
     private static string Count(int count, string one) =>
         string.Create(CultureInfo.CurrentCulture, $"{count:N0} {one}{(count == 1 ? "" : "s")}");
 
-    private sealed record Rgb(int Width, int Height, uint[] Pixels);
+    internal sealed record Rgb(int Width, int Height, uint[] Pixels);
 
     // The image at full size, every divisor-th pixel where its longer side
     // is more than 1024 pixels.
@@ -384,7 +384,7 @@ public static class AndroidImagesOfText
 
     // The whole screen at half size, with the image outlined in cyan
     // outside its bounds.
-    private static Rgb Screen(PhonePixels pixels, PhoneBounds bounds)
+    internal static Rgb Screen(PhonePixels pixels, PhoneBounds bounds)
     {
         var (outWidth, outHeight) = (Math.Max(1, pixels.Width / ScreenDivisor), Math.Max(1, pixels.Height / ScreenDivisor));
         var result = new uint[outWidth * outHeight];
@@ -412,7 +412,7 @@ public static class AndroidImagesOfText
     }
 
     // An RGB PNG, the same bytes for the same pixels.
-    private static byte[] Png(Rgb image)
+    internal static byte[] Png(Rgb image)
     {
         var raw = new byte[((image.Width * 3) + 1) * image.Height];
         var at = 0;

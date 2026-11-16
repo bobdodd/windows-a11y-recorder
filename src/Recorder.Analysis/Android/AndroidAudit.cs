@@ -8,9 +8,10 @@ namespace Recorder.Analysis.Android;
 /// them (MainWindow.PhoneScreens.cs): the checks from the tree and the
 /// recording's events, then the colours measured on each settled snapshot's
 /// picture, with OCR finding the text, and the checks judged from that
-/// measurement. No model is used here; the images-of-text check's
-/// questions are asked after, where a model may be used
-/// (<see cref="AndroidImagesOfText"/>; android-report.md, "The audit").
+/// measurement. No model is used here; the questions of the images-of-text
+/// check and of the check of text shown as a heading are asked after, where
+/// a model may be used (<see cref="AndroidImagesOfText"/>,
+/// <see cref="AndroidHeadingLook"/>; android-report.md, "The audit").
 /// </summary>
 public sealed class AndroidAudit
 {
@@ -42,6 +43,9 @@ public sealed class AndroidAudit
 
     public PhoneLabelInNameRun? LabelInName { get; private init; }
 
+    /// <summary>Text shown as a heading but not marked as one (android-checks.md, step 19).</summary>
+    public PhoneHeadingLookRun? HeadingLook { get; private init; }
+
     /// <summary>The findings of the whole app, not of one visit, such as no live region in the app.</summary>
     public IReadOnlyList<PhoneFinding> AppFindings => Tree.AppFindings;
 
@@ -57,6 +61,7 @@ public sealed class AndroidAudit
         .. NonTextContrast?.For(visit) ?? [],
         .. ImagesOfText?.For(visit) ?? [],
         .. LabelInName?.For(visit) ?? [],
+        .. HeadingLook?.For(visit) ?? [],
     ];
 
     /// <summary>
@@ -65,7 +70,10 @@ public sealed class AndroidAudit
     /// (android-vision-checks.md, decision 2).
     /// </summary>
     public IReadOnlyList<PhoneInference> Inferences =>
-        ImagesOfText is null ? [] : [.. ImagesOfText.Findings.Select(finding => finding.Inference).OfType<PhoneInference>().Where(inference => inference.Inferred)];
+    [
+        .. (ImagesOfText?.Findings ?? []).Concat(HeadingLook?.Findings ?? [])
+            .Select(finding => finding.Inference).OfType<PhoneInference>().Where(inference => inference.Inferred),
+    ];
 
     /// <summary>
     /// The audit with the images-of-text check judged by a model's answers
@@ -82,6 +90,27 @@ public sealed class AndroidAudit
             ImagesOfText = run,
             NonTextContrast = NonTextContrast,
             LabelInName = LabelInName,
+            HeadingLook = HeadingLook,
+        };
+    }
+
+    /// <summary>
+    /// The audit with the check of text shown as a heading judged by a
+    /// model's answers (<see cref="AndroidHeadingLook"/>), every other check
+    /// as it was.
+    /// </summary>
+    public AndroidAudit WithHeadingLook(PhoneHeadingLookRun run)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        return new AndroidAudit(Tree, Level, HoldSeconds)
+        {
+            Measured = Measured,
+            MeasureProblem = MeasureProblem,
+            TextContrast = TextContrast,
+            ImagesOfText = ImagesOfText,
+            NonTextContrast = NonTextContrast,
+            LabelInName = LabelInName,
+            HeadingLook = run,
         };
     }
 
@@ -144,5 +173,6 @@ public sealed class AndroidAudit
             ImagesOfText = measured is null ? null : PhoneImagesOfTextRun.Run(measured, screens, device, level, speech, accessibility),
             NonTextContrast = measured is null ? null : PhoneNonTextContrastRun.Run(measured, screens),
             LabelInName = measured is null ? null : PhoneLabelInNameRun.Run(measured, screens),
+            HeadingLook = measured is null ? null : PhoneHeadingLookRun.Run(measured, screens),
         };
 }

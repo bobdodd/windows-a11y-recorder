@@ -1736,7 +1736,7 @@
                           Style="{StaticResource AnalysisButton}"
                           Content="Ask the project's model"
                           IsEnabled="False"
-                          AutomationProperties.HelpText="Queues the model checks: the project's model for vision-based checks is asked about each image of text the rules leave that it has not answered. Its answers are kept and shown in this tab."
+                          AutomationProperties.HelpText="Queues the model checks: the project's model for vision-based checks is asked about each image of text and each piece of text shown as a heading the rules leave that it has not answered. Its answers are kept and shown in this tab."
                           Click="AskChecksModelButton_Click" />
                 </WrapPanel>
                 <local:SelectableText x:Name="ChecksStatusTextBlock"

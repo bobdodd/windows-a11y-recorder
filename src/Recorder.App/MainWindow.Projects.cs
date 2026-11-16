@@ -375,7 +375,7 @@ public partial class MainWindow
         AnalysisModelsTextBlock.Visibility = Visibility.Visible;
         ChecksModelsTextBlock.Text = "Models for checks, from the project's settings: " +
             AnalysisPlayer.ModelsLine(models.Choices(_analysisSettings), models, [ModelUses.TextChecks, ModelUses.VisionChecks]) +
-            ". The images-of-text check asks the model for vision-based checks about the images its rules leave; no check uses the model for text-based checks yet.";
+            ". The images-of-text check and the check of text shown as a heading ask the model for vision-based checks about the images and text their rules leave; no check uses the model for text-based checks yet.";
 
         // The model may have changed, so its kept answers are read again.
         _ = ApplyKeptAnswersAsync();

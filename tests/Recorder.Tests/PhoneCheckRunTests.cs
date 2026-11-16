@@ -756,6 +756,176 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.False(unread.Read(visit));
     }
 
+    // Step 19: text shown as a heading. A window of made-up text: a large
+    // title, body text, a line in capitals, a field's label in capitals
+    // above its field, large text in a button, a marked heading, a line in
+    // capitals with a digit, large text in three lines and a large line of
+    // eleven words.
+    private static (PhoneCheckWindow Window, PhoneTextLine[] Lines) HeadingLooks()
+    {
+        AndroidTreeNode Node(int index, int? parent, (int Left, int Top, int Right, int Bottom) bounds, string className, string? text = null,
+            bool clickable = false, bool editable = false, bool heading = false) =>
+            ImageNode(index, parent, bounds, className, text: text) with { Clickable = clickable, Editable = editable, Heading = heading };
+        const string body = "Plain body text that runs across the screen in one long line of small letters, longer than every other line here.";
+        var window = new PhoneCheckWindow(512, 1,
+        [
+            Node(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout"),
+            Node(1, 0, (60, 200, 1020, 300), "android.widget.TextView", "Your week"),
+            Node(2, 0, (60, 320, 1020, 420), "android.widget.TextView", body),
+            Node(3, 0, (60, 500, 1020, 560), "android.widget.TextView", "Settings"),
+            Node(4, 0, (60, 700, 600, 740), "android.widget.TextView", "Email"),
+            Node(5, 0, (60, 760, 1020, 860), "android.widget.EditText", editable: true),
+            Node(6, 0, (60, 1000, 1020, 1100), "android.widget.Button", clickable: true),
+            Node(7, 6, (80, 1010, 1000, 1090), "android.widget.TextView", "Start now"),
+            Node(8, 0, (60, 1200, 1020, 1300), "android.widget.TextView", "Marked title", heading: true),
+            Node(9, 0, (60, 1400, 1020, 1450), "android.widget.TextView", "Top 10"),
+            Node(10, 0, (60, 1500, 1020, 1800), "android.widget.TextView", "One two three"),
+            Node(11, 0, (60, 1900, 1020, 2000), "android.widget.TextView", "One two three four five six seven eight nine ten eleven"),
+        ]);
+        var items = window.Items;
+        PhoneTextLine Line(int item, string ocr, int top, int ink) =>
+            new(items[item], items[item], PhoneTextPlace.AppTextPlacedByOcr, items[item].Text, ocr,
+                new PhoneBounds(80, top, 1000, top + ink + 10), new PhoneSwatch(0xFFFFFF, 0x000000, 21, 2, 2), ink + 6, ink);
+        return (window,
+        [
+            Line(1, "Your week", 210, 60),
+            Line(2, body, 330, 30),
+            Line(3, "SETTINGS", 510, 30),
+            Line(4, "EMAIL", 700, 30),
+            Line(7, "Start now", 1015, 60),
+            Line(8, "Marked title", 1210, 60),
+            Line(9, "TOP 10", 1405, 30),
+            Line(10, "One", 1510, 60),
+            Line(10, "two", 1590, 60),
+            Line(10, "three", 1670, 60),
+            Line(11, "One two three four five six seven eight nine ten eleven", 1910, 60),
+        ]);
+    }
+
+    private PhoneHeadingLookRun HeadingLookRun((PhoneCheckWindow Window, PhoneTextLine[] Lines) screen, string? engine = "Windows OCR, en-US")
+    {
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var measured = PhoneContrastRun.Of([.. visit.SettledSnapshots.Take(2).Select(at =>
+            new PhoneContrastSnapshot(
+                visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                new PhoneContrastPicture(PhonePictureKind.Screenshot, at.MonotonicNanoseconds, "p.png", "p.png"),
+                engine, screen.Lines, null, screen.Window))]);
+        return PhoneHeadingLookRun.Run(measured, archive.PhoneScreens);
+    }
+
+    [Fact]
+    public void HeadingLook_WarnsOfLargeTextAndALineInCapitals_NotMarkedAsHeadings_AndLeavesOutControlsAndFieldLabels()
+    {
+        var (window, lines) = HeadingLooks();
+        var run = HeadingLookRun((window, lines));
+        var visit = run.Findings[0].Visit;
+
+        // Nine items on each of two snapshots; the button's text and the
+        // field's label are counted once in the visit.
+        Assert.Equal((2, 18), (run.SnapshotsRead, run.Items));
+        Assert.Equal(18, run.ItemsIn(visit));
+        Assert.True(run.Read(visit));
+        Assert.Equal((1, 1), (run.InControls, run.FieldLabels));
+        Assert.Equal([window.Items[1].Identity, window.Items[3].Identity], run.Findings.Select(finding => finding.Identity));
+        Assert.All(run.Findings, finding => Assert.Equal((PhoneCheckNames.TextShownAsHeading, PhoneCheckLevel.Warning), (finding.Check, finding.Level)));
+        Assert.All(run.Findings, finding => Assert.Equal(2, finding.Times.Count));
+        Assert.Equal(
+            "its letters are 2 times as tall as the screen's body text (60 pixels against 30 on the picture), in 1 line, and is not marked as a heading; " +
+            "whether it is shown as a heading for the content after it is not judged; from the phone's screenshot",
+            run.Findings[0].Times[0].Measured);
+        Assert.StartsWith("it is in capitals, \"SETTINGS\", in 1 line,", run.Findings[1].Times[0].Measured, StringComparison.Ordinal);
+        Assert.Equal("Text shown as a heading, not marked as one (WCAG 1.3.1)", PhoneCheckNames.Title(PhoneCheckNames.TextShownAsHeading));
+
+        // One question for each finding, with the box of the item's lines.
+        Assert.Equal(2, run.Questions.Count);
+        Assert.Equal(new PhoneBounds(80, 210, 1000, 280), run.Questions[0].Lines);
+        Assert.Equal("Your week", run.Questions[0].Text);
+        Assert.Same(run.Questions[1], run.QuestionOf(run.Findings[1]));
+
+        // With no OCR, nothing is placed on the picture.
+        var unread = HeadingLookRun((window, lines), engine: null);
+
+        Assert.Equal((0, 0), (unread.SnapshotsRead, unread.Findings.Count));
+        Assert.False(unread.Read(visit));
+    }
+
+    [Fact]
+    public void HeadingLook_Judged_GivesAnswersLevelsAndDropsTheNoteOfWhatIsNotJudged()
+    {
+        var run = HeadingLookRun(HeadingLooks());
+        var inference = new PhoneInference(PhoneCheckLevel.Error, "a model inferred it is a heading", Inferred: true, "Model", Cloud: false);
+
+        var judged = run.Judged(new Dictionary<PhoneHeadingQuestion, PhoneInference> { [run.Questions[0]] = inference }, "1 answered");
+
+        Assert.Equal([PhoneCheckLevel.Error, PhoneCheckLevel.Warning], judged.Findings.Select(finding => finding.Level));
+        Assert.Same(inference, judged.Findings[0].Inference);
+        Assert.DoesNotContain("is not judged", judged.Findings[0].Times[0].Measured, StringComparison.Ordinal);
+        Assert.Contains("is not judged", judged.Findings[1].Times[0].Measured, StringComparison.Ordinal);
+        Assert.Null(judged.QuestionOf(judged.Findings[0]));
+        Assert.NotNull(judged.QuestionOf(judged.Findings[1]));
+        Assert.Equal(("1 answered", 1, 1), (judged.ModelNote, judged.InControls, judged.FieldLabels));
+    }
+
+    // The request is the same for the same picture and text; picture B is
+    // the screen across, from a line's height above the text to 30% of the
+    // screen's height below it.
+    [Fact]
+    public void HeadingLook_RequestIsTheSameForTheSameText_AndKeptAnswersJudgeIt()
+    {
+        var run = HeadingLookRun(HeadingLooks());
+        var rgb = new uint[1080 * 2400];
+        Array.Fill(rgb, 0x203040u);
+        var pixels = new PhonePixels(1080, 2400, rgb);
+
+        var requests = run.Questions.Select(question => Recorder.Analysis.Android.AndroidHeadingLook.RequestOf(question, pixels)).ToList();
+        var again = Recorder.Analysis.Android.AndroidHeadingLook.RequestOf(run.Questions[0], new PhonePixels(1080, 2400, [.. rgb]));
+
+        Assert.Equal(requests[0].Key, again.Key);
+        Assert.NotEqual(requests[0].Key, requests[1].Key);
+        Assert.Matches("^text-shown-as-heading-[0-9a-f]{16}$", requests[0].Key);
+        Assert.Equal(Recorder.Analysis.ModelUses.VisionChecks, requests[0].Request.Use);
+        Assert.True(requests[0].Request.ReusedAcrossTasks);
+        Assert.Equal(Recorder.Analysis.Android.AndroidHeadingLook.Answers, requests[0].Request.Answers);
+        Assert.Equal((540, 1200), PngSize(requests[0].Request.Images[0].Content));
+        Assert.Equal((1080, 860), PngSize(requests[0].Request.Images[1].Content));
+        Assert.Contains("The outlined text, as the app gives it: \"Your week\".", requests[0].Request.Input, StringComparison.Ordinal);
+
+        static JsonElement Output(string answer) =>
+            JsonSerializer.SerializeToElement(new { answer, reason = "The pictures show it." });
+        var kept = new Dictionary<string, Recorder.Analysis.KeptAnswer>
+        {
+            [requests[0].StepKey(1)] = new(Output("heading"), "stated", """{"temperature": 0}"""),
+            [requests[1].StepKey(1)] = new(Output("not-heading"), "service", """{"temperature": null}"""),
+        };
+
+        var judged = Recorder.Analysis.Android.AndroidHeadingLook.FromKept(run, requests, kept, "Haiku");
+
+        Assert.Equal([PhoneCheckLevel.Error, PhoneCheckLevel.Warning], judged.Findings.Select(finding => finding.Level));
+        Assert.StartsWith("Haiku, a local model, inferred from the pictures that the text is shown as a heading", judged.Findings[0].Inference!.Text, StringComparison.Ordinal);
+        Assert.Equal("2 pieces of text left by the rules are for Haiku; 1 piece of text answered, 1 piece of text not yet asked", judged.ModelNote);
+
+        kept[requests[1].StepKey(2)] = new(Output("not-heading"), "service", """{"temperature": null}""");
+        var both = Recorder.Analysis.Android.AndroidHeadingLook.FromKept(run, requests, kept, "Haiku");
+
+        Assert.Equal(PhoneCheckLevel.Info, both.Findings[1].Level);
+        Assert.True(both.Findings[1].Inference!.Cloud);
+
+        static (int Width, int Height) PngSize(byte[] png) =>
+            ((png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19], (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23]);
+    }
+
+    // The body text is the height most of the characters have.
+    [Fact]
+    public void HeadingLook_BodyHeight_IsTheMedianInkHeightByCharacters()
+    {
+        PhoneTextLine Line(string text, int ink) => new(null, null, PhoneTextPlace.FoundByOcr, null, text, new PhoneBounds(0, 0, 10, 10), null, ink, ink);
+
+        Assert.Equal(30, PhoneHeadingLookRun.BodyHeight([Line("Title", 60), Line("A longer line of body text", 30), Line("Hi", 20)]));
+        Assert.Equal(60, PhoneHeadingLookRun.BodyHeight([Line("A long large line of text", 60), Line("Small", 30)]));
+        Assert.Equal(0, PhoneHeadingLookRun.BodyHeight([Line("Unmeasured", 0)]));
+    }
+
     // A description that holds some of the words, and words split between
     // two images go to the smaller one they are in.
     [Fact]

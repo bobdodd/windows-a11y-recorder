@@ -105,6 +105,47 @@ public static class PhoneColours
         return Separate(histogram, colours);
     }
 
+    /// <summary>
+    /// The height of a line's letters on the picture (android-checks.md,
+    /// step 19): from the first row of the box to the last that has a pixel
+    /// nearer the swatch's text colour than its background, by Delta E, as
+    /// measured on 2026-11-16; 0 where no pixel is.
+    /// </summary>
+    public static int InkHeight(PhonePixels picture, PhoneBounds box, PhoneSwatch swatch)
+    {
+        ArgumentNullException.ThrowIfNull(picture);
+        ArgumentNullException.ThrowIfNull(box);
+        ArgumentNullException.ThrowIfNull(swatch);
+        var left = Math.Clamp(box.Left, 0, picture.Width);
+        var right = Math.Clamp(box.Right, 0, picture.Width);
+        var top = Math.Clamp(box.Top, 0, picture.Height);
+        var bottom = Math.Clamp(box.Bottom, 0, picture.Height);
+        var (foreground, background) = (Lab(swatch.Foreground), Lab(swatch.Background));
+        var ink = new Dictionary<uint, bool>();
+        int first = -1, last = -1;
+        for (var y = top; y < bottom; y++)
+        {
+            for (var x = left; x < right; x++)
+            {
+                var colour = picture.At(x, y) & 0xFFFFFF;
+                if (!ink.TryGetValue(colour, out var isInk))
+                {
+                    var lab = Lab(colour);
+                    ink[colour] = isInk = Difference(lab, foreground) < Difference(lab, background);
+                }
+
+                if (isInk)
+                {
+                    first = first < 0 ? y : first;
+                    last = y;
+                    break;
+                }
+            }
+        }
+
+        return first < 0 ? 0 : last - first + 1;
+    }
+
     // Joins each colour, most common first, into the first kept colour
     // closer than the limit, which keeps its own colour and takes the
     // other's count; ATF does this for its swatch with several text

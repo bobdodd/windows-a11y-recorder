@@ -3340,6 +3340,158 @@ the tree, and the word matching.
 - A word shared by chance, such as "Settings" in a row and its title,
   still counts as the control's text.
 
+## Step 19: text shown as a heading
+
+### The owner's decision (2026-11-16)
+
+Offered four rules from the measurement below, the owner chose: "Build
+rules 1 to 4 for the heading check as you described".
+
+1. **Candidates, without a model.** An item's text, from the tree and
+   placed on the picture by OCR, in an item of at most 2 lines and 10
+   words with a letter in it, that is not marked as a heading, not
+   inside one and holding none, and either (a) whose letters are at
+   least 1.35 times as tall as the screen's body text, or (b) that is
+   one line of at most 6 words, all in capitals, with no digit, not
+   directly above a field.
+2. **The judgement.** Each candidate is a closed question for the
+   project's model for vision-based checks, with the screen and the
+   text outlined: is the text shown as a heading for the content after
+   it? The answer is heading, not a heading, or cannot tell. With no
+   model chosen, each candidate is a warning for a manual check.
+3. **Levels, as for images of text.** "Heading" agreed on both runs is
+   an error under 1.3.1, marked as the model's inference; "not a
+   heading" agreed is information; anything else is a warning.
+4. **Text inside an item that can be tapped, or a field, is left out,**
+   as a control's text is its name, and the Checks tab says how many.
+
+This is a finding of its own, `text-shown-as-heading`, apart from the
+screen's "No heading" check: that one is about the whole screen, this
+one about each piece of text, so a screen can have both.
+
+### What the standards say (checked in cited documents)
+
+- [WCAG 2.2 failure F2](https://www.w3.org/WAI/WCAG22/Techniques/failures/F2)
+  is a failure of 1.3.1 where a change in the look of text conveys
+  information, such as a heading, without the markup or text that
+  conveys it. Android's markup for a heading is
+  `accessibilityHeading`, and TalkBack moves by headings.
+
+### Measured first (2026-11-16)
+
+A probe read the 20 recordings with phone screens on the development
+PC, with OCR: 1,865 lines of text, 1,745 of them from the video's
+frames (measured).
+
+- One app had 423 of the lines and none marked as a heading; the other
+  apps had 85 lines marked as headings, 52 of them in Android Settings.
+- **Size.** The screen's body text was taken as the letter height that
+  most of its characters have. At 1.35 times that or more, the only
+  candidates were in the one app, 10 different texts. At 1.2 times, an
+  email's body text and a card's description lines qualified as well,
+  which is wrong.
+- **Larger is not a heading.** Android Settings' marked headings were
+  the size of the body text or smaller, and stood out by colour; and
+  some large text was a message, not a heading. So the rules find
+  candidates, and the model or a person judges them.
+- **Capitals.** Short lines in capitals were the one app's section
+  labels, the size of the body text. The same rule caught two fields'
+  labels, directly above their fields, so a line in capitals within
+  twice its height above a field is left out as the field's label (an
+  assumption, not measured further).
+- **Bold could not be measured.** The stroke from the video was 2 to 8
+  pixels thick, and tab labels measured bolder than the headings.
+- **Only the tree's text confirmed by OCR is reliable.** As with
+  boundaries (step 18), words OCR read on their own often belonged to
+  another item, as the video lags the tree.
+- **Text in items that can be tapped** was a large group: 86 lines in
+  the one app, 8 in the launcher, 3 in Settings, 2 in Gmail and 1 in
+  Chrome, such as app labels and card titles.
+- With both tests, about 19 different texts were candidates, all in
+  the one app. The model's answers to the question were not measured
+  before it was built.
+
+### As built
+
+- **The letters' height.** `PhoneColours.InkHeight` gives the rows of
+  a line's box from the first to the last with a pixel nearer the
+  text's colour than the background's (Delta E, as for the colours).
+  The contrast measurement (step 4b) gives it to each line with
+  colours, as `PhoneTextLine.InkHeight`, in the picture's pixels, so a
+  ratio of two lines on the same picture does not depend on its scale.
+- **The body text.** `PhoneHeadingLookRun.BodyHeight` is the median of
+  a snapshot's lines' heights, each line counted once for each
+  character OCR read in it.
+- **The rules.** `PhoneHeadingLookRun` (`Recorder.Session`) reads each
+  settled snapshot OCR read, and each item with lines placed by OCR
+  (`AppTextPlacedByOcr`). It leaves out an image, an item marked as a
+  heading, inside one or holding one, an item with no letter, of more
+  than 2 lines or of more than 10 words. Words are runs of letters,
+  digits and apostrophes. Of the rest, (a) the tallest measured line is
+  at least 1.35 times the body text, or (b) the item has one measured
+  line, which OCR read as at least 3 letters, all capitals, in at most
+  6 words, with no digit there or in the app's text, as OCR reads "0"
+  as "O". A candidate inside an item that can be tapped or long
+  pressed, or a field, is counted in `InControls`; a line in capitals,
+  not taller, with a visible field starting below its top, within twice
+  its height of its bottom and overlapping it across, is counted in
+  `FieldLabels`. Each is counted once in a visit.
+- **The finding.** A warning, one for each item in a visit, with a time
+  for each snapshot it was found on, saying how much taller its letters
+  are (or that it is in capitals), in how many lines, that it is not
+  marked as a heading, that whether it is shown as a heading is not
+  judged, and whether the picture was the phone's screenshot or the
+  video's frame.
+- **The question.** `AndroidHeadingLook` (`Recorder.Analysis`), as for
+  images of text (`android-vision-checks.md`, "Images of text, as
+  built"): picture A is the whole screen at half size with the text's
+  lines outlined in cyan; picture B is the screen across, at full size,
+  from a line's height above the text to 30% of the screen's height
+  below it, with the text outlined. The question gives the app, the
+  screen's name and the item's text, says it is not marked as a
+  heading, and asks for "heading", "not-heading" or "cannot-tell" with
+  a one-sentence reason. Template `android-text-shown-as-heading`,
+  version 1; the step key is made from the request's SHA-256, so an
+  answer is kept by its request and reused. It is asked twice, or once
+  for a local model at temperature 0.
+- **The levels.** Agreed "heading": an error, the model's inference
+  that the text should be marked as a heading. Agreed "not-heading":
+  information, not confirmed. Agreed "cannot-tell", or two answers:
+  a warning to check manually, with both reasons. A finding with no
+  answer stays a warning, and the check's note says why.
+- **Where it runs.** The Android report, the project report and the
+  model checks ask after the images-of-text check; the model checks'
+  Markdown has a section of its own. The Checks tab shows the finding
+  under each visit, with the pieces of text placed by OCR, and the
+  summary gives the findings, the rules, how many were left out and
+  how many are for the model. "Ask the project's model" is enabled
+  while an image or a piece of text has no answer from the project's
+  model.
+- **Guidance.** `android-check-guidance.json` has the check, impact
+  medium, criterion 1.3.1, with failure F2 among its sources.
+
+### Checked
+
+The solution builds with no warnings, and the tests pass, 2,616 of
+them, with the 10 that need Windows failing as before. The new tests
+cover made-up text: a large title and a line in capitals found; a
+field's label, a button's text, a marked heading, a line in capitals
+with a digit, three lines and eleven words left out; no OCR; the
+answers judging the findings; the body text's height; the letters'
+height; the request's key and pictures; kept answers; and what the
+answers make of a finding.
+
+### Limits
+
+- Bold, colour and place are not measured; a heading the size of the
+  body text, not in capitals, is not found, as Android Settings'
+  headings would not be if they were unmarked.
+- The letters' height is the line's from the top of its tallest letter
+  to the bottom of its lowest, so a line with no tall or low letters,
+  such as "now", measures smaller than its size.
+- The 2 times reach of a field's label is an assumption.
+- Text in a control that is shown as a heading is not found.
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A

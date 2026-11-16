@@ -96,6 +96,34 @@ public sealed class ModelChecksTests
         Assert.Equal(repeatable, AndroidImagesOfText.Repeatable(basis, parameters));
     }
 
+    [Theory]
+    [InlineData("heading", PhoneCheckLevel.Error, "that the text is shown as a heading, so it should be marked as one")]
+    [InlineData("not-heading", PhoneCheckLevel.Info, "that the text is not shown as a heading, not confirmed")]
+    [InlineData("cannot-tell", PhoneCheckLevel.Warning, "check manually")]
+    public void Two_answers_that_agree_judge_the_text_shown_as_a_heading_as_an_inference(string answer, PhoneCheckLevel level, string says)
+    {
+        var inference = AndroidHeadingLook.Interpret(new(answer, "First reason."), new(answer, "Second reason."), "Haiku", cloud: true);
+
+        Assert.Equal(level, inference.Level);
+        Assert.True(inference.Inferred);
+        Assert.Equal(("Haiku", true), (inference.Model, inference.Cloud));
+        Assert.StartsWith("Haiku, a cloud model,", inference.Text, StringComparison.Ordinal);
+        Assert.Contains(says, inference.Text, StringComparison.Ordinal);
+        Assert.Contains("\"First reason.\"", inference.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Two_answers_about_a_heading_that_differ_are_a_warning_to_check_manually()
+    {
+        var inference = AndroidHeadingLook.Interpret(new("heading", "Large."), new("not-heading", "A value."), "Haiku", cloud: true);
+
+        Assert.Equal(PhoneCheckLevel.Warning, inference.Level);
+        Assert.EndsWith("; check manually", inference.Text, StringComparison.Ordinal);
+        Assert.Equal(
+            "1 piece of text left by the rules was not asked about, as no model may be used for vision-based checks: no model is chosen",
+            AndroidHeadingLook.NotAsked(1, "no model is chosen"));
+    }
+
     [Fact]
     public void Questions_not_asked_say_why()
     {

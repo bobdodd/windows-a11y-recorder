@@ -57,6 +57,20 @@ public sealed class PhoneContrastTests
         Assert.Equal(1, swatch.Colours);
     }
 
+    // Step 19: the height of the letters is the rows from the first to the
+    // last with a pixel nearer the text's colour than the background's.
+    [Fact]
+    public void InkHeight_IsTheRowsFromTheFirstInkToTheLast_AndZeroWithNone()
+    {
+        var picture = Picture(20, 20, White, (2, 4, 6, 9, Black), (10, 7, 14, 15, 0x222222));
+        var box = new PhoneBounds(0, 0, 20, 20);
+        var swatch = PhoneColours.Measure(picture, box)!;
+
+        Assert.Equal(11, PhoneColours.InkHeight(picture, box, swatch));
+        Assert.Equal(3, PhoneColours.InkHeight(picture, new PhoneBounds(0, 0, 8, 7), swatch));
+        Assert.Equal(0, PhoneColours.InkHeight(Picture(20, 20, White), box, new PhoneSwatch(White, White, 1, 1, 1)));
+    }
+
     [Fact]
     public void Measure_BlackTextOnWhite_IsTwentyOneToOne_WithTheMoreCommonColourAsBackground()
     {

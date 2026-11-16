@@ -9,6 +9,7 @@
   "sources": {
     "wcag-1.1.1": { "title": "Understanding SC 1.1.1 Non-text Content", "url": "https://www.w3.org/WAI/WCAG22/Understanding/non-text-content.html" },
     "wcag-1.3.1": { "title": "Understanding SC 1.3.1 Info and Relationships", "url": "https://www.w3.org/WAI/WCAG22/Understanding/info-and-relationships.html" },
+    "wcag-f2": { "title": "Technique F2: Failure of Success Criterion 1.3.1 due to using changes in text presentation to convey information without using the appropriate markup or text", "url": "https://www.w3.org/WAI/WCAG22/Techniques/failures/F2" },
     "wcag-1.3.2": { "title": "Understanding SC 1.3.2 Meaningful Sequence", "url": "https://www.w3.org/WAI/WCAG22/Understanding/meaningful-sequence.html" },
     "wcag-1.3.4": { "title": "Understanding SC 1.3.4 Orientation", "url": "https://www.w3.org/WAI/WCAG22/Understanding/orientation.html" },
     "wcag-1.4.3": { "title": "Understanding SC 1.4.3 Contrast (Minimum)", "url": "https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html" },
@@ -340,6 +341,21 @@
       "flutter": "Show the words with a Text widget; keep images of text only for logos.",
       "reactNative": "Show the words with a Text element; keep images of text only for logos.",
       "sources": ["wcag-1.4.9"]
+    },
+    {
+      "check": "text-shown-as-heading",
+      "title": "Text shown as a heading but not marked as one",
+      "issue": "Text is shown as a heading, larger than the text around it or as a short line in capitals, but is not marked as a heading for assistive technology.",
+      "why": "Screen reader users move by headings to find their way around a screen and to skip to a section. Text that only looks like a heading is read as ordinary text, so the screen's structure is lost to them.",
+      "affects": ["People who are blind and use a screen reader", "People who are deaf-blind and use a braille display"],
+      "impact": "medium",
+      "criteria": ["1.3.1"],
+      "related": [],
+      "basis": "WCAG 1.3.1, as failure F2 describes: a change in the look of text conveys structure without the markup. Found from the recorded picture and the tree: text at least 1.35 times as tall as the screen's body text, or one short line in capitals, that is not marked as a heading and is not inside a control. A warning for a person to confirm unless the project's model for vision-based checks was asked; its answer is the model's inference and says so.",
+      "android": "Mark the text as a heading with android:accessibilityHeading=\"true\" or ViewCompat.setAccessibilityHeading; in Compose, Modifier.semantics { heading() }.",
+      "flutter": "Wrap the heading's Text in Semantics(header: true).",
+      "reactNative": "Set accessibilityRole=\"header\" (or role=\"heading\") on the heading's Text.",
+      "sources": ["wcag-1.3.1", "wcag-f2", "android-views", "compose-semantics", "flutter-semantics", "rn-accessibility"]
     },
     {
       "check": "label-not-in-name",

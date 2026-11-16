@@ -81,6 +81,14 @@ public static class PhoneCheckNames
     public const string ImageOfTextAaa = "image-of-text-aaa";
 
     /// <summary>
+    /// Text shown as a heading but not marked as one (step 19,
+    /// PhoneHeadingLookRun), WCAG 1.3.1: a warning from the rules, which the
+    /// project's model for vision-based checks can make an error or
+    /// information. Not one of the tree's checks.
+    /// </summary>
+    public const string TextShownAsHeading = "text-shown-as-heading";
+
+    /// <summary>
     /// Label in Name (step 9), from the tree's text and OCR's: the name
     /// does not contain the visible label, and the name contains it but
     /// does not start with it. Not one of the tree's checks.
@@ -190,6 +198,7 @@ public static class PhoneCheckNames
         FieldBottomLineOnly => "Text field shown only by a bottom line (related to WCAG 5.2.4)",
         ImageOfText => "Image of text (WCAG 1.4.5)",
         ImageOfTextAaa => "Image of text (WCAG 1.4.9, AAA)",
+        TextShownAsHeading => "Text shown as a heading, not marked as one (WCAG 1.3.1)",
         LabelNotInName => "Label not in name (WCAG 2.5.3)",
         LabelNotAtStart => "Label not at the start of the name (WCAG 2.5.3, best practice)",
         ClickableNotFocusable => "Clickable but not focusable (WCAG 2.1.1)",

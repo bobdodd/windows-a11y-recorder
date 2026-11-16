@@ -137,8 +137,9 @@ those in place, you will use the settings I choose."
   is chosen. Nothing is chosen for a project by default, cloud or local.
 - **Where they are shown.** The Analysis tab says the open recording's
   project's models, one use after another. The Checks tab says the two
-  models for checks, that the images-of-text check asks the model for
-  vision-based checks about the images its rules leave, and that no
+  models for checks, that the images-of-text check and the check of
+  text shown as a heading ask the model for vision-based checks about
+  the images and text their rules leave, and that no
   check uses the model for text-based checks yet; it is there because a
   torn-out Checks window has no menu, and the checks that need a model
   run from that tab ("Ask the project's model";

@@ -228,7 +228,7 @@ public static class AndroidReport
             {
                 Heading(1, (summary ? "Android accessibility summary: " : "Android accessibility report: ") + (_project ? "project " + projectName : parts[0].Recording));
                 var findings = checks is not null
-                    ? $"The findings in this {(summary ? "summary" : "report")} are the recorder's own checks of the recording, except where the images-of-text check asked {Inferences(checks)} about an image: that finding says so, with the model and its answer."
+                    ? $"The findings in this {(summary ? "summary" : "report")} are the recorder's own checks of the recording, except where the images-of-text check or the check of text shown as a heading asked {Inferences(checks)} about an image or a piece of text: that finding says so, with the model and its answer."
                     : summary
                         ? "The findings in this summary are the recorder's own checks of the recording, with no model."
                         : "Every finding in this report is the recorder's own check of the recording; no model wrote any of it.";
@@ -1061,12 +1061,17 @@ public static class AndroidReport
                 var check = _several ? $"In recording {(index + 1).ToString(CultureInfo.InvariantCulture)}, a" : "A";
                 if (part.Audit.MeasureProblem is { } problem)
                 {
-                    Item($"{of} colours could not be measured, so the contrast, image of text and label in name checks did not run: " + problem);
+                    Item($"{of} colours could not be measured, so the contrast, image of text, label in name and text shown as a heading checks did not run: " + problem);
                 }
 
                 if (part.Audit.ImagesOfText?.ModelNote is { } note)
                 {
                     Item($"{of} images-of-text check's model: {note}.");
+                }
+
+                if (part.Audit.HeadingLook?.ModelNote is { } headingNote)
+                {
+                    Item($"{of} text-shown-as-heading check's model: {headingNote}.");
                 }
 
                 foreach (var problem2 in part.Audit.Tree.Problems)
