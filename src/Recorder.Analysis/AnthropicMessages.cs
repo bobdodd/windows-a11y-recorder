@@ -130,7 +130,7 @@ public static class AnthropicMessages
             ["output_format"] = "json_schema",
             ["sections"] = new JsonArray([.. request.Sections.Select(section => JsonValue.Create(section))]),
             ["images"] = request.Images.Count
-        };
+        }.WithAnswers(request);
     }
 
     /// <summary>

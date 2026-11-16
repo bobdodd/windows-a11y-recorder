@@ -47,7 +47,9 @@ test 5 uses a model, and only until the project is set to no model.
 - There is no "Use AI in checks".
 - Above the line about the phone's apps: "Models for checks, from the
   project's settings: text-based checks, no model; vision-based checks,
-  no model. No check uses a model yet."
+  no model. The images-of-text check asks the model for vision-based
+  checks about the images its rules leave; no check uses the model for
+  text-based checks yet."
 - The line wraps; no horizontal scrollbar.
 
 ## Test 3: the project's settings window

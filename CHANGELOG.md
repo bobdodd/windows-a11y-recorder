@@ -8,6 +8,30 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Images of text with the project's model
+
+- The images-of-text check (WCAG 1.4.5, and 1.4.9 at AAA) applies four
+  rules without a model first: TalkBack's caption is left out, a picture
+  out of step with the tree is not judged, lines past the image's edge
+  or held by an item beside it are left out, and in an app detected as
+  drawn with Flutter an image whose description holds every word is a
+  manual check.
+- Each image the rules leave is a question for the project's model for
+  vision-based checks: the screen with the image outlined and the image
+  itself, and one of five fixed answers with a reason, asked twice (once
+  for a local model at temperature 0). Agreed exceptions are
+  information, agreed "could be text" an error for a person to confirm,
+  and anything else a warning to check manually; each says it is the
+  model's inference and names the model, cloud or local.
+- Answers are kept by their request and reused by any task, so the same
+  image is not asked about again. The Android reports ask automatically;
+  "Model checks" asks alone and writes `android-model-checks.md`; the
+  Checks tab shows the kept answers and has "Ask the project's model".
+  Reports with an inferred finding say AI was used, and the kind of
+  model. See
+  [Android checks with a vision model](docs/architecture/android-vision-checks.md),
+  "Images of text, as built".
+
 ### Claude models in the project's settings
 
 - Each project's model lists offer Claude Opus 5.5, Claude Sonnet 5.5

@@ -10,8 +10,11 @@ namespace Recorder.Analysis.Android;
 /// <summary>
 /// The Android report (android-report.md): every Android check run on a
 /// phone recording, written by screen as a Word document and as Markdown,
-/// with the screens' pictures. No model is used, so it needs no profile and
-/// gives the same report for the same recording, settings and guidance.
+/// with the screens' pictures. No model writes it; where the project
+/// chooses a model for vision-based checks, the images-of-text check asks
+/// it about the images its rules leave (AndroidImagesOfText), and the
+/// report says AI was used. With no model it gives the same report for the
+/// same recording, settings and guidance.
 /// </summary>
 public sealed class AndroidReportKind : IAnalysisTaskKind
 {
@@ -31,7 +34,8 @@ public sealed class AndroidReportKind : IAnalysisTaskKind
 /// The project's Android report (projects.md): the Android report of every
 /// recording in a project with phone screens, taken together, with a
 /// screen seen in more than one recording given once and its findings
-/// grouped across them. No model is used.
+/// grouped across them. No model writes it; the images-of-text check asks
+/// the project's model for vision-based checks, where one is chosen.
 /// </summary>
 public sealed class AndroidProjectReportKind : IAnalysisTaskKind
 {
@@ -182,7 +186,7 @@ public sealed class AndroidSummaryKind : IAnalysisTaskKind
             : "";
         var times = finding.Visits.Sum(on => on.Finding.Times.Count);
         return string.Create(CultureInfo.InvariantCulture,
-            $"Finding {finding.Number}, {level}, impact {impact}, {criteria}: {check?.Title ?? PhoneCheckNames.Title(finding.Finding.Check)}. Item: {finding.Finding.Label}. Measured: {first.Measured}.{(first.State is null ? "" : " State: " + first.State + ".")}{visits} Seen {Count(times, "time", "times")}.{affects}");
+            $"Finding {finding.Number}, {level}, impact {impact}, {criteria}: {check?.Title ?? PhoneCheckNames.Title(finding.Finding.Check)}. Item: {finding.Finding.Label}. Measured: {first.Measured}.{(finding.Finding.Inference is { } inference ? " A model's answer, an inference, not a fact: " + inference.Text + "." : "")}{(first.State is null ? "" : " State: " + first.State + ".")}{visits} Seen {Count(times, "time", "times")}.{affects}");
     }
 
     /// <summary>The whole app's request: the apps, the counts by criterion, the app's findings, and each screen as a model summarised it.</summary>
@@ -240,10 +244,68 @@ public sealed class AndroidSummaryKind : IAnalysisTaskKind
     }
 }
 
+/// <summary>
+/// The model checks of a phone recording (android-vision-checks.md): the
+/// checks run as the Android report runs them, and the project's model for
+/// vision-based checks asked about each image of text its rules leave, as
+/// the Checks tab's "Ask the project's model" queues it. Its answers are
+/// kept by their requests, so the Checks tab and a report show them
+/// without asking again. It writes the questions and answers as Markdown.
+/// </summary>
+public sealed class AndroidModelChecksKind : IAnalysisTaskKind
+{
+    public const string Name = "android-model-checks";
+
+    public const string BaseName = "android-model-checks";
+
+    public string Kind => Name;
+
+    public int Version => 1;
+
+    public Task RunAsync(AnalysisTaskContext context, CancellationToken cancellationToken) =>
+        AndroidReportRun.RunAsync(context, BaseName, summarize: false, cancellationToken, modelChecksOnly: true);
+
+    /// <summary>The Markdown of the questions and what their answers made of each finding.</summary>
+    public static string Markdown(string recording, AndroidAudit audit)
+    {
+        ArgumentNullException.ThrowIfNull(recording);
+        ArgumentNullException.ThrowIfNull(audit);
+        var text = new StringBuilder()
+            .Append(CultureInfo.InvariantCulture, $"# Model checks: {recording}\n\n");
+        if (audit.ImagesOfText is not { } run)
+        {
+            return text.Append("The colours could not be measured, so the images-of-text check did not run")
+                .Append(audit.MeasureProblem is { } problem ? ": " + problem : "").Append(".\n").ToString();
+        }
+
+        text.Append("## Images of text\n\n")
+            .Append(CultureInfo.InvariantCulture,
+                $"Of {run.Images} images on the pictures OCR read, the rules left {run.Questions.Count} for the model for vision-based checks, and {run.ManualChecks} for a manual check.");
+        if (run.ModelNote is { } note)
+        {
+            text.Append(' ').Append(char.ToUpperInvariant(note[0])).Append(note.AsSpan(1)).Append('.');
+        }
+
+        text.Append("\n\n");
+        foreach (var finding in run.Findings.Where(finding => finding.Check == PhoneCheckNames.ImageOfText && finding.Inference is not null))
+        {
+            text.Append(CultureInfo.InvariantCulture,
+                $"- {finding.Screen.Package}, \"{finding.Screen.Name}\", visit {finding.Visit.Number}, {finding.Label}: {finding.Text}\n");
+        }
+
+        return text.ToString();
+    }
+}
+
 /// <summary>What both Android task kinds do: open the recording, run the checks, ask for the summaries if wanted, and write the reports.</summary>
 internal static class AndroidReportRun
 {
-    public static async Task RunAsync(AnalysisTaskContext context, string baseName, bool summarize, CancellationToken cancellationToken)
+    public static async Task RunAsync(
+        AnalysisTaskContext context,
+        string baseName,
+        bool summarize,
+        CancellationToken cancellationToken,
+        bool modelChecksOnly = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         var task = context.Task;
@@ -270,6 +332,17 @@ internal static class AndroidReportRun
             var audit = await Task.Run(
                 () => AndroidAudit.Run(archive, settings, new WindowsPhoneTextReader(), PhonePictures.Load, cancellationToken),
                 cancellationToken).ConfigureAwait(false);
+            audit = await AndroidImagesOfText.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
+            if (modelChecksOnly)
+            {
+                var named = await context.Catalog.RecordingAsync(task.Recording, cancellationToken).ConfigureAwait(false);
+                var folderRelative = Path.Combine("analysis", task.TaskId.ToString("D"));
+                await AddAsync(context, Path.Combine(session, folderRelative), folderRelative, baseName + ".md",
+                    new UTF8Encoding(false).GetBytes(AndroidModelChecksKind.Markdown(named?.Label ?? Path.GetFileName(Path.TrimEndingDirectorySeparator(session)), audit)),
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             var guidance = AndroidGuidance.Load();
             var evidence = AndroidEvidence.Build(archive.PhoneScreens, audit, guidance, archive.PhoneDevice);
 
@@ -353,6 +426,7 @@ internal static class AndroidReportRun
                 var audit = await Task.Run(
                     () => AndroidAudit.Run(archive, settings, new WindowsPhoneTextReader(), PhonePictures.Load, cancellationToken),
                     cancellationToken).ConfigureAwait(false);
+                audit = await AndroidImagesOfText.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
                 parts.Add(Input(archive, audit, label, opened.Incomplete) with { StartedUtc = new DateTimeOffset(recording.StartedUtc, TimeSpan.Zero) });
                 keys.Add(key);
             }

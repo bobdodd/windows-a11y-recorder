@@ -82,6 +82,25 @@ public sealed record ModelRequest(
     /// </summary>
     public bool ChecksWording { get; init; }
 
+    /// <summary>
+    /// The fixed answers of a check's question (android-vision-checks.md,
+    /// "Keeping it repeatable", point 2), or null for a step answered in
+    /// sections of statements. Where given, the answer is a JSON object
+    /// with an "answer", one of these, and a "reason", one sentence saying
+    /// what shows it; an answer outside the set is refused, never patched.
+    /// The step then has no sections.
+    /// </summary>
+    public IReadOnlyList<string>? Answers { get; init; }
+
+    /// <summary>
+    /// Whether an accepted answer to the same request, by the same model,
+    /// server build and settings, may be reused from any task, not only the
+    /// one a task runs again: a check's answer is kept by its request
+    /// (android-vision-checks.md, "Keeping it repeatable", point 4), so a
+    /// report run again asks nothing that has been asked.
+    /// </summary>
+    public bool ReusedAcrossTasks { get; init; }
+
     private static readonly IReadOnlySet<string> NoOptions = new HashSet<string>(StringComparer.Ordinal);
 }
 
@@ -266,6 +285,11 @@ public static class ChatRequest
     public static JsonObject StepSchema(ModelRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (request.Answers is { } answers)
+        {
+            return ClosedAnswer.Schema(answers);
+        }
+
         return ClaimCheck.Schema(request.Sections, request.Forms, request.AboutSections,
             request.AboutSections is null ? null : [.. request.InputReferences.Where(reference => IsAbout(reference, request.AboutPrefix)).OrderBy(Number)]);
     }
@@ -290,7 +314,7 @@ public static class ChatRequest
             ["sampling"] = AnalysisSettingsFile.GenerationSampling(profile.Generation),
             ["sections"] = new JsonArray([.. request.Sections.Select(section => JsonValue.Create(section))]),
             ["images"] = request.Images.Count
-        };
+        }.WithAnswers(request);
     }
 
     // A reference an "about" may name: the prefix, then digits.

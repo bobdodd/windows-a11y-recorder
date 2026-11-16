@@ -174,7 +174,19 @@ public partial class MainWindow
                 _busy.AnnounceAnalysis(message);
             }
 
+            // A task that asks the model for vision-based checks has kept
+            // its answers by now, so the Checks tab shows them.
+            var answered = _analysisTasks is { } before && tasks.Any(task =>
+                task.State == AnalysisTaskStates.Done &&
+                task.Kind is AndroidModelChecksKind.Name or AndroidReportKind.Name or AndroidSummaryKind.Name or AndroidProjectReportKind.Name &&
+                before.FirstOrDefault(earlier => earlier.TaskId == task.TaskId)?.State is { } was && was != AnalysisTaskStates.Done);
             _analysisTasks = tasks;
+            UpdateAskChecksModelButton();
+            if (answered)
+            {
+                _ = ApplyKeptAnswersAsync();
+            }
+
             ShowTasks(tasks, tasks.Count == 0 ? "No analysis has been queued for this recording." : null);
         }
         catch (Exception exception) when (exception is NpgsqlException or InvalidOperationException or ObjectDisposedException)
@@ -333,7 +345,9 @@ public partial class MainWindow
 
     // The profiles a task of a kind is queued with, from the project's
     // settings: the model for report analysis for a summary, which needs
-    // one, and the models for checks for a report, which needs none. Null,
+    // one, and the models for checks for a report, which needs none but
+    // asks the model for vision-based checks about images of text where
+    // one is chosen; the Android summary has both. Null,
     // with the reason shown, where a summary cannot be queued.
     private IReadOnlyDictionary<string, string>? ProfilesFor(string kind, ProjectModels? models)
     {
@@ -355,7 +369,19 @@ public partial class MainWindow
             return null;
         }
 
-        return new Dictionary<string, string> { [ModelCapabilities.Text] = name };
+        // The Android summary is the Android report with summaries, so its
+        // checks ask the project's models for checks as the report's do
+        // (android-vision-checks.md, "Images of text, as built").
+        var profiles = new Dictionary<string, string> { [ModelCapabilities.Text] = name };
+        if (kind == AndroidSummaryKind.Name)
+        {
+            foreach (var (use, profile) in models.ForChecks())
+            {
+                profiles[use] = profile;
+            }
+        }
+
+        return profiles;
     }
 
     // What a task was queued with, in words, for the status line.
@@ -413,7 +439,8 @@ public partial class MainWindow
     private Task QueueSummaryAsync() => QueueAsync(RecordingSummaryKind.Name);
 
     // The Android report needs no model; it is queued with the project's
-    // models for checks, which no check uses yet. The summary needs the
+    // models for checks, and its images-of-text check asks the model for
+    // vision-based checks where one is chosen. The summary needs the
     // model for report analysis (android-report.md).
     private async void AndroidReportMenuItem_Click(object sender, RoutedEventArgs e)
     {

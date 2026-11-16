@@ -8,7 +8,9 @@ namespace Recorder.Analysis.Android;
 /// them (MainWindow.PhoneScreens.cs): the checks from the tree and the
 /// recording's events, then the colours measured on each settled snapshot's
 /// picture, with OCR finding the text, and the checks judged from that
-/// measurement. No model is used (android-report.md, "The audit").
+/// measurement. No model is used here; the images-of-text check's
+/// questions are asked after, where a model may be used
+/// (<see cref="AndroidImagesOfText"/>; android-report.md, "The audit").
 /// </summary>
 public sealed class AndroidAudit
 {
@@ -57,6 +59,32 @@ public sealed class AndroidAudit
         .. LabelInName?.For(visit) ?? [],
     ];
 
+    /// <summary>
+    /// Whether any finding is a model's inference, so that a report says
+    /// AI was used in the testing, and whether a cloud model was
+    /// (android-vision-checks.md, decision 2).
+    /// </summary>
+    public IReadOnlyList<PhoneInference> Inferences =>
+        ImagesOfText is null ? [] : [.. ImagesOfText.Findings.Select(finding => finding.Inference).OfType<PhoneInference>().Where(inference => inference.Inferred)];
+
+    /// <summary>
+    /// The audit with the images-of-text check judged by a model's answers
+    /// (<see cref="AndroidImagesOfText"/>), every other check as it was.
+    /// </summary>
+    public AndroidAudit WithImagesOfText(PhoneImagesOfTextRun run)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        return new AndroidAudit(Tree, Level, HoldSeconds)
+        {
+            Measured = Measured,
+            MeasureProblem = MeasureProblem,
+            TextContrast = TextContrast,
+            ImagesOfText = run,
+            NonTextContrast = NonTextContrast,
+            LabelInName = LabelInName,
+        };
+    }
+
     /// <summary>Every finding, the app's first.</summary>
     public IEnumerable<PhoneFinding> All(PhoneScreenTimeline screens)
     {
@@ -94,7 +122,7 @@ public sealed class AndroidAudit
             problem = exception.Message;
         }
 
-        return Of(tree, level, hold, measured, problem, archive.PhoneScreens, archive.PhoneDevice);
+        return Of(tree, level, hold, measured, problem, archive.PhoneScreens, archive.PhoneDevice, archive.TalkBackSpeech, archive.PhoneAccessibility);
     }
 
     /// <summary>The audit of a run of the tree's checks and a measurement, judged as the Checks tab judges them.</summary>
@@ -105,13 +133,15 @@ public sealed class AndroidAudit
         PhoneContrastRun? measured,
         string? problem,
         PhoneScreenTimeline screens,
-        PhoneDeviceTimeline device) =>
+        PhoneDeviceTimeline device,
+        TalkBackSpeechTimeline? speech = null,
+        PhoneAccessibilityTimeline? accessibility = null) =>
         new(tree, level, holdSeconds)
         {
             Measured = measured,
             MeasureProblem = problem,
             TextContrast = measured is null ? null : PhoneTextContrastRun.Run(measured, screens, device, level),
-            ImagesOfText = measured is null ? null : PhoneImagesOfTextRun.Run(measured, screens, device, level),
+            ImagesOfText = measured is null ? null : PhoneImagesOfTextRun.Run(measured, screens, device, level, speech, accessibility),
             NonTextContrast = measured is null ? null : PhoneNonTextContrastRun.Run(measured, screens),
             LabelInName = measured is null ? null : PhoneLabelInNameRun.Run(measured, screens),
         };

@@ -24,6 +24,7 @@ public static class AnalysisPlayer
         Android.AndroidReportKind.Name => "Android report",
         Android.AndroidProjectReportKind.Name => "Android report for the project",
         Android.AndroidSummaryKind.Name => "Android summary",
+        Android.AndroidModelChecksKind.Name => "Model checks",
         _ => kind
     };
 

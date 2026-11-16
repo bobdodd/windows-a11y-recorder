@@ -1777,6 +1777,75 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
 
     private async Task<Guid> RecordingOfAsync(Guid task) =>
         (Guid)(await RowsAsync("SELECT recording_id FROM analysis_tasks WHERE task_id = $1", task))[0]["recording_id"]!;
+
+    // A check's question (android-vision-checks.md, "Keeping it repeatable"):
+    // one of its fixed answers with a reason, kept by its request, so that
+    // another task asking the same reuses it without a request.
+    private static StandInKind CheckKind(params string[] steps) =>
+        new(steps)
+        {
+            Capability = ModelCapabilities.Image,
+            Request = (_, request) => request with { Sections = [] } with
+            {
+                Use = ModelUses.VisionChecks,
+                Answers = ["logotype", "could-be-text"],
+                ReusedAcrossTasks = true,
+            },
+        };
+
+    private static Dictionary<string, string> Vision() => new() { [ModelUses.VisionChecks] = "This PC" };
+
+    private static ModelResponse CheckAnswer(string answer) =>
+        new($$"""{ "answer": "{{answer}}", "reason": "The pictures show it." }""", "stop", 100, 10, 100, 100);
+
+    [Fact]
+    public async Task A_checks_answer_is_kept_by_its_request_and_reused_by_another_task_without_asking()
+    {
+        var catalog = await CatalogAsync();
+        var recording = await RecordingAsync();
+        var settings = SettingsWith(3, Profile("This PC", "qwen", ModelCapabilities.Text, ModelCapabilities.Image));
+        var endpoint = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(CheckAnswer("logotype")) };
+        var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Vision(), cancellationToken: Token);
+
+        await new AnalysisWorker(catalog, settings, [CheckKind("image-of-text-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(first));
+        var asked = Assert.Single(await AttemptsAsync(first));
+        Assert.Contains("\"answer\": \"logotype\"", (string)asked["output"]!, StringComparison.Ordinal);
+        Assert.Contains("\"answers\": [\"logotype\", \"could-be-text\"]", (string)asked["parameters"]!, StringComparison.Ordinal);
+        Assert.Contains("could-be-text", endpoint.Bodies.Single(), StringComparison.Ordinal);
+
+        // Another task, not a run again of the first, asks nothing.
+        var second = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Vision(), cancellationToken: Token);
+        var calls = endpoint.Calls.Count(call => call.StartsWith("complete", StringComparison.Ordinal));
+
+        await new AnalysisWorker(catalog, settings, [CheckKind("image-of-text-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(second));
+        Assert.Equal(calls, endpoint.Calls.Count(call => call.StartsWith("complete", StringComparison.Ordinal)));
+        var reused = Assert.Single(await RowsAsync(
+            "SELECT reused_from_attempt_id, outcome FROM analysis_attempts WHERE task_id = $1", second));
+        Assert.NotNull(reused["reused_from_attempt_id"]);
+        Assert.Equal(AttemptOutcomes.Accepted, reused["outcome"]);
+
+        var kept = await catalog.AcceptedAnswersAsync(["image-of-text-1", "image-of-text-2"], "This PC", "qwen", Token);
+        Assert.Equal("logotype", ClosedAnswer.Read(Assert.Single(kept).Value.Output)!.Answer);
+        Assert.Empty(await catalog.AcceptedAnswersAsync(["image-of-text-1"], "Another", "qwen", Token));
+    }
+
+    [Fact]
+    public async Task A_checks_answer_outside_its_fixed_answers_is_refused()
+    {
+        var catalog = await CatalogAsync();
+        var settings = SettingsWith(3, Profile("This PC", "qwen", ModelCapabilities.Text, ModelCapabilities.Image));
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Vision(), cancellationToken: Token);
+        var endpoint = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(CheckAnswer("decoration")) };
+
+        await new AnalysisWorker(catalog, settings, [CheckKind("image-of-text-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
+        Assert.Contains("The answer \"decoration\" is not one of the question's answers: logotype, could-be-text.", await FailureAsync(task), StringComparison.Ordinal);
+    }
 }
 
 /// <summary>The HTTP model endpoint against a stand-in server on loopback.</summary>
@@ -2084,5 +2153,4 @@ public sealed class HttpModelEndpointTests
 
         Assert.Contains("Recordings are not sent outside the local network.", failure.Message, StringComparison.Ordinal);
     }
-
 }

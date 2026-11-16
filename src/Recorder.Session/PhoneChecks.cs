@@ -62,6 +62,14 @@ public sealed class PhoneFinding
     /// <summary>The times it was seen, in time order.</summary>
     public IReadOnlyList<PhoneFindingTime> Times => _times;
 
+    /// <summary>
+    /// What a model's answers made of the finding, for a check that asks
+    /// one, or null: its words follow what was measured, and a model's
+    /// inference says so, with the model (android-vision-checks.md,
+    /// decision 2 and "Keeping it repeatable", point 5).
+    /// </summary>
+    public PhoneInference? Inference { get; internal init; }
+
     /// <summary>The finding as its row says it.</summary>
     public string Text
     {
@@ -74,7 +82,8 @@ public sealed class PhoneFinding
                 ? $"seen once, at {WindowsPreferenceTimeline.Clock(first.Time)}"
                 : string.Create(CultureInfo.CurrentCulture,
                     $"seen {_times.Count:N0} times, first at {WindowsPreferenceTimeline.Clock(first.Time)}");
-            return $"{Capitalized(PhoneCheckNames.Word(Level))}: {Label}, {first.Measured}{others}{state}; {seen}";
+            var inferred = Inference is null ? string.Empty : $"; {Inference.Text}";
+            return $"{Capitalized(PhoneCheckNames.Word(Level))}: {Label}, {first.Measured}{others}{state}{inferred}; {seen}";
         }
     }
 

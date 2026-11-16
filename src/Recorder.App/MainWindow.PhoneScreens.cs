@@ -6,7 +6,9 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
+using Npgsql;
 using Recorder.Analysis;
+using Recorder.Analysis.Android;
 using Recorder.Session;
 
 namespace Recorder.App;
@@ -50,6 +52,14 @@ public partial class MainWindow
     private PhoneTextContrastRun? _phoneTextContrast;
     private PhoneNonTextContrastRun? _phoneNonTextContrast;
     private PhoneImagesOfTextRun? _phoneImagesOfText;
+
+    // The images-of-text check as its rules left it, before any model's
+    // answers, and its questions' requests, made once for it; the shown
+    // run above has the project's model's kept answers given
+    // (android-vision-checks.md, "Images of text, as built").
+    private PhoneImagesOfTextRun? _phoneImagesOfTextRules;
+    private (PhoneImagesOfTextRun Rules, IReadOnlyList<ImageOfTextRequest> Requests)? _imagesOfTextRequests;
+    private int _imagesOfTextUnanswered;
     private PhoneLabelInNameRun? _phoneLabelInName;
     private PhoneCheckSettings? _checkSettings;
 
@@ -99,6 +109,9 @@ public partial class MainWindow
             _phoneTextContrast = null;
             _phoneNonTextContrast = null;
             _phoneImagesOfText = null;
+            _phoneImagesOfTextRules = null;
+            _imagesOfTextRequests = null;
+            _imagesOfTextUnanswered = 0;
             _phoneLabelInName = null;
             _shownFinding = null;
             if (_playbackArchive is { PhoneScreens.Recorded: true } opened)
@@ -221,11 +234,104 @@ public partial class MainWindow
         {
             _phoneTextContrast = null;
             _phoneImagesOfText = null;
+            _phoneImagesOfTextRules = null;
+            UpdateAskChecksModelButton();
             return;
         }
 
         _phoneTextContrast = PhoneTextContrastRun.Run(measured, archive.PhoneScreens, archive.PhoneDevice, AuditLevel);
-        _phoneImagesOfText = PhoneImagesOfTextRun.Run(measured, archive.PhoneScreens, archive.PhoneDevice, AuditLevel);
+        _phoneImagesOfTextRules = PhoneImagesOfTextRun.Run(
+            measured, archive.PhoneScreens, archive.PhoneDevice, AuditLevel, archive.TalkBackSpeech, archive.PhoneAccessibility);
+        _phoneImagesOfText = _phoneImagesOfTextRules;
+        _imagesOfTextUnanswered = _phoneImagesOfTextRules.Questions.Count;
+        _ = ApplyKeptAnswersAsync();
+    }
+
+    // Gives the images-of-text check the answers the project's model for
+    // vision-based checks has given to its questions, in any task, as they
+    // are kept by their requests; the model is not asked here. With no
+    // model chosen, the images the rules leave stay warnings, and the
+    // summary says why.
+    private async Task ApplyKeptAnswersAsync()
+    {
+        if (_phoneImagesOfTextRules is not { } rules)
+        {
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        if (rules.Questions.Count == 0)
+        {
+            _imagesOfTextUnanswered = 0;
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        var name = _openProjectModels?.VisionChecks;
+        var problem = name is null
+            ? "the project's settings choose no model for vision-based checks"
+            : ProjectModels.Problem(ProjectChoices, ModelUses.VisionChecks, name);
+        PhoneImagesOfTextRun shown;
+        if (problem is not null || AnalysisCatalogOrNull is not { } catalog || ProjectChoices.Profile(name!) is not { } profile)
+        {
+            shown = rules.Judged(
+                new Dictionary<PhoneImageOfTextQuestion, PhoneInference>(),
+                AndroidImagesOfText.NotAsked(rules.Questions.Count, problem ?? "the analysis catalog is not open"));
+        }
+        else
+        {
+            try
+            {
+                if (_imagesOfTextRequests is not { } made || !ReferenceEquals(made.Rules, rules))
+                {
+                    var requests = await Task.Run(() => AndroidImagesOfText.Requests(rules, PhonePictures.Load));
+                    made = (rules, requests);
+                    _imagesOfTextRequests = made;
+                }
+
+                var keys = made.Requests.SelectMany(request => new[] { request.StepKey(1), request.StepKey(2) }).ToList();
+                var kept = await catalog.AcceptedAnswersAsync(keys, name!, profile.Model, CancellationToken.None);
+                shown = AndroidImagesOfText.FromKept(rules, made.Requests, kept, name!);
+            }
+            catch (Exception exception) when (exception is NpgsqlException or InvalidOperationException or IOException or ObjectDisposedException)
+            {
+                shown = rules.Judged(new Dictionary<PhoneImageOfTextQuestion, PhoneInference>(), $"the model's kept answers could not be read: {exception.Message}");
+            }
+        }
+
+        // The recording or the level changed while the answers were read.
+        if (!ReferenceEquals(rules, _phoneImagesOfTextRules))
+        {
+            return;
+        }
+
+        _phoneImagesOfText = shown;
+        _imagesOfTextUnanswered = shown.Findings.Count(finding => finding.Check == PhoneCheckNames.ImageOfText && shown.QuestionOf(finding) is not null);
+        if (problem is not null)
+        {
+            _imagesOfTextUnanswered = 0;
+        }
+
+        UpdateAskChecksModelButton();
+        ShowPhoneScreenRows();
+    }
+
+    // "Ask the project's model" is for images the rules leave that the
+    // project's model for vision-based checks has not answered, while no
+    // model checks of the recording are queued or running.
+    private void UpdateAskChecksModelButton()
+    {
+        var waiting = _analysisTasks?.Any(task => task.Kind == AndroidModelChecksKind.Name &&
+            task.State is AnalysisTaskStates.Queued or AnalysisTaskStates.Running) == true;
+        AskChecksModelButton.IsEnabled = _imagesOfTextUnanswered > 0 && !waiting && _analysisRecordingId is not null &&
+            _openProjectModels?.VisionChecks is { } name && ProjectModels.Problem(ProjectChoices, ModelUses.VisionChecks, name) is null;
+    }
+
+    private async void AskChecksModelButton_Click(object sender, RoutedEventArgs e)
+    {
+        AskChecksModelButton.IsEnabled = false;
+        await QueueAsync(AndroidModelChecksKind.Name);
+        UpdateAskChecksModelButton();
     }
 
     private PhoneAuditLevel AuditLevel => _checkSettings?.AuditLevel ?? PhoneAuditLevel.AA;
@@ -823,9 +929,13 @@ public partial class MainWindow
                 : $"{Count(images.Findings.Count, "finding")} ({Levels(images.Findings)})";
             summary += images.SnapshotsRead == 0
                 ? $" {checks}: not checked, as it needs OCR's words."
-                : string.Create(
-                    CultureInfo.CurrentCulture,
-                    $" {checks}: {imageFindings}, from {Count(images.Images, "image")} read by OCR, {images.Passed:N0} passed; the words OCR read inside an image that no item's text holds are a probable image of text, a warning, as the exceptions, such as a logotype, are not judged.");
+                : string.Create(CultureInfo.CurrentCulture, $" {checks}: {imageFindings}, from {Count(images.Images, "image")} read by OCR, {images.Passed:N0} passed; ") +
+                    $"the words OCR read inside an image that no item's text holds are a probable image of text. " +
+                    $"Before any model, the rules left out {Count(images.CaptionLines, "line")} TalkBack was saying, {Count(images.EdgeLines, "line")} past an image's edge and {Count(images.NeighbourLines, "line")} an item beside the image holds; " +
+                    $"{Count(images.OutOfStep, "image")} on a picture out of step with the tree {(images.OutOfStep == 1 ? "was" : "were")} not judged, " +
+                    $"{Count(images.ManualChecks, "image")} {(images.ManualChecks == 1 ? "is" : "are")} for a manual check, as the app draws its own text with Flutter, " +
+                    $"and {Count(images.Questions.Count, "image")} {(images.Questions.Count == 1 ? "is" : "are")} for the model for vision-based checks, whose answer decides the exceptions" +
+                    (images.ModelNote is { } note ? $": {note}." : ".");
         }
 
         if (_phoneLabelInName is { } labels)

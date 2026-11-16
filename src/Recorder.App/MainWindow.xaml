@@ -1720,13 +1720,25 @@
               <StackPanel Grid.Row="1">
                 <!-- The project's models for checks, shown here because a
                      torn-out Checks window has no menu and the vision
-                     checks will run from this tab (owner, 2026-11-15;
-                     projects.md, "The project's models"). -->
+                     checks run from this tab (owner, 2026-11-15;
+                     projects.md, "The project's models"). The button
+                     queues the model checks, which ask the project's model
+                     for vision-based checks about the images of text the
+                     rules leave; its answers are kept and shown here
+                     (android-vision-checks.md, "Images of text, as built"). -->
                 <local:SelectableText x:Name="ChecksModelsTextBlock"
                            Margin="0,0,0,6"
                            TextWrapping="Wrap"
                            Text="Open a recording to see the models its project uses for checks."
                            AutomationProperties.Name="Models for checks" />
+                <WrapPanel Margin="0,0,0,6">
+                  <Button x:Name="AskChecksModelButton"
+                          Style="{StaticResource AnalysisButton}"
+                          Content="Ask the project's model"
+                          IsEnabled="False"
+                          AutomationProperties.HelpText="Queues the model checks: the project's model for vision-based checks is asked about each image of text the rules leave that it has not answered. Its answers are kept and shown in this tab."
+                          Click="AskChecksModelButton_Click" />
+                </WrapPanel>
                 <local:SelectableText x:Name="ChecksStatusTextBlock"
                            Margin="0,0,0,6"
                            TextWrapping="Wrap"

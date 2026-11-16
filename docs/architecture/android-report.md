@@ -108,7 +108,17 @@ player's Checks tab, with the settings in the phone checks settings file
 (`PhoneCheckSettings.DefaultPath`): the audit level, AA or AAA, and the
 time the phone must be held turned. Text recognition uses Windows' own
 OCR, as in the player. Checks the player runs on demand, such as text
-contrast and images of text, are run in full here.
+contrast and images of text, are run in full here. After the checks
+without a model, the task asks the project's model for vision-based
+checks about the images of text the rules leave, reusing any answer
+already kept for the same request (`android-vision-checks.md`, "Images
+of text, as built"). With no model chosen for vision-based checks,
+nothing is asked, those images stay warnings, and "Limits" says why. A
+report with a finding inferred by a model says so in its introduction:
+the client's, "AI is used in generating this report, with a cloud
+model" (or a local one, or both); the auditor's findings mark each inferred level,
+give the model's answer in its own row, and add ", if confirmed" to the
+impact.
 
 The report covers the whole recording, whatever part of it was chosen
 when it was queued; it says so under "Limits".

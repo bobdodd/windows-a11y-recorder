@@ -1,7 +1,40 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 
 namespace Recorder.Session;
+
+/// <summary>
+/// One image a model is to be asked about (android-vision-checks.md,
+/// "Images of text with Claude, and four rules"): the visit and the
+/// image's identity, the first time it was judged with the picture and the
+/// image's bounds there, what OCR read inside it once the rules have left
+/// lines out, and its description. The 1.4.5 finding and, at AAA, the
+/// 1.4.9 finding of the image share one question.
+/// </summary>
+public sealed record PhoneImageOfTextQuestion(
+    PhoneVisit Visit,
+    string Identity,
+    PhoneFindingTime Time,
+    PhoneContrastPicture Picture,
+    string Ocr,
+    string? Description)
+{
+    public string App => Visit.Screen.Package;
+
+    public string ScreenName => Visit.Screen.Name;
+
+    public PhoneBounds Bounds => Time.Bounds;
+}
+
+/// <summary>
+/// What a model's answers, or the lack of them, make of an image's
+/// finding: its level and the words the finding gives for it, whether it
+/// is a model's inference, and the model, by its profile's name, and
+/// whether it was a cloud model. A finding left a warning because the model
+/// gave no answer is not inferred.
+/// </summary>
+public sealed record PhoneInference(PhoneCheckLevel Level, string Text, bool Inferred, string? Model = null, bool Cloud = false);
 
 /// <summary>
 /// Step 8 of android-checks.md, images of text (WCAG 1.4.5; 1.4.9 as well at
@@ -14,6 +47,14 @@ namespace Recorder.Session;
 /// description holding the words does not make them text: it is what a
 /// screen reader says, not what is shown. The findings are merged in each
 /// visit by check and image, as the tree checks' are by item.
+/// Four rules without a model, chosen by the owner on 2026-11-15
+/// (android-vision-checks.md, "Images of text with Claude, and four
+/// rules"), come first: TalkBack's caption is left out (1), a picture out
+/// of step with the tree is not judged (2), a line not wholly inside the
+/// image or held by an item beside it is left out (3), and in an app that
+/// draws its own text with Flutter an image whose description holds every
+/// word left is a manual check (4). What is left is a question for the
+/// model chosen for vision-based checks (<see cref="Questions"/>).
 /// </summary>
 public sealed class PhoneImagesOfTextRun
 {
@@ -24,12 +65,34 @@ public sealed class PhoneImagesOfTextRun
     /// </summary>
     public const int MinimumCharacters = 3;
 
+    /// <summary>
+    /// How far back TalkBack's utterances count as its caption, from the
+    /// picture's snapshot: ten seconds (measured, 2026-11-15).
+    /// </summary>
+    public const long CaptionNanoseconds = 10_000_000_000L;
+
+    /// <summary>
+    /// The fewest lines outside every image, in no item's text and not
+    /// TalkBack's, for a picture to be out of step with the tree (rule 2):
+    /// measured 13 to 38 in the pictures out of step, 0 to 6 in step.
+    /// </summary>
+    public const int OutOfStepLines = 3;
+
+    // TalkBack's own phrases, which its caption shows after an item's words
+    // when the recording holds TalkBack's speech or focus.
+    private static readonly string[] TalkBackPhrases =
+    [
+        "Double-tap to activate", "Double-tap and hold to long press", "Double-tap and hold to drag",
+        "Double-tap to toggle", "Double-tap to edit text", "Swipe up or down to adjust",
+    ];
+
     // The lines of an image a finding quotes.
     private const int QuotedLines = 3;
 
     private readonly Dictionary<PhoneVisit, List<PhoneFinding>> _byVisit = [];
     private readonly Dictionary<PhoneVisit, int> _imagesByVisit = [];
     private readonly HashSet<PhoneVisit> _visitsRead = [];
+    private readonly Dictionary<(PhoneVisit, string), PhoneImageOfTextQuestion> _questions = [];
 
     private PhoneImagesOfTextRun(PhoneAuditLevel level)
     {
@@ -51,6 +114,35 @@ public sealed class PhoneImagesOfTextRun
     /// <summary>The settled snapshots whose pictures OCR read.</summary>
     public int SnapshotsRead { get; private set; }
 
+    /// <summary>The lines left out as TalkBack's caption (rule 1), once for each image on each snapshot.</summary>
+    public int CaptionLines { get; private set; }
+
+    /// <summary>The lines left out as not wholly inside the image (rule 3).</summary>
+    public int EdgeLines { get; private set; }
+
+    /// <summary>The lines left out as held by a text item beside the image (rule 3).</summary>
+    public int NeighbourLines { get; private set; }
+
+    /// <summary>The images with words not judged, as their picture was out of step with the tree (rule 2).</summary>
+    public int OutOfStep { get; private set; }
+
+    /// <summary>The images left to a manual check, as the app draws its own text (rule 4).</summary>
+    public int ManualChecks { get; private set; }
+
+    /// <summary>
+    /// The images the model chosen for vision-based checks is to be asked
+    /// about, one for each image with a finding in a visit, in the
+    /// findings' order.
+    /// </summary>
+    public IReadOnlyList<PhoneImageOfTextQuestion> Questions { get; private set; } = [];
+
+    /// <summary>
+    /// What became of the questions, such as that the model was not asked
+    /// and why; null until a model's answers are given, or where there are
+    /// no questions.
+    /// </summary>
+    public string? ModelNote { get; private set; }
+
     public TimeSpan Elapsed { get; private set; }
 
     public IReadOnlyList<PhoneFinding> For(PhoneVisit visit) =>
@@ -62,18 +154,34 @@ public sealed class PhoneImagesOfTextRun
     public int ImagesIn(PhoneVisit visit) =>
         _imagesByVisit.TryGetValue(visit, out var count) ? count : 0;
 
+    /// <summary>The question of a finding's image, or null where the finding is not one for the model.</summary>
+    public PhoneImageOfTextQuestion? QuestionOf(PhoneFinding finding)
+    {
+        ArgumentNullException.ThrowIfNull(finding);
+        return _questions.TryGetValue((finding.Visit, finding.Identity), out var question) &&
+            finding.Level == PhoneCheckLevel.Warning && finding.Inference is null
+            ? question
+            : null;
+    }
+
     public static PhoneImagesOfTextRun Run(
         PhoneContrastRun measured,
         PhoneScreenTimeline screens,
         PhoneDeviceTimeline device,
-        PhoneAuditLevel level)
+        PhoneAuditLevel level,
+        TalkBackSpeechTimeline? speech = null,
+        PhoneAccessibilityTimeline? accessibility = null)
     {
         ArgumentNullException.ThrowIfNull(measured);
         ArgumentNullException.ThrowIfNull(screens);
         ArgumentNullException.ThrowIfNull(device);
+        speech ??= TalkBackSpeechTimeline.Empty;
+        accessibility ??= PhoneAccessibilityTimeline.Empty;
+        var talkBack = speech.Recorded || accessibility.FocusRecorded;
         var stopwatch = Stopwatch.StartNew();
         var run = new PhoneImagesOfTextRun(level);
         var findings = new Dictionary<(PhoneVisit, string, string), PhoneFinding>();
+        var notJudged = new Dictionary<(PhoneVisit, string, string), PhoneFinding>();
         foreach (var snapshot in measured.Snapshots)
         {
             // With no OCR there are no words to find in an image.
@@ -91,41 +199,112 @@ public sealed class PhoneImagesOfTextRun
                 .Where(item => item.InstanceOf(PhoneTextMatching.ImageViewClass) && item.Node.VisibleToUser && !item.Bounds.IsEmpty)
                 .ToList();
             var inside = InImages(images, snapshot.Lines);
+            var caption = new Lazy<Caption>(() => CaptionAt(snapshot.Settled.MonotonicNanoseconds, talkBack, speech, accessibility));
+            var step = new Lazy<(bool OutOfStep, int Unexplained, int Found)>(() => Step(snapshot, images, caption.Value));
+            var flutter = DrawsWithFlutter(device, visit.Screen.Package);
             foreach (var image in images)
             {
                 run.Images++;
                 run._imagesByVisit[visit] = run.ImagesIn(visit) + 1;
                 var lines = inside.TryGetValue(image, out var found) ? found : [];
-                if (lines.Sum(line => PhoneTextMatching.Spelling(line.OcrText!).Length) < MinimumCharacters)
+                if (Characters(lines) < MinimumCharacters)
                 {
                     run.Passed++;
                     continue;
                 }
 
-                var read = Read(image, lines, snapshot, density);
-                Add(PhoneCheckNames.ImageOfText, $"{read}; {Exceptions145}; {Source(snapshot.Picture.Kind)}");
-                if (level == PhoneAuditLevel.AAA)
+                // Rule 2: a picture out of step with the tree is not judged.
+                if (step.Value.OutOfStep)
                 {
-                    Add(PhoneCheckNames.ImageOfTextAaa, $"{read}; {Exceptions149}; {Source(snapshot.Picture.Kind)}");
+                    run.OutOfStep++;
+                    var (unexplained, placed) = (step.Value.Unexplained, step.Value.Found);
+                    var why = string.Create(CultureInfo.CurrentCulture,
+                        $"not judged, as the picture is out of step with the tree: OCR read {Lines(unexplained)} outside every image that no item's text holds, more than the {placed:N0} text {(placed == 1 ? "item" : "items")} it found where the tree places them; {Source(snapshot.Picture.Kind)}");
+                    Add(notJudged, PhoneCheckNames.ImageOfText, PhoneCheckLevel.NotRun, why);
+                    if (level == PhoneAuditLevel.AAA)
+                    {
+                        Add(notJudged, PhoneCheckNames.ImageOfTextAaa, PhoneCheckLevel.NotRun, why);
+                    }
+
+                    continue;
                 }
 
-                void Add(string check, string measuredText)
+                // Rules 1 and 3: TalkBack's caption, then lines past the
+                // image's edge, then lines a text item beside it holds.
+                var said = lines.Where(caption.Value.Said).ToList();
+                var rest = lines.Except(said).ToList();
+                var edge = rest.Where(line => !Within(line.Box, image.Bounds)).ToList();
+                rest = [.. rest.Except(edge)];
+                var beside = rest.Where(line => HeldBeside(line, image, window)).ToList();
+                var kept = rest.Except(beside).ToList();
+                run.CaptionLines += said.Count;
+                run.EdgeLines += edge.Count;
+                run.NeighbourLines += beside.Count;
+                if (Characters(kept) < MinimumCharacters)
+                {
+                    run.Passed++;
+                    continue;
+                }
+
+                var read = Read(image, kept, snapshot, density) + LeftOut(said.Count, edge.Count, beside.Count);
+
+                // Rule 4: an app that draws its own text, with an image
+                // whose description holds every word left.
+                if (flutter && DescriptionHolds(image.Node.ContentDescription, kept))
+                {
+                    run.ManualChecks++;
+                    var manual = $"{read}; {OwnText}; {Source(snapshot.Picture.Kind)}";
+                    Add(findings, PhoneCheckNames.ImageOfText, PhoneCheckLevel.Warning, manual);
+                    if (level == PhoneAuditLevel.AAA)
+                    {
+                        Add(findings, PhoneCheckNames.ImageOfTextAaa, PhoneCheckLevel.Warning, manual);
+                    }
+
+                    continue;
+                }
+
+                var time = Add(findings, PhoneCheckNames.ImageOfText, PhoneCheckLevel.Warning, $"{read}; {Exceptions145}; {Source(snapshot.Picture.Kind)}");
+                if (level == PhoneAuditLevel.AAA)
+                {
+                    Add(findings, PhoneCheckNames.ImageOfTextAaa, PhoneCheckLevel.Warning, $"{read}; {Exceptions149}; {Source(snapshot.Picture.Kind)}");
+                }
+
+                if (time is not null && !run._questions.ContainsKey((visit, image.Identity)))
+                {
+                    run._questions[(visit, image.Identity)] = new PhoneImageOfTextQuestion(
+                        visit, image.Identity, time, snapshot.Picture, Ocr(kept), image.Node.ContentDescription);
+                }
+
+                PhoneFindingTime? Add(Dictionary<(PhoneVisit, string, string), PhoneFinding> into, string check, PhoneCheckLevel findingLevel, string measuredText)
                 {
                     var key = (visit, check, image.Identity);
-                    if (!findings.TryGetValue(key, out var finding))
+                    if (!into.TryGetValue(key, out var finding))
                     {
-                        findings[key] = finding = new PhoneFinding(check, PhoneCheckLevel.Warning, visit, image.Identity, image.Label);
+                        into[key] = finding = new PhoneFinding(check, findingLevel, visit, image.Identity, image.Label);
                     }
 
                     if (finding._times.Count > 0 && finding._times[^1].Snapshot.EventId == snapshot.Settled.EventId)
                     {
-                        return;
+                        return null;
                     }
 
-                    finding._times.Add(new PhoneFindingTime(
+                    var added = new PhoneFindingTime(
                         snapshot.Picture.Time, visit, snapshot.Settled, snapshot.TakenBy, visit.WindowId, image.Bounds, image.TreeKey,
-                        measuredText, state));
+                        measuredText, state);
+                    finding._times.Add(added);
+                    return added;
                 }
+            }
+        }
+
+        // An image judged on no picture of the visit, as each was out of
+        // step, is a check not run, so that a missing finding is not read
+        // as a pass.
+        foreach (var (key, finding) in notJudged)
+        {
+            if (!findings.ContainsKey(key))
+            {
+                findings[key] = finding;
             }
         }
 
@@ -133,25 +312,87 @@ public sealed class PhoneImagesOfTextRun
             .SelectMany(app => app.Screens)
             .Select((screen, index) => (screen, index))
             .ToDictionary(pair => pair.screen, pair => pair.index);
-        run.Findings = [.. findings.Values
+        run.Place([.. findings.Values
             .OrderBy(finding => screenOrder.TryGetValue(finding.Screen, out var at) ? at : int.MaxValue)
             .ThenBy(finding => finding.Visit.Start)
             .ThenBy(finding => finding.Check == PhoneCheckNames.ImageOfText ? 0 : 1)
             .ThenBy(finding => finding.Times[0].Time)
             .ThenBy(finding => finding.Times[0].Bounds.Top)
-            .ThenBy(finding => finding.Times[0].Bounds.Left)];
-        foreach (var finding in run.Findings)
+            .ThenBy(finding => finding.Times[0].Bounds.Left)]);
+        run.Questions = [.. run.Findings
+            .Where(finding => finding.Check == PhoneCheckNames.ImageOfText)
+            .Select(finding => run._questions.GetValueOrDefault((finding.Visit, finding.Identity)))
+            .OfType<PhoneImageOfTextQuestion>()];
+        run.Elapsed = stopwatch.Elapsed;
+        return run;
+    }
+
+    /// <summary>
+    /// The run with the model's answers given: each finding of a question
+    /// answered takes the answer's level and words, and every other finding
+    /// is as it was. The note says what became of the questions, such as
+    /// that no model was chosen, for the summary of the check.
+    /// </summary>
+    public PhoneImagesOfTextRun Judged(IReadOnlyDictionary<PhoneImageOfTextQuestion, PhoneInference> answers, string? note)
+    {
+        ArgumentNullException.ThrowIfNull(answers);
+        var judged = new PhoneImagesOfTextRun(Level)
         {
-            if (!run._byVisit.TryGetValue(finding.Visit, out var ofVisit))
+            Images = Images,
+            Passed = Passed,
+            SnapshotsRead = SnapshotsRead,
+            CaptionLines = CaptionLines,
+            EdgeLines = EdgeLines,
+            NeighbourLines = NeighbourLines,
+            OutOfStep = OutOfStep,
+            ManualChecks = ManualChecks,
+            Questions = Questions,
+            ModelNote = note,
+            Elapsed = Elapsed,
+        };
+        foreach (var (key, question) in _questions)
+        {
+            judged._questions[key] = question;
+        }
+
+        foreach (var (visit, count) in _imagesByVisit)
+        {
+            judged._imagesByVisit[visit] = count;
+        }
+
+        judged._visitsRead.UnionWith(_visitsRead);
+        judged.Place([.. Findings.Select(finding =>
+        {
+            if (QuestionOf(finding) is not { } question || !answers.TryGetValue(question, out var answer))
             {
-                run._byVisit[finding.Visit] = ofVisit = [];
+                return finding;
+            }
+
+            // The exceptions are no longer "not judged" where a model's
+            // answer judged them; the answer says what it made of them.
+            var copy = new PhoneFinding(finding.Check, answer.Level, finding.Visit, finding.Identity, finding.Label) { Inference = answer };
+            copy._times.AddRange(finding._times.Select(time => time with
+            {
+                Measured = time.Measured.Replace("; " + Exceptions145, "", StringComparison.Ordinal)
+                    .Replace("; " + Exceptions149, "", StringComparison.Ordinal),
+            }));
+            return copy;
+        })]);
+        return judged;
+    }
+
+    private void Place(IReadOnlyList<PhoneFinding> findings)
+    {
+        Findings = findings;
+        foreach (var finding in findings)
+        {
+            if (!_byVisit.TryGetValue(finding.Visit, out var ofVisit))
+            {
+                _byVisit[finding.Visit] = ofVisit = [];
             }
 
             ofVisit.Add(finding);
         }
-
-        run.Elapsed = stopwatch.Elapsed;
-        return run;
     }
 
     private const string Exceptions145 =
@@ -159,6 +400,198 @@ public sealed class PhoneImagesOfTextRun
 
     private const string Exceptions149 =
         "1.4.9 allows an image of text only as pure decoration or where essential, as a logotype; neither is judged, nor a picture with significant other visual content";
+
+    private const string OwnText =
+        "the app draws its own text with Flutter, as detected at the recording's stop, and the image's description holds every word, " +
+        "so whether the words are drawn in the image cannot be told from the recording: check manually";
+
+    private static int Characters(IEnumerable<PhoneTextLine> lines) =>
+        lines.Sum(line => PhoneTextMatching.Spelling(line.OcrText!).Length);
+
+    private static string Lines(int count) =>
+        count == 1 ? "1 line" : string.Create(CultureInfo.CurrentCulture, $"{count:N0} lines");
+
+    // Rule 4's framework: Flutter, as detected at the recording's stop
+    // (android-framework-metadata.md), from the recording itself only
+    // (owner, 2026-11-15).
+    private static bool DrawsWithFlutter(PhoneDeviceTimeline device, string package) =>
+        device.VersionOf(package)?.Framework is { Status: "detected" } framework &&
+        framework.Names.Any(name => name.Contains("Flutter", StringComparison.OrdinalIgnoreCase));
+
+    // What TalkBack said or was reading at a time: its own phrases when the
+    // recording holds its speech or focus, the utterance then and those of
+    // the ten seconds before, and the focused item's words.
+    private sealed class Caption(string spelt, HashSet<string> words)
+    {
+        public bool Said(PhoneTextLine line)
+        {
+            var spelling = PhoneTextMatching.Spelling(line.OcrText!);
+            if (spelling.Length < 2 || words.Count == 0)
+            {
+                return false;
+            }
+
+            if (spelt.Contains(spelling, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            // OCR misreads a letter of the caption now and then
+            // ("Doublertap"): every word of the line within one letter of
+            // a word said.
+            var lineWords = Words(line.OcrText!);
+            return lineWords.Count > 0 && lineWords.All(word =>
+                words.Contains(word) ||
+                (word.Length >= 4 && words.Any(said => Math.Abs(said.Length - word.Length) <= 1 && WithinOne(said, word))));
+        }
+    }
+
+    private static Caption CaptionAt(long at, bool talkBack, TalkBackSpeechTimeline speech, PhoneAccessibilityTimeline accessibility)
+    {
+        var text = new StringBuilder();
+        if (talkBack)
+        {
+            foreach (var phrase in TalkBackPhrases)
+            {
+                text.Append(phrase).Append(' ');
+            }
+        }
+
+        if (speech.At(at) is { } last)
+        {
+            text.Append(last.Text).Append(' ');
+        }
+
+        foreach (var said in speech.Utterances.Where(utterance => utterance.Start <= at && utterance.Start >= at - CaptionNanoseconds))
+        {
+            text.Append(said.Text).Append(' ');
+        }
+
+        if (accessibility.FocusAt(at) is { } focus)
+        {
+            text.Append(focus.Item.Text).Append(' ').Append(focus.Item.ContentDescription).Append(' ').Append(focus.Item.Label).Append(' ');
+        }
+
+        var all = text.ToString();
+        return new Caption(PhoneTextMatching.Spelling(all), [.. Words(all)]);
+    }
+
+    // Rule 2: the picture is out of step with the tree when OCR read at
+    // least 3 lines outside every image that are in no item's text, and not
+    // TalkBack's, and those outnumber the text items it found where the tree
+    // places them. Too few found alone is not enough: OCR misses small
+    // labels over a photograph.
+    private static (bool OutOfStep, int Unexplained, int Found) Step(PhoneContrastSnapshot snapshot, List<PhoneCheckItem> images, Caption caption)
+    {
+        var found = snapshot.Lines
+            .Where(line => line.Item is { } owner && !owner.InstanceOf(PhoneTextMatching.ImageViewClass) &&
+                line.Place is PhoneTextPlace.AppTextPlacedByOcr or PhoneTextPlace.AppTextOnItemBounds)
+            .GroupBy(line => line.Item!)
+            .Count(group => group.Any(line => line.Place == PhoneTextPlace.AppTextPlacedByOcr));
+        var unexplained = snapshot.Lines.Count(line =>
+            line.Place == PhoneTextPlace.FoundByOcr && !string.IsNullOrWhiteSpace(line.OcrText) &&
+            PhoneTextMatching.Spelling(line.OcrText).Length >= 3 && !caption.Said(line) && !InAny(line.Box, images));
+        return (unexplained >= OutOfStepLines && unexplained > found, unexplained, found);
+    }
+
+    private static bool InAny(PhoneBounds box, List<PhoneCheckItem> images)
+    {
+        var x = (box.Left + box.Right) / 2;
+        var y = (box.Top + box.Bottom) / 2;
+        return images.Any(each => x >= each.Bounds.Left && x < each.Bounds.Right && y >= each.Bounds.Top && y < each.Bounds.Bottom);
+    }
+
+    private static bool Within(PhoneBounds box, PhoneBounds bounds) =>
+        box.Left >= bounds.Left && box.Top >= bounds.Top && box.Right <= bounds.Right && box.Bottom <= bounds.Bottom;
+
+    // Rule 3: a line a visible item, not an image, holds in its text or
+    // description, whose bounds touch the image's within the line's height.
+    private static bool HeldBeside(PhoneTextLine line, PhoneCheckItem image, PhoneCheckWindow window)
+    {
+        var spelt = PhoneTextMatching.Spelling(line.OcrText!);
+        if (spelt.Length < 2)
+        {
+            return false;
+        }
+
+        var reach = Math.Max(2, line.WordsHeight);
+        var bounds = image.Bounds;
+        return window.Items.Any(other =>
+            other != image && !other.InstanceOf(PhoneTextMatching.ImageViewClass) && other.Node.VisibleToUser && !other.Bounds.IsEmpty &&
+            other.Bounds.Left <= bounds.Right + reach && other.Bounds.Right >= bounds.Left - reach &&
+            other.Bounds.Top <= bounds.Bottom + reach && other.Bounds.Bottom >= bounds.Top - reach &&
+            PhoneTextMatching.Spelling(other.Text + " " + other.Node.ContentDescription).Contains(spelt, StringComparison.Ordinal));
+    }
+
+    // The lines the rules left out, for the finding to say.
+    private static string LeftOut(int said, int edge, int beside)
+    {
+        var parts = new List<string>();
+        if (said > 0)
+        {
+            parts.Add($"{Lines(said)} TalkBack was saying");
+        }
+
+        if (edge > 0)
+        {
+            parts.Add($"{Lines(edge)} past the image's edge");
+        }
+
+        if (beside > 0)
+        {
+            parts.Add($"{Lines(beside)} that an item beside the image holds");
+        }
+
+        return parts.Count == 0 ? string.Empty : "; left out: " + string.Join(", ", parts);
+    }
+
+    // What OCR read inside the image, as the model is told it.
+    private static string Ocr(IReadOnlyList<PhoneTextLine> lines)
+    {
+        var ordered = lines.OrderBy(line => line.Box.Top).ThenBy(line => line.Box.Left).ToList();
+        return $"OCR read {Lines(ordered.Count)} of text inside the image: " + string.Join(", ", ordered.Select(line => $"\"{line.OcrText}\""));
+    }
+
+    private static List<string> Words(string text) =>
+        [.. text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Select(PhoneTextMatching.Spelling).Where(word => word.Length >= 2)];
+
+    // One letter added, left out or changed.
+    internal static bool WithinOne(string a, string b)
+    {
+        if (a == b)
+        {
+            return true;
+        }
+
+        if (a.Length > b.Length)
+        {
+            (a, b) = (b, a);
+        }
+
+        var i = 0;
+        while (i < a.Length && a[i] == b[i])
+        {
+            i++;
+        }
+
+        return a.Length == b.Length
+            ? a.AsSpan(i + 1).SequenceEqual(b.AsSpan(i + 1))
+            : a.AsSpan(i).SequenceEqual(b.AsSpan(i + 1));
+    }
+
+    // Whether the description holds every word of the lines, as spelt for
+    // matching.
+    private static bool DescriptionHolds(string? description, IReadOnlyList<PhoneTextLine> lines)
+    {
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            return false;
+        }
+
+        var spelt = PhoneTextMatching.Spelling(description);
+        var words = lines.SelectMany(line => Words(line.OcrText!)).ToList();
+        return words.Count > 0 && words.All(word => spelt.Contains(word, StringComparison.Ordinal));
+    }
 
     private static string Source(PhonePictureKind kind) =>
         kind == PhonePictureKind.Screenshot ? "from the phone's screenshot" : "approximate, from the video";

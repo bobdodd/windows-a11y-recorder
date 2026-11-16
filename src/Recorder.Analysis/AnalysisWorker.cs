@@ -397,6 +397,21 @@ public sealed class AnalysisWorker
         // A profile that sends to Anthropic has no model file to hash; its
         // model is named in the request, whose SHA-256 is part of the
         // identity (cloud-models.md, "5. Repeatability").
+        // A check's answer is kept by its request: one accepted in any task
+        // with the same request, model, server build, and settings is
+        // reused, so the same picture is not asked about again
+        // (android-vision-checks.md, "Keeping it repeatable", point 4).
+        if (request.ReusedAcrossTasks && (modelSha is not null || profile.SendsToAnthropic) && build is not null &&
+            await Catalog.ReusableAnswerAsync(stepKey, new StepIdentity(inputSha, modelSha, build, (JsonObject)parameters.DeepClone()), cancellationToken)
+                .ConfigureAwait(false) is { } kept)
+        {
+            var number = await Catalog.AttemptCountAsync(task.TaskId, stepKey, cancellationToken).ConfigureAwait(false) + 1;
+            await Catalog.ReuseAttemptAsync(kept, task.TaskId, number, cancellationToken).ConfigureAwait(false);
+            _status($"Running {task.Kind}, step {stepKey} reused from an earlier answer.");
+            return await Catalog.AcceptedStepAsync(task.TaskId, stepKey, request.Sections, cancellationToken).ConfigureAwait(false) ??
+                throw new StepFailedException($"Step {stepKey} reused an earlier answer, but it could not be read back.");
+        }
+
         if (task.RerunOfTaskId is { } source && (modelSha is not null || profile.SendsToAnthropic) && build is not null)
         {
             var identity = new StepIdentity(inputSha, modelSha, build, (JsonObject)parameters.DeepClone());
@@ -809,6 +824,14 @@ public sealed class AnalysisWorker
     // checked, its wording.
     private static (IReadOnlyList<Claim> Claims, System.Text.Json.JsonElement Output, string? Failure) Check(string? content, ModelRequest request)
     {
+        // A check's question has one of its fixed answers and a reason, and
+        // no statements (ClosedAnswer).
+        if (request.Answers is { } answers)
+        {
+            var (answer, refused) = ClosedAnswer.Check(content, answers);
+            return ([], answer, refused);
+        }
+
         var (claims, output, failure) = ClaimCheck.Check(content, request.Sections, request.InputReferences);
         if (failure is null && request.NeedsStatements && claims.Count == 0)
         {

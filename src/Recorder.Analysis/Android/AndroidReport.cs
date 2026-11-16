@@ -209,23 +209,32 @@ public static class AndroidReport
         public string Write(DateTime writtenUtc)
         {
             var summary = model is not null;
+            var checks = ChecksKind;
             if (_client)
             {
                 // For the client's team, only that AI is used, whether its
                 // model was cloud or local, and that the report is manually
                 // inspected (owner, 2026-11-14 and 2026-11-15). A summary
-                // with nothing written used no AI, so it says nothing of it.
+                // with nothing written used no AI, so it says nothing of it;
+                // a check that asked a model did use AI (android-vision-checks.md,
+                // decision 2).
                 Heading(1, ClientTitle(Apps));
-                Paragraph(model is { Written: true }
-                    ? $"This report gives the results of automated accessibility checks of {Of}, with summaries of the app and of each screen. {UsedAi(model.Kind)}"
+                var written = model is { Written: true };
+                Paragraph(written || checks is not null
+                    ? $"This report gives the results of automated accessibility checks of {Of}{(written ? ", with summaries of the app and of each screen" : "")}. {UsedAi(Merged(written ? model!.Kind : null, written && model!.Kind is null, checks))}"
                     : $"This report gives the results of automated accessibility checks of {Of}. The final report is manually inspected.");
             }
             else
             {
                 Heading(1, (summary ? "Android accessibility summary: " : "Android accessibility report: ") + (_project ? "project " + projectName : parts[0].Recording));
+                var findings = checks is not null
+                    ? $"The findings in this {(summary ? "summary" : "report")} are the recorder's own checks of the recording, except where the images-of-text check asked {Inferences(checks)} about an image: that finding says so, with the model and its answer."
+                    : summary
+                        ? "The findings in this summary are the recorder's own checks of the recording, with no model."
+                        : "Every finding in this report is the recorder's own check of the recording; no model wrote any of it.";
                 Paragraph(summary
-                    ? $"The findings in this summary are the recorder's own checks of the recording, with no model. The summaries of the app and of each screen are {Inferences(model!.Kind)} from those findings, and say so where they appear."
-                    : "Every finding in this report is the recorder's own check of the recording; no model wrote any of it.");
+                    ? $"{findings} The summaries of the app and of each screen are {Inferences(model!.Kind)} from those findings, and say so where they appear."
+                    : findings);
             }
 
             About(writtenUtc);
@@ -381,8 +390,39 @@ public static class AndroidReport
                 : "References such as [E3] are to the evidence list at the end, which gives each one's time in the recording.");
         }
 
+        // Whether a check's findings are a model's inferences, by the kind
+        // of model: "cloud", "local" or "cloud and local"; null for none.
+        private string? ChecksKind
+        {
+            get
+            {
+                var inferences = parts.SelectMany(part => part.Audit.Inferences).ToList();
+                if (inferences.Count == 0)
+                {
+                    return null;
+                }
+
+                var cloud = inferences.Any(inference => inference.Cloud);
+                var local = inferences.Any(inference => !inference.Cloud);
+                return cloud && local ? "cloud and local" : cloud ? "cloud" : "local";
+            }
+        }
+
+        // The kinds of model of the summaries and of the checks together;
+        // null where the summaries' kind was not recorded.
+        private static string? Merged(string? summaries, bool summariesUnknown, string? checks)
+        {
+            if (summariesUnknown)
+            {
+                return null;
+            }
+
+            var kinds = new[] { summaries, checks }.OfType<string>().SelectMany(kind => kind.Split(" and ")).ToHashSet(StringComparer.Ordinal);
+            return kinds.Contains("cloud") && kinds.Contains("local") ? "cloud and local" : kinds.Contains("cloud") ? "cloud" : "local";
+        }
+
         // The client's sentence on AI, with the kind of model that wrote the
-        // summaries (android-vision-checks.md, requirement 3).
+        // summaries or answered a check (android-vision-checks.md, requirement 3).
         private static string UsedAi(string? kind) => kind switch
         {
             null => "AI is used in generating this report, though whether its model was cloud or local was not recorded, and the final report is manually inspected.",
@@ -828,13 +868,18 @@ public static class AndroidReport
             var finding = numbered.Finding;
             var check = numbered.Guidance;
             Heading(headingLevel, numbered.Heading);
+            // A level a model's answers gave is its inference, not
+            // confirmed (android-vision-checks.md, decision 2).
+            var inferred = finding.Inference is { Inferred: true };
             var impact = numbered.Impact is not { } step ? "Not given: the guidance does not cover this check"
-                : step.Label + (finding.Level == PhoneCheckLevel.Error ? "" : ", if confirmed");
-            var level = finding.Level switch
+                : step.Label + (finding.Level == PhoneCheckLevel.Error && !inferred ? "" : ", if confirmed");
+            var level = (finding.Level, inferred) switch
             {
-                PhoneCheckLevel.Error => "Error",
-                PhoneCheckLevel.Warning => "Warning, for a person to confirm",
-                PhoneCheckLevel.Info => "Information, for a person to judge",
+                (PhoneCheckLevel.Error, true) => "Error, inferred by a model, for a person to confirm",
+                (PhoneCheckLevel.Error, false) => "Error",
+                (PhoneCheckLevel.Warning, _) => "Warning, for a person to confirm",
+                (PhoneCheckLevel.Info, true) => "Information, inferred by a model, for a person to judge",
+                (PhoneCheckLevel.Info, false) => "Information, for a person to judge",
                 _ => "Not run",
             };
             // On more than one visit, what was measured is given once if
@@ -860,9 +905,18 @@ public static class AndroidReport
                 new[] { "WCAG success criteria", Criteria(check) },
                 new[] { "Item", finding.Label },
                 new[] { "Measured", measured },
+            };
+            var inferences = numbered.Visits.Select(on => on.Finding.Inference?.Text).OfType<string>().Distinct(StringComparer.Ordinal).ToList();
+            if (inferences.Count > 0)
+            {
+                rows.Add(["Model's answer", string.Join("; ", inferences)]);
+            }
+
+            rows.AddRange(new List<IReadOnlyList<string>>
+            {
                 new[] { "Seen", seen },
                 new[] { "Check", PhoneCheckNames.Title(finding.Check) + (check is null ? "" : ". " + check.Basis) },
-            };
+            });
             Table(["Field", "Value"], rows);
             if (pictures)
             {
@@ -1008,6 +1062,11 @@ public static class AndroidReport
                 if (part.Audit.MeasureProblem is { } problem)
                 {
                     Item($"{of} colours could not be measured, so the contrast, image of text and label in name checks did not run: " + problem);
+                }
+
+                if (part.Audit.ImagesOfText?.ModelNote is { } note)
+                {
+                    Item($"{of} images-of-text check's model: {note}.");
                 }
 
                 foreach (var problem2 in part.Audit.Tree.Problems)

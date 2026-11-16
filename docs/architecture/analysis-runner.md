@@ -835,6 +835,24 @@ attempts marks each one reused.
   request sent; and a rerun of a rerun pointing to the attempt the model
   wrote. A report test for the reused steps listed.
 
+### Check answers kept by their request
+
+Built on 2026-11-16 for the images-of-text check
+(`android-vision-checks.md`, "Images of text, as built"). A check's
+question is a step whose request names its fixed answers: the server is
+held to a schema of one answer from the set and a reason, the worker's
+own check refuses anything else, and the answers are recorded with the
+attempt's settings, so that other steps' settings are as they were.
+
+Such a step is reused across tasks, not only when run again: before
+sending it, the worker looks in every task for an accepted attempt at
+the same step made with the same request, model file, server build and
+settings, as above, and reuses the earliest. The step key is made from
+the request's SHA-256, so the same picture and words are the same step
+in any recording. Run again from scratch therefore does not ask a
+check's question again; a new version of the question's template does.
+A summary's steps are reused only when run again, as before.
+
 ## Turning AI analysis off
 
 Built on 2026-11-15, from the owner's requirement of the same day: "What

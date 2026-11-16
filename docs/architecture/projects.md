@@ -137,9 +137,12 @@ those in place, you will use the settings I choose."
   is chosen. Nothing is chosen for a project by default, cloud or local.
 - **Where they are shown.** The Analysis tab says the open recording's
   project's models, one use after another. The Checks tab says the two
-  models for checks, and that no check uses a model yet; it is there
-  because a torn-out Checks window has no menu, and the checks that need
-  a model will run from that tab.
+  models for checks, that the images-of-text check asks the model for
+  vision-based checks about the images its rules leave, and that no
+  check uses the model for text-based checks yet; it is there because a
+  torn-out Checks window has no menu, and the checks that need a model
+  run from that tab ("Ask the project's model";
+  `android-vision-checks.md`, "Images of text, as built").
 - **Used when a task is queued.** The project's settings are read again
   each time a task is queued, Run again included, so a task always uses
   the settings as they are then, not those an earlier task was queued
@@ -147,8 +150,10 @@ those in place, you will use the settings I choose."
   vision to the summary needs that model to take images, and queues the
   summary and vision both on it; until now the summary used a text
   profile and vision the default profile for images. The Android reports
-  need no model, and are queued with the models for checks, which no
-  check uses yet. Each task's row names the models it was queued with,
+  and the model checks are queued with the models for checks, and the
+  Android summary with the model for report analysis and the models for
+  checks; the images-of-text check uses the model for vision-based
+  checks, and no check uses the model for text-based checks yet. Each task's row names the models it was queued with,
   by use, or says "No model."
 - **Used at each step.** A task keeps the models it was queued with, but
   the worker reads the project's settings again before each model step:

@@ -575,7 +575,10 @@ public sealed class PhoneCheckRunTests : IDisposable
             Checked = "unchecked",
         };
 
-    private static (PhoneCheckWindow Window, PhoneTextLine[] Lines) PicturesOfText()
+    // A test can add an item beside the images, move the sale's line, or
+    // add lines OCR read outside every image.
+    private static (PhoneCheckWindow Window, PhoneTextLine[] Lines) PicturesOfText(
+        AndroidTreeNode? extra = null, (int Left, int Top, int Right, int Bottom)? sale = null, params string[] outside)
     {
         var window = new PhoneCheckWindow(512, 1,
         [
@@ -585,18 +588,62 @@ public sealed class PhoneCheckRunTests : IDisposable
             ImageNode(3, 0, (100, 800, 900, 900), "android.widget.TextView", text: "Daily tips"),
             ImageNode(4, 0, (59, 1124, 1022, 1523), "android.widget.ImageButton", "Settings"),
             ImageNode(5, 0, (59, 1523, 1022, 1923), "android.widget.ImageView"),
+            .. extra is null ? Array.Empty<AndroidTreeNode>() : [extra],
         ]);
         var items = window.Items;
         PhoneTextLine Line(PhoneCheckItem? owner, PhoneCheckItem container, PhoneTextPlace place, string ocr, int left, int top, int right, int bottom) =>
             new(owner, container, place, owner?.Node.ContentDescription ?? owner?.Text, ocr, new PhoneBounds(left, top, right, bottom), null, bottom - top);
+        var box = sale ?? (100, 1600, 500, 1642);
         return (window,
         [
             Line(items[1], items[1], PhoneTextPlace.AppTextPlacedByOcr, "Sleep Hygiene", 100, 400, 500, 442),
             Line(items[1], items[1], PhoneTextPlace.AppTextPlacedByOcr, "Steps to take for a good night's sleep.", 100, 460, 900, 489),
             Line(items[3], items[3], PhoneTextPlace.AppTextPlacedByOcr, "Daily tips", 100, 820, 400, 860),
             Line(null, items[4], PhoneTextPlace.FoundByOcr, "Q:", 500, 1300, 560, 1340),
-            Line(null, items[5], PhoneTextPlace.FoundByOcr, "Sale 50%", 100, 1600, 500, 1642),
+            Line(null, items[5], PhoneTextPlace.FoundByOcr, "Sale 50%", box.Left, box.Top, box.Right, box.Bottom),
+            .. outside.Select((text, index) => Line(null, items[0], PhoneTextPlace.FoundByOcr, text, 100, 2000 + (index * 80), 700, 2040 + (index * 80))),
         ]);
+    }
+
+    // The images-of-text run of the pictures on the first settled snapshot
+    // of the recording's one visit, from the phone's screenshot.
+    private PhoneImagesOfTextRun ImagesOfTextRun(
+        (PhoneCheckWindow Window, PhoneTextLine[] Lines) pictures,
+        PhoneDeviceTimeline? device = null,
+        TalkBackSpeechTimeline? speech = null,
+        PhoneAuditLevel level = PhoneAuditLevel.AA)
+    {
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var at = visit.SettledSnapshots[0];
+        var measured = PhoneContrastRun.Of(
+        [
+            new PhoneContrastSnapshot(
+                visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                new PhoneContrastPicture(PhonePictureKind.Screenshot, at.MonotonicNanoseconds, "p.png", "p.png"),
+                "Windows OCR, en-US", pictures.Lines, null, pictures.Window),
+        ]);
+        return PhoneImagesOfTextRun.Run(measured, archive.PhoneScreens, device ?? Device(), level, speech);
+    }
+
+    // The recording's one visit's app, detected as drawn with Flutter at the stop.
+    private PhoneDeviceTimeline FlutterDevice()
+    {
+        var package = Assert.Single(Archive(out _).PhoneScreens.Visits).Screen.Package;
+        var app = new AndroidAppVersion(package, true, "1.0", 1, 24, 35, null, null, [])
+        {
+            Framework = new AndroidAppFramework("apk-entries", "detected", ["Flutter"], ["lib/arm64-v8a/libflutter.so"], 1, 1, null),
+        };
+        return new(
+            [
+                (0L, AndroidDeviceRecords.DensityEventType, JsonSerializer.SerializeToElement(
+                    new AndroidDisplayDensity("58191FDCQ00ABZ", AndroidDeviceRecords.StartReason, 390, null, [], null, 0, 0),
+                    JsonSerializerOptions.Web)),
+                (9 * Second, AndroidDeviceRecords.AppVersionsEventType, JsonSerializer.SerializeToElement(
+                    new AndroidAppVersions("58191FDCQ00ABZ", [app], [], 9 * Second, 9 * Second), JsonSerializerOptions.Web)),
+            ],
+            [],
+            10 * Second);
     }
 
     [Fact]
@@ -692,6 +739,216 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Equal(2, run.Findings.Count);
         Assert.Contains("its description holds some of them", run.Findings[0].Times[0].Measured, StringComparison.Ordinal);
         Assert.Contains("its description holds some of them", run.Findings[1].Times[0].Measured, StringComparison.Ordinal);
+    }
+
+    // The images the rules leave are the model's questions, one for each
+    // image whatever its two findings at AAA, in the findings' order.
+    [Fact]
+    public void ImagesOfText_LeavesAQuestionForEachImageTheRulesDoNotSettle()
+    {
+        var pictures = PicturesOfText();
+        var run = ImagesOfTextRun(pictures, level: PhoneAuditLevel.AAA);
+
+        Assert.Equal(4, run.Findings.Count);
+        Assert.Equal(2, run.Questions.Count);
+        var described = run.Questions[0];
+        Assert.Equal(pictures.Window.Items[1].Identity, described.Identity);
+        Assert.Equal(new PhoneBounds(59, 324, 1022, 724), described.Bounds);
+        Assert.Equal("OCR read 2 lines of text inside the image: \"Sleep Hygiene\", \"Steps to take for a good night's sleep.\"", described.Ocr);
+        Assert.Equal("Sleep Hygiene\nSteps to take for a good night's sleep.", described.Description);
+        Assert.Equal(PhonePictureKind.Screenshot, described.Picture.Kind);
+        Assert.Null(run.Questions[1].Description);
+        Assert.Equal(described, run.QuestionOf(run.Findings[0]));
+        Assert.Equal(described, run.QuestionOf(run.Findings.Single(finding =>
+            finding.Check == PhoneCheckNames.ImageOfTextAaa && finding.Identity == described.Identity)));
+        Assert.Equal((0, 0, 0, 0, 0), (run.CaptionLines, run.EdgeLines, run.NeighbourLines, run.OutOfStep, run.ManualChecks));
+        Assert.Null(run.ModelNote);
+    }
+
+    // Rule 1: a line TalkBack was saying is its caption, not the image's.
+    [Fact]
+    public void ImagesOfText_LeavesOutALineTalkBackWasSaying()
+    {
+        var archive = Archive(out _);
+        var at = Assert.Single(archive.PhoneScreens.Visits).SettledSnapshots[0].MonotonicNanoseconds;
+        var said = Math.Max(0, at - Second);
+        var speech = new TalkBackSpeechTimeline(
+        [
+            (new SessionTimelineEvent(1, "u1", "observed", AndroidTalkBackRecords.SpeechChannel, AndroidTalkBackRecords.UtteranceStartedEventType, said, "Sale 50%"),
+                JsonSerializer.SerializeToElement(new { utteranceId = "u1", text = "Sale 50%" })),
+        ],
+            10 * Second);
+
+        var run = ImagesOfTextRun(PicturesOfText(), speech: speech);
+
+        Assert.Equal(1, run.CaptionLines);
+        var finding = Assert.Single(run.Findings);
+        Assert.Equal(PicturesOfText().Window.Items[1].Identity, finding.Identity);
+
+        // TalkBack's speech of more than ten seconds before is not its caption.
+        var early = new TalkBackSpeechTimeline(
+        [
+            (new SessionTimelineEvent(1, "u1", "observed", AndroidTalkBackRecords.SpeechChannel, AndroidTalkBackRecords.UtteranceStartedEventType, at - (11 * Second), "Sale 50%"),
+                JsonSerializer.SerializeToElement(new { utteranceId = "u1", text = "Sale 50%" })),
+        ],
+            10 * Second);
+        if (at >= 11 * Second)
+        {
+            Assert.Equal(0, ImagesOfTextRun(PicturesOfText(), speech: early).CaptionLines);
+        }
+    }
+
+    // Rule 2: a picture out of step with the tree is not judged; its
+    // images are a check not run, not a pass and not a question.
+    [Fact]
+    public void ImagesOfText_DoesNotJudgeAPictureOutOfStepWithTheTree()
+    {
+        var run = ImagesOfTextRun(PicturesOfText(outside: ["Good morning Alex", "Your sleep score", "Weekly report ready"]));
+
+        Assert.Equal(2, run.OutOfStep);
+        Assert.Equal(2, run.Findings.Count);
+        Assert.All(run.Findings, finding => Assert.Equal(PhoneCheckLevel.NotRun, finding.Level));
+        Assert.StartsWith(
+            "not judged, as the picture is out of step with the tree: OCR read 3 lines outside every image that no item's text holds, more than the 1 text item it found where the tree places them; ",
+            run.Findings[0].Times[0].Measured, StringComparison.Ordinal);
+        Assert.Empty(run.Questions);
+
+        // Two lines are too few to say so.
+        var two = ImagesOfTextRun(PicturesOfText(outside: ["Good morning Alex", "Your sleep score"]));
+
+        Assert.Equal(0, two.OutOfStep);
+        Assert.All(two.Findings, finding => Assert.Equal(PhoneCheckLevel.Warning, finding.Level));
+    }
+
+    // Rule 3: a line not wholly inside the image, and a line an item
+    // beside the image holds, are left out.
+    [Fact]
+    public void ImagesOfText_LeavesOutLinesPastTheEdgeAndLinesAnItemBesideHolds()
+    {
+        var past = ImagesOfTextRun(PicturesOfText(sale: (900, 1600, 1100, 1642)));
+
+        Assert.Equal(1, past.EdgeLines);
+        Assert.Single(past.Findings);
+
+        var beside = ImagesOfTextRun(PicturesOfText(extra: ImageNode(6, 0, (59, 1930, 1022, 1990), "android.widget.TextView", text: "Sale 50% today")));
+
+        Assert.Equal(1, beside.NeighbourLines);
+        Assert.Single(beside.Findings);
+    }
+
+    // Rule 4: in an app drawn with Flutter, an image whose description
+    // holds every word is a manual check, not a question.
+    [Fact]
+    public void ImagesOfText_MakesADescribedImageInAFlutterAppAManualCheck()
+    {
+        var pictures = PicturesOfText();
+        var run = ImagesOfTextRun(pictures, FlutterDevice());
+
+        Assert.Equal(1, run.ManualChecks);
+        Assert.Equal(2, run.Findings.Count);
+        Assert.EndsWith(
+            "the app draws its own text with Flutter, as detected at the recording's stop, and the image's description holds every word, " +
+            "so whether the words are drawn in the image cannot be told from the recording: check manually; from the phone's screenshot",
+            run.Findings[0].Times[0].Measured, StringComparison.Ordinal);
+        Assert.Null(run.QuestionOf(run.Findings[0]));
+        Assert.Equal(pictures.Window.Items[5].Identity, Assert.Single(run.Questions).Identity);
+    }
+
+    // The model's answers judge their images' findings, and say they are
+    // inferred; every other finding is as it was.
+    [Fact]
+    public void ImagesOfText_JudgedByTheModelsAnswers_SaysTheyAreInferred()
+    {
+        var run = ImagesOfTextRun(PicturesOfText(), level: PhoneAuditLevel.AAA);
+        var sale = run.Questions[1];
+        var answer = Recorder.Analysis.Android.AndroidImagesOfText.Interpret(
+            new Recorder.Analysis.ClosedAnswerOf("could-be-text", "Plain white words on a flat colour."),
+            new Recorder.Analysis.ClosedAnswerOf("could-be-text", "Words in a plain typeface on a flat colour."),
+            "Claude Haiku 5.5", cloud: true);
+
+        var judged = run.Judged(new Dictionary<PhoneImageOfTextQuestion, PhoneInference> { [sale] = answer }, "2 images were for the model.");
+
+        Assert.Equal("2 images were for the model.", judged.ModelNote);
+        Assert.Equal(run.Questions, judged.Questions);
+        var ofSale = judged.Findings.Where(finding => finding.Identity == sale.Identity).ToList();
+        Assert.Equal(2, ofSale.Count);
+        Assert.All(ofSale, finding =>
+        {
+            Assert.Equal(PhoneCheckLevel.Error, finding.Level);
+            Assert.Same(answer, finding.Inference);
+            Assert.DoesNotContain("not judged", finding.Times[0].Measured, StringComparison.Ordinal);
+            Assert.Contains("; " + answer.Text + "; seen once", finding.Text, StringComparison.Ordinal);
+            Assert.Null(judged.QuestionOf(finding));
+        });
+        Assert.StartsWith("Claude Haiku 5.5, a cloud model, inferred from the pictures twice that the text could be shown as real text", answer.Text, StringComparison.Ordinal);
+        var other = judged.Findings.Where(finding => finding.Identity != sale.Identity).ToList();
+        Assert.Equal(2, other.Count);
+        Assert.All(other, finding => Assert.Equal((PhoneCheckLevel.Warning, (PhoneInference?)null), (finding.Level, finding.Inference)));
+        Assert.Equal(run.Questions[0], judged.QuestionOf(other[0]));
+    }
+
+    // The request is the same for the same picture and words, so that an
+    // answer kept by it is reused; the screen is at half size, outlined.
+    [Fact]
+    public void ImagesOfText_RequestIsTheSameForTheSameImage()
+    {
+        var run = ImagesOfTextRun(PicturesOfText());
+        var rgb = new uint[1080 * 2400];
+        Array.Fill(rgb, 0x203040u);
+        var pixels = new PhonePixels(1080, 2400, rgb);
+
+        var first = Recorder.Analysis.Android.AndroidImagesOfText.RequestOf(run.Questions[1], pixels);
+        var again = Recorder.Analysis.Android.AndroidImagesOfText.RequestOf(run.Questions[1], new PhonePixels(1080, 2400, [.. rgb]));
+        var other = Recorder.Analysis.Android.AndroidImagesOfText.RequestOf(run.Questions[0], pixels);
+
+        Assert.Equal(first.Key, again.Key);
+        Assert.NotEqual(first.Key, other.Key);
+        Assert.Matches("^image-of-text-[0-9a-f]{16}$", first.Key);
+        Assert.Equal(first.Key + "-2", first.StepKey(2));
+        Assert.Equal(Recorder.Analysis.ModelUses.VisionChecks, first.Request.Use);
+        Assert.True(first.Request.ReusedAcrossTasks);
+        Assert.Equal(Recorder.Analysis.Android.AndroidImagesOfText.Answers, first.Request.Answers);
+        Assert.Equal(["A", "B"], first.Request.Images.Select(image => image.Reference));
+        Assert.Equal(first.Request.Images[0].Content, again.Request.Images[0].Content);
+        Assert.Equal((540, 1200), PngSize(first.Request.Images[0].Content));
+        Assert.Equal((963, 400), PngSize(first.Request.Images[1].Content));
+        Assert.Contains("OCR read inside the image: OCR read 1 line of text inside the image: \"Sale 50%\"", first.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("The image has no description for a screen reader.", first.Request.Input, StringComparison.Ordinal);
+
+        static (int Width, int Height) PngSize(byte[] png) =>
+            ((png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19], (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23]);
+    }
+
+    // Answers kept by their requests judge the run for the Checks tab: a
+    // repeatable model's one answer, a cloud model's two.
+    [Fact]
+    public void ImagesOfText_FromKeptAnswers_JudgesTheImagesAnswered()
+    {
+        var run = ImagesOfTextRun(PicturesOfText());
+        var rgb = new uint[1080 * 2400];
+        var pixels = new PhonePixels(1080, 2400, rgb);
+        var requests = run.Questions.Select(question => Recorder.Analysis.Android.AndroidImagesOfText.RequestOf(question, pixels)).ToList();
+        static JsonElement Output(string answer) =>
+            JsonSerializer.SerializeToElement(new { answer, reason = "The pictures show it." });
+        var kept = new Dictionary<string, Recorder.Analysis.KeptAnswer>
+        {
+            [requests[0].StepKey(1)] = new(Output("logotype"), "stated", """{"temperature": 0}"""),
+            [requests[1].StepKey(1)] = new(Output("could-be-text"), "service", """{"temperature": null}"""),
+        };
+
+        var judged = Recorder.Analysis.Android.AndroidImagesOfText.FromKept(run, requests, kept, "Haiku");
+
+        Assert.Equal(PhoneCheckLevel.Info, judged.Findings[0].Level);
+        Assert.StartsWith("Haiku, a local model, inferred from the pictures that the text is part of a logo", judged.Findings[0].Inference!.Text, StringComparison.Ordinal);
+        Assert.Equal(PhoneCheckLevel.Warning, judged.Findings[1].Level);
+        Assert.Equal("2 images left by the rules are for Haiku; 1 image answered, 1 image not yet asked", judged.ModelNote);
+
+        kept[requests[1].StepKey(2)] = new(Output("could-be-text"), "service", """{"temperature": null}""");
+        var both = Recorder.Analysis.Android.AndroidImagesOfText.FromKept(run, requests, kept, "Haiku");
+
+        Assert.Equal(PhoneCheckLevel.Error, both.Findings[1].Level);
+        Assert.True(both.Findings[1].Inference!.Cloud);
+        Assert.Equal("2 images left by the rules are for Haiku; 2 images answered", both.ModelNote);
     }
 
     // Step 9: Label in Name, on made-up controls. Items 2 to 17 are each a

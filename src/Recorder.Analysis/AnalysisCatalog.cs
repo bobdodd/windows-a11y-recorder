@@ -198,6 +198,12 @@ public sealed record FailedStep(Guid AttemptId, string? Failure, string? RawOutp
 public sealed record AcceptedStep(Guid AttemptId, string InputSha256, JsonElement Output, IReadOnlyList<Claim> Claims);
 
 /// <summary>
+/// A check's accepted answer as kept: its output, how its model was
+/// identified (a service's basis for a cloud model), and its settings.
+/// </summary>
+public sealed record KeptAnswer(JsonElement Output, string? ModelSha256Basis, string Parameters);
+
+/// <summary>
 /// The analysis tables in the catalog. Every use opens its own connection.
 /// If the database server has stopped, as when the player closes and stops
 /// the server it started, the catalog asks for the server to be started
@@ -705,6 +711,77 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             command.Parameters.AddWithValue(identity.ServerBuild);
             command.Parameters.Add(new NpgsqlParameter { Value = identity.Parameters.ToJsonString(), NpgsqlDbType = NpgsqlDbType.Jsonb });
             return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is Guid id ? (Guid?)id : null;
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// The earliest accepted attempt at a check's step in any task that was
+    /// made with the same request, model file, server build, and sampling
+    /// settings, so that a check's answer is kept by its request and not
+    /// asked for again (android-vision-checks.md, "Keeping it repeatable",
+    /// point 4); or null where there is none.
+    /// </summary>
+    public Task<Guid?> ReusableAnswerAsync(string stepKey, StepIdentity identity, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        return UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT attempt_id FROM analysis_attempts WHERE step_key = $1 AND outcome = 'accepted' " +
+                "AND input_sha256 = $2 AND model_sha256 IS NOT DISTINCT FROM $3 AND server_build = $4 AND parameters = $5 " +
+                "ORDER BY finished_utc, attempt_id LIMIT 1",
+                connection);
+            command.Parameters.AddWithValue(stepKey);
+            command.Parameters.AddWithValue(identity.InputSha256);
+            command.Parameters.Add(new NpgsqlParameter { Value = (object?)identity.ModelSha256 ?? DBNull.Value, NpgsqlDbType = NpgsqlDbType.Text });
+            command.Parameters.AddWithValue(identity.ServerBuild);
+            command.Parameters.Add(new NpgsqlParameter { Value = identity.Parameters.ToJsonString(), NpgsqlDbType = NpgsqlDbType.Jsonb });
+            return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is Guid id ? (Guid?)id : null;
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// The earliest accepted answer at each of a check's steps given by the
+    /// named profile and model, whatever task asked, for showing a check's
+    /// answers where no task is open (android-vision-checks.md, "Keeping it
+    /// repeatable", point 4). Steps with none are left out.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, KeptAnswer>> AcceptedAnswersAsync(
+        IReadOnlyCollection<string> stepKeys,
+        string profileName,
+        string model,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(stepKeys);
+        ArgumentNullException.ThrowIfNull(profileName);
+        ArgumentNullException.ThrowIfNull(model);
+        if (stepKeys.Count == 0)
+        {
+            return Task.FromResult<IReadOnlyDictionary<string, KeptAnswer>>(new Dictionary<string, KeptAnswer>());
+        }
+
+        return UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT DISTINCT ON (step_key) step_key, output::text, model_sha256_basis, parameters::text FROM analysis_attempts " +
+                "WHERE step_key = ANY($1) AND outcome = 'accepted' AND profile_name = $2 AND model = $3 " +
+                "ORDER BY step_key, finished_utc, attempt_id",
+                connection);
+            command.Parameters.AddWithValue(stepKeys.ToArray());
+            command.Parameters.AddWithValue(profileName);
+            command.Parameters.AddWithValue(model);
+            var answers = new Dictionary<string, KeptAnswer>(StringComparer.Ordinal);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                using var document = JsonDocument.Parse(reader.GetString(1));
+                answers[reader.GetString(0)] = new KeptAnswer(
+                    document.RootElement.Clone(),
+                    reader.IsDBNull(2) ? null : reader.GetString(2),
+                    reader.GetString(3));
+            }
+
+            return (IReadOnlyDictionary<string, KeptAnswer>)answers;
         }, cancellationToken);
     }
 

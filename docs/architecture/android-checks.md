@@ -458,7 +458,9 @@ the recording is opened and nothing is kept.
    reporting (see "The audit level"). Built, and checked on the PC.
 8. **Images of text** (WCAG 1.4.5, and 1.4.9 at AAA), from the words OCR
    already reads (see "Step 8: images of text"). Built, and checked on
-   the PC.
+   the PC. Four rules without a model and a question for the project's
+   model for vision-based checks about what they leave were added on
+   2026-11-16 (`android-vision-checks.md`, "Images of text, as built").
 9. **Label in Name** (WCAG 2.5.3), a control's content description
    against the text inside it (see "Step 9: Label in Name"). Built, and
    checked on the PC.

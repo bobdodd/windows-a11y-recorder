@@ -11,5 +11,6 @@ public static class AnalysisTaskKinds
     [
         new Summary.RecordingSummaryKind(), new Summary.RecordingSummaryVisionKind(),
         new Android.AndroidReportKind(), new Android.AndroidSummaryKind(), new Android.AndroidProjectReportKind(),
+        new Android.AndroidModelChecksKind(),
     ];
 }

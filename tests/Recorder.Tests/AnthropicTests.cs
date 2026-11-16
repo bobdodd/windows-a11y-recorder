@@ -128,6 +128,23 @@ public sealed class AnthropicTests
             Forms = ["heading", "sentence"]
         };
 
+    // A check's question (android-vision-checks.md, "Keeping it
+    // repeatable"): the answer's schema, closed and without minLength, and
+    // its answers recorded with the attempt.
+    [Fact]
+    public void A_Claude_check_question_is_held_to_its_fixed_answers()
+    {
+        var request = Request() with { Sections = [], Answers = ["logotype", "could-be-text"] };
+        using var document = JsonDocument.Parse(ChatRequest.Build(Claude(), request));
+        var schema = document.RootElement.GetProperty("output_config").GetProperty("format").GetProperty("schema");
+
+        Assert.Equal(["logotype", "could-be-text"], schema.GetProperty("properties").GetProperty("answer").GetProperty("enum").EnumerateArray().Select(item => item.GetString()));
+        Assert.False(schema.GetProperty("properties").GetProperty("reason").TryGetProperty("minLength", out _));
+        Assert.False(schema.GetProperty("additionalProperties").GetBoolean());
+        Assert.Equal("""["logotype","could-be-text"]""", ChatRequest.Parameters(Claude(), request)["answers"]!.ToJsonString());
+        Assert.Null(ChatRequest.Parameters(Claude(), Request())["answers"]);
+    }
+
     [Fact]
     public void A_Claude_request_is_a_messages_request_with_the_step_schema_closed_and_no_sampling()
     {

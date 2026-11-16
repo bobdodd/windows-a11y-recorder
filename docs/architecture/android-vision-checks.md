@@ -1,4 +1,4 @@
-# Android Checks With a Vision Model: Preliminary Plan
+# Android Checks With a Vision Model: Plan, and Images of Text as Built
 
 ## Status
 
@@ -9,8 +9,10 @@ until the owner chooses them, apart from the decisions recorded under
 2026-11-15. The switch that turns AI analysis off (decisions 5
 and 6, step 1 of the order in decision 7) was built on 2026-11-15, and
 replaced the same day by each project's models, chosen in its settings
-(decision 8; `projects.md`, "The project's models"). No check is built.
-Each is to be measured on the recordings to hand before its rules are set, as the earlier checks
+(decision 8; `projects.md`, "The project's models"). The first check
+with a model, images of text, was built on 2026-11-16 (see "Images of
+text, as built"); the others are not built. Each is to be measured on
+the recordings to hand before its rules are set, as the earlier checks
 were (see `android-checks.md` and `android-checks-candidates.md`).
 
 The owner's standing rule was first stated as: "As far as possible
@@ -329,10 +331,69 @@ same kind of card. This confirms that the pictures alone cannot settle
 the cards. The match to a later recording was the probe's only; the
 rule as built takes the framework from the recording itself (rule 4).
 
-Still to build, from the order agreed: each request asked twice, with a
-finding only where both answers agree and "needs a manual check"
-otherwise; answers kept by the request's SHA-256 (point 4 under
-"Keeping it repeatable"); and the check in the Checks tab.
+### Images of text, as built
+
+Built on 2026-11-16, at the owner's request to "build the planned AI
+checks based on our work", as measured above and following "Keeping it
+repeatable".
+
+- **The rules.** Step 8 of `android-checks.md` applies the four rules
+  before anything else, and counts the lines and images each set aside.
+  An image the rules leave, with 3 or more letters or digits that no
+  item's text holds, is a question for the model; the 1.4.5 finding and,
+  at AAA, the 1.4.9 finding of an image share one question, asked from
+  the first picture the image was judged on. A picture out of step makes
+  its images' findings "not run", not a pass and not a question; rule 4
+  makes a finding a warning to check manually, without a model.
+- **The question.** Two pictures as measured: the whole screen at half
+  size with the image outlined in cyan, 4 pixels outside its bounds, and
+  the image at full size, at most 1,024 pixels on its longer side, both
+  PNG and the same bytes for the same pixels. The words OCR read inside
+  the image and its description go with them, and the app's package and
+  the screen's name. The answer is one of the five fixed answers with a
+  one-sentence reason: a JSON schema holds the model to them, and the
+  recorder's own check refuses any other answer, an empty reason or a
+  member not asked for, without repairing it.
+- **Twice, or once.** Each question is asked twice, and a finding follows
+  only where the two answers agree. A local model at temperature 0 gives
+  the same answer to the same request, so it is asked once. Claude has no
+  seed and takes no temperature (`cloud-models.md`, "5. Repeatability"),
+  so a Claude model is always asked twice.
+- **What the answers make of the finding.** Agreed "logotype",
+  "essential" or "picture with other content": information, the
+  exception taken to apply but not confirmed. Agreed "could be text": an
+  error, inferred by a model for a person to confirm, with whether a user
+  can customize the image not judged. Agreed "cannot tell", or two
+  different answers: a warning to check manually, with both reasons. The
+  1.4.9 finding takes the same. Every such finding says it is the model's
+  inference, names the project's model and whether it is a cloud or a
+  local model, and quotes the reason. A question with no answer, as when
+  no model is chosen or a request fails, stays a warning, and the check's
+  note says why.
+- **Kept by the request.** Each question's step key is made from the
+  request's SHA-256: the question's template and version, its
+  instructions, its words and both pictures. An answer accepted for the
+  same request, by the same model with the same settings, in any task of
+  any recording, is reused without asking again, as a rerun's steps are
+  (`analysis-runner.md`, "Check answers kept by their request"). Running
+  a report again asks nothing that has been asked, so it costs nothing
+  and gives the same answers; a new template version asks again.
+- **Where it runs.** The Android report and the project report ask the
+  project's model for vision-based checks about the images the rules
+  leave, after the checks without a model. "Model checks", a task of its
+  own, asks the same and writes `android-model-checks.md`, listing each
+  answered finding. The Checks tab shows the answers already kept for
+  the project's model, without asking; its "Ask the project's model"
+  button queues the model checks when an image the rules leave has no
+  answer from that model. With no model chosen for vision-based checks,
+  nothing is asked, and the summary says so.
+- **Disclosure.** A report with any finding inferred by a model says so
+  (decision 6): the client's report "AI is used in generating this
+  report, with a cloud model" (or a local one, or both), and the
+  auditor's that its findings are the recorder's own checks except where
+  the images-of-text check asked the model about an image. The auditor's findings mark each inferred level,
+  give the model's answer in its own row, and add ", if confirmed" to the
+  impact; "Limits" gives the check's note on the model.
 
 ## Later, or text only
 

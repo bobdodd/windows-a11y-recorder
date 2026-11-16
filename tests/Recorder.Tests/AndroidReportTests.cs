@@ -601,11 +601,43 @@ public sealed class AndroidReportTests : IDisposable
         Assert.Contains("| Ref | Time | Evidence |", markdown, StringComparison.Ordinal);
     }
 
+    // A finding the images-of-text check's model judged says so, and the
+    // report says AI was used in the testing, with a cloud model.
+    [Fact]
+    public void Report_WithAFindingAModelInferred_SaysAiWasUsedAndMarksTheFinding()
+    {
+        var inference = Recorder.Analysis.Android.AndroidImagesOfText.Interpret(
+            new("could-be-text", "Plain words on a flat colour."), new("could-be-text", "Plain words."), "Claude Haiku 5.5", cloud: true);
+        var (input, guidance, evidence) = Recording(imageOfText: inference);
+
+        var markdown = AndroidReport.Write(input, guidance, evidence, null, Path.Combine(_folder, "pictures"), "pictures", new DateTime(2026, 11, 16, 12, 0, 0, DateTimeKind.Utc));
+
+        Assert.Contains("except where the images-of-text check asked a cloud model's inferences about an image", markdown, StringComparison.Ordinal);
+        var document = ReportDocument.Parse(markdown);
+        var table = document.Blocks.Single(block => block.Kind == ReportBlockKind.Table && block.Rows[0][0] == "Field" &&
+            block.Rows.Any(row => row[0] == "Model's answer"));
+        Assert.Equal("Error, inferred by a model, for a person to confirm", table.Rows.Single(row => row[0] == "Level")[1]);
+        Assert.EndsWith(", if confirmed", table.Rows.Single(row => row[0] == "Impact")[1], StringComparison.Ordinal);
+        Assert.Equal(inference.Text, table.Rows.Single(row => row[0] == "Model's answer")[1]);
+        Assert.Contains("images-of-text check's model: 1 image left by the rules was for the model for vision-based checks; 1 image answered.", markdown, StringComparison.Ordinal);
+
+        // The client's report says only that AI was used, and the kind of model.
+        var client = AndroidReport.Write(input, guidance, evidence, null, Path.Combine(_folder, "client"), "client", new DateTime(2026, 11, 16, 12, 0, 0, DateTimeKind.Utc), ReportAudience.Client);
+        Assert.Contains("AI is used in generating this report, with a cloud model, and the final report is manually inspected.", client, StringComparison.Ordinal);
+
+        // With no finding inferred, the report says no model wrote any of it.
+        var (plain, _, plainEvidence) = Recording(sessionKey: "t", within: "plain");
+        var without = AndroidReport.Write(plain, guidance, plainEvidence, null, Path.Combine(_folder, "plain", "pictures"), "pictures", new DateTime(2026, 11, 16, 12, 0, 0, DateTimeKind.Utc));
+        Assert.DoesNotContain("Model's answer", without, StringComparison.Ordinal);
+        var plainClient = AndroidReport.Write(plain, guidance, plainEvidence, null, Path.Combine(_folder, "plain", "client"), "client", new DateTime(2026, 11, 16, 12, 0, 0, DateTimeKind.Utc), ReportAudience.Client);
+        Assert.DoesNotContain("AI is used", plainClient, StringComparison.Ordinal);
+    }
+
     // The Settings window taken at 1 second and again at 3, its button
     // moved down 10 pixels, listed at 5 without being taken; a white frame
     // of the phone at 1.5 seconds.
     private (AndroidReportInput Input, AndroidGuidance Guidance, AndroidEvidence Evidence) Recording(
-        bool returns = false, string sessionKey = "s", string? version = null, string? within = null)
+        bool returns = false, string sessionKey = "s", string? version = null, string? within = null, PhoneInference? imageOfText = null)
     {
         var folder = within is null ? _folder : Path.Combine(_folder, within);
         Directory.CreateDirectory(folder);
@@ -657,6 +689,29 @@ public sealed class AndroidReportTests : IDisposable
         var device = Device(version);
         var tree = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, device, recording, pictures, TestContext.Current.CancellationToken);
         var audit = AndroidAudit.Of(tree, PhoneAuditLevel.AA, 5, null, null, archive.PhoneScreens, device);
+        if (imageOfText is not null)
+        {
+            // A picture of a sale's words, read by OCR on the first settled
+            // snapshot, judged by the model's answer given.
+            var visit = archive.PhoneScreens.Visits[0];
+            var at = visit.SettledSnapshots[0];
+            var window = new PhoneCheckWindow(512, 1,
+            [
+                new AndroidTreeNode { Index = 0, ClassName = "android.widget.FrameLayout", Bounds = new AndroidNodeBounds(0, 0, 1080, 2404), Checked = "unchecked", ImportantForAccessibility = true, VisibleToUser = true },
+                new AndroidTreeNode { Index = 1, Parent = 0, ClassName = "android.widget.ImageView", Bounds = new AndroidNodeBounds(100, 400, 900, 800), Checked = "unchecked", ImportantForAccessibility = true, VisibleToUser = true },
+            ]);
+            PhoneTextLine[] lines = [new(null, window.Items[1], PhoneTextPlace.FoundByOcr, null, "Sale 50%", new PhoneBounds(200, 500, 600, 560), null, 60)];
+            var measured = PhoneContrastRun.Of(
+            [
+                new PhoneContrastSnapshot(visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                    new PhoneContrastPicture(PhonePictureKind.Frame, At(1.5), "frame.png", framePath), "Windows OCR, en-US", lines, null, window),
+            ]);
+            var run = PhoneImagesOfTextRun.Run(measured, archive.PhoneScreens, device, PhoneAuditLevel.AA);
+            audit = audit.WithImagesOfText(run.Judged(
+                new Dictionary<PhoneImageOfTextQuestion, PhoneInference> { [Assert.Single(run.Questions)] = imageOfText },
+                "1 image left by the rules was for the model for vision-based checks; 1 image answered"));
+        }
+
         var guidance = AndroidGuidance.Load();
         var evidence = AndroidEvidence.Build(archive.PhoneScreens, audit, guidance, device);
         var input = new AndroidReportInput(sessionKey, 10 * Second, archive.PhoneScreens, device, audit, pictures,
