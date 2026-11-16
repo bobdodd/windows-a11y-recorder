@@ -71,7 +71,8 @@ public partial class MainWindow
 
     // The check of images with no text alternative, the same way
     // (android-checks.md, step 20); its kept answers are found by the
-    // image's pixels and the text beside it, in the project.
+    // image's pixels, the text beside it and what a screen reader says on
+    // the screen, in the project.
     private PhoneImageAlternativeRun? _phoneImageAlternative;
     private PhoneImageAlternativeRun? _phoneImageAlternativeRules;
     private (PhoneImageAlternativeRun Rules, IReadOnlyList<ImageAlternativeRequest> Requests)? _imageAlternativeRequests;
@@ -289,8 +290,8 @@ public partial class MainWindow
     // and the check of images with no text alternative the answers the
     // project's model for vision-based checks has given to their
     // questions, in any task, as they are kept by their requests, or for
-    // an image with no text alternative by its pixels and the text beside
-    // it in the project; the model is not asked here. With no model chosen, what the
+    // an image with no text alternative by its pixels, the text beside it
+    // and what a screen reader says on the screen, in the project; the model is not asked here. With no model chosen, what the
     // rules leave stays a warning, and the summary says why.
     private async Task ApplyKeptAnswersAsync()
     {

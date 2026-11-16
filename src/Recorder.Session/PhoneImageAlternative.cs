@@ -38,8 +38,10 @@ public sealed record PhoneImageAlternativeQuestion(
 /// image under 2 dp on its shorter side is not asked about, a line, where
 /// the recording holds the density; (3) an image on a picture out of step
 /// with the tree is not asked about there, as the images-of-text check
-/// finds it; (4) the answer for an image is kept by its own pixels and the
-/// text beside it, so the same image is given the first answer again
+/// finds it; (4) the answer for an image is kept by its own pixels, the
+/// text beside it and what a screen reader says on the screen (added at
+/// the owner's request the same day), so the same image is given the
+/// first answer again
 /// (AndroidImageAlternative); (5) the answers set the level: informative an
 /// error, cannot tell a warning, decorative information. Each image left
 /// is a warning, and a question for the model chosen for vision-based

@@ -3619,8 +3619,10 @@ pictures OCR read (measured).
 - **Rule 4, the signature.** Each request carries a signature, kept
   with the attempt in `analysis_attempts.input_signature` (migration
   0047): a version, the image's width and height in pixels, the
-  SHA-256 of the text beside it, and a 16 by 16 colour thumbnail of the
-  image's own pixels, each cell the mean of the pixels it covers. Two
+  SHA-256 of the text beside it, the SHA-256 of what a screen reader
+  says on the screen with the image's place marked (signature version
+  2, see below), and a 16 by 16 colour thumbnail of the image's own
+  pixels, each cell the mean of the pixels it covers. Two
   are the same image when all but the thumbnail are equal and every
   channel of the thumbnails is within 16 of 255. Before asking, the
   check looks for answers with a signature by the same profile and
@@ -3679,10 +3681,14 @@ project, recording, template, version and model.
   measured further.
 - What a screen reader says is the tree's order, not the order a screen
   reader moved in on the recording, and only the app's window.
-- Rule 4 keeps the answer by the image's pixels and the text beside it,
-  not by what a screen reader says on the screen: the same image with
-  the same text beside it, on a screen that says other things, is given
-  the first answer.
+- Rule 4 matches what a screen reader says exactly, so the same image
+  on the same screen is asked again when anything said changes, such as
+  a time, a count or a list scrolled by one row.
+- As the image's place is marked, identical images in different places
+  on one screen are asked separately, as the 6 "i" icons of the
+  measurement would be; rule 4 now gives the first answer again for the
+  same image in the same place on a screen that says the same, on
+  another visit or recording.
 
 ### What a screen reader says, as context (owner, 2026-11-16)
 
@@ -3699,6 +3705,13 @@ the screen reader's text for the whole screen to the image check".
 - The template is version 2, so answers to version 1 are not reused,
   and each image is asked again.
 - The limit of 4,000 characters was chosen, not measured.
+- Then, told that rule 4 still matched an image by its pixels and the
+  text beside it alone, so the same image on a screen that says other
+  things would be given the first answer, the owner chose: "Pass the
+  screen reader text to the image check's rule 4 matching too". The
+  signature (version 2) adds the SHA-256 of what a screen reader says
+  on the screen, with the image's place marked, so an answer is given
+  again only for the same image where a screen reader says the same.
 
 ## Decisions on the open questions (2026-11-11)
 

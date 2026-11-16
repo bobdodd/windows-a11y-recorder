@@ -26,7 +26,8 @@ public sealed record ImageAlternativeRequest(PhoneImageAlternativeQuestion Quest
 /// with a reason. It is asked as the images-of-text check asks
 /// (<see cref="AndroidImagesOfText"/>): twice, once for a model that gives
 /// the same answer to the same request. Each answer is kept against the
-/// image's own pixels and the text beside it (<see cref="Signature"/>), so
+/// image's own pixels, the text beside it and what a screen reader says on
+/// the screen (<see cref="Signature"/>), so
 /// an identical image, in the same run or on another recording of the
 /// project, is given the first answer again, not asked again (rule 4).
 /// What the answers make of the finding is the model's inference, and says
@@ -69,12 +70,18 @@ public static class AndroidImageAlternative
     private const int LongestCloseUp = 1024;
 
     // The signature: its version, the image's size, the SHA-256 of the
-    // text beside it, and a 16 by 16 thumbnail of the image's pixels.
-    private const byte SignatureVersion = 1;
+    // text beside it, the SHA-256 of what a screen reader says on the
+    // screen, and a 16 by 16 thumbnail of the image's pixels. Version 2
+    // (owner, 2026-11-16: "Pass the screen reader text to the image check's
+    // rule 4 matching too") added what a screen reader says.
+    private const byte SignatureVersion = 2;
 
     private const int ThumbnailSide = 16;
 
-    private const int SignatureLength = 1 + 4 + 4 + 32 + (ThumbnailSide * ThumbnailSide * 3);
+    private const int SignatureLength = ThumbnailAt + (ThumbnailSide * ThumbnailSide * 3);
+
+    // Where the thumbnail starts: after the version, the size and the two hashes.
+    private const int ThumbnailAt = 1 + 4 + 4 + 32 + 32;
 
     /// <summary>
     /// How far, out of 255, a channel of two thumbnails may differ for the
@@ -137,7 +144,7 @@ public static class AndroidImageAlternative
         var screen = AndroidImagesOfText.Png(AndroidImagesOfText.Screen(pixels, box));
         var closeUp = AndroidImagesOfText.Png(CloseUp(pixels, box));
         var input = Question(question.App, question.ScreenName, question.Nearby, question.ScreenText);
-        var signature = Signature(pixels, box, question.Nearby);
+        var signature = Signature(pixels, box, question.Nearby, question.ScreenText);
         var request = new ModelRequest(
             Template,
             TemplateVersion,
@@ -164,20 +171,23 @@ public static class AndroidImageAlternative
     /// <summary>
     /// What an image's answer is kept against (rule 4): the version, the
     /// image's width and height in pixels, the SHA-256 of the text beside
-    /// it, and a 16 by 16 thumbnail of its own pixels, each cell the mean
-    /// of the pixels it covers.
+    /// it, the SHA-256 of what a screen reader says on the screen, with the
+    /// image's place marked, and a 16 by 16 thumbnail of its own pixels,
+    /// each cell the mean of the pixels it covers.
     /// </summary>
-    public static byte[] Signature(PhonePixels pixels, PhoneBounds bounds, string nearby)
+    public static byte[] Signature(PhonePixels pixels, PhoneBounds bounds, string nearby, string screenText)
     {
         ArgumentNullException.ThrowIfNull(pixels);
         ArgumentNullException.ThrowIfNull(nearby);
+        ArgumentNullException.ThrowIfNull(screenText);
         var box = Clamp(bounds, pixels) ?? throw new ArgumentException("The image is not on the picture.", nameof(bounds));
         var signature = new byte[SignatureLength];
         signature[0] = SignatureVersion;
         BitConverter.TryWriteBytes(signature.AsSpan(1, 4), box.Width);
         BitConverter.TryWriteBytes(signature.AsSpan(5, 4), box.Height);
         SHA256.HashData(Encoding.UTF8.GetBytes(nearby), signature.AsSpan(9, 32));
-        var at = 41;
+        SHA256.HashData(Encoding.UTF8.GetBytes(screenText), signature.AsSpan(41, 32));
+        var at = ThumbnailAt;
         for (var cellY = 0; cellY < ThumbnailSide; cellY++)
         {
             var top = box.Top + (cellY * box.Height / ThumbnailSide);
@@ -210,18 +220,19 @@ public static class AndroidImageAlternative
 
     /// <summary>
     /// Whether two signatures are of the same image: the same version, the
-    /// same width and height, the same text beside it, and every channel of
+    /// same width and height, the same text beside it, the same that a
+    /// screen reader says on the screen, and every channel of
     /// the thumbnails within <see cref="ThumbnailTolerance"/>.
     /// </summary>
     public static bool SameImage(ReadOnlySpan<byte> first, ReadOnlySpan<byte> second)
     {
         if (first.Length != SignatureLength || second.Length != SignatureLength || first[0] != SignatureVersion || second[0] != SignatureVersion ||
-            !first[..41].SequenceEqual(second[..41]))
+            !first[..ThumbnailAt].SequenceEqual(second[..ThumbnailAt]))
         {
             return false;
         }
 
-        for (var at = 41; at < SignatureLength; at++)
+        for (var at = ThumbnailAt; at < SignatureLength; at++)
         {
             if (Math.Abs(first[at] - second[at]) > ThumbnailTolerance)
             {
@@ -424,7 +435,7 @@ public static class AndroidImageAlternative
         ArgumentNullException.ThrowIfNull(model);
         var who = $"{model}, {(cloud ? "a cloud model" : "a local model")},";
         var twice = ReferenceEquals(first, second) ? "" : " twice";
-        var where = again ? " for the same image, by its pixels and the text beside it," : "";
+        var where = again ? " for the same image, by its pixels, the text beside it and what a screen reader says on the screen," : "";
         if (first.Answer != second.Answer)
         {
             return new PhoneInference(PhoneCheckLevel.Warning,

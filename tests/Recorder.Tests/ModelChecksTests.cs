@@ -147,7 +147,7 @@ public sealed class ModelChecksTests
         var inference = AndroidImageAlternative.Interpret(new("informative", "An icon."), new("decorative", "A flourish."), "Haiku", cloud: true, again: true);
 
         Assert.Equal(PhoneCheckLevel.Warning, inference.Level);
-        Assert.Contains("was asked twice for the same image, by its pixels and the text beside it, and gave two answers", inference.Text, StringComparison.Ordinal);
+        Assert.Contains("was asked twice for the same image, by its pixels, the text beside it and what a screen reader says on the screen, and gave two answers", inference.Text, StringComparison.Ordinal);
         Assert.EndsWith("; check manually", inference.Text, StringComparison.Ordinal);
         Assert.Equal(
             "2 images left by the rules were not asked about, as no model may be used for vision-based checks: no model is chosen",

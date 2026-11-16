@@ -1070,7 +1070,8 @@ public sealed class PhoneCheckRunTests : IDisposable
 
     // Rule 4: the request has the screen and a close-up enlarged to 192
     // pixels on the image's shorter side; the answer is kept against the
-    // image's pixels and the text beside it, which match within a
+    // image's pixels, the text beside it and what a screen reader says on
+    // the screen, which match within a
     // tolerance, so an answer given for the same image elsewhere is used.
     [Fact]
     public void ImageAlternative_RequestIsSignedByTheImagesPixelsAndNearbyText_AndKeptAnswersJudgeIt()
@@ -1098,8 +1099,9 @@ public sealed class PhoneCheckRunTests : IDisposable
             "\"Logo | Profile | Start | [the outlined image] | Battery 80%\".", request.Request.Input, StringComparison.Ordinal);
 
         // The same image a little different, as a video frame is, is the
-        // same; much different, other text beside it, or another size is not.
-        byte[] Signed(uint colour, string nearby, PhoneBounds? bounds = null)
+        // same; much different, other text beside it, another screen's
+        // text, or another size is not.
+        byte[] Signed(uint colour, string nearby, PhoneBounds? bounds = null, string? screen = null)
         {
             var changed = (uint[])rgb.Clone();
             for (var y = 1420; y < 1580; y++)
@@ -1110,7 +1112,7 @@ public sealed class PhoneCheckRunTests : IDisposable
                 }
             }
 
-            return Recorder.Analysis.Android.AndroidImageAlternative.Signature(new PhonePixels(1080, 2400, changed), bounds ?? question.Bounds, nearby);
+            return Recorder.Analysis.Android.AndroidImageAlternative.Signature(new PhonePixels(1080, 2400, changed), bounds ?? question.Bounds, nearby, screen ?? question.ScreenText);
         }
 
         var same = Signed(0x233343, "Battery 80%");
@@ -1119,6 +1121,8 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.False(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(request.Signature, Signed(0x203040, "Battery 20%")));
         Assert.False(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(
             request.Signature, Signed(0x203040, "Battery 80%", new PhoneBounds(40, 1420, 200, 1579))));
+        Assert.False(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(
+            request.Signature, Signed(0x203040, "Battery 80%", screen: "Logo | Settings | Start | [the outlined image] | Battery 80%")));
 
         static JsonElement Output(string answer) =>
             JsonSerializer.SerializeToElement(new { answer, reason = "The pictures show it." });
@@ -1143,7 +1147,7 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Equal(PhoneCheckLevel.Error, finding.Level);
         Assert.True(finding.Inference!.Cloud);
         Assert.StartsWith(
-            "Haiku, a cloud model, inferred from the pictures twice for the same image, by its pixels and the text beside it, that the image gives information",
+            "Haiku, a cloud model, inferred from the pictures twice for the same image, by its pixels, the text beside it and what a screen reader says on the screen, that the image gives information",
             finding.Inference.Text, StringComparison.Ordinal);
 
         static (int Width, int Height) PngSize(byte[] png) =>

@@ -435,7 +435,10 @@ extended; `analysis-runner.md`, "Answers kept by a signature"). The
 question also gives what a screen reader says on the whole screen, with
 the image's place marked, and asks whether the image gives information
 that this does not (version 2, at the owner's request, "Pass the screen
-reader's text for the whole screen to the image check").
+reader's text for the whole screen to the image check"), and the answer
+is given again only where a screen reader says the same on the screen
+("Pass the screen reader text to the image check's rule 4 matching
+too").
 
 ## Later, or text only
 
