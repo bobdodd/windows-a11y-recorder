@@ -109,6 +109,31 @@ public static class AnthropicSettings
         new("Claude Haiku 5.5", "claude-haiku-5-5", new ServicePrices(0.10, 0.50) { LongPrompt = new LongPromptPrices(100_000, 0.50, 2.50) })
     ];
 
+    /// <summary>
+    /// The API key already saved with a profile that sends to Anthropic,
+    /// still protected for this Windows user, and that profile's name, or
+    /// null where none has one. A new Claude profile can take it, so that
+    /// the key is pasted once (2026-11-15).
+    /// </summary>
+    public static (string Profile, string ProtectedApiKey)? SavedKey(AnalysisSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        return settings.Profiles.FirstOrDefault(profile => profile.SendsToAnthropic && !string.IsNullOrWhiteSpace(profile.ProtectedApiKey))
+            is { } found ? (found.Name, found.ProtectedApiKey!) : null;
+    }
+
+    /// <summary>
+    /// The first model offered with no profile for it yet, so that "Add a
+    /// Claude profile" starts on one not yet added, or the first where
+    /// every one has a profile.
+    /// </summary>
+    public static ClaudeModel FirstNotAdded(AnalysisSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        return Models.FirstOrDefault(model => !settings.Profiles.Any(profile =>
+            profile.SendsToAnthropic && string.Equals(profile.Model, model.Id, StringComparison.Ordinal))) ?? Models[0];
+    }
+
     /// <summary>The model the player offers with this ID, or null for another.</summary>
     public static ClaudeModel? Model(string id) =>
         Models.FirstOrDefault(model => string.Equals(model.Id, id, StringComparison.Ordinal));

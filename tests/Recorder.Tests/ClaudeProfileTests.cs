@@ -156,6 +156,33 @@ public sealed class ClaudeProfileTests
     }
 
     [Fact]
+    public void A_new_Claude_profile_can_take_the_key_saved_with_another()
+    {
+        var (local, _) = AnalysisSettingsFile.Parse(LocalSettings);
+        Assert.Null(AnthropicSettings.SavedKey(local));
+
+        var (settings, problems) = AnalysisSettingsFile.Parse(ModelSetup.WithClaudeProfile(LocalSettings, Opus()));
+        Assert.Empty(problems);
+        Assert.Equal(("Claude Opus 5.5", "protected-key"), AnthropicSettings.SavedKey(settings));
+    }
+
+    [Fact]
+    public void Add_a_Claude_profile_starts_on_the_first_model_with_no_profile_yet()
+    {
+        var (local, _) = AnalysisSettingsFile.Parse(LocalSettings);
+        Assert.Equal("claude-opus-5-5", AnthropicSettings.FirstNotAdded(local).Id);
+
+        var withOpus = ModelSetup.WithClaudeProfile(LocalSettings, Opus());
+        Assert.Equal("claude-sonnet-5-5", AnthropicSettings.FirstNotAdded(AnalysisSettingsFile.Parse(withOpus).Settings).Id);
+
+        var all = AnthropicSettings.Models.Skip(1).Aggregate(withOpus, (text, model) =>
+            ModelSetup.WithClaudeProfile(text, ModelSetup.ClaudeProfile(model.Name, model.Id, null, 32000, model.Prices, "protected-key")));
+        var (settings, problems) = AnalysisSettingsFile.Parse(all);
+        Assert.Empty(problems);
+        Assert.Equal("claude-opus-5-5", AnthropicSettings.FirstNotAdded(settings).Id);
+    }
+
+    [Fact]
     public void A_profile_that_sends_to_Anthropic_is_labelled_so_wherever_it_is_chosen()
     {
         var (settings, _) = AnalysisSettingsFile.Parse(ModelSetup.WithClaudeProfile(LocalSettings, Opus()));

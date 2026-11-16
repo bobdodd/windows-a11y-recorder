@@ -8,6 +8,14 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Claude profiles share the saved key
+
+- "Add a Claude profile..." can leave the key box empty to use the key
+  already saved with another Claude profile, so Claude Sonnet 5.5 and
+  Claude Haiku 5.5 can be added beside Claude Opus 5.5 without pasting
+  the key again, and chosen in a project's settings. The model list
+  starts on the first model not yet added.
+
 ### The project's models
 
 - Each project's settings choose the model, or no model, for report

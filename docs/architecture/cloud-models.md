@@ -319,6 +319,15 @@ checked only on Windows, in [the validation plan](../validation/cloud-models-pla
   every current Claude model takes images (same page). The key is
   protected for the Windows user before it is written and is not shown
   again. A profile of the same name is not replaced.
+- **The key is pasted once (2026-11-15).** So that Sonnet 5.5 and Haiku
+  5.5 can be added beside Opus 5.5 and chosen in a project's settings,
+  the key box can be left empty where another Claude profile already
+  has a key: its label then names that profile, and the new profile
+  takes the same protected key. The model list starts on the first model
+  with no profile yet. The models offered are unchanged: Anthropic's
+  overview and pricing page, read again on 2026-11-15, list the same
+  IDs and prices, and Fable 5.2 (US$8 and US$40) stays out, as it was on
+  2026-11-11.
 - **Not made a default.** Unlike a model set up on this PC, a new Claude
   profile is not made the default for anything, and where no default is
   set the player offers first a profile that does not send to Anthropic.

@@ -14,6 +14,9 @@ namespace Recorder.App;
 /// profile's name, the effort, the output limit, and the API key, in a
 /// password box. The key is protected for this Windows user before it is
 /// written, and never shown again. The profile is not made a default.
+/// Where another Claude profile already has a key, the key box can be left
+/// empty to use that key, and the model list starts on the first model
+/// with no profile yet (2026-11-15).
 /// </summary>
 internal sealed class ClaudeProfileWindow : Window
 {
@@ -28,6 +31,7 @@ internal sealed class ClaudeProfileWindow : Window
     private readonly PasswordBox _key;
     private readonly SelectableText _prices;
     private readonly SelectableText _status;
+    private readonly (string Profile, string ProtectedApiKey)? _savedKey;
 
     public ClaudeProfileWindow(Window owner, string path)
     {
@@ -40,6 +44,8 @@ internal sealed class ClaudeProfileWindow : Window
         MinHeight = 400;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ShowInTaskbar = false;
+        var settings = File.Exists(path) ? AnalysisSettingsFile.Read(path).Settings : AnalysisSettings.Empty;
+        _savedKey = AnthropicSettings.SavedKey(settings);
 
         var page = new StackPanel { Margin = new Thickness(12) };
         page.Children.Add(Paragraph(
@@ -85,7 +91,18 @@ internal sealed class ClaudeProfileWindow : Window
 
         _key = new PasswordBox { MinHeight = 44, VerticalContentAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(_key, "Anthropic API key");
-        page.Children.Add(new Label { Content = "Anthropic API _key:", Target = _key, Padding = new Thickness(0, 4, 0, 2) });
+        page.Children.Add(new Label
+        {
+            Content = new AccessText
+            {
+                Text = _savedKey is { } saved
+                    ? $"Anthropic API _key, or leave it empty to use the key saved with \"{saved.Profile}\":"
+                    : "Anthropic API _key:",
+                TextWrapping = TextWrapping.Wrap
+            },
+            Target = _key,
+            Padding = new Thickness(0, 4, 0, 2)
+        });
         page.Children.Add(_key);
         page.Children.Add(Paragraph(
             "The key is kept in the analysis settings file on this PC, protected for this Windows user with the Windows Data " +
@@ -106,7 +123,8 @@ internal sealed class ClaudeProfileWindow : Window
 
         _model.SelectionChanged += (_, _) => ModelChosen();
         _modelId.TextChanged += (_, _) => ShowPrices();
-        _model.SelectedIndex = 0;
+        var first = AnthropicSettings.FirstNotAdded(settings);
+        _model.SelectedItem = _model.Items.OfType<ComboBoxItem>().First(item => ReferenceEquals(item.Tag, first));
     }
 
     /// <summary>The name of the profile added, or null where none was.</summary>
@@ -183,7 +201,7 @@ internal sealed class ClaudeProfileWindow : Window
             return;
         }
 
-        if (_key.Password.Trim().Length == 0)
+        if (_key.Password.Trim().Length == 0 && _savedKey is null)
         {
             _status.Text = "Paste your Anthropic API key into the key box.";
             return;
@@ -191,7 +209,9 @@ internal sealed class ClaudeProfileWindow : Window
 
         try
         {
-            var protectedKey = new CurrentUserApiKeyProtector().Protect(_key.Password.Trim());
+            var protectedKey = _key.Password.Trim().Length == 0
+                ? _savedKey!.Value.ProtectedApiKey
+                : new CurrentUserApiKeyProtector().Protect(_key.Password.Trim());
             var profile = ModelSetup.ClaudeProfile(name, modelId, (_effort.SelectedItem as ComboBoxItem)?.Tag as string, maxTokens, Prices, protectedKey);
             AnalysisPlayer.EnsureSettingsFile(_path);
             File.WriteAllText(_path, ModelSetup.WithClaudeProfile(File.ReadAllText(_path), profile));
