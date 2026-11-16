@@ -129,7 +129,9 @@ function Invoke-Program {
     param(
         [Parameter(Mandatory = $true)] [string] $FilePath,
         [string[]] $Arguments = @(),
-        [string] $WorkingDirectory = (Get-Location).Path
+        # The repository, not the shell's current folder, which may have
+        # been deleted since the shell went there.
+        [string] $WorkingDirectory = $repositoryRoot
     )
 
     $info = New-Object System.Diagnostics.ProcessStartInfo
