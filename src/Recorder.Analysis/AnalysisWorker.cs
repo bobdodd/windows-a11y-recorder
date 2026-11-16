@@ -485,7 +485,7 @@ public sealed class AnalysisWorker
                     request.PromptTemplate,
                     request.PromptTemplateVersion,
                     inputSha,
-                    [.. request.InputReferences.Order(StringComparer.Ordinal)]),
+                    [.. request.InputReferences.Order(StringComparer.Ordinal)]) { InputSignature = request.Signature },
                 cancellationToken).ConfigureAwait(false);
             _status($"Running {task.Kind}, step {stepKey}, attempt {number}, with {profile.Name}.");
 
@@ -744,7 +744,7 @@ public sealed class AnalysisWorker
             new AttemptStart(
                 task.TaskId, stepKey, number, profile, modelSha, basis, build, cutParameters,
                 request.PromptTemplate, request.PromptTemplateVersion, inputSha,
-                [.. request.InputReferences.Order(StringComparer.Ordinal)]),
+                [.. request.InputReferences.Order(StringComparer.Ordinal)]) { InputSignature = request.Signature },
             cancellationToken).ConfigureAwait(false);
 
         // The answer as the server gave it is kept beside the answer cut
@@ -923,7 +923,7 @@ public sealed class AnalysisWorker
             new AttemptStart(
                 task.TaskId, stepKey, number, profile, modelSha, basis, build, (JsonObject)parameters.DeepClone(),
                 request.PromptTemplate, request.PromptTemplateVersion, inputSha,
-                [.. request.InputReferences.Order(StringComparer.Ordinal)]),
+                [.. request.InputReferences.Order(StringComparer.Ordinal)]) { InputSignature = request.Signature },
             cancellationToken).ConfigureAwait(false);
         _status($"Running {task.Kind}, step {stepKey}, attempt {number}, an {what}, with {profile.Name}.");
 

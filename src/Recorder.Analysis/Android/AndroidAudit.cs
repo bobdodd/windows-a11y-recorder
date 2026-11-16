@@ -9,9 +9,10 @@ namespace Recorder.Analysis.Android;
 /// recording's events, then the colours measured on each settled snapshot's
 /// picture, with OCR finding the text, and the checks judged from that
 /// measurement. No model is used here; the questions of the images-of-text
-/// check and of the check of text shown as a heading are asked after, where
-/// a model may be used (<see cref="AndroidImagesOfText"/>,
-/// <see cref="AndroidHeadingLook"/>; android-report.md, "The audit").
+/// check, the check of text shown as a heading and the check of images with
+/// no text alternative are asked after, where a model may be used
+/// (<see cref="AndroidImagesOfText"/>, <see cref="AndroidHeadingLook"/>,
+/// <see cref="AndroidImageAlternative"/>; android-report.md, "The audit").
 /// </summary>
 public sealed class AndroidAudit
 {
@@ -46,6 +47,9 @@ public sealed class AndroidAudit
     /// <summary>Text shown as a heading but not marked as one (android-checks.md, step 19).</summary>
     public PhoneHeadingLookRun? HeadingLook { get; private init; }
 
+    /// <summary>Images with no text alternative (android-checks.md, step 20).</summary>
+    public PhoneImageAlternativeRun? ImageAlternative { get; private init; }
+
     /// <summary>The findings of the whole app, not of one visit, such as no live region in the app.</summary>
     public IReadOnlyList<PhoneFinding> AppFindings => Tree.AppFindings;
 
@@ -62,6 +66,7 @@ public sealed class AndroidAudit
         .. ImagesOfText?.For(visit) ?? [],
         .. LabelInName?.For(visit) ?? [],
         .. HeadingLook?.For(visit) ?? [],
+        .. ImageAlternative?.For(visit) ?? [],
     ];
 
     /// <summary>
@@ -71,7 +76,7 @@ public sealed class AndroidAudit
     /// </summary>
     public IReadOnlyList<PhoneInference> Inferences =>
     [
-        .. (ImagesOfText?.Findings ?? []).Concat(HeadingLook?.Findings ?? [])
+        .. (ImagesOfText?.Findings ?? []).Concat(HeadingLook?.Findings ?? []).Concat(ImageAlternative?.Findings ?? [])
             .Select(finding => finding.Inference).OfType<PhoneInference>().Where(inference => inference.Inferred),
     ];
 
@@ -82,16 +87,7 @@ public sealed class AndroidAudit
     public AndroidAudit WithImagesOfText(PhoneImagesOfTextRun run)
     {
         ArgumentNullException.ThrowIfNull(run);
-        return new AndroidAudit(Tree, Level, HoldSeconds)
-        {
-            Measured = Measured,
-            MeasureProblem = MeasureProblem,
-            TextContrast = TextContrast,
-            ImagesOfText = run,
-            NonTextContrast = NonTextContrast,
-            LabelInName = LabelInName,
-            HeadingLook = HeadingLook,
-        };
+        return Copy(run, HeadingLook, ImageAlternative);
     }
 
     /// <summary>
@@ -102,17 +98,32 @@ public sealed class AndroidAudit
     public AndroidAudit WithHeadingLook(PhoneHeadingLookRun run)
     {
         ArgumentNullException.ThrowIfNull(run);
-        return new AndroidAudit(Tree, Level, HoldSeconds)
+        return Copy(ImagesOfText, run, ImageAlternative);
+    }
+
+    /// <summary>
+    /// The audit with the check of images with no text alternative judged
+    /// by a model's answers (<see cref="AndroidImageAlternative"/>), every
+    /// other check as it was.
+    /// </summary>
+    public AndroidAudit WithImageAlternative(PhoneImageAlternativeRun run)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        return Copy(ImagesOfText, HeadingLook, run);
+    }
+
+    private AndroidAudit Copy(PhoneImagesOfTextRun? images, PhoneHeadingLookRun? headings, PhoneImageAlternativeRun? alternatives) =>
+        new(Tree, Level, HoldSeconds)
         {
             Measured = Measured,
             MeasureProblem = MeasureProblem,
             TextContrast = TextContrast,
-            ImagesOfText = ImagesOfText,
+            ImagesOfText = images,
             NonTextContrast = NonTextContrast,
             LabelInName = LabelInName,
-            HeadingLook = run,
+            HeadingLook = headings,
+            ImageAlternative = alternatives,
         };
-    }
 
     /// <summary>Every finding, the app's first.</summary>
     public IEnumerable<PhoneFinding> All(PhoneScreenTimeline screens)
@@ -174,5 +185,6 @@ public sealed class AndroidAudit
             NonTextContrast = measured is null ? null : PhoneNonTextContrastRun.Run(measured, screens),
             LabelInName = measured is null ? null : PhoneLabelInNameRun.Run(measured, screens),
             HeadingLook = measured is null ? null : PhoneHeadingLookRun.Run(measured, screens),
+            ImageAlternative = measured is null ? null : PhoneImageAlternativeRun.Run(measured, screens, device, speech, accessibility),
         };
 }

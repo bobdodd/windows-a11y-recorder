@@ -401,8 +401,7 @@ repeatable".
   (decision 6): the client's report "AI is used in generating this
   report, with a cloud model" (or a local one, or both), and the
   auditor's that its findings are the recorder's own checks except where
-  the images-of-text check, or the check of text shown as a heading,
-  asked the model about an image or a piece of text. The auditor's
+  a check asked the model about an image or a piece of text. The auditor's
   findings mark each inferred level,
   give the model's answer in its own row, and add ", if confirmed" to the
   impact; "Limits" gives the check's note on the model.
@@ -416,7 +415,23 @@ each asked of the project's model for vision-based checks as images of
 text are, with the same pictures, the same three-level answers and the
 same keeping by request. Picture B is the part of the screen from the
 text down, as whether text is a heading depends on the content after
-it. The reports' disclosure names both checks.
+it. The reports' disclosure says a check asked the model about an
+image or a piece of text, as there are now three.
+
+### Images with no text alternative, as built
+
+Built on 2026-11-16, at the owner's request, "Build the image check
+with the proposed rules 1 to 5". Step 20 of `android-checks.md` has the
+measurement and the rules: images a screen reader says nothing for,
+found without a model, and each asked of the project's model for
+vision-based checks whether it gives information, with the same
+three-level answers. Picture B is a close-up of the image, enlarged
+when it is small. Keeping by request was not enough here: 6 identical
+icons, with pictures that differed only by the screen round them, were
+given two answers. So the answer is also kept against the image's own
+pixels and the text beside it, and the first answer for the same image
+in the project is given again (point 4 of "Keeping it repeatable",
+extended; `analysis-runner.md`, "Answers kept by a signature").
 
 ## Later, or text only
 

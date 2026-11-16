@@ -1833,6 +1833,49 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Assert.Empty(await catalog.AcceptedAnswersAsync(["image-of-text-1"], "Another", "qwen", Token));
     }
 
+    // Step 20, rule 4: a check's answer is kept with the signature its
+    // request gives, copied with the answer when reused, and found by the
+    // check, profile and model on the recording's project or the recording.
+    [Fact]
+    public async Task A_checks_signature_is_kept_with_its_answer_and_found_in_the_project()
+    {
+        var catalog = await CatalogAsync();
+        var recording = await RecordingAsync();
+        var settings = SettingsWith(3, Profile("This PC", "qwen", ModelCapabilities.Text, ModelCapabilities.Image));
+        var endpoint = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(CheckAnswer("logotype")) };
+        var kind = new StandInKind(["image-text-alternative-1"])
+        {
+            Capability = ModelCapabilities.Image,
+            Request = (_, request) => request with { Sections = [], PromptTemplate = "signed-check", PromptTemplateVersion = 1 } with
+            {
+                Use = ModelUses.VisionChecks,
+                Answers = ["logotype", "could-be-text"],
+                ReusedAcrossTasks = true,
+                Signature = [1, 2, 3],
+            },
+        };
+        var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Vision(), cancellationToken: Token);
+        await new AnalysisWorker(catalog, settings, [kind], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+        var second = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Vision(), cancellationToken: Token);
+        await new AnalysisWorker(catalog, settings, [kind], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal((AnalysisTaskStates.Done, AnalysisTaskStates.Done), (await StateAsync(first), await StateAsync(second)));
+        var project = (await catalog.ProjectOfAsync(recording, Token))?.ProjectId;
+        Assert.NotNull(project);
+        var signed = await catalog.SignedAnswersAsync("signed-check", 1, "This PC", "qwen", project, null, Token);
+
+        // The answer and its copy, earliest first, each with the signature.
+        Assert.Equal([first, second], signed.Select(answer => answer.TaskId));
+        Assert.All(signed, answer => Assert.Equal(new byte[] { 1, 2, 3 }, answer.Signature));
+        Assert.All(signed, answer => Assert.Equal("image-text-alternative-1", answer.StepKey));
+        Assert.Equal("logotype", ClosedAnswer.Read(signed[0].Answer.Output)!.Answer);
+        Assert.Equal(2, (await catalog.SignedAnswersAsync("signed-check", 1, "This PC", "qwen", null, recording, Token)).Count);
+        Assert.Empty(await catalog.SignedAnswersAsync("signed-check", 1, "This PC", "qwen", Guid.NewGuid(), null, Token));
+        Assert.Empty(await catalog.SignedAnswersAsync("signed-check", 2, "This PC", "qwen", project, null, Token));
+        Assert.Empty(await catalog.SignedAnswersAsync("signed-check", 1, "This PC", "other", project, null, Token));
+        Assert.Empty(await catalog.SignedAnswersAsync("signed-check", 1, "This PC", "qwen", null, null, Token));
+    }
+
     [Fact]
     public async Task A_checks_answer_outside_its_fixed_answers_is_refused()
     {

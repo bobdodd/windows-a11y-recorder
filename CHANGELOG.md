@@ -8,6 +8,23 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Images with no text alternative
+
+- A new check, "Image with no text alternative" (WCAG 1.1.1), finds an
+  image that is not a control, with no description, text or label,
+  that no control with a name holds, so a screen reader says nothing
+  for it. An image at least half under or over controls with a name
+  is not checked; one under 2 dp on its shorter side, or on a picture
+  out of step with the tree, is not asked about.
+- Each finding is a warning; where the project chooses a model for
+  vision-based checks, it is asked whether the image gives
+  information: informative makes the finding an error, decorative
+  information, marked as the model's inference.
+- The answer is kept against the image's own pixels and the text beside
+  it (a new column, `analysis_attempts.input_signature`), so the same
+  image is given the first answer again across visits and recordings in
+  the project.
+
 ### Text shown as a heading
 
 - A new check, "Text shown as a heading, not marked as one" (WCAG

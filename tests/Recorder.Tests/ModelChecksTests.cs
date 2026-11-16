@@ -124,6 +124,36 @@ public sealed class ModelChecksTests
             AndroidHeadingLook.NotAsked(1, "no model is chosen"));
     }
 
+    [Theory]
+    [InlineData("informative", PhoneCheckLevel.Error, "that the image gives information, so it needs a text alternative")]
+    [InlineData("decorative", PhoneCheckLevel.Info, "that the image is decorative, giving no information of its own, not confirmed")]
+    [InlineData("cannot-tell", PhoneCheckLevel.Warning, "check manually")]
+    public void Two_answers_that_agree_judge_the_image_with_no_text_alternative_as_an_inference(string answer, PhoneCheckLevel level, string says)
+    {
+        var inference = AndroidImageAlternative.Interpret(new(answer, "First reason."), new(answer, "Second reason."), "Haiku", cloud: true);
+
+        Assert.Equal(level, inference.Level);
+        Assert.True(inference.Inferred);
+        Assert.Equal(("Haiku", true), (inference.Model, inference.Cloud));
+        Assert.StartsWith("Haiku, a cloud model,", inference.Text, StringComparison.Ordinal);
+        Assert.Contains(says, inference.Text, StringComparison.Ordinal);
+        Assert.Contains("\"First reason.\"", inference.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("same image", inference.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Two_answers_about_an_image_that_differ_are_a_warning_to_check_manually()
+    {
+        var inference = AndroidImageAlternative.Interpret(new("informative", "An icon."), new("decorative", "A flourish."), "Haiku", cloud: true, again: true);
+
+        Assert.Equal(PhoneCheckLevel.Warning, inference.Level);
+        Assert.Contains("was asked twice for the same image, by its pixels and the text beside it, and gave two answers", inference.Text, StringComparison.Ordinal);
+        Assert.EndsWith("; check manually", inference.Text, StringComparison.Ordinal);
+        Assert.Equal(
+            "2 images left by the rules were not asked about, as no model may be used for vision-based checks: no model is chosen",
+            AndroidImageAlternative.NotAsked(2, "no model is chosen"));
+    }
+
     [Fact]
     public void Questions_not_asked_say_why()
     {

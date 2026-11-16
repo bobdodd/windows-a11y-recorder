@@ -218,8 +218,7 @@ public sealed class PhoneImagesOfTextRun
                 {
                     run.OutOfStep++;
                     var (unexplained, placed) = (step.Value.Unexplained, step.Value.Found);
-                    var why = string.Create(CultureInfo.CurrentCulture,
-                        $"not judged, as the picture is out of step with the tree: OCR read {Lines(unexplained)} outside every image that no item's text holds, more than the {placed:N0} text {(placed == 1 ? "item" : "items")} it found where the tree places them; {Source(snapshot.Picture.Kind)}");
+                    var why = $"not judged, as {OutOfStepText(unexplained, placed)}; {Source(snapshot.Picture.Kind)}";
                     Add(notJudged, PhoneCheckNames.ImageOfText, PhoneCheckLevel.NotRun, why);
                     if (level == PhoneAuditLevel.AAA)
                     {
@@ -475,6 +474,27 @@ public sealed class PhoneImagesOfTextRun
         var all = text.ToString();
         return new Caption(PhoneTextMatching.Spelling(all), [.. Words(all)]);
     }
+
+    /// <summary>
+    /// Rule 2, for another check that needs a picture in step with the tree
+    /// (the check of images with no text alternative, android-checks.md,
+    /// step 20, rule 3): whether the snapshot's picture is out of step, with
+    /// the lines OCR read that no item's text explains and the text items it
+    /// found where the tree places them. TalkBack's caption is left out as
+    /// here.
+    /// </summary>
+    internal static (bool OutOfStep, int Unexplained, int Found) OutOfStepAt(
+        PhoneContrastSnapshot snapshot,
+        List<PhoneCheckItem> images,
+        bool talkBack,
+        TalkBackSpeechTimeline speech,
+        PhoneAccessibilityTimeline accessibility) =>
+        Step(snapshot, images, CaptionAt(snapshot.Settled.MonotonicNanoseconds, talkBack, speech, accessibility));
+
+    /// <summary>What a finding not judged as its picture is out of step says (rule 2).</summary>
+    internal static string OutOfStepText(int unexplained, int found) =>
+        string.Create(CultureInfo.CurrentCulture,
+            $"the picture is out of step with the tree: OCR read {Lines(unexplained)} outside every image that no item's text holds, more than the {found:N0} text {(found == 1 ? "item" : "items")} it found where the tree places them");
 
     // Rule 2: the picture is out of step with the tree when OCR read at
     // least 3 lines outside every image that are in no item's text, and not

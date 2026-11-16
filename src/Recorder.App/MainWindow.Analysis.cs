@@ -346,8 +346,9 @@ public partial class MainWindow
     // The profiles a task of a kind is queued with, from the project's
     // settings: the model for report analysis for a summary, which needs
     // one, and the models for checks for a report, which needs none but
-    // asks the model for vision-based checks about images of text and text
-    // shown as a heading where one is chosen; the Android summary has both. Null,
+    // asks the model for vision-based checks about images of text, text
+    // shown as a heading and images with no text alternative where one is
+    // chosen; the Android summary has both. Null,
     // with the reason shown, where a summary cannot be queued.
     private IReadOnlyDictionary<string, string>? ProfilesFor(string kind, ProjectModels? models)
     {
@@ -439,9 +440,9 @@ public partial class MainWindow
     private Task QueueSummaryAsync() => QueueAsync(RecordingSummaryKind.Name);
 
     // The Android report needs no model; it is queued with the project's
-    // models for checks, and its images-of-text check and check of text
-    // shown as a heading ask the model for vision-based checks where one is
-    // chosen. The summary needs the
+    // models for checks, and its images-of-text check, check of text shown
+    // as a heading and check of images with no text alternative ask the
+    // model for vision-based checks where one is chosen. The summary needs the
     // model for report analysis (android-report.md).
     private async void AndroidReportMenuItem_Click(object sender, RoutedEventArgs e)
     {

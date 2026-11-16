@@ -3494,6 +3494,181 @@ answers make of a finding.
 - The 2 times reach of a field's label is an assumption.
 - Text in a control that is shown as a heading is not found.
 
+## Step 20: images with no text alternative
+
+### The owner's decision (2026-11-16)
+
+Asked for "An informative image with no description", then offered
+five rules from the measurement below, the owner chose: "Build the
+image check with the proposed rules 1 to 5".
+
+1. **Drawn under or over controls.** An image at least half of whose
+   area is under or over controls with a name, that neither hold it nor
+   are inside it, is not checked.
+2. **Lines.** An image under 2 dp on its shorter side is not asked
+   about, where the recording holds the density.
+3. **Pictures out of step.** An image is not asked about on a picture
+   that does not match the tree at that moment, as the images-of-text
+   check finds it (step 8, rule 2).
+4. **One answer for one image.** The answer is kept against the
+   image's own pixels and the text beside it, so an identical image is
+   given the first answer again, across visits and recordings in the
+   project.
+5. **Levels.** Informative is an error, the model's inference, high
+   impact; cannot tell is a warning for a manual check; decorative is
+   information, as for the other model checks.
+
+This is a finding of its own, `image-no-text-alternative`, apart from
+the tree's "Item with nothing for a screen reader to say"
+(`speakable-text-present`): that one is about a control, which needs a
+name whatever it looks like; this one is about an image that is not a
+control, which needs a text alternative only when it gives
+information.
+
+### What the standards say (checked in cited documents)
+
+- [WCAG 2.2's 1.1.1](https://www.w3.org/WAI/WCAG22/Understanding/non-text-content.html)
+  asks for a text alternative for non-text content that gives
+  information, and for decoration to be implemented so assistive
+  technology can ignore it. Whether an image gives information is a
+  judgement of what it shows, so the rules find the images a screen
+  reader says nothing for, and the model or a person judges them.
+
+### Measured first (2026-11-16)
+
+A probe read the 20 recordings with phone screens on the development
+PC: 576 images (ImageView or a class drawn from one, visible) on the
+pictures OCR read (measured).
+
+- Most had a name of their own, were controls, or were inside a
+  control with a name. 49 had none of these, on 8 recordings.
+- **Rule 1.** 32 of the 49 were drawn under controls with a name: 28 of
+  the launcher's views under the sheet of all apps, 3 of Chrome's menu
+  badges and 1 of Chrome's full-screen images, 75% covered.
+- **Rule 2.** 1 was a Chrome hairline 0.82 dp high. Two hairlines on
+  older recordings with no density recorded were asked about, and
+  answered decorative.
+- **Rule 3.** 2 were the launcher's weather images on the home screen,
+  whose picture, a video frame, showed Gmail opening; the model
+  described Gmail's rows.
+- **The answers.** The 16 left were asked of Claude Haiku 5.5 twice;
+  each pair agreed and none was cannot tell. Informative: an app's
+  illustration, 3 Settings illustrations, the Google logo, 4 of 6
+  "i" icons and the 2 weather images; decorative: a "G" icon, the 2
+  hairlines and 2 of the 6 "i" icons. The 2 runs used 63,164 input and
+  3,234 output tokens.
+- **Identical images, different answers.** The 6 "i" icons were the
+  same 59 by 59 pixel image (`android:id/icon`), some on the same
+  screen with the same text beside them, and were split 4 to 2. Their
+  pictures differed only by the screen round them, so their requests
+  differed. On 16 by 16 grey thumbnails of the icon alone they differed
+  by at most 3 of 255, including a video frame against a screenshot,
+  while a hash of the exact or rounded pixels differed. Rule 4 follows
+  from this.
+
+### As built
+
+- **The rules.** `PhoneImageAlternativeRun` (`Recorder.Session`) reads
+  each settled snapshot OCR read, as rule 3 needs OCR's words, and each
+  visible image with bounds. It leaves out, in turn: an image with a
+  content description, text or label (`Named`); an image that is a
+  control, visible, important for accessibility and clickable, long
+  clickable, focusable or focusable by a screen reader, whose name the tree's checks judge
+  (`Controls`); an image whose nearest control holding it has a name
+  (`InNamedControls`); rule 1 (`Covered`), the share of the image's
+  area under controls with a name that neither hold it nor are inside
+  it, sampled on a grid of at most 60 points along its shorter side;
+  rule 2 (`Thin`), with the density at the snapshot's taking. Each is
+  counted once in a visit.
+- **Rule 3.** `PhoneImagesOfTextRun.OutOfStepAt` gives the
+  images-of-text check's test to this check: at least 3 lines OCR read
+  outside every image, in no item's text and not TalkBack's caption,
+  more than the text items OCR found where the tree places them. An
+  image on such a picture is a check not run, saying why, only where no
+  picture of the visit is in step.
+- **The finding.** A warning, one for each image in a visit, with a
+  time for each snapshot it was found on, giving the image's size in
+  pixels and dp, that it has no description, text or label and no
+  control with a name holds it, so a screen reader says nothing for
+  it, that whether it gives information is not judged, and whether the
+  picture was the screenshot or the video's frame.
+- **The text beside it.** What a screen reader would say for each of
+  the image's parent's other children, joined, or where none has text,
+  its grandparent's; at most 400 characters.
+- **The question.** `AndroidImageAlternative` (`Recorder.Analysis`), as
+  for images of text: picture A is the whole screen at half size with
+  the image outlined in cyan; picture B is the image and 48 pixels round
+  it, enlarged up to 4 times so its shorter side is at least 192
+  pixels, no longer than 1,024, outlined 4 pixels wide. The question
+  gives the app, the screen's name and the text beside the image, says
+  it has no text alternative, and asks for "informative",
+  "decorative" or "cannot-tell" ("such as when nothing can be seen
+  inside the outline") with a one-sentence reason. Template
+  `android-image-text-alternative`, version 1; the step key is made
+  from the request's SHA-256. It is asked twice, or once for a local
+  model at temperature 0.
+- **Rule 4, the signature.** Each request carries a signature, kept
+  with the attempt in `analysis_attempts.input_signature` (migration
+  0047): a version, the image's width and height in pixels, the
+  SHA-256 of the text beside it, and a 16 by 16 colour thumbnail of the
+  image's own pixels, each cell the mean of the pixels it covers. Two
+  are the same image when all but the thumbnail are equal and every
+  channel of the thumbnails is within 16 of 255. Before asking, the
+  check looks for answers with a signature by the same profile and
+  model on the project's tasks and its recordings' tasks
+  (`AnalysisCatalog.SignedAnswersAsync`), or for a recording in no
+  project, on the recording's; the earliest for the same image is
+  copied into the task, with both runs where the model is not
+  repeatable, and the finding says the answer was first given for the
+  same image. An image the same as one already answered in the same
+  run takes that answer. The Checks tab reads the same answers.
+- **The levels.** Agreed "informative": an error, the model's
+  inference that the image needs a text alternative. Agreed
+  "decorative": information, not confirmed. Agreed "cannot-tell", or
+  two answers: a warning to check manually, with both reasons. A
+  finding with no answer stays a warning, and the check's note says
+  why.
+- **Where it runs.** The Android report, the project report and the
+  model checks ask after the check of text shown as a heading; the
+  model checks' Markdown has a section of its own. The Checks tab shows
+  the finding under each visit, and the summary gives the findings, the
+  rules and how many each left out. "Ask the project's model" is
+  enabled while an image has no answer from the project's model.
+- **Guidance.** `android-check-guidance.json` has the check, impact
+  high, criterion 1.1.1, with remediation for Views, Compose, Flutter
+  and React Native: a description for an image that gives information,
+  and hiding a decorative one from accessibility services.
+
+### Checked
+
+The solution builds with no warnings, and the tests pass, 2,626 of
+them, with the 10 that need Windows failing as before. The new tests
+cover made-up items: an image a screen reader says nothing for found;
+an image with a description, an image that is a control, an image in
+a control with a name, a background under a button and a hairline left
+out; the hairline asked about with no density; the share covered; no
+OCR; a picture out of step; the answers judging the finding; the
+request's key, pictures and signature; the signature's tolerance and
+what differs; kept answers from another task, needing both runs for a
+model that is not repeatable; what the answers make of a finding; and
+the signature kept with an attempt, copied when reused and found by
+project, recording, template, version and model.
+
+### Limits
+
+- Only images in the tree are checked. An image drawn by a framework
+  with no node, such as a Flutter image with no semantics, is not.
+- An image that is a control is left to the tree's checks of names,
+  so a control with an informative image and a wrong name is not this
+  check's finding.
+- The thumbnail is coarse: two images of the same size, with the same
+  text beside them, that differ only in fine detail could be taken as
+  one. The tolerance is from 6 icons, not measured further.
+- The same image with different text beside it is asked again, as the
+  text can change what it means.
+- Rule 1's grid and its threshold of half are from the measurement, not
+  measured further.
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A

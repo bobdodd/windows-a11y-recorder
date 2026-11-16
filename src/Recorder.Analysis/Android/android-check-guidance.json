@@ -358,6 +358,21 @@
       "sources": ["wcag-1.3.1", "wcag2ict", "wcag-f2", "android-views", "compose-semantics", "flutter-semantics", "rn-accessibility"]
     },
     {
+      "check": "image-no-text-alternative",
+      "title": "Image with no text alternative",
+      "issue": "An image that is not a control has no content description, text or label, and no control with a name holds it, so a screen reader says nothing for it. Where the image gives information, that information is lost.",
+      "why": "Screen reader users hear nothing for the image, so they miss what it shows, such as a status, a chart, a logo that names something or an icon whose meaning the text beside it does not give. A decorative image that is left in the accessibility tree can also be stopped at with nothing said.",
+      "affects": ["People who are blind and use a screen reader such as TalkBack", "People with low vision who use a screen reader", "People who are deaf-blind and use a braille display"],
+      "impact": "high",
+      "criteria": ["1.1.1"],
+      "related": [],
+      "basis": "WCAG 1.1.1, from the tree and the recorded picture: a visible image with no content description, text or label, that is not a control and that no control with a name holds; an image mostly under controls with a name, or under 2 dp on its shorter side, is left out. A warning for a person to confirm whether it gives information unless the project's model for vision-based checks was asked; its answer is the model's inference and says so.",
+      "android": "Give an image that gives information a content description that says what it shows, with android:contentDescription or setContentDescription; in Compose, set the contentDescription of the Image or Icon. Mark a decorative image as not important for accessibility with android:importantForAccessibility=\"no\", or in Compose give it contentDescription = null.",
+      "flutter": "Give an image that gives information a semanticLabel, or wrap it in Semantics(label: ...). Wrap a decorative image in ExcludeSemantics, or set excludeFromSemantics: true on the Image.",
+      "reactNative": "Give an image that gives information an accessibilityLabel (or alt), and mark it accessible. Hide a decorative image with accessible={false} and importantForAccessibility=\"no\".",
+      "sources": ["wcag-1.1.1", "android-views", "compose-semantics", "flutter-semantics", "flutter-image-label", "rn-accessibility"]
+    },
+    {
       "check": "label-not-in-name",
       "title": "Visible label not in the spoken name",
       "issue": "The words shown on a control are not part of the name a screen reader or voice control uses for it.",

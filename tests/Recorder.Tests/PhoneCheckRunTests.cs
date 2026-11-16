@@ -915,6 +915,210 @@ public sealed class PhoneCheckRunTests : IDisposable
             ((png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19], (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23]);
     }
 
+    // Step 20: images with no text alternative. A window of made-up items:
+    // an image with a description, an image that is a control, an image in
+    // a control with a name, a background under a button with a name, a
+    // hairline 3 pixels high, and an image beside a line of text.
+    private static PhoneCheckWindow ImageAlternatives()
+    {
+        AndroidTreeNode Node(int index, int? parent, (int Left, int Top, int Right, int Bottom) bounds, string className,
+            string? description = null, string? text = null, bool clickable = false) =>
+            ImageNode(index, parent, bounds, className, description, text) with { Clickable = clickable };
+        return new PhoneCheckWindow(512, 1,
+        [
+            Node(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout"),
+            Node(1, 0, (59, 200, 259, 400), "android.widget.ImageView", description: "Logo"),
+            Node(2, 0, (300, 200, 400, 300), "android.widget.ImageView", clickable: true),
+            Node(3, 0, (0, 500, 1080, 700), "android.widget.LinearLayout", clickable: true),
+            Node(4, 3, (140, 520, 600, 620), "android.widget.TextView", text: "Profile"),
+            Node(5, 3, (20, 520, 120, 620), "android.widget.ImageView"),
+            Node(6, 0, (0, 800, 1080, 1200), "android.widget.ImageView"),
+            Node(7, 0, (100, 850, 980, 1150), "android.widget.Button", text: "Start", clickable: true),
+            Node(8, 0, (0, 1300, 1080, 1303), "android.widget.ImageView"),
+            Node(9, 0, (0, 1400, 1080, 1600), "android.widget.LinearLayout"),
+            Node(10, 9, (40, 1420, 200, 1580), "android.widget.ImageView"),
+            Node(11, 9, (240, 1460, 900, 1540), "android.widget.TextView", text: "Battery 80%"),
+        ]);
+    }
+
+    // The run of two settled snapshots of the recording's one visit, from
+    // the phone's screenshot, with lines OCR read outside every image.
+    private PhoneImageAlternativeRun ImageAlternativeRun(PhoneDeviceTimeline? device = null, string? engine = "Windows OCR, en-US", params string[] outside)
+    {
+        var window = ImageAlternatives();
+        var lines = outside
+            .Select((text, index) => new PhoneTextLine(null, window.Items[0], PhoneTextPlace.FoundByOcr, null, text,
+                new PhoneBounds(100, 1700 + (index * 80), 700, 1740 + (index * 80)), null, 40))
+            .ToArray();
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var measured = PhoneContrastRun.Of([.. visit.SettledSnapshots.Take(2).Select(at =>
+            new PhoneContrastSnapshot(
+                visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                new PhoneContrastPicture(PhonePictureKind.Screenshot, at.MonotonicNanoseconds, "p.png", "p.png"),
+                engine, lines, null, window))]);
+        return PhoneImageAlternativeRun.Run(measured, archive.PhoneScreens, device ?? Device());
+    }
+
+    [Fact]
+    public void ImageAlternative_WarnsOfAnImageAScreenReaderSaysNothingFor_AndLeavesOutTheRulesExceptions()
+    {
+        var run = ImageAlternativeRun();
+        var window = ImageAlternatives();
+        var finding = Assert.Single(run.Findings);
+
+        // Six images on each of two snapshots, each left out once in the visit.
+        Assert.Equal((2, 12), (run.SnapshotsRead, run.Images));
+        Assert.Equal(12, run.ImagesIn(finding.Visit));
+        Assert.True(run.Read(finding.Visit));
+        Assert.Equal((1, 1, 1, 1, 1, 0), (run.Named, run.Controls, run.InNamedControls, run.Covered, run.Thin, run.OutOfStep));
+        Assert.Equal(window.Items[10].Identity, finding.Identity);
+        Assert.Equal((PhoneCheckNames.ImageNoTextAlternative, PhoneCheckLevel.Warning), (finding.Check, finding.Level));
+        Assert.Equal(2, finding.Times.Count);
+        Assert.StartsWith("an image of 160 by 160 pixels (", finding.Times[0].Measured, StringComparison.Ordinal);
+        Assert.EndsWith(
+            " dp) with no description, text or label, that no control with a name holds, so a screen reader says nothing for it; " +
+            "whether it gives information is not judged; from the phone's screenshot",
+            finding.Times[0].Measured, StringComparison.Ordinal);
+        Assert.Equal("Image with no text alternative (WCAG 1.1.1)", PhoneCheckNames.Title(PhoneCheckNames.ImageNoTextAlternative));
+
+        // One question, with the text beside the image.
+        var question = Assert.Single(run.Questions);
+        Assert.Equal((new PhoneBounds(40, 1420, 200, 1580), "Battery 80%"), (question.Bounds, question.Nearby));
+        Assert.Same(question, run.QuestionOf(finding));
+
+        // Rule 2 needs the density: without it the hairline is asked about.
+        var unknown = ImageAlternativeRun(PhoneDeviceTimeline.Empty);
+
+        Assert.Equal(0, unknown.Thin);
+        Assert.Equal([window.Items[8].Identity, window.Items[10].Identity], unknown.Findings.Select(item => item.Identity));
+        Assert.StartsWith("an image of 1,080 by 3 pixels with no description", unknown.Findings[0].Times[0].Measured, StringComparison.Ordinal);
+
+        // Rule 1 measures the share under the button: 880 by 300 of 1,080 by 400.
+        Assert.Equal(880.0 * 300 / (1080 * 400), PhoneImageAlternativeRun.CoveredShare(window.Items[6], window), 2);
+        Assert.Equal(0, PhoneImageAlternativeRun.CoveredShare(window.Items[10], window));
+
+        // With no OCR, the pictures cannot be told in step.
+        var unread = ImageAlternativeRun(engine: null);
+
+        Assert.Equal((0, 0), (unread.SnapshotsRead, unread.Findings.Count));
+    }
+
+    // Rule 3: an image on a picture out of step with the tree is a check
+    // not run, not a question.
+    [Fact]
+    public void ImageAlternative_DoesNotAskAboutAnImageOnAPictureOutOfStepWithTheTree()
+    {
+        var run = ImageAlternativeRun(outside: ["Inbox", "Promotions", "Meeting at noon"]);
+
+        var finding = Assert.Single(run.Findings);
+        Assert.Equal(PhoneCheckLevel.NotRun, finding.Level);
+        Assert.Equal(2, run.OutOfStep);
+        Assert.Contains(
+            "not judged, as the picture is out of step with the tree: OCR read 3 lines outside every image that no item's text holds, more than the 0 text items it found where the tree places them; ",
+            finding.Times[0].Measured, StringComparison.Ordinal);
+        Assert.Empty(run.Questions);
+        Assert.Null(run.QuestionOf(finding));
+
+        // Two lines are too few to say so.
+        Assert.Equal(PhoneCheckLevel.Warning, Assert.Single(ImageAlternativeRun(outside: ["Inbox", "Promotions"]).Findings).Level);
+    }
+
+    [Fact]
+    public void ImageAlternative_Judged_GivesTheAnswersLevel_AndDropsTheNoteOfWhatIsNotJudged()
+    {
+        var run = ImageAlternativeRun();
+        var inference = new PhoneInference(PhoneCheckLevel.Info, "a model inferred it is decorative", Inferred: true, "Model", Cloud: false);
+
+        var judged = run.Judged(new Dictionary<PhoneImageAlternativeQuestion, PhoneInference> { [run.Questions[0]] = inference }, "1 answered");
+
+        var finding = Assert.Single(judged.Findings);
+        Assert.Equal(PhoneCheckLevel.Info, finding.Level);
+        Assert.Same(inference, finding.Inference);
+        Assert.DoesNotContain("is not judged", finding.Times[0].Measured, StringComparison.Ordinal);
+        Assert.Null(judged.QuestionOf(finding));
+        Assert.Equal(("1 answered", 1, 1, 12), (judged.ModelNote, judged.Covered, judged.Thin, judged.ImagesIn(finding.Visit)));
+    }
+
+    // Rule 4: the request has the screen and a close-up enlarged to 192
+    // pixels on the image's shorter side; the answer is kept against the
+    // image's pixels and the text beside it, which match within a
+    // tolerance, so an answer given for the same image elsewhere is used.
+    [Fact]
+    public void ImageAlternative_RequestIsSignedByTheImagesPixelsAndNearbyText_AndKeptAnswersJudgeIt()
+    {
+        var run = ImageAlternativeRun();
+        var question = Assert.Single(run.Questions);
+        var rgb = new uint[1080 * 2400];
+        Array.Fill(rgb, 0x203040u);
+        var pixels = new PhonePixels(1080, 2400, rgb);
+
+        var request = Recorder.Analysis.Android.AndroidImageAlternative.RequestOf(question, pixels);
+        var again = Recorder.Analysis.Android.AndroidImageAlternative.RequestOf(question, new PhonePixels(1080, 2400, [.. rgb]));
+
+        Assert.Equal(request.Key, again.Key);
+        Assert.Matches("^image-text-alternative-[0-9a-f]{16}$", request.Key);
+        Assert.Equal(Recorder.Analysis.ModelUses.VisionChecks, request.Request.Use);
+        Assert.True(request.Request.ReusedAcrossTasks);
+        Assert.Same(request.Signature, request.Request.Signature);
+        Assert.Equal(Recorder.Analysis.Android.AndroidImageAlternative.Answers, request.Request.Answers);
+        Assert.Equal((540, 1200), PngSize(request.Request.Images[0].Content));
+        Assert.Equal((297, 307), PngSize(request.Request.Images[1].Content));
+        Assert.Contains("The text of the items beside it, as the app gives it: \"Battery 80%\".", request.Request.Input, StringComparison.Ordinal);
+
+        // The same image a little different, as a video frame is, is the
+        // same; much different, other text beside it, or another size is not.
+        byte[] Signed(uint colour, string nearby, PhoneBounds? bounds = null)
+        {
+            var changed = (uint[])rgb.Clone();
+            for (var y = 1420; y < 1580; y++)
+            {
+                for (var x = 40; x < 200; x++)
+                {
+                    changed[(y * 1080) + x] = colour;
+                }
+            }
+
+            return Recorder.Analysis.Android.AndroidImageAlternative.Signature(new PhonePixels(1080, 2400, changed), bounds ?? question.Bounds, nearby);
+        }
+
+        var same = Signed(0x233343, "Battery 80%");
+        Assert.True(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(request.Signature, same));
+        Assert.False(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(request.Signature, Signed(0x405060, "Battery 80%")));
+        Assert.False(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(request.Signature, Signed(0x203040, "Battery 20%")));
+        Assert.False(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(
+            request.Signature, Signed(0x203040, "Battery 80%", new PhoneBounds(40, 1420, 200, 1579))));
+
+        static JsonElement Output(string answer) =>
+            JsonSerializer.SerializeToElement(new { answer, reason = "The pictures show it." });
+        var elsewhere = Guid.NewGuid();
+        var signed = new List<Recorder.Analysis.SignedAnswer>
+        {
+            new(Guid.NewGuid(), elsewhere, "image-text-alternative-0123456789abcdef-1", same,
+                new(Output("informative"), "service", """{"temperature": null}""")),
+        };
+
+        // A model that is not repeatable needs both runs' answers.
+        var one = Recorder.Analysis.Android.AndroidImageAlternative.FromKept(run, [request], signed, "Haiku");
+
+        Assert.Equal(PhoneCheckLevel.Warning, Assert.Single(one.Findings).Level);
+        Assert.Equal("1 image left by the rules is for Haiku; 0 images answered, 1 image not yet asked", one.ModelNote);
+
+        signed.Add(new(Guid.NewGuid(), elsewhere, "image-text-alternative-0123456789abcdef-2", same,
+            new(Output("informative"), "service", """{"temperature": null}""")));
+        var both = Recorder.Analysis.Android.AndroidImageAlternative.FromKept(run, [request], signed, "Haiku");
+
+        var finding = Assert.Single(both.Findings);
+        Assert.Equal(PhoneCheckLevel.Error, finding.Level);
+        Assert.True(finding.Inference!.Cloud);
+        Assert.StartsWith(
+            "Haiku, a cloud model, inferred from the pictures twice for the same image, by its pixels and the text beside it, that the image gives information",
+            finding.Inference.Text, StringComparison.Ordinal);
+
+        static (int Width, int Height) PngSize(byte[] png) =>
+            ((png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19], (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23]);
+    }
+
     // The body text is the height most of the characters have.
     [Fact]
     public void HeadingLook_BodyHeight_IsTheMedianInkHeightByCharacters()

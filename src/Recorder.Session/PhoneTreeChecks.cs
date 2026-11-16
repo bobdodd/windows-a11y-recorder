@@ -88,6 +88,9 @@ public static class PhoneCheckNames
     /// </summary>
     public const string TextShownAsHeading = "text-shown-as-heading";
 
+    /// <summary>An image a screen reader says nothing for, with no description, text or label, that may give information (WCAG 1.1.1), step 20.</summary>
+    public const string ImageNoTextAlternative = "image-no-text-alternative";
+
     /// <summary>
     /// Label in Name (step 9), from the tree's text and OCR's: the name
     /// does not contain the visible label, and the name contains it but
@@ -199,6 +202,7 @@ public static class PhoneCheckNames
         ImageOfText => "Image of text (WCAG 1.4.5)",
         ImageOfTextAaa => "Image of text (WCAG 1.4.9, AAA)",
         TextShownAsHeading => "Text shown as a heading, not marked as one (WCAG 1.3.1)",
+        ImageNoTextAlternative => "Image with no text alternative (WCAG 1.1.1)",
         LabelNotInName => "Label not in name (WCAG 2.5.3)",
         LabelNotAtStart => "Label not at the start of the name (WCAG 2.5.3, best practice)",
         ClickableNotFocusable => "Clickable but not focusable (WCAG 2.1.1)",

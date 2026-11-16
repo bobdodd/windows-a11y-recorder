@@ -101,6 +101,16 @@ public sealed record ModelRequest(
     /// </summary>
     public bool ReusedAcrossTasks { get; init; }
 
+    /// <summary>
+    /// What a check keeps its answer against beside the request, or null:
+    /// for the check of images with no text alternative, the image's own
+    /// pixels and the text beside it (android-checks.md, step 20, rule 4),
+    /// so that the same image is given the first answer again where the
+    /// picture round it differs. It is kept with the attempt and is not
+    /// part of the request sent.
+    /// </summary>
+    public byte[]? Signature { get; init; }
+
     private static readonly IReadOnlySet<string> NoOptions = new HashSet<string>(StringComparer.Ordinal);
 }
 

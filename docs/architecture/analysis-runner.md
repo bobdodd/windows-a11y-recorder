@@ -853,6 +853,24 @@ in any recording. Run again from scratch therefore does not ask a
 check's question again; a new version of the question's template does.
 A summary's steps are reused only when run again, as before.
 
+### Answers kept by a signature
+
+Built on 2026-11-16 for the check of images with no text alternative
+(`android-checks.md`, step 20, rule 4). Keeping by request is not
+enough when the same image is on pictures that differ round it: 6
+identical icons were given two answers. Such a check's request also
+carries a signature, kept with the attempt in
+`analysis_attempts.input_signature` (migration 0047) and copied when an
+attempt is reused. Before asking, the check reads the signed answers
+for its template, version, profile and model on the project's tasks
+and its recordings' tasks, or on the recording's where it is in no
+project (`AnalysisCatalog.SignedAnswersAsync`), earliest first. Where
+one is for the same image, by the check's own comparison, that attempt
+is copied into the task (`ReuseAttemptAsync`) instead of a request
+being sent, and the finding says the answer was first given for the
+same image. The worker does not compare signatures; only the check
+knows what makes two inputs the same.
+
 ## Turning AI analysis off
 
 Built on 2026-11-15, from the owner's requirement of the same day: "What

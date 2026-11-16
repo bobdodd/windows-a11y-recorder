@@ -45,7 +45,7 @@ public sealed class AndroidReportTests : IDisposable
         [
             PhoneCheckNames.TextContrastAa, PhoneCheckNames.TextContrastAaa, PhoneCheckNames.NonTextContrast, PhoneCheckNames.FieldBottomLineOnly,
             PhoneCheckNames.ImageOfText, PhoneCheckNames.ImageOfTextAaa, PhoneCheckNames.LabelNotInName, PhoneCheckNames.LabelNotAtStart,
-            PhoneCheckNames.TextShownAsHeading,
+            PhoneCheckNames.TextShownAsHeading, PhoneCheckNames.ImageNoTextAlternative,
         ];
         var checks = PhoneCheckNames.All.Concat(measured).ToList();
         Assert.Equal(checks.Order(StringComparer.Ordinal), guidance.Checks.Select(check => check.Check).Order(StringComparer.Ordinal));
@@ -613,7 +613,7 @@ public sealed class AndroidReportTests : IDisposable
 
         var markdown = AndroidReport.Write(input, guidance, evidence, null, Path.Combine(_folder, "pictures"), "pictures", new DateTime(2026, 11, 16, 12, 0, 0, DateTimeKind.Utc));
 
-        Assert.Contains("except where the images-of-text check or the check of text shown as a heading asked a cloud model's inferences about an image or a piece of text", markdown, StringComparison.Ordinal);
+        Assert.Contains("except where a check asked a cloud model's inferences about an image or a piece of text", markdown, StringComparison.Ordinal);
         var document = ReportDocument.Parse(markdown);
         var table = document.Blocks.Single(block => block.Kind == ReportBlockKind.Table && block.Rows[0][0] == "Field" &&
             block.Rows.Any(row => row[0] == "Model's answer"));

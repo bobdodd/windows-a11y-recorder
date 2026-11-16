@@ -134,7 +134,11 @@ public sealed record AttemptStart(
     string PromptTemplate,
     int PromptTemplateVersion,
     string InputSha256,
-    IReadOnlyList<string> InputReferences);
+    IReadOnlyList<string> InputReferences)
+{
+    /// <summary>What the check keeps its answer against beside the request (<see cref="ModelRequest.Signature"/>), or null.</summary>
+    public byte[]? InputSignature { get; init; }
+}
 
 /// <summary>How an attempt ended.</summary>
 public sealed record AttemptEnd(
@@ -202,6 +206,12 @@ public sealed record AcceptedStep(Guid AttemptId, string InputSha256, JsonElemen
 /// identified (a service's basis for a cloud model), and its settings.
 /// </summary>
 public sealed record KeptAnswer(JsonElement Output, string? ModelSha256Basis, string Parameters);
+
+/// <summary>
+/// An accepted answer kept with a signature (<see cref="ModelRequest.Signature"/>):
+/// the attempt, its task and step, the signature, and the answer.
+/// </summary>
+public sealed record SignedAnswer(Guid AttemptId, Guid TaskId, string StepKey, byte[] Signature, KeptAnswer Answer);
 
 /// <summary>
 /// The analysis tables in the catalog. Every use opens its own connection.
@@ -786,6 +796,65 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
     }
 
     /// <summary>
+    /// The accepted answers of a check kept with a signature
+    /// (<see cref="ModelRequest.Signature"/>), given by the named profile
+    /// and model, on the tasks of a project and of its recordings, or where
+    /// no project is given, of one recording: earliest first, so that the
+    /// first answer is the one given again (android-checks.md, step 20,
+    /// rule 4). An answer reused into a task of the project is in the list
+    /// as that task's, as its first answer may be on a task elsewhere.
+    /// </summary>
+    public Task<IReadOnlyList<SignedAnswer>> SignedAnswersAsync(
+        string promptTemplate,
+        int promptTemplateVersion,
+        string profileName,
+        string model,
+        Guid? projectId,
+        Guid? recordingId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(promptTemplate);
+        ArgumentNullException.ThrowIfNull(profileName);
+        ArgumentNullException.ThrowIfNull(model);
+        if (projectId is null && recordingId is null)
+        {
+            return Task.FromResult<IReadOnlyList<SignedAnswer>>([]);
+        }
+
+        return UseAsync(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT a.attempt_id, a.task_id, a.step_key, a.input_signature, a.output::text, a.model_sha256_basis, a.parameters::text " +
+                "FROM analysis_attempts a JOIN analysis_tasks t ON t.task_id = a.task_id LEFT JOIN recordings r ON r.recording_id = t.recording_id " +
+                "WHERE a.outcome = 'accepted' AND a.input_signature IS NOT NULL " +
+                "AND a.prompt_template = $1 AND a.prompt_template_version = $2 AND a.profile_name = $3 AND a.model = $4 " +
+                "AND (($5::uuid IS NOT NULL AND coalesce(t.project_id, r.project_id) = $5) OR ($5::uuid IS NULL AND t.recording_id = $6)) " +
+                "ORDER BY a.finished_utc, a.attempt_id",
+                connection);
+            command.Parameters.AddWithValue(promptTemplate);
+            command.Parameters.AddWithValue(promptTemplateVersion);
+            command.Parameters.AddWithValue(profileName);
+            command.Parameters.AddWithValue(model);
+            command.Parameters.Add(new NpgsqlParameter { Value = (object?)projectId ?? DBNull.Value, NpgsqlDbType = NpgsqlDbType.Uuid });
+            command.Parameters.Add(new NpgsqlParameter { Value = (object?)recordingId ?? DBNull.Value, NpgsqlDbType = NpgsqlDbType.Uuid });
+            var answers = new List<SignedAnswer>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                using var document = JsonDocument.Parse(reader.GetString(4));
+                answers.Add(new SignedAnswer(
+                    reader.GetGuid(0),
+                    reader.GetGuid(1),
+                    reader.GetString(2),
+                    (byte[])reader.GetValue(3),
+                    new KeptAnswer(document.RootElement.Clone(), reader.IsDBNull(5) ? null : reader.GetString(5), reader.GetString(6))));
+            }
+
+            return (IReadOnlyList<SignedAnswer>)answers;
+        }, cancellationToken);
+    }
+
+    /// <summary>
     /// The latest failed attempt at a step in an earlier task that was made
     /// with the same request, model file, server build, and sampling
     /// settings, whose output the checks refused: not attempts set aside
@@ -842,12 +911,12 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
                 "profile_name, profile, endpoint, model, model_file, quantization, model_sha256, model_sha256_basis, server_build, " +
                 "parameters, prompt_template, prompt_template_version, input_sha256, input_references, prompt_tokens, " +
                 "completion_tokens, prompt_milliseconds, completion_milliseconds, finish_reason, raw_output, output, reused_from_attempt_id, " +
-                "service_request_id, service_model) " +
+                "service_request_id, service_model, input_signature) " +
                 "SELECT $2, step_key, $3, now(), now(), 'accepted', NULL, " +
                 "profile_name, profile, endpoint, model, model_file, quantization, model_sha256, model_sha256_basis, server_build, " +
                 "parameters, prompt_template, prompt_template_version, input_sha256, input_references, prompt_tokens, " +
                 "completion_tokens, prompt_milliseconds, completion_milliseconds, finish_reason, raw_output, output, " +
-                "coalesce(reused_from_attempt_id, attempt_id), service_request_id, service_model " +
+                "coalesce(reused_from_attempt_id, attempt_id), service_request_id, service_model, input_signature " +
                 "FROM analysis_attempts WHERE attempt_id = $1 AND outcome = 'accepted' " +
                 "RETURNING attempt_id",
                 connection,
@@ -941,8 +1010,8 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             await using var command = new NpgsqlCommand(
                 "INSERT INTO analysis_attempts (task_id, step_key, attempt_number, started_utc, outcome, " +
                 "profile_name, profile, endpoint, model, model_file, quantization, model_sha256, model_sha256_basis, " +
-                "server_build, parameters, prompt_template, prompt_template_version, input_sha256, input_references) " +
-                "VALUES ($1, $2, $3, now(), 'running', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) " +
+                "server_build, parameters, prompt_template, prompt_template_version, input_sha256, input_references, input_signature) " +
+                "VALUES ($1, $2, $3, now(), 'running', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) " +
                 "RETURNING attempt_id",
                 connection);
             command.Parameters.AddWithValue(start.TaskId);
@@ -962,6 +1031,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             command.Parameters.AddWithValue(start.PromptTemplateVersion);
             command.Parameters.AddWithValue(start.InputSha256);
             command.Parameters.AddWithValue(start.InputReferences.ToArray());
+            command.Parameters.Add(new NpgsqlParameter { Value = (object?)start.InputSignature ?? DBNull.Value, NpgsqlDbType = NpgsqlDbType.Bytea });
             return (Guid)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
         }, cancellationToken);
     }

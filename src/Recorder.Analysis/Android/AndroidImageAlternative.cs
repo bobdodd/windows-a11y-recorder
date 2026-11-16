@@ -1,0 +1,529 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using Recorder.Session;
+
+namespace Recorder.Analysis.Android;
+
+/// <summary>
+/// One image's question as it is sent: the request, its step key for each
+/// of the two runs, and the signature its answer is kept against.
+/// </summary>
+public sealed record ImageAlternativeRequest(PhoneImageAlternativeQuestion Question, ModelRequest Request, string Key, byte[] Signature)
+{
+    /// <summary>The step key of a run, 1 or 2.</summary>
+    public string StepKey(int run) => $"{Key}-{run.ToString(CultureInfo.InvariantCulture)}";
+}
+
+/// <summary>
+/// The question of the check of images with no text alternative for the
+/// model chosen for vision-based checks (android-checks.md, step 20, rules
+/// 4 and 5): for each image the rules leave
+/// (<see cref="PhoneImageAlternativeRun.Questions"/>), the whole screen
+/// with the image outlined and a close-up of the image, enlarged when it is
+/// small, the text of the items beside it, and one of three fixed answers
+/// with a reason. It is asked as the images-of-text check asks
+/// (<see cref="AndroidImagesOfText"/>): twice, once for a model that gives
+/// the same answer to the same request. Each answer is kept against the
+/// image's own pixels and the text beside it (<see cref="Signature"/>), so
+/// an identical image, in the same run or on another recording of the
+/// project, is given the first answer again, not asked again (rule 4).
+/// What the answers make of the finding is the model's inference, and says
+/// so.
+/// </summary>
+public static class AndroidImageAlternative
+{
+    public const string Template = "android-image-text-alternative";
+
+    public const int TemplateVersion = 1;
+
+    public const string Informative = "informative";
+
+    public const string Decorative = "decorative";
+
+    public const string CannotTell = "cannot-tell";
+
+    public static readonly IReadOnlyList<string> Answers = [Informative, Decorative, CannotTell];
+
+    public const string Instructions =
+        "You judge one image in an Android app for WCAG 2.2 success criterion 1.1.1, Non-text Content: whether it gives information. " +
+        "Answer only from what the pictures show, with one of the fixed answers.";
+
+    private const uint Cyan = 0x00E5FF;
+
+    private const int Outline = 4;
+
+    // Picture B: the image and this many pixels round it, enlarged up to
+    // four times so its shorter side is at least 192 pixels, no longer
+    // than 1,024 pixels.
+    private const int Pad = 48;
+
+    private const int ShortestCloseUp = 192;
+
+    private const double MostEnlarged = 4;
+
+    private const int LongestCloseUp = 1024;
+
+    // The signature: its version, the image's size, the SHA-256 of the
+    // text beside it, and a 16 by 16 thumbnail of the image's pixels.
+    private const byte SignatureVersion = 1;
+
+    private const int ThumbnailSide = 16;
+
+    private const int SignatureLength = 1 + 4 + 4 + 32 + (ThumbnailSide * ThumbnailSide * 3);
+
+    /// <summary>
+    /// How far, out of 255, a channel of two thumbnails may differ for the
+    /// two to be the same image. Measured on 2026-11-16: six identical icons,
+    /// on screenshots and video frames, differed by at most 3; a hash of
+    /// the exact or rounded pixels differed between them.
+    /// </summary>
+    public const int ThumbnailTolerance = 16;
+
+    /// <summary>The question's text.</summary>
+    public static string Question(string app, string screenName, string nearby) =>
+        $"Picture A is the whole screen of the Android app {app}, on its screen \"{screenName}\", with one image outlined in cyan. " +
+        "Picture B is the outlined image and a little of the screen around it, enlarged when the image is small.\n" +
+        "The image has no text alternative, so a screen reader says nothing for it.\n" +
+        (nearby.Length > 0 ? $"The text of the items beside it, as the app gives it: \"{nearby}\".\n" : "No item beside it has text.\n") +
+        "Which one is true of the outlined image?\n" +
+        "- informative: it gives information that the text on the screen does not, such as a photograph or illustration of the content, a chart, a status, a logo that names something, or an icon whose meaning the text beside it does not give.\n" +
+        "- decorative: it gives no information of its own: it only decorates, repeats what the text beside it already says, or is a line, a background or a flourish.\n" +
+        "- cannot-tell: the pictures do not show enough to judge, such as when nothing can be seen inside the outline.\n" +
+        "Give the answer, and one sentence saying what in the pictures shows it.";
+
+    /// <summary>
+    /// The requests of a run's questions, in the questions' order; a
+    /// question whose picture cannot be read is left out, and stays a
+    /// warning.
+    /// </summary>
+    public static IReadOnlyList<ImageAlternativeRequest> Requests(PhoneImageAlternativeRun run, Func<string, PhonePixels?> load)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        ArgumentNullException.ThrowIfNull(load);
+        var requests = new List<ImageAlternativeRequest>();
+        var pixelsOf = new Dictionary<string, PhonePixels?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var question in run.Questions)
+        {
+            var path = question.Picture.AbsolutePath;
+            if (!pixelsOf.TryGetValue(path, out var pixels))
+            {
+                pixelsOf[path] = pixels = load(path);
+            }
+
+            if (pixels is null || Clamp(question.Bounds, pixels) is null)
+            {
+                continue;
+            }
+
+            requests.Add(RequestOf(question, pixels));
+        }
+
+        return requests;
+    }
+
+    /// <summary>A question's request, from its picture's pixels.</summary>
+    public static ImageAlternativeRequest RequestOf(PhoneImageAlternativeQuestion question, PhonePixels pixels)
+    {
+        ArgumentNullException.ThrowIfNull(question);
+        ArgumentNullException.ThrowIfNull(pixels);
+        var box = Clamp(question.Bounds, pixels) ?? throw new ArgumentException("The image is not on the picture.", nameof(question));
+        var screen = AndroidImagesOfText.Png(AndroidImagesOfText.Screen(pixels, box));
+        var closeUp = AndroidImagesOfText.Png(CloseUp(pixels, box));
+        var input = Question(question.App, question.ScreenName, question.Nearby);
+        var signature = Signature(pixels, box, question.Nearby);
+        var request = new ModelRequest(
+            Template,
+            TemplateVersion,
+            Instructions,
+            input,
+            [new ModelImage("A", "image/png", screen), new ModelImage("B", "image/png", closeUp)],
+            [],
+            new HashSet<string>(StringComparer.Ordinal))
+        {
+            Use = ModelUses.VisionChecks,
+            Answers = Answers,
+            ReusedAcrossTasks = true,
+            Signature = signature,
+        };
+
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hash.AppendData(Encoding.UTF8.GetBytes($"{Template}\n{TemplateVersion.ToString(CultureInfo.InvariantCulture)}\n{Instructions}\n{input}\n"));
+        hash.AppendData(screen);
+        hash.AppendData(closeUp);
+        var key = "image-text-alternative-" + Convert.ToHexStringLower(hash.GetHashAndReset())[..16];
+        return new ImageAlternativeRequest(question, request, key, signature);
+    }
+
+    /// <summary>
+    /// What an image's answer is kept against (rule 4): the version, the
+    /// image's width and height in pixels, the SHA-256 of the text beside
+    /// it, and a 16 by 16 thumbnail of its own pixels, each cell the mean
+    /// of the pixels it covers.
+    /// </summary>
+    public static byte[] Signature(PhonePixels pixels, PhoneBounds bounds, string nearby)
+    {
+        ArgumentNullException.ThrowIfNull(pixels);
+        ArgumentNullException.ThrowIfNull(nearby);
+        var box = Clamp(bounds, pixels) ?? throw new ArgumentException("The image is not on the picture.", nameof(bounds));
+        var signature = new byte[SignatureLength];
+        signature[0] = SignatureVersion;
+        BitConverter.TryWriteBytes(signature.AsSpan(1, 4), box.Width);
+        BitConverter.TryWriteBytes(signature.AsSpan(5, 4), box.Height);
+        SHA256.HashData(Encoding.UTF8.GetBytes(nearby), signature.AsSpan(9, 32));
+        var at = 41;
+        for (var cellY = 0; cellY < ThumbnailSide; cellY++)
+        {
+            var top = box.Top + (cellY * box.Height / ThumbnailSide);
+            var bottom = Math.Max(top + 1, box.Top + ((cellY + 1) * box.Height / ThumbnailSide));
+            for (var cellX = 0; cellX < ThumbnailSide; cellX++)
+            {
+                var left = box.Left + (cellX * box.Width / ThumbnailSide);
+                var right = Math.Max(left + 1, box.Left + ((cellX + 1) * box.Width / ThumbnailSide));
+                long red = 0, green = 0, blue = 0, count = 0;
+                for (var y = top; y < bottom; y++)
+                {
+                    for (var x = left; x < right; x++)
+                    {
+                        var colour = pixels.At(x, y);
+                        red += (colour >> 16) & 0xFF;
+                        green += (colour >> 8) & 0xFF;
+                        blue += colour & 0xFF;
+                        count++;
+                    }
+                }
+
+                signature[at++] = (byte)(red / count);
+                signature[at++] = (byte)(green / count);
+                signature[at++] = (byte)(blue / count);
+            }
+        }
+
+        return signature;
+    }
+
+    /// <summary>
+    /// Whether two signatures are of the same image: the same version, the
+    /// same width and height, the same text beside it, and every channel of
+    /// the thumbnails within <see cref="ThumbnailTolerance"/>.
+    /// </summary>
+    public static bool SameImage(ReadOnlySpan<byte> first, ReadOnlySpan<byte> second)
+    {
+        if (first.Length != SignatureLength || second.Length != SignatureLength || first[0] != SignatureVersion || second[0] != SignatureVersion ||
+            !first[..41].SequenceEqual(second[..41]))
+        {
+            return false;
+        }
+
+        for (var at = 41; at < SignatureLength; at++)
+        {
+            if (Math.Abs(first[at] - second[at]) > ThumbnailTolerance)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Asks the model chosen for vision-based checks about each image the
+    /// rules leave in the audit, and gives the audit with its findings
+    /// judged. An image the same as one answered before, in this run or on
+    /// a task of the project (or, for a recording in no project, of the
+    /// recording) by the same model, is given that answer again, copied
+    /// into this task (rule 4). Where the task may use no model for
+    /// vision-based checks, nothing is asked and the findings stay
+    /// warnings, with the reason. A question whose step fails stays a
+    /// warning, with why.
+    /// </summary>
+    public static async Task<AndroidAudit> AskAsync(
+        AnalysisTaskContext context,
+        AndroidAudit audit,
+        Func<string, PhonePixels?> load,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(audit);
+        ArgumentNullException.ThrowIfNull(load);
+        if (audit.ImageAlternative is not { } run || run.Questions.Count == 0)
+        {
+            return audit;
+        }
+
+        if (context.NoModel(ModelUses.VisionChecks) is { } none)
+        {
+            return audit.WithImageAlternative(run.Judged(new Dictionary<PhoneImageAlternativeQuestion, PhoneInference>(), NotAsked(run.Questions.Count, none)));
+        }
+
+        var requests = Requests(run, load);
+        var profileName = context.ModelFor(ModelUses.VisionChecks);
+        var model = profileName is null ? null : context.Settings.ForProject(null).Profile(profileName)?.Model;
+        var recording = context.Task.RecordingId;
+        var project = context.Task.ProjectId ??
+            (recording is { } id ? (await context.Catalog.ProjectOfAsync(id, cancellationToken).ConfigureAwait(false))?.ProjectId : null);
+        IReadOnlyList<SignedAnswer> signed = profileName is null || model is null
+            ? []
+            : await context.Catalog.SignedAnswersAsync(Template, TemplateVersion, profileName, model, project, recording, cancellationToken).ConfigureAwait(false);
+
+        var answers = new Dictionary<PhoneImageAlternativeQuestion, PhoneInference>();
+        var given = new List<(byte[] Signature, ClosedAnswerOf One, ClosedAnswerOf Two, string Model, bool Cloud)>();
+        var failures = new List<string>();
+        int asked = 0, again = 0;
+        var copied = new HashSet<Guid>();
+        var held = (await context.Catalog.AttemptsAsync(context.Task.TaskId, cancellationToken).ConfigureAwait(false))
+            .Where(item => item.Outcome == "accepted")
+            .Select(item => item.StepKey)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var request in requests)
+        {
+            // The same image answered earlier in this run.
+            if (given.FirstOrDefault(item => SameImage(item.Signature, request.Signature)) is { Signature: not null } earlier)
+            {
+                answers[request.Question] = Interpret(earlier.One, earlier.Two, earlier.Model, earlier.Cloud, again: true);
+                again++;
+                continue;
+            }
+
+            // The same image answered on an earlier task: its first answer,
+            // copied into this task.
+            if (Kept(signed, request.Signature) is { } kept)
+            {
+                foreach (var source in kept.Sources.Where(source => source.TaskId != context.Task.TaskId && !held.Contains(source.StepKey) && copied.Add(source.AttemptId)))
+                {
+                    var number = await context.Catalog.AttemptCountAsync(context.Task.TaskId, source.StepKey, cancellationToken).ConfigureAwait(false) + 1;
+                    await context.Catalog.ReuseAttemptAsync(source.AttemptId, context.Task.TaskId, number, cancellationToken).ConfigureAwait(false);
+                }
+
+                var cloud = kept.Sources[0].Answer.ModelSha256Basis == AnalysisWorker.ServiceBasis;
+                given.Add((request.Signature, kept.One, kept.Two, profileName!, cloud));
+                answers[request.Question] = Interpret(kept.One, kept.Two, profileName!, cloud, again: true);
+                again++;
+                continue;
+            }
+
+            asked++;
+            if (await TryAskAsync(context, request, 1, failures, cancellationToken).ConfigureAwait(false) is not { } step)
+            {
+                continue;
+            }
+
+            var attempts = await context.Catalog.AttemptsAsync(context.Task.TaskId, cancellationToken).ConfigureAwait(false);
+            var attempt = attempts.LastOrDefault(item => item.StepKey == request.StepKey(1) && item.Outcome == "accepted");
+            var who = attempt?.ProfileName ?? profileName ?? "the model";
+            var service = attempt?.ModelSha256Basis == AnalysisWorker.ServiceBasis;
+            var repeatable = attempt is not null && AndroidImagesOfText.Repeatable(attempt.ModelSha256Basis, attempt.Parameters);
+            var one = ClosedAnswer.Read(step.Output);
+            ClosedAnswerOf? two = one;
+            if (!repeatable)
+            {
+                var second = await TryAskAsync(context, request, 2, failures, cancellationToken).ConfigureAwait(false);
+                two = second is null ? null : ClosedAnswer.Read(second.Output);
+            }
+
+            if (one is not null && two is not null)
+            {
+                given.Add((request.Signature, one, two, who, service));
+                answers[request.Question] = Interpret(one, two, who, service);
+            }
+        }
+
+        var note = string.Create(CultureInfo.CurrentCulture,
+            $"{Count(run.Questions.Count)} left by the rules {(run.Questions.Count == 1 ? "was" : "were")} for the model for vision-based checks; {Count(answers.Count)} answered");
+        if (again > 0)
+        {
+            note += string.Create(CultureInfo.CurrentCulture, $", {again:N0} of them with the answer first given for the same image");
+        }
+
+        if (requests.Count < run.Questions.Count)
+        {
+            note += string.Create(CultureInfo.CurrentCulture, $", {Count(run.Questions.Count - requests.Count)} not asked as the picture could not be read");
+        }
+
+        if (failures.Count > 0)
+        {
+            note += "; not answered: " + string.Join(" ", failures.Distinct(StringComparer.Ordinal));
+        }
+
+        return audit.WithImageAlternative(run.Judged(answers, note));
+    }
+
+    /// <summary>The note of questions not asked, as no model may be used for vision-based checks.</summary>
+    public static string NotAsked(int questions, string reason) =>
+        string.Create(CultureInfo.CurrentCulture,
+            $"{Count(questions)} left by the rules {(questions == 1 ? "was" : "were")} not asked about, as no model may be used for vision-based checks: {reason}");
+
+    /// <summary>
+    /// The first answer kept for the same image, earliest first, with both
+    /// runs' answers where the model is not repeatable: the attempts it is
+    /// made of and the two answers; null where there is none.
+    /// </summary>
+    internal static (IReadOnlyList<SignedAnswer> Sources, ClosedAnswerOf One, ClosedAnswerOf Two)? Kept(IReadOnlyList<SignedAnswer> signed, byte[] signature)
+    {
+        ArgumentNullException.ThrowIfNull(signed);
+        ArgumentNullException.ThrowIfNull(signature);
+        foreach (var first in signed)
+        {
+            if (!first.StepKey.EndsWith("-1", StringComparison.Ordinal) || !SameImage(first.Signature, signature) ||
+                ClosedAnswer.Read(first.Answer.Output) is not { } one)
+            {
+                continue;
+            }
+
+            if (AndroidImagesOfText.Repeatable(first.Answer.ModelSha256Basis, first.Answer.Parameters))
+            {
+                return ([first], one, one);
+            }
+
+            var secondKey = first.StepKey[..^1] + "2";
+            if (signed.FirstOrDefault(item => item.TaskId == first.TaskId && item.StepKey == secondKey) is { } second &&
+                ClosedAnswer.Read(second.Answer.Output) is { } two)
+            {
+                return ([first, second], one, two);
+            }
+        }
+
+        return null;
+    }
+
+    private static async Task<AcceptedStep?> TryAskAsync(
+        AnalysisTaskContext context,
+        ImageAlternativeRequest request,
+        int run,
+        List<string> failures,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await context.RunStepAsync(request.StepKey(run), request.Request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (StepFailedException exception)
+        {
+            failures.Add(exception.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// What two answers make of a finding (android-checks.md, step 20, rule
+    /// 5): agreed that the image gives information, an error; agreed that
+    /// it is decorative, information; agreed that the pictures do not tell,
+    /// or not agreed, a warning to check manually. Where the answers were
+    /// first given for the same image elsewhere, it says so.
+    /// </summary>
+    public static PhoneInference Interpret(ClosedAnswerOf first, ClosedAnswerOf second, string model, bool cloud, bool again = false)
+    {
+        ArgumentNullException.ThrowIfNull(first);
+        ArgumentNullException.ThrowIfNull(second);
+        ArgumentNullException.ThrowIfNull(model);
+        var who = $"{model}, {(cloud ? "a cloud model" : "a local model")},";
+        var twice = ReferenceEquals(first, second) ? "" : " twice";
+        var where = again ? " for the same image, by its pixels and the text beside it," : "";
+        if (first.Answer != second.Answer)
+        {
+            return new PhoneInference(PhoneCheckLevel.Warning,
+                $"{who} was asked twice{where} and gave two answers, {first.Answer} and {second.Answer}: \"{first.Reason}\" and \"{second.Reason}\"; check manually",
+                Inferred: true, model, cloud);
+        }
+
+        return first.Answer switch
+        {
+            Informative => new PhoneInference(PhoneCheckLevel.Error,
+                $"{who} inferred from the pictures{twice}{where} that the image gives information, so it needs a text alternative: \"{first.Reason}\"",
+                Inferred: true, model, cloud),
+            Decorative => new PhoneInference(PhoneCheckLevel.Info,
+                $"{who} inferred from the pictures{twice}{where} that the image is decorative, giving no information of its own, not confirmed: \"{first.Reason}\"",
+                Inferred: true, model, cloud),
+            _ => new PhoneInference(PhoneCheckLevel.Warning,
+                $"{who} could not tell from the pictures{twice}{where} whether the image gives information: \"{first.Reason}\"; check manually",
+                Inferred: true, model, cloud),
+        };
+    }
+
+    /// <summary>
+    /// What kept answers make of a run, for the Checks tab: the first
+    /// answers the project's model for vision-based checks gave for the
+    /// same image as each request (rule 4), from its signed answers. A
+    /// request with none stays a warning, and the note counts it.
+    /// </summary>
+    public static PhoneImageAlternativeRun FromKept(
+        PhoneImageAlternativeRun run,
+        IReadOnlyList<ImageAlternativeRequest> requests,
+        IReadOnlyList<SignedAnswer> signed,
+        string model)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        ArgumentNullException.ThrowIfNull(requests);
+        ArgumentNullException.ThrowIfNull(signed);
+        ArgumentNullException.ThrowIfNull(model);
+        var answers = new Dictionary<PhoneImageAlternativeQuestion, PhoneInference>();
+        foreach (var request in requests)
+        {
+            if (Kept(signed, request.Signature) is not { } kept)
+            {
+                continue;
+            }
+
+            var cloud = kept.Sources[0].Answer.ModelSha256Basis == AnalysisWorker.ServiceBasis;
+            var own = kept.Sources[0].StepKey == request.StepKey(1);
+            answers[request.Question] = Interpret(kept.One, kept.Two, model, cloud, again: !own);
+        }
+
+        var unanswered = run.Questions.Count - answers.Count;
+        var note = string.Create(CultureInfo.CurrentCulture,
+            $"{Count(run.Questions.Count)} left by the rules {(run.Questions.Count == 1 ? "is" : "are")} for {model}; {Count(answers.Count)} answered")
+            + (unanswered > 0 ? string.Create(CultureInfo.CurrentCulture, $", {Count(unanswered)} not yet asked") : "");
+        return run.Judged(answers, note);
+    }
+
+    private static string Count(int count) =>
+        string.Create(CultureInfo.CurrentCulture, $"{count:N0} {(count == 1 ? "image" : "images")}");
+
+    // The image's bounds on the picture, or null where none of it is on it.
+    private static PhoneBounds? Clamp(PhoneBounds bounds, PhonePixels pixels)
+    {
+        var left = Math.Clamp(bounds.Left, 0, pixels.Width);
+        var top = Math.Clamp(bounds.Top, 0, pixels.Height);
+        var right = Math.Clamp(bounds.Right, 0, pixels.Width);
+        var bottom = Math.Clamp(bounds.Bottom, 0, pixels.Height);
+        return right > left && bottom > top ? new PhoneBounds(left, top, right, bottom) : null;
+    }
+
+    // The image and the screen round it, outlined, enlarged up to four
+    // times so its shorter side is at least 192 pixels, and made smaller
+    // when its longer side would pass 1,024.
+    private static AndroidImagesOfText.Rgb CloseUp(PhonePixels pixels, PhoneBounds box)
+    {
+        var left = Math.Clamp(box.Left - Pad, 0, pixels.Width - 1);
+        var top = Math.Clamp(box.Top - Pad, 0, pixels.Height - 1);
+        var right = Math.Clamp(box.Right + Pad, left + 1, pixels.Width);
+        var bottom = Math.Clamp(box.Bottom + Pad, top + 1, pixels.Height);
+        var (width, height) = (right - left, bottom - top);
+        var scale = Math.Clamp(ShortestCloseUp / (double)Math.Max(1, Math.Min(box.Width, box.Height)), 1, MostEnlarged);
+        scale = Math.Min(scale, LongestCloseUp / (double)Math.Max(width, height));
+        var (outWidth, outHeight) = (Math.Max(1, (int)(width * scale)), Math.Max(1, (int)(height * scale)));
+        var result = new uint[outWidth * outHeight];
+        for (var y = 0; y < outHeight; y++)
+        {
+            for (var x = 0; x < outWidth; x++)
+            {
+                result[(y * outWidth) + x] = pixels.At(Math.Min(right - 1, left + (int)(x / scale)), Math.Min(bottom - 1, top + (int)(y / scale)));
+            }
+        }
+
+        var (boxLeft, boxTop, boxRight, boxBottom) =
+            ((int)((box.Left - left) * scale), (int)((box.Top - top) * scale), (int)((box.Right - left) * scale), (int)((box.Bottom - top) * scale));
+        for (var y = Math.Max(0, boxTop - Outline); y < Math.Min(outHeight, boxBottom + Outline); y++)
+        {
+            for (var x = Math.Max(0, boxLeft - Outline); x < Math.Min(outWidth, boxRight + Outline); x++)
+            {
+                if (!(x >= boxLeft && x < boxRight && y >= boxTop && y < boxBottom))
+                {
+                    result[(y * outWidth) + x] = Cyan;
+                }
+            }
+        }
+
+        return new AndroidImagesOfText.Rgb(outWidth, outHeight, result);
+    }
+}
