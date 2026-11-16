@@ -3595,16 +3595,25 @@ pictures OCR read (measured).
 - **The text beside it.** What a screen reader would say for each of
   the image's parent's other children, joined, or where none has text,
   its grandparent's; at most 400 characters.
+- **What a screen reader says on the screen.** Added on 2026-11-16 (see
+  "What a screen reader says, as context" below): each item a screen
+  reader would stop on, by the tree's checks' rule
+  (`PhoneTreeChecks.ShouldFocusView`, from ATF), with what it would say
+  for it, in the tree's order, joined with " | ", with "[the outlined
+  image]" at the image's place. Longer than 4,000 characters, the items
+  nearest the image's place are kept, and "..." marks what is left out.
 - **The question.** `AndroidImageAlternative` (`Recorder.Analysis`), as
   for images of text: picture A is the whole screen at half size with
   the image outlined in cyan; picture B is the image and 48 pixels round
   it, enlarged up to 4 times so its shorter side is at least 192
   pixels, no longer than 1,024, outlined 4 pixels wide. The question
-  gives the app, the screen's name and the text beside the image, says
-  it has no text alternative, and asks for "informative",
+  gives the app, the screen's name, the text beside the image and what
+  a screen reader says on the screen, says it has no text alternative
+  and that text seen in the pictures but not in what a screen reader
+  says is not given to a screen reader user, and asks for "informative",
   "decorative" or "cannot-tell" ("such as when nothing can be seen
   inside the outline") with a one-sentence reason. Template
-  `android-image-text-alternative`, version 1; the step key is made
+  `android-image-text-alternative`, version 2; the step key is made
   from the request's SHA-256. It is asked twice, or once for a local
   model at temperature 0.
 - **Rule 4, the signature.** Each request carries a signature, kept
@@ -3641,7 +3650,7 @@ pictures OCR read (measured).
 
 ### Checked
 
-The solution builds with no warnings, and the tests pass, 2,626 of
+The solution builds with no warnings, and the tests pass, 2,627 of
 them, with the 10 that need Windows failing as before. The new tests
 cover made-up items: an image a screen reader says nothing for found;
 an image with a description, an image that is a control, an image in
@@ -3649,7 +3658,7 @@ a control with a name, a background under a button and a hairline left
 out; the hairline asked about with no density; the share covered; no
 OCR; a picture out of step; the answers judging the finding; the
 request's key, pictures and signature; the signature's tolerance and
-what differs; kept answers from another task, needing both runs for a
+what differs; what a screen reader says on the screen, and on a long screen what is kept round the image; kept answers from another task, needing both runs for a
 model that is not repeatable; what the answers make of a finding; and
 the signature kept with an attempt, copied when reused and found by
 project, recording, template, version and model.
@@ -3668,6 +3677,28 @@ project, recording, template, version and model.
   text can change what it means.
 - Rule 1's grid and its threshold of half are from the measurement, not
   measured further.
+- What a screen reader says is the tree's order, not the order a screen
+  reader moved in on the recording, and only the app's window.
+- Rule 4 keeps the answer by the image's pixels and the text beside it,
+  not by what a screen reader says on the screen: the same image with
+  the same text beside it, on a screen that says other things, is given
+  the first answer.
+
+### What a screen reader says, as context (owner, 2026-11-16)
+
+Asked how the check tells that an image is informative in its context
+of use, and told that the model was given only the text beside the
+image and judged information against "the text on the screen", which
+can include text a screen reader does not reach, the owner chose: "Pass
+the screen reader's text for the whole screen to the image check".
+
+- The question gives what a screen reader says on the screen, with the
+  image's place marked, and asks whether the image gives information
+  that this does not. Text seen in the pictures but not said is
+  stated not to be given. The text beside the image is still given.
+- The template is version 2, so answers to version 1 are not reused,
+  and each image is asked again.
+- The limit of 4,000 characters was chosen, not measured.
 
 ## Decisions on the open questions (2026-11-11)
 

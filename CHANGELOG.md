@@ -24,6 +24,10 @@ Changes on `main` since 1.1.0, not yet released.
   it (a new column, `analysis_attempts.input_signature`), so the same
   image is given the first answer again across visits and recordings in
   the project.
+- The model is given what a screen reader says on the whole screen,
+  with the image's place marked, and judges whether the image gives
+  information that this does not; text that can be seen but is not
+  said does not count (question version 2).
 
 ### Text shown as a heading
 

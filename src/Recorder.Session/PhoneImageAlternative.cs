@@ -6,15 +6,17 @@ namespace Recorder.Session;
 /// <summary>
 /// One image a model is to be asked about (android-checks.md, step 20): the
 /// visit and the image's identity, the first time it was judged with the
-/// picture and the image's bounds there, and the text of the items beside
-/// it, as the app gives it.
+/// picture and the image's bounds there, the text of the items beside it,
+/// as the app gives it, and what a screen reader says on the screen there,
+/// with the image's place marked.
 /// </summary>
 public sealed record PhoneImageAlternativeQuestion(
     PhoneVisit Visit,
     string Identity,
     PhoneFindingTime Time,
     PhoneContrastPicture Picture,
-    string Nearby)
+    string Nearby,
+    string ScreenText)
 {
     public string App => Visit.Screen.Package;
 
@@ -54,6 +56,12 @@ public sealed class PhoneImageAlternativeRun
 
     /// <summary>The longest text of the items beside an image the model is given.</summary>
     public const int MostNearbyCharacters = 400;
+
+    /// <summary>The longest text of what a screen reader says on the screen the model is given, kept round the image's place.</summary>
+    public const int MostScreenCharacters = 4000;
+
+    /// <summary>Where the image is in what a screen reader says on the screen.</summary>
+    public const string ImageMark = "[the outlined image]";
 
     private readonly Dictionary<PhoneVisit, List<PhoneFinding>> _byVisit = [];
     private readonly Dictionary<PhoneVisit, int> _imagesByVisit = [];
@@ -219,7 +227,7 @@ public sealed class PhoneImageAlternativeRun
                 var time = Add(findings, PhoneCheckLevel.Warning, measuredText);
                 if (time is not null && !run._questions.ContainsKey(key))
                 {
-                    run._questions[key] = new PhoneImageAlternativeQuestion(visit, image.Identity, time, snapshot.Picture, nearby);
+                    run._questions[key] = new PhoneImageAlternativeQuestion(visit, image.Identity, time, snapshot.Picture, nearby, ScreenText(window, image));
                 }
 
                 PhoneFindingTime? Add(Dictionary<(PhoneVisit, string), PhoneFinding> into, PhoneCheckLevel level, string text)
@@ -444,5 +452,84 @@ public sealed class PhoneImageAlternativeRun
         }
 
         return string.Empty;
+    }
+
+    /// <summary>
+    /// What a screen reader says on the screen, as the tree's checks find
+    /// it: each item a screen reader would stop on
+    /// (<see cref="PhoneTreeChecks.ShouldFocusView"/>) with text to say, in
+    /// the tree's order, with <see cref="ImageMark"/> at the image's place.
+    /// Longer than <see cref="MostScreenCharacters"/>, the items nearest
+    /// the image's place are kept, and "..." marks what is left out.
+    /// </summary>
+    internal static string ScreenText(PhoneCheckWindow window, PhoneCheckItem image)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        ArgumentNullException.ThrowIfNull(image);
+        var stops = new List<string>();
+        var mark = -1;
+        var seen = new HashSet<PhoneCheckItem>();
+        void Walk(PhoneCheckItem item)
+        {
+            if (!seen.Add(item))
+            {
+                return;
+            }
+
+            if (item == image)
+            {
+                mark = stops.Count;
+                stops.Add(ImageMark);
+            }
+            else if (PhoneTreeChecks.ShouldFocusView(item) && PhoneTreeChecks.SpeakableText(item).Trim() is { Length: > 0 } said)
+            {
+                stops.Add(said);
+            }
+
+            foreach (var child in item.Children)
+            {
+                Walk(child);
+            }
+        }
+
+        foreach (var top in window.Items.Where(item => item.Parent is null))
+        {
+            Walk(top);
+        }
+
+        if (mark < 0)
+        {
+            mark = stops.Count;
+            stops.Add(ImageMark);
+        }
+
+        const string Separator = " | ";
+        var joined = string.Join(Separator, stops);
+        if (joined.Length <= MostScreenCharacters)
+        {
+            return joined;
+        }
+
+        // Widen from the image's place, one item either side in turn.
+        int first = mark, last = mark, length = ImageMark.Length;
+        var widened = true;
+        while (widened)
+        {
+            widened = false;
+            if (last + 1 < stops.Count && length + Separator.Length + stops[last + 1].Length <= MostScreenCharacters - 10)
+            {
+                length += Separator.Length + stops[++last].Length;
+                widened = true;
+            }
+
+            if (first > 0 && length + Separator.Length + stops[first - 1].Length <= MostScreenCharacters - 10)
+            {
+                length += Separator.Length + stops[--first].Length;
+                widened = true;
+            }
+        }
+
+        var kept = string.Join(Separator, stops.Skip(first).Take(last - first + 1));
+        return (first > 0 ? "..." + Separator : "") + kept + (last < stops.Count - 1 ? Separator + "..." : "");
     }
 }

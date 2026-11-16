@@ -431,7 +431,11 @@ icons, with pictures that differed only by the screen round them, were
 given two answers. So the answer is also kept against the image's own
 pixels and the text beside it, and the first answer for the same image
 in the project is given again (point 4 of "Keeping it repeatable",
-extended; `analysis-runner.md`, "Answers kept by a signature").
+extended; `analysis-runner.md`, "Answers kept by a signature"). The
+question also gives what a screen reader says on the whole screen, with
+the image's place marked, and asks whether the image gives information
+that this does not (version 2, at the owner's request, "Pass the screen
+reader's text for the whole screen to the image check").
 
 ## Later, or text only
 

@@ -21,7 +21,8 @@ public sealed record ImageAlternativeRequest(PhoneImageAlternativeQuestion Quest
 /// 4 and 5): for each image the rules leave
 /// (<see cref="PhoneImageAlternativeRun.Questions"/>), the whole screen
 /// with the image outlined and a close-up of the image, enlarged when it is
-/// small, the text of the items beside it, and one of three fixed answers
+/// small, the text of the items beside it, what a screen reader says on
+/// the screen with the image's place marked, and one of three fixed answers
 /// with a reason. It is asked as the images-of-text check asks
 /// (<see cref="AndroidImagesOfText"/>): twice, once for a model that gives
 /// the same answer to the same request. Each answer is kept against the
@@ -35,7 +36,10 @@ public static class AndroidImageAlternative
 {
     public const string Template = "android-image-text-alternative";
 
-    public const int TemplateVersion = 1;
+    // Version 2 (2026-11-16, the owner: "Pass the screen reader's text for
+    // the whole screen to the image check"): what a screen reader says on
+    // the screen, and information judged against it, not the text drawn.
+    public const int TemplateVersion = 2;
 
     public const string Informative = "informative";
 
@@ -47,7 +51,7 @@ public static class AndroidImageAlternative
 
     public const string Instructions =
         "You judge one image in an Android app for WCAG 2.2 success criterion 1.1.1, Non-text Content: whether it gives information. " +
-        "Answer only from what the pictures show, with one of the fixed answers.";
+        "Answer only from what the pictures show and what a screen reader says, as given, with one of the fixed answers.";
 
     private const uint Cyan = 0x00E5FF;
 
@@ -81,14 +85,16 @@ public static class AndroidImageAlternative
     public const int ThumbnailTolerance = 16;
 
     /// <summary>The question's text.</summary>
-    public static string Question(string app, string screenName, string nearby) =>
+    public static string Question(string app, string screenName, string nearby, string screenText) =>
         $"Picture A is the whole screen of the Android app {app}, on its screen \"{screenName}\", with one image outlined in cyan. " +
         "Picture B is the outlined image and a little of the screen around it, enlarged when the image is small.\n" +
         "The image has no text alternative, so a screen reader says nothing for it.\n" +
         (nearby.Length > 0 ? $"The text of the items beside it, as the app gives it: \"{nearby}\".\n" : "No item beside it has text.\n") +
+        $"What a screen reader says on this screen, item by item in the app's order, with {PhoneImageAlternativeRun.ImageMark} at the image's place: \"{screenText}\".\n" +
+        "Text that can be seen in the pictures but is not in what a screen reader says is not given to a screen reader user.\n" +
         "Which one is true of the outlined image?\n" +
-        "- informative: it gives information that the text on the screen does not, such as a photograph or illustration of the content, a chart, a status, a logo that names something, or an icon whose meaning the text beside it does not give.\n" +
-        "- decorative: it gives no information of its own: it only decorates, repeats what the text beside it already says, or is a line, a background or a flourish.\n" +
+        "- informative: it gives information that what a screen reader says on this screen does not, such as a photograph or illustration of the content, a chart, a status, a logo that names something, or an icon whose meaning what a screen reader says does not give.\n" +
+        "- decorative: it gives no information that a screen reader user would miss: it only decorates, repeats what a screen reader already says on this screen, or is a line, a background or a flourish.\n" +
         "- cannot-tell: the pictures do not show enough to judge, such as when nothing can be seen inside the outline.\n" +
         "Give the answer, and one sentence saying what in the pictures shows it.";
 
@@ -130,7 +136,7 @@ public static class AndroidImageAlternative
         var box = Clamp(question.Bounds, pixels) ?? throw new ArgumentException("The image is not on the picture.", nameof(question));
         var screen = AndroidImagesOfText.Png(AndroidImagesOfText.Screen(pixels, box));
         var closeUp = AndroidImagesOfText.Png(CloseUp(pixels, box));
-        var input = Question(question.App, question.ScreenName, question.Nearby);
+        var input = Question(question.App, question.ScreenName, question.Nearby, question.ScreenText);
         var signature = Signature(pixels, box, question.Nearby);
         var request = new ModelRequest(
             Template,

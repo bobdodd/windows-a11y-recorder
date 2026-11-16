@@ -985,6 +985,7 @@ public sealed class PhoneCheckRunTests : IDisposable
         // One question, with the text beside the image.
         var question = Assert.Single(run.Questions);
         Assert.Equal((new PhoneBounds(40, 1420, 200, 1580), "Battery 80%"), (question.Bounds, question.Nearby));
+        Assert.Equal("Logo | Profile | Start | [the outlined image] | Battery 80%", question.ScreenText);
         Assert.Same(question, run.QuestionOf(finding));
 
         // Rule 2 needs the density: without it the hairline is asked about.
@@ -1022,6 +1023,33 @@ public sealed class PhoneCheckRunTests : IDisposable
 
         // Two lines are too few to say so.
         Assert.Equal(PhoneCheckLevel.Warning, Assert.Single(ImageAlternativeRun(outside: ["Inbox", "Promotions"]).Findings).Level);
+    }
+
+    // What a screen reader says on a long screen is kept round the image's
+    // place, and marks what is left out.
+    [Fact]
+    public void ImageAlternative_ScreenText_KeepsTheItemsNearestTheImage_OnALongScreen()
+    {
+        var nodes = new List<AndroidTreeNode> { ImageNode(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout", null, null) };
+        for (var index = 1; index <= 200; index++)
+        {
+            nodes.Add(ImageNode(index, 0, (0, index * 10, 1080, (index * 10) + 9), "android.widget.TextView", null, $"Row {index:000} of the list"));
+            if (index == 150)
+            {
+                nodes.Add(ImageNode(1000, 0, (0, 1505, 100, 1509), "android.widget.ImageView", null, null));
+            }
+        }
+
+        var window = new PhoneCheckWindow(1, 1, nodes);
+        var image = window.Items.Single(item => item.Node.Index == 1000);
+
+        var text = PhoneImageAlternativeRun.ScreenText(window, image);
+
+        Assert.True(text.Length <= PhoneImageAlternativeRun.MostScreenCharacters);
+        Assert.StartsWith("... | Row ", text, StringComparison.Ordinal);
+        Assert.EndsWith(" | Row 200 of the list", text, StringComparison.Ordinal);
+        Assert.Contains("Row 150 of the list | [the outlined image] | Row 151 of the list", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Row 001 ", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1065,6 +1093,9 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Equal((540, 1200), PngSize(request.Request.Images[0].Content));
         Assert.Equal((297, 307), PngSize(request.Request.Images[1].Content));
         Assert.Contains("The text of the items beside it, as the app gives it: \"Battery 80%\".", request.Request.Input, StringComparison.Ordinal);
+        Assert.Contains(
+            "What a screen reader says on this screen, item by item in the app's order, with [the outlined image] at the image's place: " +
+            "\"Logo | Profile | Start | [the outlined image] | Battery 80%\".", request.Request.Input, StringComparison.Ordinal);
 
         // The same image a little different, as a video frame is, is the
         // same; much different, other text beside it, or another size is not.
