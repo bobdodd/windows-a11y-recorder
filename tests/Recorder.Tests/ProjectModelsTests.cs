@@ -42,7 +42,7 @@ public sealed class ProjectModelsTests
         Assert.Null(ProjectModels.Problem(Settings, ModelUses.VisionChecks, "Vision"));
         Assert.Equal("The project's model for vision-based checks, \"Text\", cannot take images.",
             ProjectModels.Problem(Settings, ModelUses.VisionChecks, "Text"));
-        Assert.Equal("The project's model for report analysis, \"Gone\", is not in the model profiles.",
+        Assert.Equal("The project's model for report analysis, \"Gone\", is not offered on this PC.",
             ProjectModels.Problem(Settings, ModelUses.Report, "Gone"));
     }
 
@@ -52,14 +52,14 @@ public sealed class ProjectModelsTests
         Assert.Equal([(null, "No model"), ("Text", "Text"), ("Vision", "Vision")], AnalysisPlayer.ModelChoices(Settings, ModelUses.TextChecks, null));
         Assert.Equal([(null, "No model"), ("Vision", "Vision")], AnalysisPlayer.ModelChoices(Settings, ModelUses.VisionChecks, "Vision"));
         Assert.Equal((string?)"Gone", AnalysisPlayer.ModelChoices(Settings, ModelUses.Report, "Gone")[^1].Name);
-        Assert.Equal("Gone (not in the model profiles)", AnalysisPlayer.ModelChoices(Settings, ModelUses.Report, "Gone")[^1].Label);
+        Assert.Equal("Gone (not offered on this PC)", AnalysisPlayer.ModelChoices(Settings, ModelUses.Report, "Gone")[^1].Label);
         Assert.Equal("Text (cannot take images)", AnalysisPlayer.ModelChoices(Settings, ModelUses.VisionChecks, "Text")[^1].Label);
     }
 
     [Fact]
     public void The_models_are_named_by_use_in_words()
     {
-        Assert.Equal("report analysis, Text; text-based checks, no model; vision-based checks, Gone (not in the model profiles)",
+        Assert.Equal("report analysis, Text; text-based checks, no model; vision-based checks, Gone (not offered on this PC)",
             AnalysisPlayer.ModelsLine(Settings, new ProjectModels("Text", null, "Gone"), ModelUses.All));
         Assert.Equal("No model.", AnalysisPlayer.TaskModelsLine(new Dictionary<string, string>(), aiAnalysis: true));
         Assert.Equal("No model.", AnalysisPlayer.TaskModelsLine(new Dictionary<string, string> { [ModelCapabilities.Text] = "Text" }, aiAnalysis: false));

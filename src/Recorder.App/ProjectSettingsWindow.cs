@@ -9,9 +9,12 @@ namespace Recorder.App;
 /// <summary>
 /// A project's settings (projects.md, "The project's models"; owner,
 /// 2026-11-15): the model, or no model, for report analysis, for
-/// text-based checks and for vision-based checks. Each list offers no
-/// model and the profiles that can do what the use needs. Every target
-/// is at least 44 pixels high, and the text wraps rather than scrolling
+/// text-based checks and for vision-based checks, and the project's
+/// Anthropic API key. Each list offers no model, the Claude models, each
+/// the project's own with its defaults, and the models set up on this PC
+/// that can do what the use needs. The key is protected for this Windows
+/// user before it is saved, and never shown again. Every target is at
+/// least 44 pixels high, and the text wraps rather than scrolling
 /// sideways.
 /// </summary>
 internal sealed class ProjectSettingsWindow : Window
@@ -22,6 +25,9 @@ internal sealed class ProjectSettingsWindow : Window
     private readonly Dictionary<string, ComboBox> _choices = [];
     private readonly SelectableText _status;
     private readonly Button _save;
+    private readonly PasswordBox _key;
+    private readonly SelectableText _keyState;
+    private ProjectModels? _read;
     private ProjectModels? _saved;
 
     public ProjectSettingsWindow(Window owner, AnalysisCatalog catalog, AnalysisSettings settings, Guid projectId, string projectName)
@@ -43,7 +49,8 @@ internal sealed class ProjectSettingsWindow : Window
             Text = $"The models the project {projectName} uses. No model means none is asked, cloud or local, and what needs one is not done: " +
                 "a summary cannot be queued, and a check that needs one is listed as not run. " +
                 "A task keeps the models it was queued with, but choosing no model stops a task already queued from asking one at its next step. " +
-                "The profiles are set up in Model profiles, in the Analysis menu.",
+                "A Claude model sends the recording's facts and pictures to Anthropic with the project's API key; choosing one is the permission to send them. " +
+                "Models on this PC are set up from the Analysis menu.",
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 12)
         });
@@ -61,6 +68,19 @@ internal sealed class ProjectSettingsWindow : Window
             page.Children.Add(box);
             _choices[use] = box;
         }
+
+        _key = new PasswordBox { MinHeight = 44, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 0, 4), IsEnabled = false };
+        AutomationProperties.SetName(_key, "Anthropic API key for the project");
+        page.Children.Add(new Label
+        {
+            Content = new AccessText { Text = "Anthropic API _key, for the Claude models:", TextWrapping = TextWrapping.Wrap },
+            Target = _key,
+            Padding = new Thickness(0, 0, 0, 4)
+        });
+        page.Children.Add(_key);
+        _keyState = new SelectableText { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12) };
+        AutomationProperties.SetName(_keyState, "Anthropic API key saved");
+        page.Children.Add(_keyState);
 
         _status = new SelectableText { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8), Text = "Reading the project's settings." };
         AutomationProperties.SetName(_status, "Status");
@@ -99,10 +119,12 @@ internal sealed class ProjectSettingsWindow : Window
             return;
         }
 
+        _read = models;
+        var choices = models.Choices(_settings);
         foreach (var (use, box) in _choices)
         {
             box.Items.Clear();
-            foreach (var (name, label) in AnalysisPlayer.ModelChoices(_settings, use, models.For(use)))
+            foreach (var (name, label) in AnalysisPlayer.ModelChoices(choices, use, models.For(use)))
             {
                 var item = new ComboBoxItem { Content = new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap }, Tag = name, MinHeight = 44, VerticalContentAlignment = VerticalAlignment.Center };
                 AutomationProperties.SetName(item, label);
@@ -113,19 +135,48 @@ internal sealed class ProjectSettingsWindow : Window
             box.IsEnabled = true;
         }
 
+        _key.IsEnabled = true;
+        _keyState.Text = models.ProtectedAnthropicKey is null
+            ? "No key is saved for this project. Paste one to use a Claude model."
+            : "A key is saved for this project, protected for this Windows user. Paste another only to replace it.";
         _save.IsEnabled = true;
-        _status.Text = _settings.Profiles.Count == 0
-            ? "There are no model profiles yet, so only no model can be chosen. Set up models from the Analysis menu."
-            : "";
+        _status.Text = "";
         _choices[ModelUses.Report].Focus();
     }
 
     private async Task SaveAsync()
     {
-        var models = ProjectModels.None;
+        if (_read is null)
+        {
+            return;
+        }
+
+        var models = ProjectModels.None with { ProtectedAnthropicKey = _read.ProtectedAnthropicKey };
         foreach (var (use, box) in _choices)
         {
             models = models.With(use, (box.SelectedItem as ComboBoxItem)?.Tag as string);
+        }
+
+        try
+        {
+            if (_key.Password.Trim().Length > 0)
+            {
+                models = models with { ProtectedAnthropicKey = new CurrentUserApiKeyProtector().Protect(_key.Password.Trim()) };
+            }
+        }
+        catch (System.Security.Cryptography.CryptographicException exception)
+        {
+            _status.Text = "The key could not be protected for this Windows user, so nothing was saved: " + exception.Message;
+            return;
+        }
+
+        var choices = models.Choices(_settings);
+        if (ModelUses.All.Select(use => models.For(use)).OfType<string>().FirstOrDefault(name => choices.Profile(name)?.SendsToAnthropic == true) is { } claude &&
+            models.ProtectedAnthropicKey is null)
+        {
+            _status.Text = $"{claude} needs the project's Anthropic API key. Paste it into the key box, then choose Save.";
+            _key.Focus();
+            return;
         }
 
         try
@@ -142,6 +193,7 @@ internal sealed class ProjectSettingsWindow : Window
             return;
         }
 
+        _key.Clear();
         _saved = models;
         DialogResult = true;
     }

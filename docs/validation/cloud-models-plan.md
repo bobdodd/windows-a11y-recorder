@@ -5,6 +5,14 @@ adding a Claude profile with your Anthropic API key, checking it, and
 summarising a recording with Claude Opus 5.5 and then Claude Sonnet 5.5,
 on the development PC.
 
+Since 2026-11-15 the Model profiles window, "Add a Claude profile..."
+and "Check the profile" are gone: each project's settings offer the
+Claude models with defaults and hold the project's key
+([cloud models](../architecture/cloud-models.md), "As built: Claude
+models in the project's settings"). The tests below that open those
+windows are kept as the record of 2026-11-11 and cannot be run again;
+[the project's models](project-models-plan.md), test 7, replaces them.
+
 ## Results (2026-11-11)
 
 Run by the owner with build bb92d38.

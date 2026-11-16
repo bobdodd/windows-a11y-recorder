@@ -199,10 +199,6 @@
                 Style="{StaticResource AnalysisMenuItem}"
                 Header="Show the Analysis _tab"
                 Click="ShowAnalysisMenuItem_Click" />
-      <MenuItem x:Name="ModelProfilesMenuItem"
-                Style="{StaticResource AnalysisMenuItem}"
-                Header="_Model profiles..."
-                Click="ModelProfilesMenuItem_Click" />
       <MenuItem x:Name="ModelSetupMenuItem"
                 Style="{StaticResource AnalysisMenuItem}"
                 Header="Set _up models..."

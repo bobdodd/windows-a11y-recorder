@@ -6,7 +6,9 @@ Proposed 2026-11-11. Steps 1 and 2 of "Build order", the provider and
 the request in `Recorder.Analysis` and the player, are built and tested
 in the Linux build environment, the request against a fake server; where
 they differ from the design, "As built: step 1" and "As built: step 2"
-say so. Step 3, the run on the development PC with the owner's key,
+say so. On 2026-11-15 the Claude models moved into each project's
+settings and the Model profiles window was removed; "As built: Claude
+models in the project's settings" says how. Step 3, the run on the development PC with the owner's key,
 passed on 2026-11-11 for the check, the summary and the summary with
 vision with Opus 5.5; Sonnet 5.5 was not run. See
 [the validation plan](../validation/cloud-models-plan.md), "Results". The owner's decisions of 2026-11-11 are in
@@ -308,6 +310,11 @@ real service is step 3's check.
 Checked in source and in the unit tests; the windows themselves are
 checked only on Windows, in [the validation plan](../validation/cloud-models-plan.md).
 
+Replaced on 2026-11-15 by "As built: Claude models in the project's
+settings": the windows below are gone, and what they set is now a
+default in the project's settings. The description is kept as the record
+of what was built.
+
 - **"Add a Claude profile..."**, a button in the Model profiles window,
   opens a window of its own: the model (Claude Opus 5.5, Sonnet 5.5 or
   Haiku 5.5, with their IDs `claude-opus-5-5`, `claude-sonnet-5-5` and
@@ -367,6 +374,47 @@ checked only on Windows, in [the validation plan](../validation/cloud-models-pla
   no token counts, such as one cut off before Anthropic gave them, or
   the profile has no prices, the line says there is no cost estimate and
   why.
+
+## As built: Claude models in the project's settings (2026-11-15)
+
+Checked in source and in the unit tests; the window itself is checked
+only on Windows. The owner asked: "Each selected model gets it's own
+profile for that project, and has reasonable default values. Get rid of
+the generic model profiles. You have made things way too complicated. I
+choose Haiku and add my API key and it should work. This is a project
+based interface."
+
+- **Offered in every project.** Each project's three model lists offer
+  Claude Opus 5.5, Claude Sonnet 5.5 and Claude Haiku 5.5, each with
+  "(sends to Anthropic)" after it, then the models set up on this PC. No
+  profile has to be made first. Fable 5.2 stays out, as decided on
+  2026-11-11.
+- **Defaults, not settings.** A Claude model chosen in a project is
+  used with the model's own effort (none is sent), an output limit of
+  32,000 tokens, text and images, Anthropic's address, and the prices of
+  [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing)
+  read again on 2026-11-15, unchanged since 2026-11-11. The model IDs are
+  those of [Anthropic's models overview](https://platform.claude.com/docs/en/about-claude/models/overview),
+  read the same day. There is nothing to edit.
+- **The key is the project's.** The project settings window has a
+  password box, "Anthropic API key, for the Claude models", and says
+  whether a key is saved for the project. The key is protected for the
+  Windows user before it is written to the catalog (migration 0046,
+  `projects.anthropic_api_key`) and is not shown again; a key pasted
+  later replaces it, and an empty box keeps it. Save refuses a Claude
+  model while the project has no key, saying so.
+- **Checked again at each step.** The worker reads the project's models
+  and key before each model step, as for the models themselves; where a
+  Claude model is chosen and the project has no key, the step asks no
+  model and fails the task saying so.
+- **What was removed.** The Model profiles window, with "Add a Claude
+  profile...", "Check the profile" and the local profiles' editor, and
+  the Analysis menu's "Model profiles...". A Claude profile already in
+  the analysis settings file is no longer read, so its key is not used:
+  the key is pasted once in each project's settings. A project that
+  chose "Claude Opus 5.5" keeps that choice, which is now the project's
+  own Opus 5.5. Local models are still set up with "Set up models..." in
+  the Analysis menu, with that window's settings.
 
 ## Not covered here
 

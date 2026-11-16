@@ -922,7 +922,10 @@ Before step 3 was built, the owner chose among four proposals:
    default profile for text and for images, and opens
    `analysis-models.json` in Notepad and reads it again. A full profile
    editor comes later. The defaults were replaced on 2026-11-15 by each
-   project's models (`projects.md`, "The project's models").
+   project's models (`projects.md`, "The project's models"), and the
+   window was removed the same day, when the Claude models came to be
+   offered in each project's settings with defaults (`cloud-models.md`,
+   "As built: Claude models in the project's settings").
 4. **Run again queues a new task** of the same kind with the same
    profile. The earlier task and its report stay, so the two can be
    compared. Since 2026-11-15, Run again uses the project's current

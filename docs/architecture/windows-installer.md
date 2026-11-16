@@ -46,7 +46,7 @@ configuration after the install (see "Model setup").
 | Instrumented Chromium | `browser\chrome.exe` beside the programs (`RecreationBrowser.DefaultExecutablePath`) | The run-time files of the development PC's `out\A11yRecorder` build |
 | llama.cpp server | `localServer.executable` in `analysis-models.json` | `llama\llama-server.exe`, with the CUDA run time beside it; the app points the setting at it (see "First start") |
 | Model files (GGUF) and image add-ons (mmproj) | Each profile's `modelPath` and `imageAddOnPath` | Downloaded by the app's model setup, or chosen from the PC's disk |
-| Model profiles | `analysis-models.json` in `%LOCALAPPDATA%\Windows A11y Recorder` | Written by model setup and the model profiles window |
+| Model profiles | `analysis-models.json` in `%LOCALAPPDATA%\Windows A11y Recorder` | Written by model setup |
 | Microsoft Visual C++ x64 run time | Windows | llama.cpp's programs import `vcruntime140.dll`, `vcruntime140_1.dll` and `msvcp140.dll`; the installer runs Microsoft's redistributable when it is missing |
 | NVDA | Its own installation | Installed separately; not part of the recorder |
 
@@ -276,8 +276,8 @@ worker relies on router mode and presets.
 ## Model setup
 
 A window (`ModelSetupWindow`), opened from the installer's last page, from
-the first-start question, from Analysis, "Set up models...", and from the
-model profiles window.
+the first-start question, and from Analysis, "Set up models..." (and,
+until 2026-11-15, from the model profiles window).
 
 ### What it shows
 
@@ -355,9 +355,16 @@ to fit in the devices' memory (`--fit`, default on, in the
 [server README at b11607](https://github.com/ggml-org/llama.cpp/blob/b11607/tools/server/README.md)).
 How well that suits the RTX 3090 is not yet measured. The development PC's
 own profile keeps its measured `-ngl 99 -ncmoe 36`. Fixed layer counts can
-be set per profile in the model profiles window and compared there.
+be set per profile in the model profiles window and compared there
+(removed on 2026-11-15; the settings file can still be edited).
 
 ## Model profiles window
+
+Removed on 2026-11-15, with the Analysis menu's "Model profiles...":
+each project's settings choose its models, the Claude models with
+default settings and the project's key, and a local model is used with
+the settings model setup gave it; see [cloud models](cloud-models.md),
+"As built: Claude models in the project's settings". As it was built:
 
 Replaces "edit in Notepad" with an editor, keeping "Open the file in
 Notepad" and "Read the file again" for anything it does not cover:

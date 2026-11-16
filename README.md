@@ -676,9 +676,10 @@ the PC's graphics card and memory, offers Qwen3.6 and Gemma 4 models in
 several sizes, says how each compares with the card's memory, and downloads
 the chosen ones with their checksums checked. A model not in the list can be
 added from its Hugging Face address or from a file already on the PC. Model
-setup is on the Analysis menu afterwards, as "Set up models...", and the
-model profiles window edits each profile's server arguments and generation
-settings. Uninstalling keeps the recordings, the catalog and the models.
+setup is on the Analysis menu afterwards, as "Set up models...". Each
+project's settings, in the Project menu, choose its models: one set up on
+this PC, or Claude Opus 5.5, Sonnet 5.5 or Haiku 5.5 with the project's
+Anthropic API key. Uninstalling keeps the recordings, the catalog and the models.
 
 The installer is built on the development PC, which has the instrumented
 Chromium build, with Inno Setup 6.3 or later installed:

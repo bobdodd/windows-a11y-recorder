@@ -110,28 +110,30 @@ public static class AnthropicSettings
     ];
 
     /// <summary>
-    /// The API key already saved with a profile that sends to Anthropic,
-    /// still protected for this Windows user, and that profile's name, or
-    /// null where none has one. A new Claude profile can take it, so that
-    /// the key is pasted once (2026-11-15).
+    /// A project's profile for a Claude model offered: the model with the
+    /// recorder's defaults (the model's own effort, the output limit of
+    /// <see cref="DefaultMaxTokens"/>, and the model's prices), and the
+    /// project's API key, protected for this Windows user, or null where
+    /// the project has none (projects.md, "The project's models"; owner,
+    /// 2026-11-15: "Each selected model gets it's own profile for that
+    /// project, and has reasonable default values").
     /// </summary>
-    public static (string Profile, string ProtectedApiKey)? SavedKey(AnalysisSettings settings)
+    public static ModelProfile ProjectProfile(ClaudeModel model, string? protectedApiKey)
     {
-        ArgumentNullException.ThrowIfNull(settings);
-        return settings.Profiles.FirstOrDefault(profile => profile.SendsToAnthropic && !string.IsNullOrWhiteSpace(profile.ProtectedApiKey))
-            is { } found ? (found.Name, found.ProtectedApiKey!) : null;
-    }
-
-    /// <summary>
-    /// The first model offered with no profile for it yet, so that "Add a
-    /// Claude profile" starts on one not yet added, or the first where
-    /// every one has a profile.
-    /// </summary>
-    public static ClaudeModel FirstNotAdded(AnalysisSettings settings)
-    {
-        ArgumentNullException.ThrowIfNull(settings);
-        return Models.FirstOrDefault(model => !settings.Profiles.Any(profile =>
-            profile.SendsToAnthropic && string.Equals(profile.Model, model.Id, StringComparison.Ordinal))) ?? Models[0];
+        ArgumentNullException.ThrowIfNull(model);
+        return new ModelProfile(
+            model.Name,
+            EndpointPolicy.AnthropicEndpoint,
+            model.Id,
+            [ModelCapabilities.Text, ModelCapabilities.Image],
+            new ModelFile(null, null, null, null),
+            null,
+            GenerationSettings.Default with { MaxTokens = DefaultMaxTokens },
+            string.IsNullOrWhiteSpace(protectedApiKey) ? null : protectedApiKey)
+        {
+            Provider = ModelProviders.Anthropic,
+            Prices = model.Prices
+        };
     }
 
     /// <summary>The model the player offers with this ID, or null for another.</summary>
@@ -267,7 +269,7 @@ public sealed record ModelProfile(
 public sealed record LocalServerSettings(string Executable, int Port);
 
 /// <summary>
-/// The analysis settings file: the model profiles, the local server, and
+/// The analysis settings file: the models set up on this PC, the local server, and
 /// how many attempts a step has. Which profile is used for what is a
 /// project's setting, not this file's (projects.md, "The project's models",
 /// owner, 2026-11-15); the file's former "defaults" and "aiAnalysis" are
@@ -285,6 +287,23 @@ public sealed record AnalysisSettings(
 
     public ModelProfile? Profile(string name) =>
         Profiles.FirstOrDefault(profile => string.Equals(profile.Name, name, StringComparison.Ordinal));
+
+    /// <summary>
+    /// The models a project can choose from: first each Claude model the
+    /// recorder offers, as the project's own profile with the project's
+    /// API key, then the models set up on this PC (projects.md, "The
+    /// project's models"). A Claude profile in the settings file, from
+    /// before 2026-11-15, is not offered: a project's Claude models are its
+    /// own.
+    /// </summary>
+    public AnalysisSettings ForProject(string? protectedAnthropicKey)
+    {
+        var claude = AnthropicSettings.Models.Select(model => AnthropicSettings.ProjectProfile(model, protectedAnthropicKey)).ToList();
+        return this with
+        {
+            Profiles = [.. claude, .. Profiles.Where(profile => !profile.SendsToAnthropic && !claude.Any(own => own.Name == profile.Name))]
+        };
+    }
 
     /// <summary>
     /// "Limit the report to the browser while it is in front": while the

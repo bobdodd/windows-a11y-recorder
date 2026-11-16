@@ -353,7 +353,7 @@ public partial class MainWindow
         }
 
         var message = $"The settings of the project {name} were saved. Models: " +
-            AnalysisPlayer.ModelsLine(_analysisSettings, saved, ModelUses.All) + ".";
+            AnalysisPlayer.ModelsLine(saved.Choices(_analysisSettings), saved, ModelUses.All) + ".";
         ShowAnalysisStatus(message);
         _busy.AnnounceCompleted(message);
         return true;
@@ -371,10 +371,10 @@ public partial class MainWindow
         }
 
         AnalysisModelsTextBlock.Text = "Models, from the project's settings: " +
-            AnalysisPlayer.ModelsLine(_analysisSettings, models, ModelUses.All) + ".";
+            AnalysisPlayer.ModelsLine(models.Choices(_analysisSettings), models, ModelUses.All) + ".";
         AnalysisModelsTextBlock.Visibility = Visibility.Visible;
         ChecksModelsTextBlock.Text = "Models for checks, from the project's settings: " +
-            AnalysisPlayer.ModelsLine(_analysisSettings, models, [ModelUses.TextChecks, ModelUses.VisionChecks]) +
+            AnalysisPlayer.ModelsLine(models.Choices(_analysisSettings), models, [ModelUses.TextChecks, ModelUses.VisionChecks]) +
             ". No check uses a model yet.";
     }
 }

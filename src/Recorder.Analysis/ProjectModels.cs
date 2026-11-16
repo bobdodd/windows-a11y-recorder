@@ -43,6 +43,19 @@ public sealed record ProjectModels(string? Report, string? TextChecks, string? V
 {
     public static ProjectModels None { get; } = new(null, null, null);
 
+    /// <summary>
+    /// The project's Anthropic API key, protected for this Windows user,
+    /// or null for none. A Claude model chosen for a use needs it.
+    /// </summary>
+    public string? ProtectedAnthropicKey { get; init; }
+
+    /// <summary>The models the project can choose from, its Claude models with its key.</summary>
+    public AnalysisSettings Choices(AnalysisSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        return settings.ForProject(ProtectedAnthropicKey);
+    }
+
     /// <summary>The profile chosen for a use, or null for no model.</summary>
     public string? For(string use) => use switch
     {
@@ -90,19 +103,26 @@ public sealed record ProjectModels(string? Report, string? TextChecks, string? V
 
     /// <summary>
     /// Why a profile cannot be used for a use, or null when it can: it is
-    /// not in the analysis settings, or cannot take what the use needs.
+    /// not one the project can choose from, cannot take what the use
+    /// needs, or is a Claude model and the project has no API key. The
+    /// settings are the project's choices, <see cref="Choices"/>.
     /// </summary>
     public static string? Problem(AnalysisSettings settings, string use, string profileName)
     {
         ArgumentNullException.ThrowIfNull(settings);
         if (settings.Profile(profileName) is not { } profile)
         {
-            return $"The project's model for {ModelUses.Name(use)}, \"{profileName}\", is not in the model profiles.";
+            return $"The project's model for {ModelUses.Name(use)}, \"{profileName}\", is not offered on this PC.";
         }
 
         var capability = ModelUses.Capability(use);
-        return profile.Supports(capability)
-            ? null
-            : $"The project's model for {ModelUses.Name(use)}, \"{profileName}\", cannot take {(capability == ModelCapabilities.Image ? "images" : "text")}.";
+        if (!profile.Supports(capability))
+        {
+            return $"The project's model for {ModelUses.Name(use)}, \"{profileName}\", cannot take {(capability == ModelCapabilities.Image ? "images" : "text")}.";
+        }
+
+        return profile.SendsToAnthropic && profile.ProtectedApiKey is null
+            ? $"The project's model for {ModelUses.Name(use)} is {profileName}, but no Anthropic API key is saved in the project's settings."
+            : null;
     }
 }

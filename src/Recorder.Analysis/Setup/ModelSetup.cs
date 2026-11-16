@@ -218,7 +218,7 @@ public static class ModelSetup
 
     /// <summary>
     /// The settings without the profile. A project whose settings name it
-    /// keeps the name, shown as not in the model profiles, and no model of
+    /// keeps the name, shown as not offered on this PC, and no model of
     /// that name is asked.
     /// </summary>
     public static string WithoutProfile(string? text, string name)

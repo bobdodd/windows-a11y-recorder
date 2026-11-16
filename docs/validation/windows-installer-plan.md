@@ -132,6 +132,9 @@ and images.
 
 ## Test 5: the profiles in the model profiles window
 
+Removed on 2026-11-15 with the window; kept as the record of what was
+checked.
+
 1. Close the "Set up analysis models" window.
 2. Open Analysis, "Model profiles...".
 3. Choose each of the two profiles in the list.

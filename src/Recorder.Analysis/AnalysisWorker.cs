@@ -329,17 +329,22 @@ public sealed class AnalysisWorker
             throw new StepFailedException(NoModel(task, request.Use)!);
         }
 
-        if (await Catalog.ProjectModelsOfTaskAsync(task.TaskId, cancellationToken).ConfigureAwait(false) is { } now && now.For(request.Use) is null)
+        var now = await Catalog.ProjectModelsOfTaskAsync(task.TaskId, cancellationToken).ConfigureAwait(false);
+        if (now is not null && now.For(request.Use) is null)
         {
             throw new StepFailedException($"The project's settings now choose no model for {ModelUses.Name(request.Use)}, so no model was asked.");
         }
 
+        // The models the project can choose from, its Claude models with
+        // the API key saved in its settings now (projects.md, "The
+        // project's models").
+        var choices = (now ?? ProjectModels.None).Choices(_settings);
         if (_trial is { } trial)
         {
-            return await TrialStepAsync(task, stepKey, request, trial, cancellationToken).ConfigureAwait(false);
+            return await TrialStepAsync(task, stepKey, request, trial, choices, cancellationToken).ConfigureAwait(false);
         }
 
-        var profile = StepProfile(task, request);
+        var profile = StepProfile(task, request, choices);
         var body = ChatRequest.Build(profile, request);
         var inputSha = ChatRequest.Sha256(body);
         var accepted = await Catalog.AcceptedStepAsync(task.TaskId, stepKey, request.Sections, cancellationToken).ConfigureAwait(false);
@@ -931,7 +936,7 @@ public sealed class AnalysisWorker
         return new AttemptResult(attemptId, response, failure, claims, output);
     }
 
-    private ModelProfile StepProfile(AnalysisTask task, ModelRequest request)
+    private static ModelProfile StepProfile(AnalysisTask task, ModelRequest request, AnalysisSettings choices)
     {
         var capability = request.Capability;
         if (QueuedProfile(task, request.Use, capability) is not { } profileName)
@@ -941,19 +946,24 @@ public sealed class AnalysisWorker
                 : $"No model was chosen for {ModelUses.Name(request.Use)} when the task was queued.");
         }
 
-        return ChosenProfile(profileName, request);
+        return ChosenProfile(profileName, request, choices);
     }
 
-    // A profile of the analysis settings for a step, by name, without the
+    // A model the project can choose from for a step, by name, without the
     // sampling options the step leaves out.
-    private ModelProfile ChosenProfile(string profileName, ModelRequest request)
+    private static ModelProfile ChosenProfile(string profileName, ModelRequest request, AnalysisSettings choices)
     {
         var capability = request.Capability;
-        var profile = _settings.Profile(profileName) ??
-            throw new StepFailedException($"The model profile \"{profileName}\" is not in the analysis settings.");
+        var profile = choices.Profile(profileName) ??
+            throw new StepFailedException($"The model \"{profileName}\" is not offered on this PC.");
         if (!profile.Supports(capability))
         {
-            throw new StepFailedException($"The model profile \"{profileName}\" cannot take {capability}.");
+            throw new StepFailedException($"The model \"{profileName}\" cannot take {capability}.");
+        }
+
+        if (profile.SendsToAnthropic && profile.ProtectedApiKey is null)
+        {
+            throw new StepFailedException($"No Anthropic API key is saved in the project's settings, so {profileName} was not asked.");
         }
 
         // The profile's sampling options this step leaves out, such as the
@@ -1029,6 +1039,7 @@ public sealed class AnalysisWorker
         string stepKey,
         ModelRequest request,
         TrialPlan trial,
+        AnalysisSettings choices,
         CancellationToken cancellationToken)
     {
         if (stepKey != trial.StepKey)
@@ -1038,8 +1049,8 @@ public sealed class AnalysisWorker
                     $"Step {stepKey} has no accepted attempt in this task, so the trial cannot reach step {trial.StepKey}.");
         }
 
-        var given = StepProfile(task, request);
-        var chosen = trial.Profile is { } name ? ChosenProfile(name, request) : given;
+        var given = StepProfile(task, request, choices);
+        var chosen = trial.Profile is { } name ? ChosenProfile(name, request, choices) : given;
 
         // Anthropic takes no temperature, seed, thinking switch or sampling
         // options, and has no one-line grammar; only the output limit may

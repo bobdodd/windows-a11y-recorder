@@ -364,7 +364,7 @@ internal sealed class ModelSetupWindow : Window
     // A model not in the list starts with the list's settings: flash
     // attention, a 32,768-token context, and the layers placed by
     // llama.cpp's fit; 8,192 output tokens, temperature 0, seed 1, no
-    // thinking. All can be changed in the model profiles window.
+    // thinking: the defaults a project uses it with.
     private const string DefaultArguments = "-fa on -c 32768";
     private static readonly GenerationSettings DefaultGeneration = new(8192, 0, 1, false);
 
@@ -388,9 +388,8 @@ internal sealed class ModelSetupWindow : Window
     private void Done(IReadOnlyList<string> added)
     {
         _progress.Value = _progress.Maximum;
-        Say($"Added {(added.Count == 1 ? "the profile" : "the profiles")} {string.Join(" and ", added.Select(item => $"\"{item}\""))}. " +
-            "A project uses a profile once it is chosen in the project's settings, from the Project menu. " +
-            "Profiles can be changed in the model profiles window.");
+        Say($"Set up {string.Join(" and ", added.Select(item => $"\"{item}\""))} on this PC. " +
+            "A project uses it once it is chosen in the project's settings, from the Project menu.");
     }
 
     // Each start button runs one job at a time, with the others and the

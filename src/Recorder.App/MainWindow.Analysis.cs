@@ -16,7 +16,7 @@ namespace Recorder.App;
 // The player's analysis controls (analysis-runner.md, "The player", and
 // "Decisions on the player (2026-10-13)"): the Analysis menu, the Analysis
 // tab with the session's tasks, the unread count, the notifications, the
-// reading view, the capability description, and the model profiles. All of
+// reading view and the capability description. All of
 // it works with the mouse alone, every target at least 44 by 44 pixels.
 public partial class MainWindow
 {
@@ -94,11 +94,14 @@ public partial class MainWindow
         _ = ReadAnalysisAsync();
     }
 
+    // The models the open recording's project can choose from: the Claude
+    // models with its API key, and the models set up on this PC.
+    private AnalysisSettings ProjectChoices => (_openProjectModels ?? ProjectModels.None).Choices(_analysisSettings);
+
     // The open recording's project's model for report analysis, where it
-    // names a profile that can take text, else null (projects.md, "The
-    // project's models").
+    // can be used, else null (projects.md, "The project's models").
     private string? ReportProfile =>
-        _openProjectModels?.Report is { } name && ProjectModels.Problem(_analysisSettings, ModelUses.Report, name) is null ? name : null;
+        _openProjectModels?.Report is { } name && ProjectModels.Problem(ProjectChoices, ModelUses.Report, name) is null ? name : null;
 
     private void UpdateAnalysisControls()
     {
@@ -120,7 +123,7 @@ public partial class MainWindow
         QueueAndroidProjectReportButton.IsEnabled = open && _openProjectId is not null;
         AndroidProjectReportMenuItem.IsEnabled = QueueAndroidProjectReportButton.IsEnabled;
         // Vision is all on the report analysis model, so it must take images.
-        VisionMenuItem.IsEnabled = report && _analysisSettings.Profile(ReportProfile!)?.Supports(ModelCapabilities.Image) == true;
+        VisionMenuItem.IsEnabled = report && ProjectChoices.Profile(ReportProfile!)?.Supports(ModelCapabilities.Image) == true;
         AnalysisProjectSettingsButton.IsEnabled = open && _openProjectId is not null;
         CapabilitiesMenuItem.IsEnabled = open;
     }
@@ -346,7 +349,7 @@ public partial class MainWindow
             return null;
         }
 
-        if (ProjectModels.Problem(_analysisSettings, ModelUses.Report, name) is { } problem)
+        if (ProjectModels.Problem(models.Choices(_analysisSettings), ModelUses.Report, name) is { } problem)
         {
             ShowAnalysisStatus($"{AnalysisPlayer.KindName(kind)} was not queued. {problem} Choose another in Project settings.");
             return null;
@@ -360,7 +363,7 @@ public partial class MainWindow
         profiles.Count == 0
             ? $"{AnalysisPlayer.KindName(kind)} queued with no model."
             : $"{AnalysisPlayer.KindName(kind)} queued. " + AnalysisPlayer.TaskModelsLine(
-                profiles.ToDictionary(pair => pair.Key, pair => _analysisSettings.Profile(pair.Value) is { } profile ? AnalysisPlayer.ProfileLabel(profile) : pair.Value),
+                profiles.ToDictionary(pair => pair.Key, pair => ProjectChoices.Profile(pair.Value) is { } profile ? AnalysisPlayer.ProfileLabel(profile) : pair.Value),
                 aiAnalysis: true);
 
     // A recording's task, queued with the project's models as they are now.
@@ -483,7 +486,7 @@ public partial class MainWindow
             }
 
             var name = _openProjectModels!.Report!;
-            var profile = _analysisSettings.Profile(name)!;
+            var profile = ProjectChoices.Profile(name)!;
             if (!profile.Supports(ModelCapabilities.Image))
             {
                 ShowAnalysisStatus($"Summary with vision was not queued: the project's model for report analysis, {AnalysisPlayer.ProfileLabel(profile)}, cannot take images. " +
@@ -672,13 +675,6 @@ public partial class MainWindow
         {
             ShowAnalysisStatus($"The participant's capabilities could not be read or saved: {exception.Message}");
         }
-    }
-
-    private void ModelProfilesMenuItem_Click(object sender, RoutedEventArgs e)
-    {
-        new ModelProfilesWindow(this, AnalysisSettingsFile.DefaultPath, AppContext.BaseDirectory).ShowDialog();
-        ReadAnalysisSettings();
-        UpdateAnalysisControls();
     }
 
     // "Limit the report to the browser while it is in front", saved in

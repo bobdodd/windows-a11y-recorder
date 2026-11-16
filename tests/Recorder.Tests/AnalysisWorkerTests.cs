@@ -171,7 +171,8 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
     {
         await using var connection = await fixture.Server.DataSource.OpenConnectionAsync(Token);
         await using (var project = new NpgsqlCommand(
-            "INSERT INTO projects (name, report_model, text_checks_model, vision_checks_model) VALUES ($1, 'This PC', 'This PC', 'This PC') " +
+            "INSERT INTO projects (name, report_model, text_checks_model, vision_checks_model, anthropic_api_key) " +
+            "VALUES ($1, 'This PC', 'This PC', 'This PC', 'protected') " +
             "ON CONFLICT (name) DO NOTHING", connection))
         {
             project.Parameters.AddWithValue(projectName);
@@ -1041,7 +1042,7 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         var missing = await Assert.ThrowsAsync<StepFailedException>(() =>
             new AnalysisWorker(catalog, settings, [new StandInKind("visit-1")], endpoint, options: Fast)
                 .TrialAsync(task, "visit-1", new Dictionary<string, double>(), Token, profile: "Elsewhere"));
-        Assert.Equal("The model profile \"Elsewhere\" is not in the analysis settings.", missing.Message);
+        Assert.Equal("The model \"Elsewhere\" is not offered on this PC.", missing.Message);
     }
 
     [Fact]
@@ -1388,7 +1389,7 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         await new AnalysisWorker(catalog, SettingsWith(), [kind], new StandInEndpoint(), options: Fast).RunUntilEmptyAsync(Token);
 
         Assert.Equal("No model profile was chosen for image when the task was queued.", await FailureAsync(missing));
-        Assert.Equal("The model profile \"This PC\" cannot take image.", await FailureAsync(noImage));
+        Assert.Equal("The model \"This PC\" cannot take image.", await FailureAsync(noImage));
         Assert.Equal("The task was queued for version 2 of \"stand-in\"; this worker has version 1.", await FailureAsync(oldVersion));
     }
 
@@ -1487,21 +1488,8 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         }
     }
 
-    // A profile that sends to Anthropic, as the settings file gives one.
-    private static ModelProfile Claude() =>
-        new ModelProfile(
-            "Claude",
-            EndpointPolicy.AnthropicEndpoint,
-            "claude-opus-5-5",
-            [ModelCapabilities.Text, ModelCapabilities.Image],
-            new ModelFile(null, null, null, null),
-            null,
-            GenerationSettings.Default with { MaxTokens = AnthropicSettings.DefaultMaxTokens },
-            "protected")
-        {
-            Provider = ModelProviders.Anthropic,
-            Effort = "high"
-        };
+    // The project's own Claude Opus 5.5, with the project's key.
+    private const string Opus = "Claude Opus 5.5";
 
     private static ModelResponse ClaudeAnswer(string reference, string stop = "end_turn") =>
         StandInEndpoint.Valid(reference, stop) with { RequestId = "req_011", ResponseModel = "claude-opus-5-5" };
@@ -1510,14 +1498,14 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
     public async Task A_Claude_step_is_sent_as_a_messages_request_and_records_the_service_and_its_answer()
     {
         var catalog = await CatalogAsync();
-        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text("Claude"), cancellationToken: Token);
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(Opus), cancellationToken: Token);
         var endpoint = new StandInEndpoint { Build = AnthropicMessages.ServerBuild, Answer = (_, _, _) => Task.FromResult(ClaudeAnswer("E1")) };
 
-        await new AnalysisWorker(catalog, SettingsWith(3, Claude()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+        await new AnalysisWorker(catalog, SettingsWith(3), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
 
         Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
         // Nothing is loaded or unloaded for a model Anthropic serves.
-        Assert.Equal(["complete Claude"], endpoint.Calls);
+        Assert.Equal(["complete Claude Opus 5.5"], endpoint.Calls);
         using var body = JsonDocument.Parse(endpoint.Bodies.Single());
         Assert.Equal("claude-opus-5-5", body.RootElement.GetProperty("model").GetString());
         Assert.Equal("Describe.", body.RootElement.GetProperty("system").GetString());
@@ -1530,7 +1518,8 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Assert.Equal("end_turn", attempt["finish_reason"]);
         using var parameters = JsonDocument.Parse((string)attempt["parameters"]!);
         Assert.Equal("anthropic", parameters.RootElement.GetProperty("provider").GetString());
-        Assert.Equal("high", parameters.RootElement.GetProperty("effort").GetString());
+        // The project's Claude models take the model's own effort.
+        Assert.Equal(JsonValueKind.Null, parameters.RootElement.GetProperty("effort").ValueKind);
         Assert.Equal(32000, parameters.RootElement.GetProperty("max_tokens").GetInt32());
         Assert.False(parameters.RootElement.TryGetProperty("seed", out _));
         var service = Assert.Single(await RowsAsync(
@@ -1545,7 +1534,7 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
     public async Task A_Claude_answer_that_fails_its_checks_is_asked_for_again_with_the_same_request()
     {
         var catalog = await CatalogAsync();
-        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text("Claude"), cancellationToken: Token);
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(Opus), cancellationToken: Token);
         var calls = 0;
         var endpoint = new StandInEndpoint
         {
@@ -1558,7 +1547,7 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
             })
         };
 
-        await new AnalysisWorker(catalog, SettingsWith(3, Claude()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+        await new AnalysisWorker(catalog, SettingsWith(3), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
 
         Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
         Assert.Equal(3, calls);
@@ -1574,10 +1563,10 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
     public async Task A_Claude_answer_that_fails_at_every_attempt_fails_at_the_limit()
     {
         var catalog = await CatalogAsync();
-        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text("Claude"), cancellationToken: Token);
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(Opus), cancellationToken: Token);
         var endpoint = new StandInEndpoint { Build = AnthropicMessages.ServerBuild, Answer = (_, _, _) => Task.FromResult(ClaudeAnswer("E7")) };
 
-        await new AnalysisWorker(catalog, SettingsWith(3, Claude()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+        await new AnalysisWorker(catalog, SettingsWith(3), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
 
         Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
         Assert.Contains("failed 3 times, the limit", await FailureAsync(task), StringComparison.Ordinal);
@@ -1588,14 +1577,14 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
     public async Task A_Claude_refusal_fails_the_step_at_once()
     {
         var catalog = await CatalogAsync();
-        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text("Claude"), cancellationToken: Token);
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(Opus), cancellationToken: Token);
         var endpoint = new StandInEndpoint
         {
             Build = AnthropicMessages.ServerBuild,
             Answer = (_, _, _) => Task.FromResult(ClaudeAnswer("E1", "refusal") with { Content = "I can't help with that." })
         };
 
-        await new AnalysisWorker(catalog, SettingsWith(3, Claude()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+        await new AnalysisWorker(catalog, SettingsWith(3), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
 
         Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
         Assert.Contains("Claude refused to answer", await FailureAsync(task), StringComparison.Ordinal);
@@ -1608,12 +1597,12 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
     {
         var catalog = await CatalogAsync();
         var recording = await RecordingAsync();
-        var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text("Claude"), cancellationToken: Token);
+        var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(Opus), cancellationToken: Token);
         var endpoint = new StandInEndpoint { Build = AnthropicMessages.ServerBuild, Answer = (_, _, _) => Task.FromResult(ClaudeAnswer("E1")) };
-        await new AnalysisWorker(catalog, SettingsWith(3, Claude()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+        await new AnalysisWorker(catalog, SettingsWith(3), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
 
-        var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text("Claude"), rerunOfTaskId: first, cancellationToken: Token);
-        await new AnalysisWorker(catalog, SettingsWith(3, Claude()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+        var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(Opus), rerunOfTaskId: first, cancellationToken: Token);
+        await new AnalysisWorker(catalog, SettingsWith(3), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
 
         Assert.Equal(AnalysisTaskStates.Done, await StateAsync(again));
         Assert.Single(endpoint.Calls);
@@ -1629,17 +1618,16 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
     {
         var catalog = await CatalogAsync();
         var recording = await RecordingAsync();
-        var priced = Claude() with { Prices = new ServicePrices(4, 20) };
         var calls = 0;
         var endpoint = new StandInEndpoint
         {
             Build = AnthropicMessages.ServerBuild,
             Answer = (_, _, _) => Task.FromResult(++calls == 1 ? ClaudeAnswer("E7") : ClaudeAnswer("E1"))
         };
-        var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text("Claude"), cancellationToken: Token);
-        await new AnalysisWorker(catalog, SettingsWith(3, priced), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
-        var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text("Claude"), rerunOfTaskId: first, cancellationToken: Token);
-        await new AnalysisWorker(catalog, SettingsWith(3, priced), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+        var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(Opus), cancellationToken: Token);
+        await new AnalysisWorker(catalog, SettingsWith(3), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+        var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(Opus), rerunOfTaskId: first, cancellationToken: Token);
+        await new AnalysisWorker(catalog, SettingsWith(3), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
 
         var usage = await catalog.ServiceUsageAsync(recording, Token);
 
@@ -1654,17 +1642,23 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
     }
 
     [Fact]
-    public async Task A_Claude_task_without_prices_has_tokens_and_no_cost()
+    public async Task A_Claude_model_is_not_asked_while_the_project_has_no_API_key()
     {
         var catalog = await CatalogAsync();
-        var recording = await RecordingAsync();
-        var task = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text("Claude"), cancellationToken: Token);
+        var recording = await RecordingAsync(projectName: "No key");
+        await using (var connection = await fixture.Server.DataSource.OpenConnectionAsync(Token))
+        await using (var command = new NpgsqlCommand("UPDATE projects SET anthropic_api_key = NULL WHERE name = 'No key'", connection))
+        {
+            await command.ExecuteNonQueryAsync(Token);
+        }
+
+        var task = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(Opus), cancellationToken: Token);
         var endpoint = new StandInEndpoint { Build = AnthropicMessages.ServerBuild, Answer = (_, _, _) => Task.FromResult(ClaudeAnswer("E1")) };
-        await new AnalysisWorker(catalog, SettingsWith(3, Claude()), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+        await new AnalysisWorker(catalog, SettingsWith(3), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
 
-        var usage = (await catalog.ServiceUsageAsync(recording, Token))[task];
-
-        Assert.Equal(new ServiceUsage(1, 120, 40, null, 0), usage);
+        Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
+        Assert.Empty(endpoint.Calls);
+        Assert.Contains("No Anthropic API key is saved in the project's settings, so Claude Opus 5.5 was not asked.", await FailureAsync(task), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1673,15 +1667,15 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         var catalog = await CatalogAsync();
         var recording = await RecordingAsync();
         var local = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), cancellationToken: Token);
-        var cloud = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text("Claude"), cancellationToken: Token);
+        var cloud = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(Opus), cancellationToken: Token);
         var endpoint = new StandInEndpoint();
 
-        await new AnalysisWorker(catalog, SettingsWith(3, Profile("This PC", "qwen"), Claude()), [new StandInKind("visit-1")], endpoint, options: Fast)
+        await new AnalysisWorker(catalog, SettingsWith(3, Profile("This PC", "qwen")), [new StandInKind("visit-1")], endpoint, options: Fast)
             .RunUntilEmptyAsync(Token);
 
         Assert.Equal(AnalysisTaskStates.Done, await StateAsync(local));
         Assert.Equal(AnalysisTaskStates.Done, await StateAsync(cloud));
-        Assert.Equal(["load This PC", "complete This PC", "complete Claude", "unload This PC"], endpoint.Calls);
+        Assert.Equal(["load This PC", "complete This PC", "complete Claude Opus 5.5", "unload This PC"], endpoint.Calls);
     }
 
     // A project's models (projects.md, "The project's models"): no model
@@ -1772,7 +1766,7 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         var project = (await catalog.ProjectOfAsync(recording, Token))!.Value.ProjectId;
         Assert.Equal(ProjectModels.None, await catalog.ProjectModelsAsync(project, Token));
 
-        var chosen = new ProjectModels("Claude Opus 5.5", null, "This PC, with images");
+        var chosen = new ProjectModels("Claude Opus 5.5", null, "This PC, with images") { ProtectedAnthropicKey = "protected-key" };
         Assert.True(await catalog.SaveProjectModelsAsync(project, chosen, Token));
         Assert.Equal(chosen, await catalog.ProjectModelsAsync(project, Token));
         Assert.Null(await catalog.ProjectModelsAsync(Guid.NewGuid(), Token));

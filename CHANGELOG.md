@@ -8,13 +8,19 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
-### Claude profiles share the saved key
+### Claude models in the project's settings
 
-- "Add a Claude profile..." can leave the key box empty to use the key
-  already saved with another Claude profile, so Claude Sonnet 5.5 and
-  Claude Haiku 5.5 can be added beside Claude Opus 5.5 without pasting
-  the key again, and chosen in a project's settings. The model list
-  starts on the first model not yet added.
+- Each project's model lists offer Claude Opus 5.5, Claude Sonnet 5.5
+  and Claude Haiku 5.5 with default settings (the model's own effort,
+  32,000 output tokens, Anthropic's prices), then the models set up on
+  this PC. Choosing one needs only the project's Anthropic API key,
+  pasted once into the project's settings and kept protected for the
+  Windows user (migration 0046).
+- The Model profiles window, "Add a Claude profile..." and "Check the
+  profile" are removed. Claude profiles in the analysis settings file
+  are no longer read. See
+  [cloud models](docs/architecture/cloud-models.md), "As built: Claude
+  models in the project's settings".
 
 ### The project's models
 

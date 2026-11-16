@@ -115,7 +115,7 @@ those in place, you will use the settings I choose."
   Android summary. The model for text-based checks, checks that ask a
   model about text, such as an item's name. The model for vision-based
   checks, checks that ask a model about a picture, such as an image of
-  text. Each is a model profile, by name, or no model. No model means
+  text. Each is a model, by name, or no model. No model means
   none is asked, cloud or local, and what needs one is not done: a
   summary cannot be queued, and a check that needs one is listed as not
   run.
@@ -123,8 +123,8 @@ those in place, you will use the settings I choose."
   `text_checks_model` and `vision_checks_model` to `projects`, each the
   profile's name or null for no model. Every project, the ones made
   before and every new one, starts with no model for each, so nothing
-  is sent to a model until one is chosen. A name no profile has any
-  longer is kept, shown as "(not in the model profiles)", and not used.
+  is sent to a model until one is chosen. A name no model has any
+  longer is kept, shown as "(not offered on this PC)", and not used.
 - **Where they are chosen.** "Project settings..." in the Project menu,
   for the open recording's project, else the project chosen for new
   recordings; "Project settings..." in the Analysis tab, for the open
@@ -161,6 +161,13 @@ those in place, you will use the settings I choose."
   "Use AI in this report", and the default profiles for text and for
   images in the model profiles window and the settings file. See
   `analysis-runner.md`, "Turning AI analysis off".
+- **The models offered (2026-11-15).** Each list offers Claude Opus 5.5,
+  Claude Sonnet 5.5 and Claude Haiku 5.5, with default settings and no
+  profile to make, then the models set up on this PC. The window has the
+  project's Anthropic API key, kept protected in the catalog, which a
+  Claude model needs; the Model profiles window is gone. See
+  [cloud models](cloud-models.md), "As built: Claude models in the
+  project's settings".
 - **The reports.** A report made with a model says so, and whether the
   model was in the cloud or on this PC, as before (`android-report.md`,
   "Cloud or local"). One made without says nothing about AI.

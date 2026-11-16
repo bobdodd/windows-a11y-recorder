@@ -260,7 +260,7 @@ public static class AnalysisPlayer
         if (saved is not null && !choices.Any(choice => choice.Item1 == saved))
         {
             choices.Add((saved, settings.Profile(saved) is null
-                ? $"{saved} (not in the model profiles)"
+                ? $"{saved} (not offered on this PC)"
                 : $"{saved} (cannot take images)"));
         }
 
@@ -277,7 +277,7 @@ public static class AnalysisPlayer
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(models);
         return string.Join("; ", uses.Select(use => $"{ModelUses.Name(use)}, " +
-            (models.For(use) is not { } name ? "no model" : settings.Profile(name) is { } profile ? ProfileLabel(profile) : $"{name} (not in the model profiles)")));
+            (models.For(use) is not { } name ? "no model" : settings.Profile(name) is { } profile ? ProfileLabel(profile) : $"{name} (not offered on this PC)")));
     }
 
     /// <summary>

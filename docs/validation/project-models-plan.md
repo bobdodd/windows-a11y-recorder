@@ -64,9 +64,12 @@ test 5 uses a model, and only until the project is set to no model.
 - It has three lists: "Model for report analysis, the summaries:",
   "Model for text-based checks:" and "Model for vision-based checks,
   which must take images:", each showing "No model".
-- The vision list holds "No model" and only profiles that take images,
-  such as "This PC, with images" and "Claude Opus 5.5 (sends to
-  Anthropic)", not "This PC".
+- The vision list holds "No model", then "Claude Opus 5.5 (sends to
+  Anthropic)", "Claude Sonnet 5.5 (sends to Anthropic)" and "Claude
+  Haiku 5.5 (sends to Anthropic)", then only the models on this PC that
+  take images, such as "This PC, with images", not "This PC".
+- Below the lists: "Anthropic API key, for the Claude models:", with a
+  line saying whether a key is saved for this project.
 - The text above the lists wraps; no horizontal scrollbar.
 
 ## Test 4: choosing a model for report analysis
@@ -115,12 +118,19 @@ test 5 uses a model, and only until the project is set to no model.
 - Its three lists show that project's own models, "No model" unless you
   have chosen one for it.
 
-## Test 7: the model profiles window has no defaults
+## Test 7: Claude Haiku 5.5 with the project's key
 
-1. Choose "Model profiles..." from the "Analysis" menu.
-2. Take a screenshot of the whole screen, then close the window.
+Changed on 2026-11-15, when the Model profiles window was removed.
+
+1. Choose "Project settings..." from the "Project" menu.
+2. In "Model for report analysis", choose "Claude Haiku 5.5 (sends to
+   Anthropic)". If the window says no key is saved for this project,
+   paste your Anthropic API key into the key box.
+3. Choose "Save", and take a screenshot of the whole screen.
+4. Open the "Analysis" menu, and take a screenshot of the whole screen.
 
 **On screen:**
-- There is no "Default for text:", no "Default for images:" and no
-  "Save the defaults".
-- The profiles are listed as before.
+- The status line names "report analysis, Claude Haiku 5.5".
+- "Queue summary" and "Queue Android summary" can be chosen.
+- There is no "Model profiles..." in the menu; "Set up models..." is
+  there.

@@ -156,30 +156,53 @@ public sealed class ClaudeProfileTests
     }
 
     [Fact]
-    public void A_new_Claude_profile_can_take_the_key_saved_with_another()
+    public void A_projects_Claude_profile_has_the_defaults_a_profile_written_with_them_is_read_with()
     {
-        var (local, _) = AnalysisSettingsFile.Parse(LocalSettings);
-        Assert.Null(AnthropicSettings.SavedKey(local));
+        foreach (var model in AnthropicSettings.Models)
+        {
+            var written = ModelSetup.ClaudeProfile(model.Name, model.Id, null, AnthropicSettings.DefaultMaxTokens, model.Prices, "protected-key");
+            var (read, problems) = AnalysisSettingsFile.Parse(ModelSetup.WithClaudeProfile(LocalSettings, written));
+            Assert.Empty(problems);
+            var own = AnthropicSettings.ProjectProfile(model, "protected-key");
+            var expected = read.Profile(model.Name)!;
 
-        var (settings, problems) = AnalysisSettingsFile.Parse(ModelSetup.WithClaudeProfile(LocalSettings, Opus()));
-        Assert.Empty(problems);
-        Assert.Equal(("Claude Opus 5.5", "protected-key"), AnthropicSettings.SavedKey(settings));
+            Assert.Equal(expected.Endpoint, own.Endpoint);
+            Assert.Equal(expected.Model, own.Model);
+            Assert.Equal(expected.Capabilities, own.Capabilities);
+            Assert.Equal(expected.Generation, own.Generation);
+            Assert.Equal(expected.File, own.File);
+            Assert.Equal(expected.Provider, own.Provider);
+            Assert.Equal(expected.Prices, own.Prices);
+            Assert.Null(own.Effort);
+            Assert.Null(own.Local);
+            Assert.Equal("protected-key", own.ProtectedApiKey);
+        }
     }
 
     [Fact]
-    public void Add_a_Claude_profile_starts_on_the_first_model_with_no_profile_yet()
+    public void A_project_chooses_from_the_Claude_models_with_its_key_then_the_models_on_this_PC()
     {
-        var (local, _) = AnalysisSettingsFile.Parse(LocalSettings);
-        Assert.Equal("claude-opus-5-5", AnthropicSettings.FirstNotAdded(local).Id);
-
-        var withOpus = ModelSetup.WithClaudeProfile(LocalSettings, Opus());
-        Assert.Equal("claude-sonnet-5-5", AnthropicSettings.FirstNotAdded(AnalysisSettingsFile.Parse(withOpus).Settings).Id);
-
-        var all = AnthropicSettings.Models.Skip(1).Aggregate(withOpus, (text, model) =>
-            ModelSetup.WithClaudeProfile(text, ModelSetup.ClaudeProfile(model.Name, model.Id, null, 32000, model.Prices, "protected-key")));
-        var (settings, problems) = AnalysisSettingsFile.Parse(all);
+        var (settings, problems) = AnalysisSettingsFile.Parse(ModelSetup.WithClaudeProfile(LocalSettings, Opus()));
         Assert.Empty(problems);
-        Assert.Equal("claude-opus-5-5", AnthropicSettings.FirstNotAdded(settings).Id);
+
+        var choices = settings.ForProject("project-key");
+
+        Assert.Equal(["Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Haiku 5.5", "Qwen"], choices.Profiles.Select(profile => profile.Name));
+        Assert.All(choices.Profiles.Take(3), profile => Assert.Equal("project-key", profile.ProtectedApiKey));
+        Assert.All(settings.ForProject(null).Profiles.Take(3), profile => Assert.Null(profile.ProtectedApiKey));
+    }
+
+    [Fact]
+    public void A_Claude_model_cannot_be_used_until_the_project_has_a_key()
+    {
+        var (settings, _) = AnalysisSettingsFile.Parse(LocalSettings);
+        var models = ProjectModels.None.With(ModelUses.Report, "Claude Haiku 5.5");
+
+        Assert.Equal(
+            "The project's model for report analysis is Claude Haiku 5.5, but no Anthropic API key is saved in the project's settings.",
+            ProjectModels.Problem(models.Choices(settings), ModelUses.Report, "Claude Haiku 5.5"));
+        Assert.Null(ProjectModels.Problem((models with { ProtectedAnthropicKey = "project-key" }).Choices(settings), ModelUses.Report, "Claude Haiku 5.5"));
+        Assert.Null(ProjectModels.Problem((models with { ProtectedAnthropicKey = "project-key" }).Choices(settings), ModelUses.VisionChecks, "Claude Haiku 5.5"));
     }
 
     [Fact]
