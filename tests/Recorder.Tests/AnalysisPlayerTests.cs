@@ -162,41 +162,11 @@ public sealed class AnalysisPlayerTests
     }
 
     [Fact]
-    public void SettingADefaultKeepsTheRestOfTheFile()
-    {
-        var settings = """{"version":1,"maxAttempts":4,"profiles":[{"name":"This PC"}],"defaults":{"image":"Vision"}}""";
-
-        var changed = AnalysisPlayer.WithDefault(settings, ModelCapabilities.Text, "This PC");
-        var removed = AnalysisPlayer.WithDefault(changed, ModelCapabilities.Image, null);
-
-        using var document = JsonDocument.Parse(removed);
-        Assert.Equal(4, document.RootElement.GetProperty("maxAttempts").GetInt32());
-        Assert.Equal("This PC", document.RootElement.GetProperty("profiles")[0].GetProperty("name").GetString());
-        Assert.Equal("This PC", document.RootElement.GetProperty("defaults").GetProperty("text").GetString());
-        Assert.False(document.RootElement.GetProperty("defaults").TryGetProperty("image", out _));
-    }
-
-    [Fact]
     public void EmptySettingsFileReadsWithNoProblems()
     {
         var (settings, problems) = AnalysisSettingsFile.Parse(AnalysisPlayer.EmptySettings);
 
         Assert.Empty(settings.Profiles);
         Assert.Empty(problems);
-    }
-
-    [Fact]
-    public void DefaultProfileIsTheNamedOneThatCanDoIt()
-    {
-        static ModelProfile Profile(string name, params string[] capabilities) =>
-            new(name, new Uri("http://127.0.0.1:8080/"), "m", capabilities, new ModelFile("m.gguf", null, null, null), null, GenerationSettings.Default, null);
-        var settings = new AnalysisSettings(
-            [Profile("Vision", ModelCapabilities.Image), Profile("This PC", ModelCapabilities.Text), Profile("Server", ModelCapabilities.Text)],
-            new Dictionary<string, string> { [ModelCapabilities.Text] = "Server", [ModelCapabilities.Image] = "This PC" },
-            null,
-            3);
-
-        Assert.Equal("Server", AnalysisPlayer.DefaultProfile(settings, ModelCapabilities.Text)?.Name);
-        Assert.Equal("Vision", AnalysisPlayer.DefaultProfile(settings, ModelCapabilities.Image)?.Name);
     }
 }

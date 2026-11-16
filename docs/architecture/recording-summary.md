@@ -264,8 +264,9 @@ There is one request for each visit, then one for the whole recording.
 The model is told to describe only what the facts support, to name
 programs and windows only as the facts name them, and to say unknown where
 the facts do not say. Every claim cites the evidence references it rests
-on, and the runner's checks apply. The default profile needs text only;
-on this PC, that is Qwen3.6-35B-A3B.
+on, and the runner's checks apply. The profile needs text only. Since
+2026-11-15 it is the project's model for report analysis
+(`projects.md`, "The project's models").
 
 ## Stage 2 implementation status
 
@@ -290,6 +291,9 @@ kind `recording-summary-vision`, version 1, shown in the player as
 - **All of it runs on the image profile**, its text requests too, so that
   the model is not changed between requests (decision 2 below). The menu
   item is available only when there is a default profile for images.
+  Since 2026-11-15, when the project's model for report analysis takes
+  images, and the summary it queues first runs on that model too
+  (`projects.md`, "The project's models").
 - **The moments, as built:**
   - **Settled:** the first layout change set of the page's document,
     within 5 s of the visit's start, followed by 1 s without another; the

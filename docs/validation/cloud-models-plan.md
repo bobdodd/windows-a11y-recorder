@@ -106,7 +106,9 @@ The "Add a Claude profile" window is open as test 1 left it.
 - The status line: "The profile "Claude Opus 5.5" was added. Choose Check
   the profile to send Anthropic one short question with it."
 - "Default for text:" and "Default for images:" are the profiles they
-  were before, not Claude Opus 5.5.
+  were before, not Claude Opus 5.5. (Since 2026-11-15 the window has no
+  defaults; a project's settings choose its models. See
+  `project-models-plan.md`.)
 
 Send the screenshot.
 

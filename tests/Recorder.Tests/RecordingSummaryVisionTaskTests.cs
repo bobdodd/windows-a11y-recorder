@@ -30,11 +30,7 @@ public sealed partial class RecordingSummaryTaskTests
             Model = "qwen3.6-35b-a3b-images",
             Capabilities = [ModelCapabilities.Text, ModelCapabilities.Image]
         };
-        return Settings() with
-        {
-            Profiles = [text, images],
-            Defaults = new Dictionary<string, string> { [ModelCapabilities.Text] = text.Name, [ModelCapabilities.Image] = WithImages }
-        };
+        return Settings() with { Profiles = [text, images] };
     }
 
     [GeneratedRegex(@"the captured frame \[(E\d+)\]")]
@@ -1055,7 +1051,7 @@ public sealed partial class RecordingSummaryTaskTests
             Assert.Equal(1, await command.ExecuteNonQueryAsync(Token));
         }
 
-        var (summary, vision, queued) = await AnalysisPlayer.QueueVisionAsync(catalog, recording, _session, "This PC", WithImages, null, Token);
+        var (summary, vision, queued) = await AnalysisPlayer.QueueVisionAsync(catalog, recording, _session, WithImages, null, Token);
         await RunAsync(catalog, VisionEndpoint());
 
         Assert.True(queued);
@@ -1063,7 +1059,8 @@ public sealed partial class RecordingSummaryTaskTests
         Assert.Equal(AnalysisTaskStates.Done, (await StateAsync(summary)).State);
         Assert.Equal(AnalysisTaskStates.Done, (await StateAsync(vision)).State);
         var task = await catalog.TaskAsync(summary, Token);
-        Assert.Equal((old, "This PC"), (task!.RerunOfTaskId, task.StageProfiles[ModelCapabilities.Text]));
+        // All of it on the project's model for report analysis, which takes images.
+        Assert.Equal((old, WithImages), (task!.RerunOfTaskId, task.StageProfiles[ModelCapabilities.Text]));
         Assert.Equal(summary, (await catalog.TaskAsync(vision, Token))!.AfterTaskId);
     }
 
@@ -1077,7 +1074,7 @@ public sealed partial class RecordingSummaryTaskTests
             recording, RecordingSummaryKind.Name, 1, new Dictionary<string, string> { [ModelCapabilities.Text] = "This PC" },
             sessionDirectory: _session, cancellationToken: Token);
 
-        var (summary, vision, queued) = await AnalysisPlayer.QueueVisionAsync(catalog, recording, _session, "This PC", WithImages, null, Token);
+        var (summary, vision, queued) = await AnalysisPlayer.QueueVisionAsync(catalog, recording, _session, WithImages, null, Token);
 
         Assert.False(queued);
         Assert.Equal(pending, summary);

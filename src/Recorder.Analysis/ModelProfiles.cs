@@ -242,19 +242,21 @@ public sealed record ModelProfile(
 public sealed record LocalServerSettings(string Executable, int Port);
 
 /// <summary>
-/// The analysis settings file: the model profiles, the default profile for
-/// each capability, the local server, and how many attempts a step has.
+/// The analysis settings file: the model profiles, the local server, and
+/// how many attempts a step has. Which profile is used for what is a
+/// project's setting, not this file's (projects.md, "The project's models",
+/// owner, 2026-11-15); the file's former "defaults" and "aiAnalysis" are
+/// no longer read.
 /// </summary>
 public sealed record AnalysisSettings(
     IReadOnlyList<ModelProfile> Profiles,
-    IReadOnlyDictionary<string, string> Defaults,
     LocalServerSettings? LocalServer,
     int MaxAttempts)
 {
     public const int DefaultMaxAttempts = 3;
 
     public static AnalysisSettings Empty { get; } =
-        new([], new Dictionary<string, string>(), null, DefaultMaxAttempts);
+        new([], null, DefaultMaxAttempts);
 
     public ModelProfile? Profile(string name) =>
         Profiles.FirstOrDefault(profile => string.Equals(profile.Name, name, StringComparison.Ordinal));
@@ -267,16 +269,6 @@ public sealed record AnalysisSettings(
     /// windows"). Written in the file as "reportBrowserOnly".
     /// </summary>
     public bool BrowserOnly { get; init; } = true;
-
-    /// <summary>
-    /// "Use AI in analysis": whether any model may be used, for checks and
-    /// summaries alike. Off, no request is made to any model, cloud or
-    /// local, and no model's earlier answer is reused; each report's own
-    /// checkbox starts from it (owner, 2026-11-15; analysis-runner.md,
-    /// "Turning AI analysis off"). On by default, as before the switch.
-    /// Written in the file as "aiAnalysis".
-    /// </summary>
-    public bool AiAnalysis { get; init; } = true;
 }
 
 /// <summary>
@@ -402,32 +394,6 @@ public static class AnalysisSettingsFile
             }
         }
 
-        var defaults = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (document["defaults"] is JsonObject defaultObject)
-        {
-            foreach (var (capability, value) in defaultObject)
-            {
-                var name = value?.GetValueKind() == JsonValueKind.String ? value.GetValue<string>() : null;
-                var profile = name is null ? null : profiles.FirstOrDefault(item => item.Name == name);
-                if (!ModelCapabilities.All.Contains(capability))
-                {
-                    problems.Add($"The default for \"{capability}\" names no known capability.");
-                }
-                else if (profile is null)
-                {
-                    problems.Add($"The default {capability} profile \"{name}\" is not a profile.");
-                }
-                else if (!profile.Supports(capability))
-                {
-                    problems.Add($"The default {capability} profile \"{name}\" cannot take {capability}.");
-                }
-                else
-                {
-                    defaults[capability] = profile.Name;
-                }
-            }
-        }
-
         var browserOnly = true;
         if (document[BrowserOnlyName] is { } browserOnlyNode)
         {
@@ -441,30 +407,8 @@ public static class AnalysisSettingsFile
             }
         }
 
-        var aiAnalysis = true;
-        if (document[AiAnalysisName] is { } aiNode)
-        {
-            if (aiNode.GetValueKind() is JsonValueKind.True or JsonValueKind.False)
-            {
-                aiAnalysis = aiNode.GetValue<bool>();
-            }
-            else
-            {
-                problems.Add($"\"{AiAnalysisName}\" is not true or false, so AI analysis is on, the default.");
-            }
-        }
-
-        return (new AnalysisSettings(profiles, defaults, localServer, maxAttempts) { BrowserOnly = browserOnly, AiAnalysis = aiAnalysis }, problems);
+        return (new AnalysisSettings(profiles, localServer, maxAttempts) { BrowserOnly = browserOnly }, problems);
     }
-
-    /// <summary>The name of the setting "Use AI in analysis" in the file.</summary>
-    public const string AiAnalysisName = "aiAnalysis";
-
-    /// <summary>
-    /// The settings file's text with "aiAnalysis" set, the rest as it was;
-    /// a file that is not a JSON object is left as it is, and null returned.
-    /// </summary>
-    public static string? WithAiAnalysis(string? text, bool on) => With(text, AiAnalysisName, on);
 
     /// <summary>The name of the setting "Limit the report to the browser while it is in front" in the file.</summary>
     public const string BrowserOnlyName = "reportBrowserOnly";

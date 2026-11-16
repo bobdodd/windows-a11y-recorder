@@ -387,13 +387,10 @@ internal sealed class ModelSetupWindow : Window
 
     private void Done(IReadOnlyList<string> added)
     {
-        var (settings, _) = AnalysisSettingsFile.Read(_settingsPath);
-        var text = settings.Defaults.GetValueOrDefault(ModelCapabilities.Text);
-        var image = settings.Defaults.GetValueOrDefault(ModelCapabilities.Image);
         _progress.Value = _progress.Maximum;
         Say($"Added {(added.Count == 1 ? "the profile" : "the profiles")} {string.Join(" and ", added.Select(item => $"\"{item}\""))}. " +
-            $"The default for text is {(text is null ? "not set" : $"\"{text}\"")}; for images, {(image is null ? "not set" : $"\"{image}\"")}. " +
-            "Defaults and settings can be changed in the model profiles window.");
+            "A project uses a profile once it is chosen in the project's settings, from the Project menu. " +
+            "Profiles can be changed in the model profiles window.");
     }
 
     // Each start button runs one job at a time, with the others and the

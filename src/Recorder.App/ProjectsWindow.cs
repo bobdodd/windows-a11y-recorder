@@ -12,7 +12,8 @@ namespace Recorder.App;
 /// The projects and their recordings (projects.md): a project's recordings
 /// listed in the order they were made, by name and session key
 /// (recording-names.md), new projects, renaming projects and recordings,
-/// and moving recordings from one project to another. Every target is at least 44
+/// each project's settings, and moving recordings from one project to
+/// another. Every target is at least 44
 /// pixels high, and the text wraps rather than scrolling sideways.
 /// </summary>
 internal sealed class ProjectsWindow : Window
@@ -22,6 +23,8 @@ internal sealed class ProjectsWindow : Window
     private readonly ListBox _recordings;
     private readonly ComboBox _target;
     private readonly Button _rename;
+    private readonly Button _settings;
+    private readonly Func<Window, Guid, string, bool>? _openSettings;
     private readonly Button _move;
     private readonly Button _renameRecording;
     private IReadOnlyList<ProjectRecordingSummary> _shown = [];
@@ -32,9 +35,10 @@ internal sealed class ProjectsWindow : Window
     private readonly SelectableText _status;
     private IReadOnlyList<ProjectSummary> _list = [];
 
-    public ProjectsWindow(Window owner, RecordingStore store, Guid? selected)
+    public ProjectsWindow(Window owner, RecordingStore store, Guid? selected, Func<Window, Guid, string, bool>? openSettings = null)
     {
         _store = store;
+        _openSettings = openSettings;
         Owner = owner;
         Title = "Projects and recordings";
         Width = 760;
@@ -68,8 +72,12 @@ internal sealed class ProjectsWindow : Window
         create.Click += async (_, _) => await CreateAsync();
         _rename = Button("_Rename project...", "Rename the selected project");
         _rename.Click += async (_, _) => await RenameAsync();
+        // The project's models (projects.md, "The project's models").
+        _settings = Button("Project _settings...", "Settings of the selected project: the models it uses");
+        _settings.Click += (_, _) => OpenSettings();
         projectButtons.Children.Add(create);
         projectButtons.Children.Add(_rename);
+        projectButtons.Children.Add(_settings);
         Add(root, 3, projectButtons);
 
         _recordings = List("Recordings in the selected project", SelectionMode.Extended);
@@ -238,6 +246,7 @@ internal sealed class ProjectsWindow : Window
     private void UpdateButtons()
     {
         _rename.IsEnabled = SelectedProject is not null;
+        _settings.IsEnabled = SelectedProject is not null && _openSettings is not null;
         _renameRecording.IsEnabled = _recordings.SelectedItems.Count == 1;
         var target = (_target.SelectedItem as ComboBoxItem)?.Tag as Guid?;
         _move.IsEnabled = _recordings.SelectedItems.Count > 0 && target is not null && target != SelectedProject;
@@ -266,6 +275,16 @@ internal sealed class ProjectsWindow : Window
         catch (NpgsqlException exception)
         {
             _status.Text = "The project could not be made: " + exception.Message;
+        }
+    }
+
+    private void OpenSettings()
+    {
+        if (SelectedProject is { } project && _openSettings is { } open && _list.FirstOrDefault(item => item.ProjectId == project) is { } current &&
+            open(this, project, current.Name))
+        {
+            _status.Text = $"The settings of the project {current.Name} were saved.";
+            Changed = true;
         }
     }
 

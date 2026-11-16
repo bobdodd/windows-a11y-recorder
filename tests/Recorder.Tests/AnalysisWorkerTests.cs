@@ -84,7 +84,7 @@ internal sealed class NoModelKind : IAnalysisTaskKind
 
     public Task RunAsync(AnalysisTaskContext context, CancellationToken cancellationToken)
     {
-        Told.Add(context.AiOff);
+        Told.Add(context.NoModel(ModelUses.TextChecks));
         return Task.CompletedTask;
     }
 }
@@ -162,14 +162,19 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Profile("This PC", "qwen") with { Generation = GenerationSettings.Default with { Temperature = 0.3 } };
 
     private static AnalysisSettings SettingsWith(int maxAttempts = 3, params ModelProfile[] profiles) =>
-        new(profiles.Length == 0 ? [Profile("This PC", "qwen")] : profiles, new Dictionary<string, string>(), null, maxAttempts);
+        new(profiles.Length == 0 ? [Profile("This PC", "qwen")] : profiles, null, maxAttempts);
 
-    private async Task<Guid> RecordingAsync(short status = 2)
+    // A recording in a project whose settings choose This PC for each use
+    // of a model (projects.md, "The project's models"), unless another
+    // project is named.
+    private async Task<Guid> RecordingAsync(short status = 2, string projectName = "Analysis tests")
     {
         await using var connection = await fixture.Server.DataSource.OpenConnectionAsync(Token);
-        await using (var project = new NpgsqlCommand("INSERT INTO projects (name) VALUES ($1) ON CONFLICT (name) DO NOTHING", connection))
+        await using (var project = new NpgsqlCommand(
+            "INSERT INTO projects (name, report_model, text_checks_model, vision_checks_model) VALUES ($1, 'This PC', 'This PC', 'This PC') " +
+            "ON CONFLICT (name) DO NOTHING", connection))
         {
-            project.Parameters.AddWithValue("Analysis tests");
+            project.Parameters.AddWithValue(projectName);
             await project.ExecuteNonQueryAsync(Token);
         }
 
@@ -181,7 +186,7 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
             "SELECT project_id, $2, $3, now(), 10000000, 0, 'Windows', '.NET', 'X64', true, true, true, true, 5, false, false " +
             "FROM projects WHERE name = $1 RETURNING recording_id",
             connection);
-        command.Parameters.AddWithValue("Analysis tests");
+        command.Parameters.AddWithValue(projectName);
         command.Parameters.AddWithValue("analysis-" + Guid.NewGuid().ToString("N"));
         command.Parameters.AddWithValue(status);
         return (Guid)(await command.ExecuteScalarAsync(Token))!;
@@ -1678,10 +1683,11 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Assert.Equal(AnalysisTaskStates.Done, await StateAsync(cloud));
         Assert.Equal(["load This PC", "complete This PC", "complete Claude", "unload This PC"], endpoint.Calls);
     }
-    // Turning AI analysis off (analysis-runner.md, "Turning AI analysis
-    // off"): off means no model at all, cloud or local.
+
+    // A project's models (projects.md, "The project's models"): no model
+    // means none at all, cloud or local.
     [Fact]
-    public async Task A_task_queued_with_AI_off_asks_no_model_and_fails_saying_why()
+    public async Task A_task_queued_with_no_model_asks_none_and_fails_saying_why()
     {
         var catalog = await CatalogAsync();
         var task = await catalog.QueueTaskAsync(await RecordingAsync(), StandInKind.Name, 1, Text(), aiAnalysis: false, cancellationToken: Token);
@@ -1691,35 +1697,39 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
 
         Assert.False((await catalog.TaskAsync(task, Token))!.AiAnalysis);
         Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(task));
-        Assert.Contains("AI analysis was off for this task when it was queued, so no model was asked.", await FailureAsync(task), StringComparison.Ordinal);
+        Assert.Contains("The project's settings chose no model for report analysis when this task was queued, so no model was asked.", await FailureAsync(task), StringComparison.Ordinal);
         Assert.Empty(endpoint.Calls);
         Assert.Empty(await AttemptsAsync(task));
     }
 
     [Fact]
-    public async Task Turning_the_setting_off_stops_a_task_already_queued_and_reuses_no_answer()
+    public async Task Choosing_no_model_in_the_projects_settings_stops_a_task_already_queued_and_reuses_no_answer()
     {
         var catalog = await CatalogAsync();
-        var recording = await RecordingAsync();
+        var recording = await RecordingAsync(projectName: "Analysis tests, no model later");
+        var project = (await catalog.ProjectOfAsync(recording, Token))!.Value.ProjectId;
+        Assert.True(await catalog.SaveProjectModelsAsync(project, new ProjectModels("This PC", null, null), Token));
         var first = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), cancellationToken: Token);
         var endpoint = new StandInEndpoint();
         await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
         Assert.Equal(AnalysisTaskStates.Done, await StateAsync(first));
         var calls = endpoint.Calls.Count;
 
-        // Queued with AI on, as a run again that could reuse the answer;
-        // the setting is read as off when the step runs.
+        // Queued with the model, as a run again that could reuse the
+        // answer; the project's settings choose no model when the step runs.
         var again = await catalog.QueueTaskAsync(recording, StandInKind.Name, 1, Text(), rerunOfTaskId: first, cancellationToken: Token);
         Assert.True((await catalog.TaskAsync(again, Token))!.AiAnalysis);
-        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast, aiAnalysisOn: () => false).RunUntilEmptyAsync(Token);
+        Assert.True(await catalog.SaveProjectModelsAsync(project, ProjectModels.None, Token));
+        await new AnalysisWorker(catalog, SettingsWith(), [new StandInKind("visit-1")], endpoint, options: Fast).RunUntilEmptyAsync(Token);
 
         Assert.Equal(AnalysisTaskStates.Failed, await StateAsync(again));
-        Assert.Contains("AI analysis is off in the analysis settings, so no model was asked.", await FailureAsync(again), StringComparison.Ordinal);
+        Assert.Contains("The project's settings now choose no model for report analysis, so no model was asked.", await FailureAsync(again), StringComparison.Ordinal);
         Assert.Equal(calls, endpoint.Calls.Count);
+        Assert.Equal(ProjectModels.None, await catalog.ProjectModelsOfTaskAsync(again, Token));
     }
 
     [Fact]
-    public async Task A_task_that_uses_no_model_runs_with_AI_off_and_is_told_why_it_may_not()
+    public async Task A_task_that_uses_no_model_runs_and_is_told_which_uses_have_none()
     {
         var catalog = await CatalogAsync();
         var task = await catalog.QueueTaskAsync(await RecordingAsync(), NoModelKind.Name, 1, new Dictionary<string, string>(), aiAnalysis: false, cancellationToken: Token);
@@ -1728,22 +1738,47 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         await new AnalysisWorker(catalog, SettingsWith(), [kind], new StandInEndpoint(), options: Fast).RunUntilEmptyAsync(Token);
 
         Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
-        Assert.Equal(["AI analysis was off for this task when it was queued, so no model was asked."], kind.Told);
+        Assert.Equal(["The project's settings chose no model for text-based checks when this task was queued, so no model was asked."], kind.Told);
         var listed = (await catalog.TasksAsync(await RecordingOfAsync(task), Token)).Single(item => item.TaskId == task);
         Assert.False(listed.AiAnalysis);
     }
 
     [Fact]
-    public async Task A_task_is_queued_with_AI_on_unless_told_otherwise()
+    public async Task A_check_task_has_the_models_for_checks_it_was_queued_with()
     {
         var catalog = await CatalogAsync();
-        var task = await catalog.QueueTaskAsync(await RecordingAsync(), NoModelKind.Name, 1, new Dictionary<string, string>(), cancellationToken: Token);
+        var profiles = new ProjectModels(null, "This PC", null).ForChecks();
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), NoModelKind.Name, 1, profiles, cancellationToken: Token);
         var kind = new NoModelKind();
 
         await new AnalysisWorker(catalog, SettingsWith(), [kind], new StandInEndpoint(), options: Fast).RunUntilEmptyAsync(Token);
 
         Assert.True((await catalog.TaskAsync(task, Token))!.AiAnalysis);
         Assert.Equal([null], kind.Told);
+    }
+
+    [Fact]
+    public async Task A_projects_models_start_as_none_and_are_saved_and_read_back()
+    {
+        var catalog = await CatalogAsync();
+        await using (var connection = await fixture.Server.DataSource.OpenConnectionAsync(Token))
+        await using (var command = new NpgsqlCommand("INSERT INTO projects (name) VALUES ($1) ON CONFLICT (name) DO NOTHING", connection))
+        {
+            command.Parameters.AddWithValue("Analysis tests, new project");
+            await command.ExecuteNonQueryAsync(Token);
+        }
+
+        var recording = await RecordingAsync(projectName: "Analysis tests, new project");
+        var project = (await catalog.ProjectOfAsync(recording, Token))!.Value.ProjectId;
+        Assert.Equal(ProjectModels.None, await catalog.ProjectModelsAsync(project, Token));
+
+        var chosen = new ProjectModels("Claude Opus 5.5", null, "This PC, with images");
+        Assert.True(await catalog.SaveProjectModelsAsync(project, chosen, Token));
+        Assert.Equal(chosen, await catalog.ProjectModelsAsync(project, Token));
+        Assert.Null(await catalog.ProjectModelsAsync(Guid.NewGuid(), Token));
+        Assert.False(await catalog.SaveProjectModelsAsync(Guid.NewGuid(), chosen, Token));
+        var task = await catalog.QueueProjectTaskAsync(project, NoModelKind.Name, 1, chosen.ForChecks(), Path.GetTempPath(), null, true, Token);
+        Assert.Equal(chosen, await catalog.ProjectModelsOfTaskAsync(task, Token));
     }
 
     private async Task<Guid> RecordingOfAsync(Guid task) =>

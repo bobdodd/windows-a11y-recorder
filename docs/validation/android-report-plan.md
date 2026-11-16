@@ -57,8 +57,7 @@ and the recorder opens after setup.
 2. Open the Analysis menu.
 3. Take a screenshot of the open menu.
 
-**On screen:** "Android report, with no model" and "Android summary,
-with the chosen profile" are both shown and both greyed out.
+**On screen:** "Android report" and "Android summary" are both shown and both greyed out.
 
 ## Test 3: queue the Android report
 
@@ -66,7 +65,7 @@ Keep the phone's picture in view throughout.
 
 1. Open the recording from test 58 of the Android checks plan, or any
    phone recording with findings in its Checks tab.
-2. Open the Analysis menu and choose "Android report, with no model".
+2. Open the Analysis menu and choose "Android report".
 3. Open the Analysis panel and wait until the new task's row says
    "Finished".
 4. Take a screenshot of the whole recorder.

@@ -6,10 +6,10 @@ Recorded 2026-11-15 at the owner's request, "so it doesn't get lost".
 This is a preliminary plan: the checks below are options, not decisions,
 until the owner chooses them, apart from the decisions recorded under
 "Owner's decisions". The switch that turns AI analysis off (decisions 5
-and 6, step 1 of the order in decision 7) was built on 2026-11-15; see
-`analysis-runner.md`, "Turning AI analysis off". No check is built. Each
-is to be measured on
-the recordings to hand before its rules are set, as the earlier checks
+and 6, step 1 of the order in decision 7) was built on 2026-11-15, and
+replaced the same day by each project's models, chosen in its settings
+(decision 8; `projects.md`, "The project's models"). No check is built.
+Each is to be measured on the recordings to hand before its rules are set, as the earlier checks
 were (see `android-checks.md` and `android-checks-candidates.md`).
 
 The owner's standing rule was first stated as: "As far as possible
@@ -51,6 +51,13 @@ or cloud models:
    reports say so since 2026-11-15 (`android-report.md`, "Cloud or
    local").
 
+4. **Testing is passive.** "No, you can't do that, you can't modify the
+   phone settings or UI, testing is passive from user navigation and
+   recording." (owner, 2026-11-15). A check works from what was recorded
+   while the tester used the phone; nothing changes the phone's settings
+   or drives its interface, for example to make text larger and see
+   which text grows.
+
 ## Owner's decisions
 
 Given by the owner on 2026-11-15, in answer to the open questions:
@@ -70,6 +77,7 @@ Given by the owner on 2026-11-15, in answer to the open questions:
 5. **Where the switch sits.** One setting in the analysis settings turns
    AI analysis on or off, and each report has a checkbox that starts
    from that setting, so a single report can be run without AI.
+   Replaced by decision 8.
 6. **What the switch covers.** It also turns off the summaries, so that
    off means no model at all.
 7. **The order of building** (owner, 2026-11-15: "Yes, I accept the
@@ -83,6 +91,14 @@ Given by the owner on 2026-11-15, in answer to the open questions:
       from the tree, the pictures' text and the positions;
    4. boundaries, with a model, last, as it would mostly confirm the
       information items already there.
+8. **The project chooses the models** (owner, 2026-11-15): "Change it so
+   that projects have settings and we can choose models (or no model)
+   for report analysis, for text-based checks, for vision-based checks.
+   Remove the existing checkboxes and model selection from analysis and
+   checks. Once I have those in place, you will use the settings I
+   choose." This replaces decisions 5 and 6: no model for a use means no
+   model at all for it, cloud or local, and choosing no model for all
+   three is AI analysis off. See `projects.md`, "The project's models".
 
 ## What a model adds
 
@@ -187,6 +203,50 @@ later snapshot of the same visit shows it whole. By the owner's rule,
 "AI only when non-AI cannot do the test", they are built without one
 (decision 7).
 
+### Images of text, measured on 2026-11-15
+
+A probe, deleted afterwards, chose the candidates as the images-of-text
+rule would and asked one model about each, on the 20 phone recordings
+of 2026-11-09 to 2026-11-14. It found 44 candidates, which fall into
+groups by what the tree and the pictures show:
+
+- **17, TalkBack's on-screen caption** over a picture. The caption's
+  window is not in the recorded list of windows, so the rule that leaves
+  out text drawn above a picture's window missed it. A rule without a
+  model can leave these out.
+- **3, a picture whose tree was out of step** with the frame by then. A
+  rule without a model can leave these out, as other checks already do
+  for out-of-step trees.
+- **2, logotypes**, a search engine's and a store's.
+- **5, the preview in Settings' display size and text**, text drawn as an
+  example, arguably essential.
+- **1, an illustration** with other content in a TalkBack setting.
+- **16, the client's library cards**, each a picture whose description
+  holds its text, from the app's framework. The pictures alone cannot
+  tell whether the text is drawn in the picture or set over it, so a
+  model cannot settle these either; each would be "cannot tell", for a
+  manual check.
+
+The model asked was the local "This PC, with images" profile
+(Qwen3.6-35B-A3B, 4-bit, temperature 0, seed 1) on the development PC.
+It gave the same answer, reason and output for all 44 in two runs, so
+it was repeatable, but its answers were poor: only "could be text" (35)
+and "logotype" (9), never "essential", "picture" or "cannot tell", with
+reasons that contradicted the answers. A request took about 20 seconds
+after the model was loaded, about 15 minutes for the 44; a request's
+body was about 476 KB at the median, and about 1,070 tokens in and 57
+out. The owner had already found this model poor ("I know the local
+model with 4 bit quant is shit, we proved it earlier"), and the model
+to use is now chosen in the project's settings (decision 8). Estimated
+for Claude, not sent: about US$0.30 for the 44 with Opus 5.5, US$0.15
+with Sonnet 5.5 and under US$0.01 with Haiku 5.5.
+
+The rule's options, from these, are for the owner to choose: leave out
+TalkBack's caption and the out-of-step pictures without a model; list
+pictures whose description holds their text as needing a manual check;
+and ask the model a narrower question, or several yes or no questions,
+about the rest.
+
 ## Later, or text only
 
 - **Focus visible (2.4.7):** needs a Bluetooth keyboard, which the owner
@@ -252,6 +312,7 @@ The probe and its copies are deleted afterwards, as before.
 
 ## Open questions for the owner
 
-None at present. The owner answered the questions on 2026-11-15
-(decisions 1 to 7 above). New questions will come from measuring each
-check on the recordings before its rules are set.
+The owner answered the earlier questions on 2026-11-15 (decisions 1 to
+8 above). Open now: the rule for images of text, from its options under
+"Images of text, measured on 2026-11-15". New questions will come from
+measuring each check on the recordings before its rules are set.

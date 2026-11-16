@@ -77,11 +77,17 @@ public sealed class AnalysisTaskContext
         _worker.RunStepAsync(Task, stepKey, request, cancellationToken);
 
     /// <summary>
-    /// Why this task may not use a model, or null when it may. A check that
-    /// needs a model is listed as not run, with this reason, rather than
-    /// asked (analysis-runner.md, "Turning AI analysis off").
+    /// Why this task may not use a model for a use (<see cref="ModelUses"/>),
+    /// or null when it may: its project's settings chose no model for it
+    /// when the task was queued. A check that needs a model is listed as
+    /// not run, with this reason, rather than asked (projects.md, "The
+    /// project's models"). A step may still be refused when it runs, where
+    /// the project's settings choose no model for its use by then.
     /// </summary>
-    public string? AiOff => _worker.AiOff(Task);
+    public string? NoModel(string use) => AnalysisWorker.NoModel(Task, use);
+
+    /// <summary>The profile, by name, this task was queued with for a use, or null for none.</summary>
+    public string? ModelFor(string use) => AnalysisWorker.QueuedProfile(Task, use);
 }
 
 /// <summary>The worker's timing.</summary>
@@ -139,7 +145,6 @@ public sealed class AnalysisWorker
     private readonly ILocalServerHost? _localServer;
     private readonly AnalysisWorkerOptions _options;
     private readonly Action<string> _status;
-    private readonly Func<bool> _aiAnalysisOn;
     private readonly Dictionary<Guid, string> _waitingFor = [];
     private IReadOnlyList<AnalysisTask> _runnable = [];
     private ModelProfile? _loaded;
@@ -152,8 +157,7 @@ public sealed class AnalysisWorker
         IModelEndpoint endpoint,
         ILocalServerHost? localServer = null,
         AnalysisWorkerOptions? options = null,
-        Action<string>? status = null,
-        Func<bool>? aiAnalysisOn = null)
+        Action<string>? status = null)
     {
         ArgumentNullException.ThrowIfNull(kinds);
         Catalog = catalog;
@@ -163,19 +167,24 @@ public sealed class AnalysisWorker
         _localServer = localServer;
         _options = options ?? AnalysisWorkerOptions.Default;
         _status = status ?? (_ => { });
-        _aiAnalysisOn = aiAnalysisOn ?? (() => settings.AiAnalysis);
     }
 
     /// <summary>
-    /// Why a task may not use a model now, or null when it may: it was
-    /// queued with AI analysis off, or the setting is off now, as read at
-    /// each step, so that turning it off stops tasks already queued
-    /// (analysis-runner.md, "Turning AI analysis off").
+    /// The profile a task was queued with for a use: for report analysis,
+    /// by capability, as the summaries have always been queued; for a
+    /// check, by its use.
     /// </summary>
-    internal string? AiOff(AnalysisTask task) =>
-        !task.AiAnalysis ? "AI analysis was off for this task when it was queued, so no model was asked."
-        : !_aiAnalysisOn() ? "AI analysis is off in the analysis settings, so no model was asked."
-        : null;
+    internal static string? QueuedProfile(AnalysisTask task, string use, string capability = ModelCapabilities.Text) =>
+        task.StageProfiles.TryGetValue(use == ModelUses.Report ? capability : use, out var name) ? name : null;
+
+    /// <summary>
+    /// Why a task may not use a model for a use, as it was queued, or null
+    /// when it may (projects.md, "The project's models").
+    /// </summary>
+    internal static string? NoModel(AnalysisTask task, string use) =>
+        !task.AiAnalysis || QueuedProfile(task, use) is null
+            ? $"The project's settings chose no model for {ModelUses.Name(use)} when this task was queued, so no model was asked."
+            : null;
 
     public AnalysisCatalog Catalog { get; }
 
@@ -310,11 +319,19 @@ public sealed class AnalysisWorker
         ModelRequest request,
         CancellationToken cancellationToken)
     {
-        // Off means no model at all (owner, 2026-11-15): no request, and no
-        // earlier answer reused, before anything else, trials included.
-        if (AiOff(task) is { } off)
+        // No model means none at all, cloud or local (owner, 2026-11-15):
+        // no request, and no earlier answer reused, before anything else,
+        // trials included. The project's settings are read at each step,
+        // so choosing no model stops a task already queued or running from
+        // asking one (projects.md, "The project's models").
+        if (!task.AiAnalysis)
         {
-            throw new StepFailedException(off);
+            throw new StepFailedException(NoModel(task, request.Use)!);
+        }
+
+        if (await Catalog.ProjectModelsOfTaskAsync(task.TaskId, cancellationToken).ConfigureAwait(false) is { } now && now.For(request.Use) is null)
+        {
+            throw new StepFailedException($"The project's settings now choose no model for {ModelUses.Name(request.Use)}, so no model was asked.");
         }
 
         if (_trial is { } trial)
@@ -917,9 +934,11 @@ public sealed class AnalysisWorker
     private ModelProfile StepProfile(AnalysisTask task, ModelRequest request)
     {
         var capability = request.Capability;
-        if (!task.StageProfiles.TryGetValue(capability, out var profileName))
+        if (QueuedProfile(task, request.Use, capability) is not { } profileName)
         {
-            throw new StepFailedException($"No model profile was chosen for {capability} when the task was queued.");
+            throw new StepFailedException(request.Use == ModelUses.Report
+                ? $"No model profile was chosen for {capability} when the task was queued."
+                : $"No model was chosen for {ModelUses.Name(request.Use)} when the task was queued.");
         }
 
         return ChosenProfile(profileName, request);

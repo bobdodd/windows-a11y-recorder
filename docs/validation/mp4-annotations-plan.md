@@ -67,8 +67,7 @@ horizontal scrollbar.
 
 Keep the phone's picture in view throughout.
 
-1. Close the window. Open the Analysis menu and choose "Android report,
-   with no model".
+1. Close the window. Open the Analysis menu and choose "Android report".
 2. Wait until the new task's row in the Analysis panel says "Finished".
 3. Choose "Save as MP4..." (Alt+4).
 4. Take a screenshot of the window.

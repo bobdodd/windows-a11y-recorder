@@ -142,8 +142,7 @@ test".
 Keep the phone's picture in view throughout.
 
 1. Open one of the phone recordings moved in test 8.
-2. Open the Analysis menu and choose "Android report for the project,
-   with no model".
+2. Open the Analysis menu and choose "Android report for the project".
 3. Wait until the new task's row in the Analysis panel says "Finished".
 4. Take a screenshot of the whole recorder.
 
@@ -192,7 +191,7 @@ table.
 
 ## Test 14: a recording's own report is unchanged
 
-1. With the same recording open, choose "Android report, with no model"
+1. With the same recording open, choose "Android report"
    in the Analysis menu and wait until it says "Finished".
 2. Choose "Open in Word" in its row.
 3. Take a screenshot of the contents and the first visit heading.

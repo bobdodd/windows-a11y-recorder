@@ -433,7 +433,8 @@ player (2026-10-13)". Passed its system test on the target machine on
   Markdown back into headings, paragraphs, list items, quotes, and tables,
   and its evidence list into each reference's time; `AnalysisPlayer` holds
   the names the player shows, the unread count, what to announce, the
-  worker's line, the default profiles, and starting the worker. In the
+  worker's line, the default profiles (replaced on 2026-11-15 by the
+  project's models, `projects.md`), and starting the worker. In the
   player, `MainWindow.Analysis.cs`, `ReportWindow`, `CapabilityDialog`, and
   `ModelProfilesWindow`. The catalog gained `RecordingIdAsync`,
   `ReportsAsync`, and `AnyQueuedAsync`.
@@ -505,7 +506,9 @@ on 2026-10-14; see "Stage 2 implementation status" in
 - **A task may follow another.** The vision task is queued after a
   summary, with `after_task_id`, which the worker already honoured.
 - **The Analysis menu** has Add vision to the summary, available when a
-  recording is open and there is a default profile for images.
+  recording is open and there is a default profile for images. Since
+  2026-11-15, when the project's model for report analysis takes images
+  (`projects.md`, "The project's models").
 - **The catalog** gives the input references of a step's accepted
   attempt, so that the vision task can check that it builds on a summary
   written from the same facts.
@@ -839,44 +842,39 @@ I do need is a switch to turn off AI analysis" (`android-vision-checks.md`,
 "Owner's requirements" and decisions 5 and 6). Off means no model at
 all, cloud or local, for checks and summaries alike.
 
-- **The setting.** "Use AI in analysis", in the Analysis menu, is saved
-  at once in the analysis settings file as `"aiAnalysis"`. It is on by
-  default, as the recorder was before the switch. A value that is not
-  true or false is reported as a problem and read as on.
-- **The same setting in the Checks tab.** "Use AI in checks", in the
-  Checks tab, is that setting, not a second one: checking it there checks
-  the menu item, and the other way round. It is there because a
-  torn-out Checks window has no menu, and the checks that need a model
-  will run from that tab (owner, 2026-11-15). No check there uses a
-  model yet, so for now it changes nothing in the list.
-- **The report's checkbox.** "Use AI in this report", in the Analysis
-  tab, starts from the setting each time the settings are read and after
-  each report is queued, so that one report can be made without AI. With
-  the setting off it is unchecked and cannot be checked, and says that
-  AI analysis is off in the Analysis menu.
-- **The task records it.** Each task is queued with AI on only where the
-  setting and the checkbox both allow it, and keeps that in its row
-  (`ai_analysis`, migration 0044; tasks queued before it could use a
-  model). The Analysis tab says "Without AI." for a task queued with it
-  off, and a run again of one stays without AI.
-- **The summaries need a model**, so are not queued with AI off: Queue
-  summary, Queue Android summary, Summarise this recording, Add vision to
-  the summary and Android summary are greyed out. The Android reports
-  use no model, so are queued either way.
-- **The worker refuses.** A model step of a task queued with AI off, or
-  any model step while the setting is off, makes no request and reuses
-  no earlier answer: it fails the task saying why ("AI analysis was off
-  for this task when it was queued, so no model was asked", or "AI
-  analysis is off in the analysis settings, so no model was asked"). The
-  worker reads the setting at each step, so turning it off stops tasks
-  already queued or running from asking a model; trials are refused too.
-- **Checks that need a model** are told why they may not run
-  (`AnalysisTaskContext.AiOff`), so that the report lists them as not
-  run, with that reason, rather than leaving them out. None is built
-  yet; the first, images of text, is next (`android-vision-checks.md`,
-  decision 7).
-- **The reports.** A report made without AI says nothing about AI, as
-  before (`android-report.md`, "Cloud or local").
+Replaced the same day by the project's models (owner, 2026-11-15: "The
+model UI selection is nonsense. Change it so that projects have settings
+and we can choose models (or no model) for report analysis, for
+text-based checks, for vision-based checks. Remove the existing
+checkboxes and model selection from analysis and checks."). See
+`projects.md`, "The project's models", for what is built now. What
+changed for the runner:
+
+- **Gone:** "Use AI in analysis" in the Analysis menu, "Use AI in checks"
+  in the Checks tab, and the Analysis tab's Profile list and "Use AI in
+  this report" checkbox; the settings file's `"aiAnalysis"` and
+  `"defaults"`, which are no longer read, and are dropped the next time
+  model setup or the model profiles window writes the file; and the
+  model profiles window's "Default for text", "Default for images" and
+  "Save the defaults".
+- **Kept:** each task's `ai_analysis` (migration 0044), now true where
+  the project's settings chose a model for any of the task's uses when it
+  was queued. A task with it false asks no model and reuses no answer, as
+  before.
+- **The worker reads the project's settings at each model step**, in
+  place of the switch: where they now choose no model for the step's use,
+  the step makes no request, reuses no earlier answer, and fails the task
+  saying so ("The project's settings now choose no model for report
+  analysis, so no model was asked."). Trials are refused too.
+- **A step's use.** `ModelRequest.Use` says what a step uses a model
+  for: report analysis, unless a check says otherwise. It is not part of
+  the request sent, so it changes no request's SHA-256 and no reuse. A
+  summary's profiles are still by capability, text and images; a check
+  task's are by use, `text-checks` and `vision-checks`.
+- **Checks that need a model** are told why they may not run with
+  `AnalysisTaskContext.NoModel(use)`, so that the report lists them as
+  not run, with that reason, rather than leaving them out. None is built
+  yet.
 
 ## Required tests
 
@@ -923,10 +921,12 @@ Before step 3 was built, the owner chose among four proposals:
    It lists each profile with its problems, lets the auditor choose the
    default profile for text and for images, and opens
    `analysis-models.json` in Notepad and reads it again. A full profile
-   editor comes later.
+   editor comes later. The defaults were replaced on 2026-11-15 by each
+   project's models (`projects.md`, "The project's models").
 4. **Run again queues a new task** of the same kind with the same
    profile. The earlier task and its report stay, so the two can be
-   compared.
+   compared. Since 2026-11-15, Run again uses the project's current
+   models instead.
 
 The rest of step 3 was proposed with them and agreed: a menu bar with one
 Analysis menu, holding Summarise this recording, Describe the

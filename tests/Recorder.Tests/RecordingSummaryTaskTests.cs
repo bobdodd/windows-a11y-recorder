@@ -53,7 +53,6 @@ public sealed partial class RecordingSummaryTaskTests(EmbeddedPostgresFixture fi
                 null,
                 GenerationSettings.Default,
                 null)],
-            new Dictionary<string, string>(),
             null,
             3);
 
@@ -156,7 +155,7 @@ public sealed partial class RecordingSummaryTaskTests(EmbeddedPostgresFixture fi
         await using var connection = await fixture.Server.DataSource.OpenConnectionAsync(Token);
         await using (var clear = new NpgsqlCommand(
             "DELETE FROM analysis_tasks; UPDATE recordings SET recording_status_id = 2 WHERE recording_status_id = 1; " +
-            "INSERT INTO projects (name) VALUES ('Summary tests') ON CONFLICT (name) DO NOTHING",
+            "INSERT INTO projects (name, report_model) VALUES ('Summary tests', 'This PC') ON CONFLICT (name) DO NOTHING",
             connection))
         {
             await clear.ExecuteNonQueryAsync(Token);

@@ -42,11 +42,15 @@ the recording summary (see [the analysis runner](analysis-runner.md)).
 
 | Kind | Menu item | Model | Title |
 | --- | --- | --- | --- |
-| `android-report`, version 1 | Android report, with no model | None | Android accessibility report |
-| `android-summary`, version 1 | Android summary, with the chosen profile | The profile chosen in the Analysis panel | Android accessibility summary |
+| `android-report`, version 1 | Android report | None | Android accessibility report |
+| `android-summary`, version 1 | Android summary | The project's model for report analysis | Android accessibility summary |
 
 The Android report can be queued with no profile set up at all; the
-status line then says it "uses no model".
+status line then says it "uses no model". Until 2026-11-15 the menu items
+were named "Android report, with no model" and "Android summary, with the
+chosen profile", and the summary used the profile chosen in the Analysis
+panel; since then it uses the project's model for report analysis
+(`projects.md`, "The project's models").
 
 Each writes to the task's folder, `analysis/<task>/` in the recording's
 session folder:

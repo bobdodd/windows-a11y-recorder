@@ -19,15 +19,14 @@ public sealed class ClaudeProfileTests
     private const string LocalSettings = """
         { "version": 1, "localServer": { "executable": "C:\\llama\\llama-server.exe", "port": 8080 },
           "profiles": [ { "name": "Qwen", "endpoint": "http://127.0.0.1:8080", "model": "qwen", "capabilities": ["text"],
-                          "local": { "modelPath": "C:\\models\\qwen.gguf", "arguments": "" } } ],
-          "defaults": { "text": "Qwen" } }
+                          "local": { "modelPath": "C:\\models\\qwen.gguf", "arguments": "" } } ] }
         """;
 
     private static JsonObject Opus(string? effort = null, ServicePrices? prices = null) =>
         ModelSetup.ClaudeProfile("Claude Opus 5.5", "claude-opus-5-5", effort, 32000, prices ?? AnthropicSettings.Model("claude-opus-5-5")!.Prices, "protected-key");
 
     [Fact]
-    public void A_Claude_profile_written_by_the_player_is_read_back_as_one_that_sends_to_Anthropic_and_is_not_made_a_default()
+    public void A_Claude_profile_written_by_the_player_is_read_back_as_one_that_sends_to_Anthropic()
     {
         var text = ModelSetup.WithClaudeProfile(LocalSettings, Opus("high"));
         var (settings, problems) = AnalysisSettingsFile.Parse(text);
@@ -42,8 +41,6 @@ public sealed class ClaudeProfileTests
         Assert.Equal(32000, profile.Generation.MaxTokens);
         Assert.Equal(new ServicePrices(4, 20), profile.Prices);
         Assert.Equal("protected-key", profile.ProtectedApiKey);
-        Assert.Equal(new Dictionary<string, string> { [ModelCapabilities.Text] = "Qwen" }, settings.Defaults);
-        Assert.Equal("Qwen", AnalysisPlayer.DefaultProfile(settings, ModelCapabilities.Text)!.Name);
     }
 
     [Fact]
@@ -57,16 +54,13 @@ public sealed class ClaudeProfileTests
     }
 
     [Fact]
-    public void Without_a_default_a_profile_that_sends_to_Anthropic_is_not_offered_first()
+    public void A_profile_that_sends_to_Anthropic_is_offered_by_its_label_and_never_first()
     {
         var text = ModelSetup.WithClaudeProfile(AnalysisPlayer.EmptySettings, Opus());
         var (settings, _) = AnalysisSettingsFile.Parse(text);
 
-        Assert.Null(AnalysisPlayer.DefaultProfile(settings, ModelCapabilities.Text));
-        Assert.Null(AnalysisPlayer.DefaultProfile(settings, ModelCapabilities.Image));
-
-        var chosen = AnalysisPlayer.WithDefault(text, ModelCapabilities.Image, "Claude Opus 5.5");
-        Assert.Equal("Claude Opus 5.5", AnalysisPlayer.DefaultProfile(AnalysisSettingsFile.Parse(chosen).Settings, ModelCapabilities.Image)!.Name);
+        var choices = AnalysisPlayer.ModelChoices(settings, ModelUses.VisionChecks, null);
+        Assert.Equal([(null, "No model"), ("Claude Opus 5.5", "Claude Opus 5.5 (sends to Anthropic)")], choices);
     }
 
     [Fact]

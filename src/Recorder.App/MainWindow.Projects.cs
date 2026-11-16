@@ -17,6 +17,7 @@ namespace Recorder.App;
 public partial class MainWindow
 {
     private Guid? _openProjectId;
+    private ProjectModels? _openProjectModels;
     private const string AppTitle = "Windows Accessibility Recorder";
     private Guid? _projectShownFor;
     private bool _showingProjects;
@@ -156,7 +157,7 @@ public partial class MainWindow
             return;
         }
 
-        var window = new ProjectsWindow(this, _database.Store, _openProjectId ?? SelectedProjectId);
+        var window = new ProjectsWindow(this, _database.Store, _openProjectId ?? SelectedProjectId, OpenProjectSettings);
         window.ShowDialog();
         if (window.Changed)
         {
@@ -240,9 +241,12 @@ public partial class MainWindow
         Title = named is { } shown ? $"{shown.Label}, {AppTitle}" : AppTitle;
         var project = await catalog.ProjectOfAsync(recording, CancellationToken.None);
         _openProjectId = project?.ProjectId;
+        _openProjectModels = project is { } of ? await catalog.ProjectModelsAsync(of.ProjectId, CancellationToken.None) : null;
+        ShowProjectModels();
         if (project is not { } found)
         {
             AnalysisProjectTextBlock.Visibility = Visibility.Collapsed;
+            UpdateAnalysisControls();
             return;
         }
 
@@ -259,10 +263,11 @@ public partial class MainWindow
     private async void AndroidProjectReportMenuItem_Click(object sender, RoutedEventArgs e)
     {
         ShowAnalysisTab();
-        await QueueProjectAsync(AndroidProjectReportKind.Name, new Dictionary<string, string>());
+        await QueueProjectAsync(AndroidProjectReportKind.Name);
     }
 
-    private async Task QueueProjectAsync(string kind, IReadOnlyDictionary<string, string> profiles, Guid? rerunOfTaskId = null, bool aiAllowed = true)
+    // A project's task, queued with the project's models as they are now.
+    private async Task QueueProjectAsync(string kind, Guid? rerunOfTaskId = null)
     {
         if (AnalysisCatalogOrNull is not { } catalog || _openProjectId is not { } project || _analysisSessionDirectory is null)
         {
@@ -279,11 +284,13 @@ public partial class MainWindow
 
         try
         {
-            var ai = aiAllowed && UseAi;
-            await catalog.QueueProjectTaskAsync(project, kind, KindVersion(kind), profiles, folder, rerunOfTaskId, ai, CancellationToken.None);
-            ResetUseAi();
-            UpdateAnalysisControls();
-            ShowAnalysisStatus($"{AnalysisPlayer.KindName(kind)} queued; it uses no model. It reads the project's recordings from {folder}.");
+            if (ProfilesFor(kind, await CurrentModelsAsync(catalog)) is not { } profiles)
+            {
+                return;
+            }
+
+            await catalog.QueueProjectTaskAsync(project, kind, KindVersion(kind), profiles, folder, rerunOfTaskId, profiles.Count > 0, CancellationToken.None);
+            ShowAnalysisStatus($"{QueuedWith(kind, profiles)} It reads the project's recordings from {folder}.");
             _busy.AnnounceCompleted(AnalysisStatusTextBlock.Text);
             StartWorker();
             await ReadAnalysisAsync();
@@ -292,5 +299,82 @@ public partial class MainWindow
         {
             ShowAnalysisStatus($"The task could not be queued: {exception.Message}");
         }
+    }
+
+    // The project's settings (projects.md, "The project's models"): of the
+    // open recording's project, else of the project chosen for new
+    // recordings, from the Project menu and the Analysis tab.
+    private async void ProjectSettingsMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (_database is null || AnalysisCatalogOrNull is not { } catalog)
+        {
+            MessageBox.Show(this, DatabaseUnavailableText, "Project settings", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var project = _openProjectId ?? SelectedProjectId ?? _database.ProjectId;
+        string name;
+        try
+        {
+            name = (await _database.Store.ProjectsAsync()).FirstOrDefault(item => item.ProjectId == project)?.Name ?? SessionDatabase.DefaultProjectName;
+        }
+        catch (NpgsqlException exception)
+        {
+            ShowAnalysisStatus("The projects could not be read: " + exception.Message);
+            return;
+        }
+
+        if (OpenProjectSettings(this, project, name))
+        {
+            await CurrentModelsAsync(catalog);
+        }
+    }
+
+    // Opens a project's settings over a window; true where they were saved.
+    private bool OpenProjectSettings(Window owner, Guid project, string name)
+    {
+        if (AnalysisCatalogOrNull is not { } catalog)
+        {
+            return false;
+        }
+
+        ReadAnalysisSettings();
+        var window = new ProjectSettingsWindow(owner, catalog, _analysisSettings, project, name);
+        if (window.ShowDialog() != true || window.Saved is not { } saved)
+        {
+            return false;
+        }
+
+        if (project == _openProjectId)
+        {
+            _openProjectModels = saved;
+            ShowProjectModels();
+            UpdateAnalysisControls();
+        }
+
+        var message = $"The settings of the project {name} were saved. Models: " +
+            AnalysisPlayer.ModelsLine(_analysisSettings, saved, ModelUses.All) + ".";
+        ShowAnalysisStatus(message);
+        _busy.AnnounceCompleted(message);
+        return true;
+    }
+
+    // The open recording's project's models, in the Analysis tab and, for
+    // the checks, in the Checks tab, which wrap rather than scroll.
+    private void ShowProjectModels()
+    {
+        if (_openProjectModels is not { } models)
+        {
+            AnalysisModelsTextBlock.Visibility = Visibility.Collapsed;
+            ChecksModelsTextBlock.Text = "Open a recording to see the models its project uses for checks.";
+            return;
+        }
+
+        AnalysisModelsTextBlock.Text = "Models, from the project's settings: " +
+            AnalysisPlayer.ModelsLine(_analysisSettings, models, ModelUses.All) + ".";
+        AnalysisModelsTextBlock.Visibility = Visibility.Visible;
+        ChecksModelsTextBlock.Text = "Models for checks, from the project's settings: " +
+            AnalysisPlayer.ModelsLine(_analysisSettings, models, [ModelUses.TextChecks, ModelUses.VisionChecks]) +
+            ". No check uses a model yet.";
     }
 }

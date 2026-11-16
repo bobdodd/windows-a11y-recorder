@@ -169,9 +169,20 @@ public static class ModelSetup
     }
 
     /// <summary>
+    /// Drops what the settings file held before the project's settings
+    /// chose the models, the defaults and the AI analysis switch, which
+    /// nothing reads any longer (projects.md, "The project's models").
+    /// </summary>
+    private static void Obsolete(JsonObject document)
+    {
+        document.Remove("defaults");
+        document.Remove("aiAnalysis");
+    }
+
+    /// <summary>
     /// The settings with the profiles added, each replacing one of the same
-    /// name, and each made the default for what it takes where there is no
-    /// default yet.
+    /// name. No profile is chosen for anything here: a project's settings
+    /// choose its models (projects.md, "The project's models").
     /// </summary>
     public static string WithProfiles(string? text, IEnumerable<JsonObject> profiles)
     {
@@ -183,12 +194,7 @@ public static class ModelSetup
             document["profiles"] = list;
         }
 
-        if (document["defaults"] is not JsonObject defaults)
-        {
-            defaults = [];
-            document["defaults"] = defaults;
-        }
-
+        Obsolete(document);
         var added = new List<string>();
         foreach (var profile in profiles)
         {
@@ -205,22 +211,16 @@ public static class ModelSetup
             }
 
             added.Add(name);
-            foreach (var capability in (copy["capabilities"] as JsonArray ?? []).Select(item => item!.GetValue<string>()))
-            {
-                // The image profile also takes text, but the text default
-                // stays with the text profile.
-                var isImageProfile = (copy["capabilities"] as JsonArray)!.Count > 1;
-                if (defaults[capability] is null && !(capability == ModelCapabilities.Text && isImageProfile))
-                {
-                    defaults[capability] = name;
-                }
-            }
         }
 
         return Checked(document, added);
     }
 
-    /// <summary>The settings without the profile, and without any default that named it.</summary>
+    /// <summary>
+    /// The settings without the profile. A project whose settings name it
+    /// keeps the name, shown as not in the model profiles, and no model of
+    /// that name is asked.
+    /// </summary>
     public static string WithoutProfile(string? text, string name)
     {
         var document = Document(text) ?? throw new InvalidDataException("The analysis settings file does not hold a JSON object.");
@@ -229,14 +229,7 @@ public static class ModelSetup
             list.RemoveAt(index);
         }
 
-        if (document["defaults"] is JsonObject defaults)
-        {
-            foreach (var capability in defaults.Where(pair => pair.Value?.GetValueKind() == JsonValueKind.String && pair.Value.GetValue<string>() == name).Select(pair => pair.Key).ToList())
-            {
-                defaults.Remove(capability);
-            }
-        }
-
+        Obsolete(document);
         return Checked(document, []);
     }
 
@@ -317,8 +310,8 @@ public static class ModelSetup
     /// <summary>
     /// The settings with a new Claude profile added. Unlike
     /// <see cref="WithProfiles"/>, a profile of the same name is not
-    /// replaced, and the profile is not made a default, so that choosing
-    /// to send to Anthropic stays a choice made when a task is queued.
+    /// replaced. As with every profile, it is used only where a project's
+    /// settings choose it.
     /// </summary>
     public static string WithClaudeProfile(string? text, JsonObject profile)
     {

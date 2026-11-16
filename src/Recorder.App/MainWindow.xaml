@@ -179,17 +179,17 @@
            recording with phone screens. -->
       <MenuItem x:Name="AndroidReportMenuItem"
                 Style="{StaticResource AnalysisMenuItem}"
-                Header="Android _report, with no model"
+                Header="Android _report"
                 Click="AndroidReportMenuItem_Click" />
       <MenuItem x:Name="AndroidSummaryMenuItem"
                 Style="{StaticResource AnalysisMenuItem}"
-                Header="Android summ_ary, with the chosen profile"
+                Header="Android summ_ary"
                 Click="AndroidSummaryMenuItem_Click" />
       <!-- Every recording in the open recording's project, taken together
            (projects.md). -->
       <MenuItem x:Name="AndroidProjectReportMenuItem"
                 Style="{StaticResource AnalysisMenuItem}"
-                Header="Android report for the _project, with no model"
+                Header="Android report for the _project"
                 Click="AndroidProjectReportMenuItem_Click" />
       <MenuItem x:Name="CapabilitiesMenuItem"
                 Style="{StaticResource AnalysisMenuItem}"
@@ -215,16 +215,6 @@
                 IsCheckable="True"
                 IsChecked="True"
                 Click="BrowserOnlyMenuItem_Click" />
-      <!-- On by default; saved in the analysis settings file as
-           "aiAnalysis". Off, no model is used at all, cloud or local, and
-           the summaries cannot be queued (analysis-runner.md, "Turning AI
-           analysis off"). -->
-      <MenuItem x:Name="AiAnalysisMenuItem"
-                Style="{StaticResource AnalysisMenuItem}"
-                Header="Use A_I in analysis"
-                IsCheckable="True"
-                IsChecked="True"
-                Click="AiAnalysisMenuItem_Click" />
     </MenuItem>
     <MenuItem x:Name="ProjectMenu"
               Header="_Project"
@@ -250,6 +240,14 @@
                 Style="{StaticResource AnalysisMenuItem}"
                 Header="_Rename the open recording..."
                 Click="RenameOpenRecordingMenuItem_Click" />
+      <!-- The models the project uses, or no model, for report analysis,
+           text-based checks and vision-based checks (projects.md, "The
+           project's models"): of the open recording's project, else of
+           the project chosen for new recordings. -->
+      <MenuItem x:Name="ProjectSettingsMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="Project _settings..."
+                Click="ProjectSettingsMenuItem_Click" />
     </MenuItem>
     <MenuItem x:Name="AndroidMenu"
               Header="An_droid"
@@ -1722,26 +1720,22 @@
                             AutomationProperties.HelpText="How long the phone must be held turned, with Auto-rotate on, before a screen that did not turn with it is an orientation finding (WCAG 1.3.4)."
                             SelectionChanged="OrientationHoldComboBox_SelectionChanged" />
                 </StackPanel>
-                <!-- "Use AI in analysis" from the Analysis menu, shown here as
-                     well because a torn-out Checks window has no menu and
-                     the vision checks will run from this tab (owner,
-                     2026-11-15). One setting: checking it here checks the
-                     menu item, and the other way round. -->
-                <CheckBox x:Name="ChecksUseAiCheckBox"
-                          MinHeight="44"
-                          Margin="16,0,0,0"
-                          VerticalContentAlignment="Center"
-                          Foreground="#CDCCCA"
-                          IsChecked="True"
-                          Content="Use AI in checks"
-                          AutomationProperties.HelpText="The same setting as Use AI in analysis in the Analysis menu. Off, no model is asked, cloud or local, by any check or report, and a check that needs a model is listed as not run."
-                          Click="ChecksUseAiCheckBox_Click" />
               </WrapPanel>
-              <local:SelectableText x:Name="ChecksStatusTextBlock"
-                         Grid.Row="1"
-                         Margin="0,0,0,6"
-                         TextWrapping="Wrap"
-                         Text="Open a recording of a phone to list its apps, screens and visits." />
+              <StackPanel Grid.Row="1">
+                <!-- The project's models for checks, shown here because a
+                     torn-out Checks window has no menu and the vision
+                     checks will run from this tab (owner, 2026-11-15;
+                     projects.md, "The project's models"). -->
+                <local:SelectableText x:Name="ChecksModelsTextBlock"
+                           Margin="0,0,0,6"
+                           TextWrapping="Wrap"
+                           Text="Open a recording to see the models its project uses for checks."
+                           AutomationProperties.Name="Models for checks" />
+                <local:SelectableText x:Name="ChecksStatusTextBlock"
+                           Margin="0,0,0,6"
+                           TextWrapping="Wrap"
+                           Text="Open a recording of a phone to list its apps, screens and visits." />
+              </StackPanel>
               <ListBox x:Name="PhoneScreensListBox"
                        Grid.Row="2"
                        MinHeight="70"
@@ -1847,34 +1841,23 @@
                          AutomationProperties.Name="Analysis worker" />
               <!-- The open recording's project; its tasks are listed with
                    the recording's (projects.md). -->
-              <local:SelectableText x:Name="AnalysisProjectTextBlock"
-                         Grid.Row="1"
-                         Margin="0,0,0,8"
-                         TextWrapping="Wrap"
-                         Text=""
-                         Visibility="Collapsed"
-                         AutomationProperties.Name="Project of this recording" />
+              <StackPanel Grid.Row="1">
+                <local:SelectableText x:Name="AnalysisProjectTextBlock"
+                           Margin="0,0,0,8"
+                           TextWrapping="Wrap"
+                           Text=""
+                           Visibility="Collapsed"
+                           AutomationProperties.Name="Project of this recording" />
+                <!-- The project's models, which every task is queued with
+                     (projects.md, "The project's models"). -->
+                <local:SelectableText x:Name="AnalysisModelsTextBlock"
+                           Margin="0,0,0,8"
+                           TextWrapping="Wrap"
+                           Text=""
+                           Visibility="Collapsed"
+                           AutomationProperties.Name="Models of this recording's project" />
+              </StackPanel>
               <WrapPanel Grid.Row="2" Margin="0,0,0,8">
-                <Label Target="{Binding ElementName=ProfileComboBox}"
-                       VerticalAlignment="Center"
-                       Content="_Profile:" />
-                <ComboBox x:Name="ProfileComboBox"
-                          MinWidth="200"
-                          MinHeight="44"
-                          Margin="0,0,8,0"
-                          VerticalContentAlignment="Center"
-                          AutomationProperties.Name="Profile to use" />
-                <!-- Starts from "Use AI in analysis", for each report, so
-                     that one report can be made without AI; it cannot turn
-                     AI on while the setting is off (analysis-runner.md,
-                     "Turning AI analysis off"). -->
-                <CheckBox x:Name="UseAiCheckBox"
-                          MinHeight="44"
-                          Margin="0,0,8,0"
-                          VerticalContentAlignment="Center"
-                          IsChecked="True"
-                          Content="Use AI in this report"
-                          Click="UseAiCheckBox_Click" />
                 <Button x:Name="QueueSummaryButton"
                         Style="{StaticResource AnalysisButton}"
                         Content="_Queue summary"
@@ -1891,6 +1874,11 @@
                         Style="{StaticResource AnalysisButton}"
                         Content="Queue Android report for the project"
                         Click="AndroidProjectReportMenuItem_Click" />
+                <Button x:Name="AnalysisProjectSettingsButton"
+                        Style="{StaticResource AnalysisButton}"
+                        Content="Project settings..."
+                        AutomationProperties.HelpText="Choose the models this recording's project uses, or no model, for report analysis, text-based checks and vision-based checks."
+                        Click="ProjectSettingsMenuItem_Click" />
                 <Button x:Name="RefreshAnalysisButton"
                         Style="{StaticResource AnalysisButton}"
                         Content="_Read the queue again"

@@ -341,9 +341,10 @@ quality of a model on a PC are measured by analysing a recording with it.
 
 Each model becomes a profile for text and, with its image add-on, a second
 profile for images ("<model>, with images", capability text and image,
-`presence_penalty` 1.5). Where there is no default profile for text, or for
-images, the first one added becomes it. Existing profiles and defaults are
-not changed.
+`presence_penalty` 1.5). Existing profiles are not changed. No profile is
+made a default: since 2026-11-15 each project's settings choose the models
+it uses (`projects.md`, "The project's models"), and model setup drops the
+settings file's former `"defaults"` and `"aiAnalysis"` when it writes it.
 
 ### Server arguments
 
@@ -365,7 +366,9 @@ Notepad" and "Read the file again" for anything it does not cover:
 - for the chosen profile: the server arguments (its llama.cpp preset), the
   output limit, temperature, seed, and thinking on or off; "Save the
   profile's settings" and "Remove the profile";
-- the default profile for text and for images, and "Save the defaults";
+- the default profile for text and for images, and "Save the defaults",
+  removed on 2026-11-15, when each project's settings came to choose its
+  models (`projects.md`, "The project's models");
 - "Set up models...", which opens model setup.
 
 Each change is read with the app's own settings reader before it is

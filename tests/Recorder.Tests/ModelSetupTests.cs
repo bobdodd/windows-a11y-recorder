@@ -135,7 +135,7 @@ public sealed class ModelSetupTests : IDisposable
             ModelSetup.DefaultPort);
 
     [Fact]
-    public void AModelWithAnImageAddOnMakesATextProfileAndAnImageProfileThatAreTheDefaults()
+    public void AModelWithAnImageAddOnMakesATextProfileAndAnImageProfile()
     {
         var text = ModelSetup.WithProfiles(WithServer(), QwenProfiles());
 
@@ -152,12 +152,12 @@ public sealed class ModelSetupTests : IDisposable
         Assert.Equal("qwen3.6-35b-a3b-ud-q4_k_m-images", imageProfile.Model);
         Assert.Equal(new Uri("http://127.0.0.1:8091"), textProfile.Endpoint);
         Assert.Equal("ac0e2c1189e055faa36eff361580e79c5bd6f8e76bffb4ce547f167d53e31a61", textProfile.File.Sha256);
-        Assert.Equal(textProfile.Name, settings.Defaults[ModelCapabilities.Text]);
-        Assert.Equal(imageProfile.Name, settings.Defaults[ModelCapabilities.Image]);
+        // No profile is chosen for anything: a project's settings choose.
+        Assert.DoesNotContain("\"defaults\"", text, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AddingAModelAgainReplacesItsProfilesAndKeepsTheDefaults()
+    public void AddingAModelAgainReplacesItsProfiles()
     {
         var gemma = ModelSetup.Profiles("Gemma", "gemma", "Q4_K_M", @"D:\m\g.gguf",
             "f2c28b3dc4776931ac6f879e11f203dec637ea0f14267a86ec8f6165f63f293f", null, "-fa on", GenerationSettings.Default, ModelSetup.DefaultPort);
@@ -167,8 +167,6 @@ public sealed class ModelSetupTests : IDisposable
         var (settings, problems) = AnalysisSettingsFile.Parse(text);
         Assert.Empty(problems);
         Assert.Equal(3, settings.Profiles.Count);
-        Assert.Equal("Gemma", settings.Defaults[ModelCapabilities.Text]);
-        Assert.Equal("Qwen3.6 35B A3B, UD-Q4_K_M, with images", settings.Defaults[ModelCapabilities.Image]);
     }
 
     [Fact]
@@ -181,16 +179,18 @@ public sealed class ModelSetupTests : IDisposable
     }
 
     [Fact]
-    public void RemovingAProfileRemovesTheDefaultsThatNameIt()
+    public void RemovingAProfileDropsTheSettingsThatNoLongerChooseModels()
     {
-        var text = ModelSetup.WithProfiles(WithServer(), QwenProfiles());
+        var text = ModelSetup.WithProfiles(WithServer(), QwenProfiles())
+            .Replace("\"profiles\"", "\"aiAnalysis\": false, \"defaults\": { \"image\": \"x\" }, \"profiles\"", StringComparison.Ordinal);
 
         text = ModelSetup.WithoutProfile(text, "Qwen3.6 35B A3B, UD-Q4_K_M, with images");
 
         var (settings, problems) = AnalysisSettingsFile.Parse(text);
         Assert.Empty(problems);
         Assert.Single(settings.Profiles);
-        Assert.False(settings.Defaults.ContainsKey(ModelCapabilities.Image));
+        Assert.DoesNotContain("\"defaults\"", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"aiAnalysis\"", text, StringComparison.Ordinal);
     }
 
     [Fact]

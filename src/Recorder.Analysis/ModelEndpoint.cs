@@ -28,6 +28,15 @@ public sealed record ModelRequest(
     public string Capability => Images.Count > 0 ? ModelCapabilities.Image : ModelCapabilities.Text;
 
     /// <summary>
+    /// What the step uses a model for (<see cref="ModelUses"/>): report
+    /// analysis, unless a check says otherwise. The worker asks the model
+    /// the task was queued with for that use, and none where the project's
+    /// settings now choose no model for it. It is not part of the request
+    /// sent.
+    /// </summary>
+    public string Use { get; init; } = ModelUses.Report;
+
+    /// <summary>
     /// The forms a statement may take, where the step's answer gives each
     /// statement a form, or null where it does not, as for every step but
     /// those of the report's second chapter (recording-summary.md, "The

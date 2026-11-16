@@ -8,21 +8,26 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
-### Turning AI analysis off
+### The project's models
 
-- "Use AI in analysis", in the Analysis menu, turns off every use of a
-  model, cloud or local, for checks and summaries alike. It is on by
-  default and saved in the analysis settings. "Use AI in checks", in the
-  Checks tab, is the same setting, so it can be changed from a torn-out
-  Checks window.
-- "Use AI in this report", in the Analysis tab, starts from the setting,
-  so that one report can be made without AI. A task queued without AI
-  says "Without AI." in the Analysis tab.
-- With AI off the summaries cannot be queued, and the worker asks no
-  model and reuses no earlier answer: a task that needs one fails saying
-  why. Turning the setting off also stops tasks already queued. See
-  [the analysis runner](docs/architecture/analysis-runner.md), "Turning
-  AI analysis off".
+- Each project's settings choose the model, or no model, for report
+  analysis (the summaries), for text-based checks and for vision-based
+  checks, which must take images. "Project settings..." is in the
+  Project menu, in the Analysis tab and in "Projects and recordings...".
+  Every project starts with no model, so nothing is sent to a model until
+  a model is chosen; existing projects need setting too.
+- This replaces "Use AI in analysis", "Use AI in checks", "Use AI in
+  this report", the Analysis tab's "Profile:" list and the model
+  profiles window's defaults, all removed. The analysis settings file's
+  `"defaults"` and `"aiAnalysis"` are no longer read, and are dropped
+  when the file is next written.
+- The Analysis tab and the Checks tab show the project's models. Each
+  task row says which models it was queued with, or "No model."; Run
+  again uses the project's current models.
+- The worker asks no model and reuses no earlier answer for a use the
+  project has no model for, read again before each step, so choosing no
+  model also stops tasks already queued. See
+  [projects](docs/architecture/projects.md), "The project's models".
 
 ### Evidence numbers, chapters, touches and title in MP4s
 

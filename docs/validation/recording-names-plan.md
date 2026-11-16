@@ -148,7 +148,7 @@ in Default project.
    phone recording 20261113-200327, rename it `Name test report`, and
    close the window.
 2. Choose Open recording..., and open that recording's folder.
-3. From the Android menu, choose "Android report, with no model", and
+3. From the Android menu, choose "Android report", and
    wait in the Analysis tab until its row says "Finished".
 4. In its row, choose "Open result", then "Open in Word".
 

@@ -1,5 +1,9 @@
 # Validation plan: turning AI analysis off
 
+Superseded on 2026-11-15, before these tests were run: the switch and the
+checkboxes they test were replaced by each project's models. See
+[the project's models](project-models-plan.md).
+
 These tests check the switch that turns AI analysis off
 ([the analysis runner](../architecture/analysis-runner.md), "Turning AI
 analysis off"): the setting "Use AI in analysis" in the Analysis menu,

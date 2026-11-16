@@ -82,7 +82,7 @@ project, not of one recording." if given a project's.
 The Analysis tab of an open recording says which project it is in and
 how many recordings it has, and lists the project's tasks with the
 recording's own. The project's tasks are queued from "Android report
-for the project, with no model" in the Analysis menu, or "Queue Android
+for the project" in the Analysis menu, or "Queue Android
 report for the project" on the tab. Its kind is
 `android-project-report`, named "Android report for the project".
 
@@ -100,6 +100,70 @@ database's evidence tables rather than a recording file, when its
 recording file is not in the folder the task was given, or when it has
 no phone screens. A task with no recording left fails, saying why each
 was left out.
+
+## The project's models
+
+Built 2026-11-15, not yet checked on the development PC. The owner asked:
+"The model UI selection is nonsense. Change it so that projects have
+settings and we can choose models (or no model) for report analysis, for
+text-based checks, for vision-based checks. Remove the existing
+checkboxes and model selection from analysis and checks. Once I have
+those in place, you will use the settings I choose."
+
+- **Three settings for each project.** The model for report analysis,
+  the summaries: the recording summary, the summary with vision and the
+  Android summary. The model for text-based checks, checks that ask a
+  model about text, such as an item's name. The model for vision-based
+  checks, checks that ask a model about a picture, such as an image of
+  text. Each is a model profile, by name, or no model. No model means
+  none is asked, cloud or local, and what needs one is not done: a
+  summary cannot be queued, and a check that needs one is listed as not
+  run.
+- **In the catalog.** Migration 0045 adds `report_model`,
+  `text_checks_model` and `vision_checks_model` to `projects`, each the
+  profile's name or null for no model. Every project, the ones made
+  before and every new one, starts with no model for each, so nothing
+  is sent to a model until one is chosen. A name no profile has any
+  longer is kept, shown as "(not in the model profiles)", and not used.
+- **Where they are chosen.** "Project settings..." in the Project menu,
+  for the open recording's project, else the project chosen for new
+  recordings; "Project settings..." in the Analysis tab, for the open
+  recording's project; and "Project settings..." in Projects and
+  recordings, for the selected project. The window has three lists, each
+  of no model and the profiles that can do what the use needs: those
+  that take text for report analysis and text-based checks, those that
+  take images for vision-based checks. A profile that sends to Anthropic
+  is listed with "(sends to Anthropic)" after it, as everywhere a profile
+  is chosen. Nothing is chosen for a project by default, cloud or local.
+- **Where they are shown.** The Analysis tab says the open recording's
+  project's models, one use after another. The Checks tab says the two
+  models for checks, and that no check uses a model yet; it is there
+  because a torn-out Checks window has no menu, and the checks that need
+  a model will run from that tab.
+- **Used when a task is queued.** The project's settings are read again
+  each time a task is queued, Run again included, so a task always uses
+  the settings as they are then, not those an earlier task was queued
+  with. A summary is queued with the model for report analysis. Add
+  vision to the summary needs that model to take images, and queues the
+  summary and vision both on it; until now the summary used a text
+  profile and vision the default profile for images. The Android reports
+  need no model, and are queued with the models for checks, which no
+  check uses yet. Each task's row names the models it was queued with,
+  by use, or says "No model."
+- **Used at each step.** A task keeps the models it was queued with, but
+  the worker reads the project's settings again before each model step:
+  where they now choose no model for the step's use, the step asks no
+  model, reuses no earlier answer, and fails the task saying so. So
+  choosing no model stops a task already queued or running from asking
+  one.
+- **What was removed.** "Use AI in analysis" in the Analysis menu, "Use
+  AI in checks" in the Checks tab, the Analysis tab's Profile list and
+  "Use AI in this report", and the default profiles for text and for
+  images in the model profiles window and the settings file. See
+  `analysis-runner.md`, "Turning AI analysis off".
+- **The reports.** A report made with a model says so, and whether the
+  model was in the cloud or on this PC, as before (`android-report.md`,
+  "Cloud or local"). One made without says nothing about AI.
 
 ## Grouping screens across recordings
 

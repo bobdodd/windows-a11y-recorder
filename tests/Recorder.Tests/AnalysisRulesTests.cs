@@ -104,8 +104,7 @@ public sealed class AnalysisRulesTests
           "version": 1,
           {{extra}}
           "localServer": { "executable": "C:\\llama\\llama-server.exe", "port": 8091 },
-          "profiles": [ {{profiles}} ],
-          "defaults": { "text": "This PC" }
+          "profiles": [ {{profiles}} ]
         }
         """;
 
@@ -122,7 +121,7 @@ public sealed class AnalysisRulesTests
         """;
 
     [Fact]
-    public void A_settings_file_is_read_with_its_profiles_defaults_and_limit()
+    public void A_settings_file_is_read_with_its_profiles_and_limit()
     {
         var (settings, problems) = AnalysisSettingsFile.Parse(Settings(LocalProfile, "\"maxAttempts\": 4,"));
 
@@ -135,7 +134,6 @@ public sealed class AnalysisRulesTests
         Assert.Equal(Sha, profile.File.Sha256);
         Assert.Equal("-ngl 99 -ncmoe 36 -fa on", profile.Local!.Arguments);
         Assert.Equal(new GenerationSettings(4096, 0, 7, false), profile.Generation);
-        Assert.Equal("This PC", settings.Defaults[ModelCapabilities.Text]);
     }
 
     [Fact]
@@ -202,21 +200,17 @@ public sealed class AnalysisRulesTests
     }
 
     [Fact]
-    public void A_network_profile_needs_no_key_and_a_default_must_name_a_capable_profile()
+    public void A_network_profile_needs_no_key()
     {
         var network = """
             { "name": "Server", "endpoint": "http://192.168.1.50:8080", "model": "big", "capabilities": ["text"] }
             """;
-        var text = Settings(network).Replace("\"defaults\": { \"text\": \"This PC\" }", "\"defaults\": { \"text\": \"Server\", \"image\": \"Server\" }", StringComparison.Ordinal);
-
-        var (settings, problems) = AnalysisSettingsFile.Parse(text);
+        var (settings, problems) = AnalysisSettingsFile.Parse(Settings(network));
 
         var profile = Assert.Single(settings.Profiles);
         Assert.Null(profile.Local);
         Assert.Null(profile.ProtectedApiKey);
-        Assert.Equal("Server", settings.Defaults[ModelCapabilities.Text]);
-        Assert.False(settings.Defaults.ContainsKey(ModelCapabilities.Image));
-        Assert.Contains(problems, problem => problem.Contains("cannot take image", StringComparison.Ordinal));
+        Assert.Empty(problems);
     }
 
     [Theory]

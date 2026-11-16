@@ -58,9 +58,11 @@ public sealed record AnalysisTask(
     public Guid? ProjectId { get; init; }
 
     /// <summary>
-    /// Whether the task may use a model, as it was queued (analysis-runner.md,
-    /// "Turning AI analysis off"). Off, it makes no request to any model
-    /// and reuses no model's answer.
+    /// Whether the task may use a model, as it was queued: whether its
+    /// project's settings chose a model for any of its uses (projects.md,
+    /// "The project's models"), or, before those settings, whether AI
+    /// analysis was on. Off, it makes no request to any model and reuses
+    /// no model's answer.
     /// </summary>
     public bool AiAnalysis { get; init; } = true;
 
@@ -95,9 +97,11 @@ public sealed record AnalysisTaskSummary(
     public Guid? ProjectId { get; init; }
 
     /// <summary>
-    /// Whether the task may use a model, as it was queued (analysis-runner.md,
-    /// "Turning AI analysis off"). Off, it makes no request to any model
-    /// and reuses no model's answer.
+    /// Whether the task may use a model, as it was queued: whether its
+    /// project's settings chose a model for any of its uses (projects.md,
+    /// "The project's models"), or, before those settings, whether AI
+    /// analysis was on. Off, it makes no request to any model and reuses
+    /// no model's answer.
     /// </summary>
     public bool AiAnalysis { get; init; } = true;
 
@@ -303,6 +307,53 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? (reader.GetGuid(0), reader.GetString(1)) : null;
         }, cancellationToken);
+
+    /// <summary>A project's models (projects.md, "The project's models"), or null where there is no such project.</summary>
+    public Task<ProjectModels?> ProjectModelsAsync(Guid projectId, CancellationToken cancellationToken) =>
+        UseAsync<ProjectModels?>(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT report_model, text_checks_model, vision_checks_model FROM projects WHERE project_id = $1", connection);
+            command.Parameters.AddWithValue(projectId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ModelsOf(reader) : null;
+        }, cancellationToken);
+
+    /// <summary>
+    /// The models of a task's project as they are now: the project the task
+    /// is of, or its recording's. Null where the task is gone.
+    /// </summary>
+    public Task<ProjectModels?> ProjectModelsOfTaskAsync(Guid taskId, CancellationToken cancellationToken) =>
+        UseAsync<ProjectModels?>(async connection =>
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT p.report_model, p.text_checks_model, p.vision_checks_model FROM analysis_tasks t " +
+                "LEFT JOIN recordings r ON r.recording_id = t.recording_id " +
+                "JOIN projects p ON p.project_id = coalesce(t.project_id, r.project_id) WHERE t.task_id = $1",
+                connection);
+            command.Parameters.AddWithValue(taskId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ModelsOf(reader) : null;
+        }, cancellationToken);
+
+    /// <summary>Saves a project's models; false where there is no such project.</summary>
+    public Task<bool> SaveProjectModelsAsync(Guid projectId, ProjectModels models, CancellationToken cancellationToken) =>
+        UseAsync<bool>(async connection =>
+        {
+            ArgumentNullException.ThrowIfNull(models);
+            await using var command = new NpgsqlCommand(
+                "UPDATE projects SET report_model = $2, text_checks_model = $3, vision_checks_model = $4 WHERE project_id = $1", connection);
+            command.Parameters.AddWithValue(projectId);
+            command.Parameters.AddWithValue((object?)models.Report ?? DBNull.Value);
+            command.Parameters.AddWithValue((object?)models.TextChecks ?? DBNull.Value);
+            command.Parameters.AddWithValue((object?)models.VisionChecks ?? DBNull.Value);
+            return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 1;
+        }, cancellationToken);
+
+    private static ProjectModels ModelsOf(NpgsqlDataReader reader) =>
+        new(reader.IsDBNull(0) ? null : reader.GetString(0),
+            reader.IsDBNull(1) ? null : reader.GetString(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2));
 
     /// <summary>
     /// A project's name and its recordings in the order they were made:

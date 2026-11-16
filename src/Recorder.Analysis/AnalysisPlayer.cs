@@ -8,8 +8,7 @@ namespace Recorder.Analysis;
 /// <summary>
 /// What the player needs from the analysis library that is not drawing:
 /// the names it shows, what changed between two reads of the tasks, the
-/// worker's status in words, the default profiles in the settings file,
-/// and starting the worker. See docs/architecture/analysis-runner.md,
+/// worker's status in words, the settings file, and starting the worker. See docs/architecture/analysis-runner.md,
 /// "The player".
 /// </summary>
 public static class AnalysisPlayer
@@ -30,9 +29,10 @@ public static class AnalysisPlayer
 
     /// <summary>
     /// Whether a kind of task cannot be made without a model: the summaries.
-    /// With AI analysis off they are not queued, as off means no model at
-    /// all (owner, 2026-11-15; analysis-runner.md, "Turning AI analysis off").
-    /// The Android reports use none, so are queued either way.
+    /// Where the project's settings choose no model for report analysis
+    /// they are not queued, as no model means none at all, cloud or local
+    /// (owner, 2026-11-15; projects.md, "The project's models"). The
+    /// Android reports need none, so are queued either way.
     /// </summary>
     public static bool NeedsModel(string kind) =>
         kind is Summary.RecordingSummaryKind.Name or Summary.RecordingSummaryVisionKind.Name or Android.AndroidSummaryKind.Name;
@@ -43,9 +43,10 @@ public static class AnalysisPlayer
     /// from the recorder's facts as they are now. Where a summary is queued
     /// or running, vision is added to it and no other is queued; otherwise
     /// a new summary is queued, as a run again of the newest finished one,
-    /// so that its steps whose requests are unchanged are reused, with that
-    /// summary's profiles, or the text profile given where there is none.
-    /// Returns the summary's and the vision task's IDs (owner, 2026-10-16:
+    /// so that its steps whose requests are unchanged are reused. Both are
+    /// queued with the profile given, the project's model for report
+    /// analysis, which must take images (projects.md, "The project's
+    /// models"). Returns the summary's and the vision task's IDs (owner, 2026-10-16:
     /// "Either fix this so we can restart or start from ther beginning";
     /// recording-summary.md, "Vision starts from the beginning").
     /// </summary>
@@ -53,8 +54,7 @@ public static class AnalysisPlayer
         AnalysisCatalog catalog,
         Guid recordingId,
         string sessionDirectory,
-        string textProfile,
-        string imageProfile,
+        string reportProfile,
         Guid? rerunOfTaskId,
         CancellationToken cancellationToken)
     {
@@ -73,7 +73,7 @@ public static class AnalysisPlayer
         else
         {
             var finished = summaries.FirstOrDefault(task => task.State == AnalysisTaskStates.Done);
-            var profiles = finished?.StageProfiles ?? new Dictionary<string, string> { [ModelCapabilities.Text] = textProfile };
+            var profiles = new Dictionary<string, string> { [ModelCapabilities.Text] = reportProfile };
             summary = await catalog.QueueTaskAsync(
                 recordingId, Summary.RecordingSummaryKind.Name, summaryVersion, profiles,
                 sessionDirectory: sessionDirectory, rerunOfTaskId: finished?.TaskId, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -82,7 +82,7 @@ public static class AnalysisPlayer
 
         var vision = await catalog.QueueTaskAsync(
             recordingId, Summary.RecordingSummaryVisionKind.Name, new Summary.RecordingSummaryVisionKind().Version,
-            new Dictionary<string, string> { [ModelCapabilities.Text] = imageProfile, [ModelCapabilities.Image] = imageProfile },
+            new Dictionary<string, string> { [ModelCapabilities.Text] = reportProfile, [ModelCapabilities.Image] = reportProfile },
             afterTaskId: summary, sessionDirectory: sessionDirectory, rerunOfTaskId: rerunOfTaskId, cancellationToken: cancellationToken).ConfigureAwait(false);
         return (summary, vision, queued);
     }
@@ -225,14 +225,13 @@ public static class AnalysisPlayer
         }
     }
 
-    /// <summary>The settings file as written when there is none: no profiles, no defaults.</summary>
+    /// <summary>The settings file as written when there is none: no profiles.</summary>
     public static string EmptySettings =>
         new JsonObject
         {
             ["version"] = AnalysisSettingsFile.Version,
             ["maxAttempts"] = AnalysisSettings.DefaultMaxAttempts,
-            ["profiles"] = new JsonArray(),
-            ["defaults"] = new JsonObject()
+            ["profiles"] = new JsonArray()
         }.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
 
     /// <summary>Writes the empty settings file when there is none, so it can be opened to edit.</summary>
@@ -246,49 +245,72 @@ public static class AnalysisPlayer
     }
 
     /// <summary>
-    /// The settings file's text with the default profile for a capability
-    /// set, or removed when null, and everything else as it was.
+    /// The choices for a use on the project's settings, in order: no model
+    /// first, then each profile that can do what the use needs, by its
+    /// label, then the saved choice where no profile of that name can any
+    /// longer, so that it is shown and not silently dropped. Each is the
+    /// profile's name, null for no model, and its label.
     /// </summary>
-    public static string WithDefault(string settings, string capability, string? profile)
+    public static IReadOnlyList<(string? Name, string Label)> ModelChoices(AnalysisSettings settings, string use, string? saved)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        ArgumentException.ThrowIfNullOrEmpty(capability);
-        var root = JsonNode.Parse(settings) as JsonObject ??
-            throw new InvalidDataException("The analysis settings file does not hold a JSON object.");
-        if (root["defaults"] is not JsonObject defaults)
+        var capability = ModelUses.Capability(use);
+        var choices = new List<(string?, string)> { (null, "No model") };
+        choices.AddRange(settings.Profiles.Where(profile => profile.Supports(capability)).Select(profile => ((string?)profile.Name, ProfileLabel(profile))));
+        if (saved is not null && !choices.Any(choice => choice.Item1 == saved))
         {
-            defaults = [];
-            root["defaults"] = defaults;
+            choices.Add((saved, settings.Profile(saved) is null
+                ? $"{saved} (not in the model profiles)"
+                : $"{saved} (cannot take images)"));
         }
 
-        if (profile is null)
-        {
-            defaults.Remove(capability);
-        }
-        else
-        {
-            defaults[capability] = profile;
-        }
-
-        return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+        return choices;
     }
 
     /// <summary>
-    /// The profile to offer first for a capability: the default where it
-    /// names a profile that can do it, else the first that can and does not
-    /// send to Anthropic. A profile that sends to Anthropic is used only
-    /// where it was chosen, as a default or for the task, since choosing it
-    /// is the permission to send the recording (cloud-models.md, decision 2).
+    /// A project's models in words, one use after another, as the
+    /// Analysis and Checks tabs show them: each use's profile by its label,
+    /// or no model.
     /// </summary>
-    public static ModelProfile? DefaultProfile(AnalysisSettings settings, string capability)
+    public static string ModelsLine(AnalysisSettings settings, ProjectModels models, IEnumerable<string> uses)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        if (settings.Defaults.TryGetValue(capability, out var name) && settings.Profile(name) is { } named && named.Supports(capability))
+        ArgumentNullException.ThrowIfNull(models);
+        return string.Join("; ", uses.Select(use => $"{ModelUses.Name(use)}, " +
+            (models.For(use) is not { } name ? "no model" : settings.Profile(name) is { } profile ? ProfileLabel(profile) : $"{name} (not in the model profiles)")));
+    }
+
+    /// <summary>
+    /// A task's models in words, for its row on the Analysis tab: the
+    /// profiles it was queued with, by use, or that it was queued with no
+    /// model. A summary's profiles are by capability, text and images,
+    /// which are both report analysis; a check task's by the check's use.
+    /// </summary>
+    public static string TaskModelsLine(IReadOnlyDictionary<string, string> stageProfiles, bool aiAnalysis)
+    {
+        ArgumentNullException.ThrowIfNull(stageProfiles);
+        if (!aiAnalysis || stageProfiles.Count == 0)
         {
-            return named;
+            return "No model.";
         }
 
-        return settings.Profiles.FirstOrDefault(profile => profile.Supports(capability) && !profile.SendsToAnthropic);
+        var parts = new List<string>();
+        var report = stageProfiles.Where(pair => pair.Key is ModelCapabilities.Text or ModelCapabilities.Image)
+            .Select(pair => pair.Value).Distinct(StringComparer.Ordinal).ToList();
+        if (report.Count > 0)
+        {
+            parts.Add($"{ModelUses.Name(ModelUses.Report)}, {string.Join(" and ", report)}");
+        }
+
+        foreach (var use in new[] { ModelUses.TextChecks, ModelUses.VisionChecks })
+        {
+            if (stageProfiles.TryGetValue(use, out var name))
+            {
+                parts.Add($"{ModelUses.Name(use)}, {name}");
+            }
+        }
+
+        return parts.Count == 0 ? "No model." : "Models: " + string.Join("; ", parts) + ".";
     }
 
     /// <summary>

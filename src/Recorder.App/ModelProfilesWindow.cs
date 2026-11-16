@@ -12,17 +12,18 @@ namespace Recorder.App;
 /// <summary>
 /// The model profiles (owner, 2026-10-13; editor 2026-11-06): the
 /// profiles, with a form for the selected one's server arguments and
-/// generation settings, the problems with the settings file, the default
-/// profile for text and for images, model setup, and buttons to open
+/// generation settings, the problems with the settings file, model setup,
+/// and buttons to open
 /// analysis-models.json in Notepad and to read it again. See
 /// docs/architecture/windows-installer.md, "Model profiles window". A
 /// Claude profile (2026-11-11) has its own form: the effort, the prices of
 /// the cost estimate, a new key, and "Check the profile"; see
-/// docs/architecture/cloud-models.md, "6. The player".
+/// docs/architecture/cloud-models.md, "6. The player". Which profile is
+/// used for what is chosen in each project's settings, not here
+/// (projects.md, "The project's models").
 /// </summary>
 internal sealed class ModelProfilesWindow : Window
 {
-    private const string NoDefault = "No default";
     private const string ModelDefault = "The model's default";
 
     private readonly string _path;
@@ -44,8 +45,6 @@ internal sealed class ModelProfilesWindow : Window
     private readonly Button _saveProfile;
     private readonly Button _removeProfile;
     private readonly SelectableText _problems;
-    private readonly ComboBox _text;
-    private readonly ComboBox _image;
     private readonly SelectableText _status;
     private AnalysisSettings _settings = AnalysisSettings.Empty;
 
@@ -137,18 +136,6 @@ internal sealed class ModelProfilesWindow : Window
         profileButtons.Children.Add(Command("Add a _Claude profile...", AddClaudeProfile));
         page.Children.Add(profileButtons);
 
-        _text = Choice();
-        _image = Choice();
-        var defaults = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
-        defaults.Children.Add(new Label { Content = "Default for _text:", Target = _text, VerticalAlignment = VerticalAlignment.Center });
-        defaults.Children.Add(_text);
-        defaults.Children.Add(new Label { Content = "Default for _images:", Target = _image, VerticalAlignment = VerticalAlignment.Center });
-        defaults.Children.Add(_image);
-        defaults.Children.Add(Command("_Save the defaults", SaveDefaults));
-        AutomationProperties.SetName(_text, "Default profile for text");
-        AutomationProperties.SetName(_image, "Default profile for images");
-        page.Children.Add(defaults);
-
         _problems = new SelectableText { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
         AutomationProperties.SetName(_problems, "Problems with the settings file");
         page.Children.Add(_problems);
@@ -166,9 +153,6 @@ internal sealed class ModelProfilesWindow : Window
         Content = new ScrollViewer { Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         Read();
     }
-
-    private static ComboBox Choice() =>
-        new() { MinWidth = 180, MinHeight = 44, Margin = new Thickness(0, 0, 16, 0), VerticalContentAlignment = VerticalAlignment.Center };
 
     private static Button Command(string content, Action click)
     {
@@ -217,8 +201,6 @@ internal sealed class ModelProfilesWindow : Window
             _list.Items.OfType<ListBoxItem>().FirstOrDefault();
         ShowSelected();
         _problems.Text = problems.Count == 0 ? "" : "Problems: " + string.Join(" ", problems);
-        Fill(_text, settings, ModelCapabilities.Text);
-        Fill(_image, settings, ModelCapabilities.Image);
         _status.Text = settings.Profiles.Count == 0
             ? "No profiles. Choose Set up models to download a model or add one from this PC."
             : File.Exists(_path) ? "" : "There is no settings file yet.";
@@ -439,28 +421,6 @@ internal sealed class ModelProfilesWindow : Window
         {
             _status.Text = $"Not saved: {exception.Message}";
         }
-    }
-
-    private static void Fill(ComboBox box, AnalysisSettings settings, string capability)
-    {
-        box.Items.Clear();
-        box.Items.Add(new ComboBoxItem { Content = NoDefault, Tag = null, MinHeight = 44 });
-        foreach (var profile in settings.Profiles.Where(profile => profile.Supports(capability)))
-        {
-            box.Items.Add(new ComboBoxItem { Content = AnalysisPlayer.ProfileLabel(profile), Tag = profile.Name, MinHeight = 44 });
-        }
-
-        var chosen = settings.Defaults.GetValueOrDefault(capability);
-        box.SelectedItem = box.Items.OfType<ComboBoxItem>().FirstOrDefault(item => item.Tag as string == chosen) ?? box.Items[0];
-    }
-
-    private void SaveDefaults()
-    {
-        Change(text =>
-        {
-            text = AnalysisPlayer.WithDefault(text, ModelCapabilities.Text, (_text.SelectedItem as ComboBoxItem)?.Tag as string);
-            return AnalysisPlayer.WithDefault(text, ModelCapabilities.Image, (_image.SelectedItem as ComboBoxItem)?.Tag as string);
-        }, "The defaults were saved. Tasks already queued keep the profiles they were queued with.");
     }
 
     private void OpenInNotepad()
