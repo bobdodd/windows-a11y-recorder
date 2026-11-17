@@ -20,8 +20,10 @@ testing should be AI-free both for cost and repeatability, I expect to
 use AI to help with summary reports and vision-centric tests only". On
 2026-11-15 the owner clarified it: "The rule is really AI only when
 non-AI cannot do the test. The biggest group is vision AI." Almost
-everything here is vision-centric. The few that need a model reading
-text alone are marked "text only", and are wanted as well.
+everything here is vision-centric. The few that ask the model for
+text-based checks are marked "text only", and are wanted as well; they
+read the screen's OCR text as well as what a screen reader says, and
+the picture where the screen is mostly images (requirement 5).
 
 The guidance in "Keeping it repeatable" was adopted by the owner on
 2026-11-15: "I like your "Keeping it repeatable" comments and we should
@@ -61,16 +63,17 @@ or cloud models:
    or drives its interface, for example to make text larger and see
    which text grows.
 
-5. **The screen title check does not trust the screen reader's text
-   alone.** Proposed with the title measured against what a screen
-   reader says on the screen, the owner answered on 2026-11-17:
-   "Actually not really. You are assuming the page is working for
-   screen-readers. It needs to also include OCR as a minimum, and
-   probably vision for image heavy screens". What a screen reader says
-   is what the check tests, so it cannot be the only account of what
-   the screen shows: drawn text, images and views with no name would
-   leave it thin or wrong. So the check of a title that does not
-   describe its screen (2.4.2) is given:
+5. **Checks that read text do not trust the screen reader's text
+   alone.** Proposed with the screen title check measured against what
+   a screen reader says on the screen, the owner answered on
+   2026-11-17: "Actually not really. You are assuming the page is
+   working for screen-readers. It needs to also include OCR as a
+   minimum, and probably vision for image heavy screens". The same day
+   the owner applied it to the other checks that read text: "Apply the
+   OCR and vision sources to the other text checks too". What a screen
+   reader says is what these checks test, so it cannot be the only
+   account of what the screen shows: drawn text, images and views with
+   no name would leave it thin or wrong. Each such check is given:
    - what a screen reader says on the screen, as what a screen reader
      user is given;
    - the screen's text as OCR read it, at least, as what a sighted user
@@ -78,12 +81,20 @@ or cloud models:
    - for a screen mostly of images, the picture, asked of the model for
      vision-based checks.
 
-   Each source is marked in the question, so the model's reason can
-   say which it relied on. Which screens are mostly images is chosen by
-   a rule, without a model, set after measuring the recordings as for
-   every check. A large difference between what a screen reader says
-   and what OCR read is not this check's finding: it is the separate
-   issue "Text shown on screen that is not in the tree".
+   The checks are: a title that does not describe its screen (2.4.2),
+   a heading that does not describe its section (2.4.6), instructions
+   that rely on shape, colour or place (1.3.3), error messages that do
+   not help (3.3.1, 3.3.3), and link text that does not say where it
+   goes (2.4.4). Where the rules choose items by their text, such as
+   the words of instructions that rely on shape or colour, or an error
+   message, they look in the OCR text too, so text that is drawn and
+   not in the tree is not missed. Each source is marked in the
+   question, so the model's reason can say which it relied on. Which
+   screens are mostly images is chosen by a rule, without a model, set
+   after measuring the recordings as for every check. A large
+   difference between what a screen reader says and what OCR read is
+   not these checks' finding: it is the separate issue "Text shown on
+   screen that is not in the tree".
 
 ## Owner's decisions
 
@@ -163,7 +174,7 @@ Each row is one issue, so that its remediation can be specific.
 | Text that looks like a heading but is not one | 1.3.1 | Is this text shown as a heading? | Text items larger or bolder than the screen's body text, not marked as headings |
 | A heading that does not look like one | 1.3.1 | Is this text shown as a heading? | Items marked as headings |
 | A title that does not describe its screen | 2.4.2 | Does this title describe the screen shown? | Each screen's unique title, once a screen, with what a screen reader says, the screen's OCR text, and the picture for a screen mostly of images (requirement 5) |
-| A heading that does not describe its section | 2.4.6 | Does this heading describe what follows it? | Each heading and the items under it |
+| A heading that does not describe its section | 2.4.6 | Does this heading describe what follows it? | Each heading and the items under it, with the OCR text below it and the picture for a screen mostly of images (requirement 5) |
 | Content in an order that does not make sense | 1.3.2 | Does the content read in a sensible order? | Screens with several blocks of text, in the order a screen reader moves |
 
 ### What the tree does not show
@@ -184,7 +195,7 @@ Each row is one issue, so that its remediation can be specific.
 | An error shown only by colour | 1.4.1 | Apart from colour, what shows this field is in error? | Fields whose colours change after input, with no error text |
 | Links shown only by colour | 1.4.1 | Apart from colour, what shows this text is a link? | Clickable text within other text |
 | A chart that relies on colour | 1.4.1 | Can the chart's series be told apart without colour? | The graphics found above that are charts |
-| Instructions that rely on shape, colour or place | 1.3.3 | Does this text refer to something only by its shape, colour or place? | Text with words such as "green", "round", "on the right"; text only |
+| Instructions that rely on shape, colour or place | 1.3.3 | Does this text refer to something only by its shape, colour or place? | Text in the tree or the OCR text with words such as "green", "round", "on the right"; text only, with the picture for a screen mostly of images (requirement 5) |
 
 ## Settling existing warnings
 
@@ -513,9 +524,12 @@ does; the probe and its copies were deleted afterwards.
   is waiting for. With one, a model can judge whether the focus is shown
   in the frames.
 - **Error messages that do not help (3.3.1, 3.3.3):** text only, and
-  wanted (decision 4).
+  wanted (decision 4), with the OCR text and the picture as requirement
+  5 sets.
 - **Link text that does not say where it goes (2.4.4):** text only, and
-  wanted (decision 4), but needs links' spans, which the companion app does not record yet.
+  wanted (decision 4), with the OCR text and the picture as requirement
+  5 sets, but needs links' spans, which the companion app does not
+  record yet.
 - **Flashing (2.3.1):** better measured from the frames without a model.
 
 ## Keeping it repeatable
@@ -539,7 +553,7 @@ Adopted by the owner, 2026-11-15. The same approach as the summaries
    says which profile answered, and whether it was cloud or local
    (requirement 3).
 4. **Each answer reused.** An answer is kept by the picture's SHA-256
-   (the text's, for a text-only check), the question and its version,
+   (the text's, for a text-only check, OCR's as well), the question and its version,
    the model (the file's SHA-256 and the
    server's build for a local model, the model ID and API version for
    Claude) and the settings, as accepted steps are reused now. Running a
@@ -603,10 +617,3 @@ The owner answered the earlier questions on 2026-11-15 (decisions 1 to
 of text with Claude, and four rules, measured on 2026-11-15"). New
 questions will come from measuring each check on the recordings before
 its rules are set.
-
-- **The other text checks' sources (2026-11-17).** Requirement 5 is set
-  for the screen title check. Whether the same sources, what a screen
-  reader says with the OCR text and the picture where needed, are
-  wanted for the other checks that read text (a heading that does not
-  describe its section, instructions that rely on shape, colour or
-  place, error messages) is not decided.
