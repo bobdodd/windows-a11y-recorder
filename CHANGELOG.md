@@ -42,6 +42,9 @@ Changes on `main` since 1.1.0, not yet released.
   was asked. A settled question is not asked again.
 - The three questions asked now are simple; no complex question is
   built yet. The new choices are kept in two new columns of `projects`.
+- The Checks tab's "Ask the project's model" is available only where the
+  model for complex questions can be used too, when another is chosen;
+  where it cannot, the tab's line of models says why.
 
 ### The reason before the answer
 

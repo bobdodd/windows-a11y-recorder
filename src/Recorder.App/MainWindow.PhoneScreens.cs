@@ -522,13 +522,15 @@ public partial class MainWindow
 
     // "Ask the project's model" is for images and text the rules leave that
     // the project's model for vision-based checks has not answered, while no
-    // model checks of the recording are queued or running.
+    // model checks of the recording are queued or running, and only where
+    // the project can use that model and, where another is chosen for
+    // complex questions, that one too (owner, 2026-11-17).
     private void UpdateAskChecksModelButton()
     {
         var waiting = _analysisTasks?.Any(task => task.Kind == AndroidModelChecksKind.Name &&
             task.State is AnalysisTaskStates.Queued or AnalysisTaskStates.Running) == true;
         AskChecksModelButton.IsEnabled = _imagesOfTextUnanswered + _headingLookUnanswered + _imageAlternativeUnanswered > 0 && !waiting && _analysisRecordingId is not null &&
-            _openProjectModels?.VisionChecks is { } name && ProjectModels.Problem(ProjectChoices, ModelUses.VisionChecks, name) is null;
+            _openProjectModels is { VisionChecks: not null } models && models.ChecksProblem(ProjectChoices, ModelUses.VisionChecks) is null;
     }
 
     private async void AskChecksModelButton_Click(object sender, RoutedEventArgs e)

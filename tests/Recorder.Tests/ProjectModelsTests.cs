@@ -100,6 +100,27 @@ public sealed class ProjectModelsTests
         Assert.Equal(ModelUses.VisionChecks, ModelUses.Simple(ModelUses.ComplexVisionChecks));
     }
 
+    // The Checks tab's "Ask the project's model" needs both models usable
+    // (owner, 2026-11-17).
+    [Fact]
+    public void A_kind_of_checks_models_are_usable_only_when_its_model_for_complex_questions_is_too()
+    {
+        var models = new ProjectModels(null, null, "Vision");
+        Assert.Null(models.ChecksProblem(Settings, ModelUses.VisionChecks));
+        Assert.Null(models.With(ModelUses.ComplexVisionChecks, ProjectModels.NoModel).ChecksProblem(Settings, ModelUses.VisionChecks));
+        Assert.Equal("The project's model for complex questions of vision-based checks, \"Gone\", is not offered on this PC.",
+            models.With(ModelUses.ComplexVisionChecks, "Gone").ChecksProblem(Settings, ModelUses.VisionChecks));
+        Assert.Equal("The project's model for complex questions of vision-based checks, \"Text\", cannot take images.",
+            models.With(ModelUses.ComplexVisionChecks, "Text").ChecksProblem(Settings, ModelUses.VisionChecks));
+
+        // The model for simple questions is checked first, and no model for
+        // them asks nothing, whatever is chosen for complex ones.
+        Assert.Equal("The project's model for vision-based checks, \"Text\", cannot take images.",
+            new ProjectModels(null, null, "Text") { ComplexVisionChecks = "Gone" }.ChecksProblem(Settings, ModelUses.VisionChecks));
+        Assert.Null(ProjectModels.None.With(ModelUses.ComplexVisionChecks, "Gone").ChecksProblem(Settings, ModelUses.VisionChecks));
+        Assert.Throws<ArgumentOutOfRangeException>(() => models.ChecksProblem(Settings, ModelUses.ComplexVisionChecks));
+    }
+
     [Fact]
     public void The_choices_for_complex_questions_start_with_the_same_model_then_no_model()
     {

@@ -186,8 +186,9 @@ those in place, you will use the settings I choose."
 Built 2026-11-17, and run the same day on the development PC on the
 project's 20 recordings with phone screens, with the models chosen in
 the settings window, by a probe running the analysis worker; the
-Checks tab's "Ask the project's model" is not yet checked there. The measurement is in `android-vision-checks.md`,
-"Simple and complex questions, measured on 2026-11-17". The owner
+Checks tab's "Ask the project's model" is not yet checked there. The
+measurement is in `android-vision-checks.md`, "Simple and complex
+questions, measured on 2026-11-17". The owner
 asked: "For some image checks Haiku is clearly good enough, for others
 we may need a more powerful model that would be wasted on simpler
 checks. We need to be able to set the model per group of checks -
@@ -234,6 +235,18 @@ add escalation".
   a question that needs asking again whose answer is not kept yet is
   left unanswered, so "Ask the project's model" can ask it, and the note
   counts it as waiting for the model for complex questions.
+- **When "Ask the project's model" is available.** The Checks tab's
+  button is available when a recording is open, a question the rules
+  left is unanswered, no model checks of the recording are queued or
+  running, and the project can use its model for vision-based checks
+  and, where another is chosen for complex questions, that one too:
+  each must be offered on this PC, take images, and, for a Claude
+  model, have the project's API key (`ProjectModels.ChecksProblem`).
+  Added 2026-11-17 at the owner's request, "Make the button also
+  require a usable complex model when one is chosen"; before, only the
+  model for simple questions was checked. Where either cannot be used,
+  the Checks tab's line of models says why and that the button is
+  unavailable until it is put right.
 - **In the catalog.** Migration 0048 adds `complex_text_checks_model` and
   `complex_vision_checks_model` to `projects`: null for the same model
   as simple questions, an empty name for no model, or the profile's

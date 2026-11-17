@@ -174,6 +174,38 @@ public sealed record ProjectModels(string? Report, string? TextChecks, string? V
     }
 
     /// <summary>
+    /// Why a kind of check's models cannot be asked, or null when they
+    /// can: the model for its simple questions, then, where a question it
+    /// does not settle is asked again of another model, that model
+    /// (projects.md, "Simple and complex questions"; owner, 2026-11-17:
+    /// "Make the button also require a usable complex model when one is
+    /// chosen"). No model for simple questions is not a problem here: the
+    /// kind's questions are then not asked. The settings are the project's
+    /// choices, <see cref="Choices"/>.
+    /// </summary>
+    public string? ChecksProblem(AnalysisSettings settings, string use)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (use is not (ModelUses.TextChecks or ModelUses.VisionChecks))
+        {
+            throw new ArgumentOutOfRangeException(nameof(use), use, "Not the use for a kind of check's simple questions.");
+        }
+
+        if (For(use) is not { } simple)
+        {
+            return null;
+        }
+
+        if (Problem(settings, use, simple) is { } problem)
+        {
+            return problem;
+        }
+
+        var complex = ModelUses.Complex(use);
+        return For(complex) is { } name && name != simple ? Problem(settings, complex, name) : null;
+    }
+
+    /// <summary>
     /// Why a profile cannot be used for a use, or null when it can: it is
     /// not one the project can choose from, cannot take what the use
     /// needs, or is a Claude model and the project has no API key. The
