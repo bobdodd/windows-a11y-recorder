@@ -61,6 +61,30 @@ or cloud models:
    or drives its interface, for example to make text larger and see
    which text grows.
 
+5. **The screen title check does not trust the screen reader's text
+   alone.** Proposed with the title measured against what a screen
+   reader says on the screen, the owner answered on 2026-11-17:
+   "Actually not really. You are assuming the page is working for
+   screen-readers. It needs to also include OCR as a minimum, and
+   probably vision for image heavy screens". What a screen reader says
+   is what the check tests, so it cannot be the only account of what
+   the screen shows: drawn text, images and views with no name would
+   leave it thin or wrong. So the check of a title that does not
+   describe its screen (2.4.2) is given:
+   - what a screen reader says on the screen, as what a screen reader
+     user is given;
+   - the screen's text as OCR read it, at least, as what a sighted user
+     can read, whatever the tree says;
+   - for a screen mostly of images, the picture, asked of the model for
+     vision-based checks.
+
+   Each source is marked in the question, so the model's reason can
+   say which it relied on. Which screens are mostly images is chosen by
+   a rule, without a model, set after measuring the recordings as for
+   every check. A large difference between what a screen reader says
+   and what OCR read is not this check's finding: it is the separate
+   issue "Text shown on screen that is not in the tree".
+
 ## Owner's decisions
 
 Given by the owner on 2026-11-15, in answer to the open questions:
@@ -138,7 +162,7 @@ Each row is one issue, so that its remediation can be specific.
 | --- | --- | --- | --- |
 | Text that looks like a heading but is not one | 1.3.1 | Is this text shown as a heading? | Text items larger or bolder than the screen's body text, not marked as headings |
 | A heading that does not look like one | 1.3.1 | Is this text shown as a heading? | Items marked as headings |
-| A title that does not describe its screen | 2.4.2 | Does this title describe the screen shown? | Each screen's unique title, once a screen |
+| A title that does not describe its screen | 2.4.2 | Does this title describe the screen shown? | Each screen's unique title, once a screen, with what a screen reader says, the screen's OCR text, and the picture for a screen mostly of images (requirement 5) |
 | A heading that does not describe its section | 2.4.6 | Does this heading describe what follows it? | Each heading and the items under it |
 | Content in an order that does not make sense | 1.3.2 | Does the content read in a sensible order? | Screens with several blocks of text, in the order a screen reader moves |
 
@@ -579,3 +603,10 @@ The owner answered the earlier questions on 2026-11-15 (decisions 1 to
 of text with Claude, and four rules, measured on 2026-11-15"). New
 questions will come from measuring each check on the recordings before
 its rules are set.
+
+- **The other text checks' sources (2026-11-17).** Requirement 5 is set
+  for the screen title check. Whether the same sources, what a screen
+  reader says with the OCR text and the picture where needed, are
+  wanted for the other checks that read text (a heading that does not
+  describe its section, instructions that rely on shape, colour or
+  place, error messages) is not decided.
