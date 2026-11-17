@@ -440,6 +440,49 @@ is given again only where a screen reader says the same on the screen
 ("Pass the screen reader text to the image check's rule 4 matching
 too").
 
+### Simple and complex questions, measured on 2026-11-17
+
+At the owner's request, "Run the vision checks on the project's
+recordings with the new complex model setting", the three checks were
+run on the 20 recordings with phone screens in the development
+project, with Claude Haiku 5.5 for simple questions and Claude Sonnet
+5.5 for complex ones (`projects.md`, "Simple and complex questions").
+A probe queued the tasks and ran the analysis worker as the player
+does; the probe and its copies were deleted afterwards.
+
+| Check | Questions | Settled by Haiku | Asked again of Sonnet |
+|---|---|---|---|
+| Text shown as a heading | 54 | 48 | 6 |
+| Images of text | 17 | 17 | 0 |
+| Images with no text alternative | 13 | 10 | 3, one given the answer kept for the same image |
+
+- **Settled by Sonnet: 4 of 8 asked.** Sonnet gave the same answer
+  twice for each: an information icon above a note the screen reader
+  reads in full, and a search provider's logo beside a field that names
+  the provider, both decorative; a large one-line sentence above a
+  control, not a heading; and an uppercase label above a list, a
+  heading. For the information icon, one of Haiku's answers contradicted
+  its own reason, which said the icon's meaning was not conveyed.
+- **Not settled by Sonnet: 4.** All were the same uppercase title of a
+  card, in four recordings, styled unlike the screen's section headings.
+  Sonnet could not tell twice in three, and gave heading and could not
+  tell in the fourth, with consistent reasons: it reads as the card's
+  title, not a section heading. These stay warnings for a person to
+  verify, which is the right outcome for a borderline case.
+- **Cost.** Haiku: 166 requests, 406,376 input and 16,948 output
+  tokens, about US$0.049. Sonnet: 16 requests, 35,410 input and 1,995
+  output tokens, about US$0.091. Asking Sonnet only what Haiku did not
+  settle cost a seventh of asking Sonnet everything, by the 20 times
+  measured on the 51 described images.
+- **Limits.** Haiku's 75 settled answers were not checked against the
+  owner's or Sonnet's: agreeing twice shows repeatability, not
+  correctness. The recordings are of apps with few real defects, so
+  how often each check finds a real failure waits for the owner's
+  fixtures.
+- **Owner's conclusion.** "It looks as if this is as far as this check
+  can go without a further escalation." No third group is built; the
+  next AI check is built on the two groups as they are.
+
 ## Later, or text only
 
 - **Focus visible (2.4.7):** needs a Bluetooth keyboard, which the owner

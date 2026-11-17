@@ -183,7 +183,11 @@ those in place, you will use the settings I choose."
 
 ## Simple and complex questions
 
-Built 2026-11-17, not yet checked on the development PC. The owner
+Built 2026-11-17, and run the same day on the development PC on the
+project's 20 recordings with phone screens, with the models chosen in
+the settings window, by a probe running the analysis worker; the
+Checks tab's "Ask the project's model" is not yet checked there. The measurement is in `android-vision-checks.md`,
+"Simple and complex questions, measured on 2026-11-17". The owner
 asked: "For some image checks Haiku is clearly good enough, for others
 we may need a more powerful model that would be wasted on simpler
 checks. We need to be able to set the model per group of checks -
