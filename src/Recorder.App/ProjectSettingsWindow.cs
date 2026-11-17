@@ -9,8 +9,10 @@ namespace Recorder.App;
 /// <summary>
 /// A project's settings (projects.md, "The project's models"; owner,
 /// 2026-11-15): the model, or no model, for report analysis, for
-/// text-based checks and for vision-based checks, and the project's
-/// Anthropic API key. Each list offers no model, the Claude models, each
+/// text-based checks and for vision-based checks, each kind of check with
+/// a model for its simple questions and one for its complex questions,
+/// the same model by default (projects.md, "Simple and complex
+/// questions"), and the project's Anthropic API key. Each list offers no model, the Claude models, each
 /// the project's own with its defaults, and the models set up on this PC
 /// that can do what the use needs. The key is protected for this Windows
 /// user before it is saved, and never shown again. Every target is at
@@ -55,15 +57,26 @@ internal sealed class ProjectSettingsWindow : Window
             Margin = new Thickness(0, 0, 0, 12)
         });
 
+        page.Children.Add(new SelectableText
+        {
+            Text = "Each check's question is simple or complex. A simple question that the model for simple questions answers two ways, or cannot tell, " +
+                "is asked again of the model for complex questions, where that is another model, and that model's answer decides the finding. " +
+                "The same model as simple questions asks nothing more.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 12)
+        });
+
         foreach (var (use, label) in new[]
                  {
                      (ModelUses.Report, "Model for _report analysis, the summaries:"),
-                     (ModelUses.TextChecks, "Model for _text-based checks:"),
-                     (ModelUses.VisionChecks, "Model for _vision-based checks, which must take images:")
+                     (ModelUses.TextChecks, "Model for _text-based checks, simple questions:"),
+                     (ModelUses.ComplexTextChecks, "Model for text-based checks, co_mplex questions:"),
+                     (ModelUses.VisionChecks, "Model for _vision-based checks, simple questions, which must take images:"),
+                     (ModelUses.ComplexVisionChecks, "Model for vision-based checks, comp_lex questions, which must take images:")
                  })
         {
             var box = new ComboBox { MinHeight = 44, MinWidth = 260, HorizontalAlignment = HorizontalAlignment.Left, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 0, 12), IsEnabled = false };
-            AutomationProperties.SetName(box, "Model for " + ModelUses.Name(use));
+            AutomationProperties.SetName(box, label.Replace("_", "", StringComparison.Ordinal).TrimEnd(':'));
             page.Children.Add(new Label { Content = new AccessText { Text = label, TextWrapping = TextWrapping.Wrap }, Target = box, Padding = new Thickness(0, 0, 0, 4) });
             page.Children.Add(box);
             _choices[use] = box;
@@ -124,14 +137,14 @@ internal sealed class ProjectSettingsWindow : Window
         foreach (var (use, box) in _choices)
         {
             box.Items.Clear();
-            foreach (var (name, label) in AnalysisPlayer.ModelChoices(choices, use, models.For(use)))
+            foreach (var (name, label) in AnalysisPlayer.ModelChoices(choices, use, models.Chosen(use)))
             {
                 var item = new ComboBoxItem { Content = new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap }, Tag = name, MinHeight = 44, VerticalContentAlignment = VerticalAlignment.Center };
                 AutomationProperties.SetName(item, label);
                 box.Items.Add(item);
             }
 
-            box.SelectedItem = box.Items.OfType<ComboBoxItem>().FirstOrDefault(item => item.Tag as string == models.For(use)) ?? box.Items[0];
+            box.SelectedItem = box.Items.OfType<ComboBoxItem>().FirstOrDefault(item => item.Tag as string == models.Chosen(use)) ?? box.Items[0];
             box.IsEnabled = true;
         }
 

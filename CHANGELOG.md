@@ -30,6 +30,19 @@ Changes on `main` since 1.1.0, not yet released.
   said does not count (question version 2). The answer is given again
   only where a screen reader also says the same on the screen.
 
+### Simple and complex questions
+
+- Each kind of check, text-based and vision-based, has a model for its
+  simple questions, the one chosen before, and a model for its complex
+  questions, "The same model as simple questions" unless another, or no
+  model, is chosen in the project's settings.
+- A simple question that the first model answers two ways, or cannot
+  tell, is asked again of the model for complex questions where that is
+  another model, and its answer decides the finding, which says why it
+  was asked. A settled question is not asked again.
+- The three questions asked now are simple; no complex question is
+  built yet. The new choices are kept in two new columns of `projects`.
+
 ### The reason before the answer
 
 - Every check that asks a model one closed question (images of text,

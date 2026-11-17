@@ -286,66 +286,88 @@ public static class AndroidImageAlternative
             ? []
             : await context.Catalog.SignedAnswersAsync(Template, TemplateVersion, profileName, model, project, recording, cancellationToken).ConfigureAwait(false);
 
+        // The model for complex questions, where a question the model for
+        // simple ones does not settle is asked again of another, and its
+        // answers for the same image (projects.md, "Simple and complex
+        // questions").
+        var complexName = CheckQuestions.EscalationProfile(context, ModelUses.VisionChecks);
+        var complexModel = complexName is null ? null : context.Settings.ForProject(null).Profile(complexName)?.Model;
+        IReadOnlyList<SignedAnswer> signedComplex = complexName is null || complexModel is null
+            ? []
+            : await context.Catalog.SignedAnswersAsync(Template, TemplateVersion, complexName, complexModel, project, recording, cancellationToken).ConfigureAwait(false);
+
         var answers = new Dictionary<PhoneImageAlternativeQuestion, PhoneInference>();
-        var given = new List<(byte[] Signature, ClosedAnswerOf One, ClosedAnswerOf Two, string Model, bool Cloud)>();
+        var given = new List<(byte[] Signature, QuestionAnswers Answers)>();
         var failures = new List<string>();
-        int asked = 0, again = 0;
+        int asked = 0, again = 0, escalated = 0;
         var copied = new HashSet<Guid>();
         var held = (await context.Catalog.AttemptsAsync(context.Task.TaskId, cancellationToken).ConfigureAwait(false))
             .Where(item => item.Outcome == "accepted")
             .Select(item => item.StepKey)
             .ToHashSet(StringComparer.Ordinal);
+
+        // An answer kept on an earlier task, copied into this task.
+        async Task CopyAsync(IReadOnlyList<SignedAnswer> sources)
+        {
+            foreach (var source in sources.Where(source => source.TaskId != context.Task.TaskId && !held.Contains(source.StepKey) && copied.Add(source.AttemptId)))
+            {
+                var number = await context.Catalog.AttemptCountAsync(context.Task.TaskId, source.StepKey, cancellationToken).ConfigureAwait(false) + 1;
+                await context.Catalog.ReuseAttemptAsync(source.AttemptId, context.Task.TaskId, number, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
         foreach (var request in requests)
         {
             // The same image answered earlier in this run.
             if (given.FirstOrDefault(item => SameImage(item.Signature, request.Signature)) is { Signature: not null } earlier)
             {
-                answers[request.Question] = Interpret(earlier.One, earlier.Two, earlier.Model, earlier.Cloud, again: true);
+                answers[request.Question] = CheckQuestions.Judge(earlier.Answers, group => Interpret(group.One, group.Two, group.Model, group.Cloud, again: true));
                 again++;
                 continue;
             }
 
             // The same image answered on an earlier task: its first answer,
             // copied into this task.
+            GroupAnswers first;
+            var reused = false;
             if (Kept(signed, request.Signature) is { } kept)
             {
-                foreach (var source in kept.Sources.Where(source => source.TaskId != context.Task.TaskId && !held.Contains(source.StepKey) && copied.Add(source.AttemptId)))
+                await CopyAsync(kept.Sources).ConfigureAwait(false);
+                first = new GroupAnswers(kept.One, kept.Two, profileName!, kept.Sources[0].Answer.ModelSha256Basis == AnalysisWorker.ServiceBasis);
+                reused = true;
+            }
+            else
+            {
+                asked++;
+                if (await CheckQuestions.AskGroupAsync(context, request.StepKey, request.Request, 1, failures, cancellationToken).ConfigureAwait(false) is not { } answered)
                 {
-                    var number = await context.Catalog.AttemptCountAsync(context.Task.TaskId, source.StepKey, cancellationToken).ConfigureAwait(false) + 1;
-                    await context.Catalog.ReuseAttemptAsync(source.AttemptId, context.Task.TaskId, number, cancellationToken).ConfigureAwait(false);
+                    continue;
                 }
 
-                var cloud = kept.Sources[0].Answer.ModelSha256Basis == AnalysisWorker.ServiceBasis;
-                given.Add((request.Signature, kept.One, kept.Two, profileName!, cloud));
-                answers[request.Question] = Interpret(kept.One, kept.Two, profileName!, cloud, again: true);
-                again++;
-                continue;
+                first = answered;
             }
 
-            asked++;
-            if (await TryAskAsync(context, request, 1, failures, cancellationToken).ConfigureAwait(false) is not { } step)
+            // Not settled: the model for complex questions' answers for the
+            // same image, kept or asked for.
+            GroupAnswers? second = null;
+            if (complexName is not null && CheckQuestions.Unsettled(first.One, first.Two, CannotTell))
             {
-                continue;
+                if (Kept(signedComplex, request.Signature, CheckQuestions.EscalatedRun) is { } keptComplex)
+                {
+                    await CopyAsync(keptComplex.Sources).ConfigureAwait(false);
+                    second = new GroupAnswers(keptComplex.One, keptComplex.Two, complexName, keptComplex.Sources[0].Answer.ModelSha256Basis == AnalysisWorker.ServiceBasis);
+                }
+                else
+                {
+                    second = await CheckQuestions.EscalateAsync(context, request.StepKey, request.Request, first, CannotTell, failures, cancellationToken).ConfigureAwait(false);
+                }
             }
 
-            var attempts = await context.Catalog.AttemptsAsync(context.Task.TaskId, cancellationToken).ConfigureAwait(false);
-            var attempt = attempts.LastOrDefault(item => item.StepKey == request.StepKey(1) && item.Outcome == "accepted");
-            var who = attempt?.ProfileName ?? profileName ?? "the model";
-            var service = attempt?.ModelSha256Basis == AnalysisWorker.ServiceBasis;
-            var repeatable = attempt is not null && AndroidImagesOfText.Repeatable(attempt.ModelSha256Basis, attempt.Parameters);
-            var one = ClosedAnswer.Read(step.Output);
-            ClosedAnswerOf? two = one;
-            if (!repeatable)
-            {
-                var second = await TryAskAsync(context, request, 2, failures, cancellationToken).ConfigureAwait(false);
-                two = second is null ? null : ClosedAnswer.Read(second.Output);
-            }
-
-            if (one is not null && two is not null)
-            {
-                given.Add((request.Signature, one, two, who, service));
-                answers[request.Question] = Interpret(one, two, who, service);
-            }
+            var judged = new QuestionAnswers(first, second);
+            escalated += second is null ? 0 : 1;
+            given.Add((request.Signature, judged));
+            answers[request.Question] = CheckQuestions.Judge(judged, group => Interpret(group.One, group.Two, group.Model, group.Cloud, again: reused));
+            again += reused ? 1 : 0;
         }
 
         var note = string.Create(CultureInfo.CurrentCulture,
@@ -354,6 +376,8 @@ public static class AndroidImageAlternative
         {
             note += string.Create(CultureInfo.CurrentCulture, $", {again:N0} of them with the answer first given for the same image");
         }
+
+        note += CheckQuestions.AskedAgain(escalated);
 
         if (requests.Count < run.Questions.Count)
         {
@@ -378,13 +402,14 @@ public static class AndroidImageAlternative
     /// runs' answers where the model is not repeatable: the attempts it is
     /// made of and the two answers; null where there is none.
     /// </summary>
-    internal static (IReadOnlyList<SignedAnswer> Sources, ClosedAnswerOf One, ClosedAnswerOf Two)? Kept(IReadOnlyList<SignedAnswer> signed, byte[] signature)
+    internal static (IReadOnlyList<SignedAnswer> Sources, ClosedAnswerOf One, ClosedAnswerOf Two)? Kept(IReadOnlyList<SignedAnswer> signed, byte[] signature, int firstRun = 1)
     {
         ArgumentNullException.ThrowIfNull(signed);
         ArgumentNullException.ThrowIfNull(signature);
+        var firstEnd = "-" + firstRun.ToString(CultureInfo.InvariantCulture);
         foreach (var first in signed)
         {
-            if (!first.StepKey.EndsWith("-1", StringComparison.Ordinal) || !SameImage(first.Signature, signature) ||
+            if (!first.StepKey.EndsWith(firstEnd, StringComparison.Ordinal) || !SameImage(first.Signature, signature) ||
                 ClosedAnswer.Read(first.Answer.Output) is not { } one)
             {
                 continue;
@@ -395,7 +420,7 @@ public static class AndroidImageAlternative
                 return ([first], one, one);
             }
 
-            var secondKey = first.StepKey[..^1] + "2";
+            var secondKey = first.StepKey[..^firstEnd.Length] + "-" + (firstRun + 1).ToString(CultureInfo.InvariantCulture);
             if (signed.FirstOrDefault(item => item.TaskId == first.TaskId && item.StepKey == secondKey) is { } second &&
                 ClosedAnswer.Read(second.Answer.Output) is { } two)
             {
@@ -404,24 +429,6 @@ public static class AndroidImageAlternative
         }
 
         return null;
-    }
-
-    private static async Task<AcceptedStep?> TryAskAsync(
-        AnalysisTaskContext context,
-        ImageAlternativeRequest request,
-        int run,
-        List<string> failures,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await context.RunStepAsync(request.StepKey(run), request.Request, cancellationToken).ConfigureAwait(false);
-        }
-        catch (StepFailedException exception)
-        {
-            failures.Add(exception.Message);
-            return null;
-        }
     }
 
     /// <summary>
@@ -470,13 +477,16 @@ public static class AndroidImageAlternative
         PhoneImageAlternativeRun run,
         IReadOnlyList<ImageAlternativeRequest> requests,
         IReadOnlyList<SignedAnswer> signed,
-        string model)
+        string model,
+        IReadOnlyList<SignedAnswer>? complexSigned = null,
+        string? complexModel = null)
     {
         ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(requests);
         ArgumentNullException.ThrowIfNull(signed);
         ArgumentNullException.ThrowIfNull(model);
         var answers = new Dictionary<PhoneImageAlternativeQuestion, PhoneInference>();
+        int waiting = 0, askedAgain = 0;
         foreach (var request in requests)
         {
             if (Kept(signed, request.Signature) is not { } kept)
@@ -486,12 +496,28 @@ public static class AndroidImageAlternative
 
             var cloud = kept.Sources[0].Answer.ModelSha256Basis == AnalysisWorker.ServiceBasis;
             var own = kept.Sources[0].StepKey == request.StepKey(1);
-            answers[request.Question] = Interpret(kept.One, kept.Two, model, cloud, again: !own);
+            var first = new GroupAnswers(kept.One, kept.Two, model, cloud);
+            GroupAnswers? escalated = null;
+            if (complexModel is not null && CheckQuestions.Unsettled(kept.One, kept.Two, CannotTell))
+            {
+                if (Kept(complexSigned ?? [], request.Signature, CheckQuestions.EscalatedRun) is not { } again)
+                {
+                    waiting++;
+                    continue;
+                }
+
+                escalated = new GroupAnswers(again.One, again.Two, complexModel, again.Sources[0].Answer.ModelSha256Basis == AnalysisWorker.ServiceBasis);
+                askedAgain++;
+            }
+
+            answers[request.Question] = CheckQuestions.Judge(new QuestionAnswers(first, escalated), group => Interpret(group.One, group.Two, group.Model, group.Cloud, again: !own));
         }
 
-        var unanswered = run.Questions.Count - answers.Count;
+        var unanswered = run.Questions.Count - answers.Count - waiting;
         var note = string.Create(CultureInfo.CurrentCulture,
             $"{Count(run.Questions.Count)} left by the rules {(run.Questions.Count == 1 ? "is" : "are")} for {model}; {Count(answers.Count)} answered")
+            + CheckQuestions.AskedAgain(askedAgain)
+            + CheckQuestions.Waiting(waiting, Count(waiting))
             + (unanswered > 0 ? string.Create(CultureInfo.CurrentCulture, $", {Count(unanswered)} not yet asked") : "");
         return run.Judged(answers, note);
     }

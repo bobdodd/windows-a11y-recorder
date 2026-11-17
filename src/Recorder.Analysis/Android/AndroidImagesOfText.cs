@@ -168,44 +168,28 @@ public static class AndroidImagesOfText
             return audit.WithImagesOfText(run.Judged(new Dictionary<PhoneImageOfTextQuestion, PhoneInference>(), NotAsked(run.Questions.Count, none)));
         }
 
+        // A repeatable model's second answer would be the first: it is not
+        // asked for (android-vision-checks.md, "Keeping it repeatable"). A
+        // question the model does not settle is asked again of the model
+        // for complex questions where that is another (projects.md, "Simple
+        // and complex questions").
         var requests = Requests(run, load);
-        var first = new Dictionary<ImageOfTextRequest, AcceptedStep>();
         var failures = new List<string>();
+        var answers = new Dictionary<PhoneImageOfTextQuestion, PhoneInference>();
+        var escalated = 0;
         foreach (var request in requests)
         {
-            if (await TryAskAsync(context, request, 1, failures, cancellationToken).ConfigureAwait(false) is { } step)
+            if (await CheckQuestions.AskAsync(context, request.StepKey, request.Request, CannotTell, failures, cancellationToken).ConfigureAwait(false) is { } answered)
             {
-                first[request] = step;
-            }
-        }
-
-        // A repeatable model's second answer would be the first: it is not
-        // asked for (android-vision-checks.md, "Keeping it repeatable").
-        var attempts = await context.Catalog.AttemptsAsync(context.Task.TaskId, cancellationToken).ConfigureAwait(false);
-        var answers = new Dictionary<PhoneImageOfTextQuestion, PhoneInference>();
-        foreach (var (request, step) in first)
-        {
-            var attempt = attempts.FirstOrDefault(item => item.StepKey == request.StepKey(1) && item.Outcome == "accepted");
-            var model = attempt?.ProfileName ?? context.ModelFor(ModelUses.VisionChecks) ?? "the model";
-            var cloud = attempt?.ModelSha256Basis == AnalysisWorker.ServiceBasis;
-            var repeatable = attempt is not null && Repeatable(attempt.ModelSha256Basis, attempt.Parameters);
-            var one = ClosedAnswer.Read(step.Output);
-            ClosedAnswerOf? two = one;
-            if (!repeatable)
-            {
-                var second = await TryAskAsync(context, request, 2, failures, cancellationToken).ConfigureAwait(false);
-                two = second is null ? null : ClosedAnswer.Read(second.Output);
-            }
-
-            if (one is not null && two is not null)
-            {
-                answers[request.Question] = Interpret(one, two, model, cloud);
+                answers[request.Question] = CheckQuestions.Judge(answered, group => Interpret(group.One, group.Two, group.Model, group.Cloud));
+                escalated += answered.Escalated is null ? 0 : 1;
             }
         }
 
         var asked = requests.Count;
         var note = string.Create(CultureInfo.CurrentCulture,
-            $"{Count(run.Questions.Count, "image")} left by the rules {(run.Questions.Count == 1 ? "was" : "were")} for the model for vision-based checks; {Count(answers.Count, "image")} answered");
+            $"{Count(run.Questions.Count, "image")} left by the rules {(run.Questions.Count == 1 ? "was" : "were")} for the model for vision-based checks; {Count(answers.Count, "image")} answered")
+            + CheckQuestions.AskedAgain(escalated);
         if (asked < run.Questions.Count)
         {
             note += string.Create(CultureInfo.CurrentCulture, $", {Count(run.Questions.Count - asked, "image")} not asked as the picture could not be read");
@@ -223,24 +207,6 @@ public static class AndroidImagesOfText
     public static string NotAsked(int questions, string reason) =>
         string.Create(CultureInfo.CurrentCulture,
             $"{Count(questions, "image")} left by the rules {(questions == 1 ? "was" : "were")} not asked about, as no model may be used for vision-based checks: {reason}");
-
-    private static async Task<AcceptedStep?> TryAskAsync(
-        AnalysisTaskContext context,
-        ImageOfTextRequest request,
-        int run,
-        List<string> failures,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await context.RunStepAsync(request.StepKey(run), request.Request, cancellationToken).ConfigureAwait(false);
-        }
-        catch (StepFailedException exception)
-        {
-            failures.Add(exception.Message);
-            return null;
-        }
-    }
 
     /// <summary>
     /// Whether an attempt's model gives the same answer to the same
@@ -321,38 +287,44 @@ public static class AndroidImagesOfText
         PhoneImagesOfTextRun run,
         IReadOnlyList<ImageOfTextRequest> requests,
         IReadOnlyDictionary<string, KeptAnswer> kept,
-        string model)
+        string model,
+        IReadOnlyDictionary<string, KeptAnswer>? complexKept = null,
+        string? complexModel = null)
     {
         ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(requests);
         ArgumentNullException.ThrowIfNull(kept);
         ArgumentNullException.ThrowIfNull(model);
         var answers = new Dictionary<PhoneImageOfTextQuestion, PhoneInference>();
+        int waiting = 0, askedAgain = 0;
         foreach (var request in requests)
         {
-            if (!kept.TryGetValue(request.StepKey(1), out var firstKept) || ClosedAnswer.Read(firstKept.Output) is not { } first)
+            if (CheckQuestions.FromKept(kept, request.StepKey, 1, model) is not { } first)
             {
                 continue;
             }
 
-            var cloud = firstKept.ModelSha256Basis == AnalysisWorker.ServiceBasis;
-            var second = first;
-            if (!Repeatable(firstKept.ModelSha256Basis, firstKept.Parameters))
+            GroupAnswers? escalated = null;
+            if (complexModel is not null && CheckQuestions.Unsettled(first.One, first.Two, CannotTell))
             {
-                if (!kept.TryGetValue(request.StepKey(2), out var secondKept) || ClosedAnswer.Read(secondKept.Output) is not { } other)
+                if (CheckQuestions.FromKept(complexKept ?? new Dictionary<string, KeptAnswer>(), request.StepKey, CheckQuestions.EscalatedRun, complexModel) is not { } again)
                 {
+                    waiting++;
                     continue;
                 }
 
-                second = other;
+                escalated = again;
+                askedAgain++;
             }
 
-            answers[request.Question] = Interpret(first, second, model, cloud);
+            answers[request.Question] = CheckQuestions.Judge(new QuestionAnswers(first, escalated), group => Interpret(group.One, group.Two, group.Model, group.Cloud));
         }
 
-        var unanswered = run.Questions.Count - answers.Count;
+        var unanswered = run.Questions.Count - answers.Count - waiting;
         var note = string.Create(CultureInfo.CurrentCulture,
             $"{Count(run.Questions.Count, "image")} left by the rules {(run.Questions.Count == 1 ? "is" : "are")} for {model}; {Count(answers.Count, "image")} answered")
+            + CheckQuestions.AskedAgain(askedAgain)
+            + CheckQuestions.Waiting(waiting, Count(waiting, "image"))
             + (unanswered > 0 ? string.Create(CultureInfo.CurrentCulture, $", {Count(unanswered, "image")} not yet asked") : "");
         return run.Judged(answers, note);
     }

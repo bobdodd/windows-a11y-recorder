@@ -250,15 +250,25 @@ public static class AnalysisPlayer
     /// first, then each profile that can do what the use needs, by its
     /// label, then the saved choice where no profile of that name can any
     /// longer, so that it is shown and not silently dropped. Each is the
-    /// profile's name, null for no model, and its label.
+    /// profile's name, null for no model, and its label. For complex
+    /// questions, the same model as simple questions, null, comes first,
+    /// then no model, <see cref="ProjectModels.NoModel"/>.
     /// </summary>
     public static IReadOnlyList<(string? Name, string Label)> ModelChoices(AnalysisSettings settings, string use, string? saved)
     {
         ArgumentNullException.ThrowIfNull(settings);
         var capability = ModelUses.Capability(use);
         var choices = new List<(string?, string)> { (null, "No model") };
+        if (ModelUses.IsComplex(use))
+        {
+            // Complex questions: the same model as simple ones first, null,
+            // then no model, saved as an empty name (projects.md, "Simple
+            // and complex questions").
+            choices = [(null, "The same model as simple questions"), (ProjectModels.NoModel, "No model")];
+        }
+
         choices.AddRange(settings.Profiles.Where(profile => profile.Supports(capability)).Select(profile => ((string?)profile.Name, ProfileLabel(profile))));
-        if (saved is not null && !choices.Any(choice => choice.Item1 == saved))
+        if (saved is { Length: > 0 } && !choices.Any(choice => choice.Item1 == saved))
         {
             choices.Add((saved, settings.Profile(saved) is null
                 ? $"{saved} (not offered on this PC)"
@@ -278,7 +288,9 @@ public static class AnalysisPlayer
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(models);
         return string.Join("; ", uses.Select(use => $"{ModelUses.Name(use)}, " +
-            (models.For(use) is not { } name ? "no model" : settings.Profile(name) is { } profile ? ProfileLabel(profile) : $"{name} (not offered on this PC)")));
+            (ModelUses.IsComplex(use) && models.Chosen(use) is null ? "the same model as simple questions"
+                : models.For(use) is not { } name ? "no model"
+                : settings.Profile(name) is { } profile ? ProfileLabel(profile) : $"{name} (not offered on this PC)")));
     }
 
     /// <summary>
@@ -303,7 +315,7 @@ public static class AnalysisPlayer
             parts.Add($"{ModelUses.Name(ModelUses.Report)}, {string.Join(" and ", report)}");
         }
 
-        foreach (var use in new[] { ModelUses.TextChecks, ModelUses.VisionChecks })
+        foreach (var use in new[] { ModelUses.TextChecks, ModelUses.ComplexTextChecks, ModelUses.VisionChecks, ModelUses.ComplexVisionChecks })
         {
             if (stageProfiles.TryGetValue(use, out var name))
             {

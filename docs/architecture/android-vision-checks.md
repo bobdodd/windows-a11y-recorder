@@ -501,6 +501,17 @@ Adopted by the owner, 2026-11-15. The same approach as the summaries
    given a new template version: images of text 2, text shown as a
    heading 2, and images with no text alternative 3, so no answer given
    in the old order is reused.
+8. **Simple and complex questions.** Each question is simple or complex,
+   and each group has its own model in the project's settings, the same
+   one by default. A simple question the model for simple questions
+   does not settle, with two answers or agreeing that it cannot tell, is
+   asked again of the model for complex questions where that is another
+   model, as runs 3 and 4, and that model's answers decide. Added
+   2026-11-17 at the owner's request ("build the two now and add
+   escalation"), after measuring Claude Haiku 5.5 and Claude Sonnet 5.5
+   on the same 51 described images: Sonnet split one question of 116 and
+   knew icons that Haiku split on, at about 20 times the cost. See
+   `projects.md`, "Simple and complex questions".
 
 ## Measuring before building
 

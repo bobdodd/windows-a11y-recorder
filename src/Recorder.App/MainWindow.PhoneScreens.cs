@@ -339,7 +339,8 @@ public partial class MainWindow
 
                 var keys = made.Requests.SelectMany(request => new[] { request.StepKey(1), request.StepKey(2) }).ToList();
                 var kept = await catalog.AcceptedAnswersAsync(keys, name!, profile.Model, CancellationToken.None);
-                shown = AndroidImagesOfText.FromKept(rules, made.Requests, kept, name!);
+                var (complexKept, complexName) = await KeptComplexAnswersAsync(catalog, made.Requests.Select(request => (Func<int, string>)request.StepKey));
+                shown = AndroidImagesOfText.FromKept(rules, made.Requests, kept, name!, complexKept, complexName);
             }
             catch (Exception exception) when (exception is NpgsqlException or InvalidOperationException or IOException or ObjectDisposedException)
             {
@@ -403,7 +404,8 @@ public partial class MainWindow
 
                 var keys = made.Requests.SelectMany(request => new[] { request.StepKey(1), request.StepKey(2) }).ToList();
                 var kept = await catalog.AcceptedAnswersAsync(keys, name!, profile.Model, CancellationToken.None);
-                shown = AndroidHeadingLook.FromKept(rules, made.Requests, kept, name!);
+                var (complexKept, complexName) = await KeptComplexAnswersAsync(catalog, made.Requests.Select(request => (Func<int, string>)request.StepKey));
+                shown = AndroidHeadingLook.FromKept(rules, made.Requests, kept, name!, complexKept, complexName);
             }
             catch (Exception exception) when (exception is NpgsqlException or InvalidOperationException or IOException or ObjectDisposedException)
             {
@@ -463,7 +465,16 @@ public partial class MainWindow
                 var signed = await catalog.SignedAnswersAsync(
                     AndroidImageAlternative.Template, AndroidImageAlternative.TemplateVersion, name!, profile.Model,
                     _openProjectId, _analysisRecordingId, CancellationToken.None);
-                shown = AndroidImageAlternative.FromKept(rules, made.Requests, signed, name!);
+                IReadOnlyList<SignedAnswer>? complexSigned = null;
+                var complex = ComplexVisionModel();
+                if (complex is not null)
+                {
+                    complexSigned = await catalog.SignedAnswersAsync(
+                        AndroidImageAlternative.Template, AndroidImageAlternative.TemplateVersion, complex.Value.Name, complex.Value.Profile.Model,
+                        _openProjectId, _analysisRecordingId, CancellationToken.None);
+                }
+
+                shown = AndroidImageAlternative.FromKept(rules, made.Requests, signed, name!, complexSigned, complex?.Name);
             }
             catch (Exception exception) when (exception is NpgsqlException or InvalidOperationException or IOException or ObjectDisposedException)
             {
@@ -481,6 +492,32 @@ public partial class MainWindow
         _imageAlternativeUnanswered = problem is not null ? 0 : shown.Findings.Count(finding => shown.QuestionOf(finding) is not null);
         UpdateAskChecksModelButton();
         ShowPhoneScreenRows();
+    }
+
+    // The project's model for complex questions of vision-based checks,
+    // where a question the model for simple ones does not settle is asked
+    // again of another (projects.md, "Simple and complex questions"), and
+    // its profile; null where there is none the project can use.
+    private (string Name, ModelProfile Profile)? ComplexVisionModel() =>
+        _openProjectModels is { } models &&
+        CheckQuestions.EscalationProfile(models, ModelUses.VisionChecks) is { } name &&
+        ProjectModels.Problem(ProjectChoices, ModelUses.ComplexVisionChecks, name) is null &&
+        ProjectChoices.Profile(name) is { } profile
+            ? (name, profile)
+            : null;
+
+    // The answers the model for complex questions gave to the questions
+    // asked again, runs 3 and 4, and its name; none where there is no such
+    // model.
+    private async Task<(IReadOnlyDictionary<string, KeptAnswer>? Kept, string? Name)> KeptComplexAnswersAsync(AnalysisCatalog catalog, IEnumerable<Func<int, string>> stepKeys)
+    {
+        if (ComplexVisionModel() is not { } complex)
+        {
+            return (null, null);
+        }
+
+        var keys = stepKeys.SelectMany(key => new[] { key(CheckQuestions.EscalatedRun), key(CheckQuestions.EscalatedRun + 1) }).ToList();
+        return (await catalog.AcceptedAnswersAsync(keys, complex.Name, complex.Profile.Model, CancellationToken.None), complex.Name);
     }
 
     // "Ask the project's model" is for images and text the rules leave that

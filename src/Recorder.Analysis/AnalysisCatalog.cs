@@ -329,7 +329,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
         UseAsync<ProjectModels?>(async connection =>
         {
             await using var command = new NpgsqlCommand(
-                "SELECT report_model, text_checks_model, vision_checks_model, anthropic_api_key FROM projects WHERE project_id = $1", connection);
+                "SELECT report_model, text_checks_model, vision_checks_model, anthropic_api_key, complex_text_checks_model, complex_vision_checks_model FROM projects WHERE project_id = $1", connection);
             command.Parameters.AddWithValue(projectId);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ModelsOf(reader) : null;
@@ -343,7 +343,7 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
         UseAsync<ProjectModels?>(async connection =>
         {
             await using var command = new NpgsqlCommand(
-                "SELECT p.report_model, p.text_checks_model, p.vision_checks_model, p.anthropic_api_key FROM analysis_tasks t " +
+                "SELECT p.report_model, p.text_checks_model, p.vision_checks_model, p.anthropic_api_key, p.complex_text_checks_model, p.complex_vision_checks_model FROM analysis_tasks t " +
                 "LEFT JOIN recordings r ON r.recording_id = t.recording_id " +
                 "JOIN projects p ON p.project_id = coalesce(t.project_id, r.project_id) WHERE t.task_id = $1",
                 connection);
@@ -358,13 +358,16 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
         {
             ArgumentNullException.ThrowIfNull(models);
             await using var command = new NpgsqlCommand(
-                "UPDATE projects SET report_model = $2, text_checks_model = $3, vision_checks_model = $4, anthropic_api_key = $5 WHERE project_id = $1",
+                "UPDATE projects SET report_model = $2, text_checks_model = $3, vision_checks_model = $4, anthropic_api_key = $5, " +
+                "complex_text_checks_model = $6, complex_vision_checks_model = $7 WHERE project_id = $1",
                 connection);
             command.Parameters.AddWithValue(projectId);
             command.Parameters.AddWithValue((object?)models.Report ?? DBNull.Value);
             command.Parameters.AddWithValue((object?)models.TextChecks ?? DBNull.Value);
             command.Parameters.AddWithValue((object?)models.VisionChecks ?? DBNull.Value);
             command.Parameters.AddWithValue((object?)models.ProtectedAnthropicKey ?? DBNull.Value);
+            command.Parameters.AddWithValue((object?)models.ComplexTextChecks ?? DBNull.Value);
+            command.Parameters.AddWithValue((object?)models.ComplexVisionChecks ?? DBNull.Value);
             return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 1;
         }, cancellationToken);
 
@@ -373,7 +376,9 @@ public sealed class AnalysisCatalog(Func<CancellationToken, Task<NpgsqlDataSourc
             reader.IsDBNull(1) ? null : reader.GetString(1),
             reader.IsDBNull(2) ? null : reader.GetString(2))
         {
-            ProtectedAnthropicKey = reader.IsDBNull(3) ? null : reader.GetString(3)
+            ProtectedAnthropicKey = reader.IsDBNull(3) ? null : reader.GetString(3),
+            ComplexTextChecks = reader.IsDBNull(4) ? null : reader.GetString(4),
+            ComplexVisionChecks = reader.IsDBNull(5) ? null : reader.GetString(5)
         };
 
     /// <summary>

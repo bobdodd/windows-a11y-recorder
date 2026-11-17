@@ -132,7 +132,9 @@ those in place, you will use the settings I choose."
   recordings, for the selected project. The window has three lists, each
   of no model and the profiles that can do what the use needs: those
   that take text for report analysis and text-based checks, those that
-  take images for vision-based checks. A profile that sends to Anthropic
+  take images for vision-based checks. Since 2026-11-17 each kind of
+  check has a second list, for its complex questions ("Simple and
+  complex questions", below). A profile that sends to Anthropic
   is listed with "(sends to Anthropic)" after it, as everywhere a profile
   is chosen. Nothing is chosen for a project by default, cloud or local.
 - **Where they are shown.** The Analysis tab says the open recording's
@@ -178,6 +180,66 @@ those in place, you will use the settings I choose."
 - **The reports.** A report made with a model says so, and whether the
   model was in the cloud or on this PC, as before (`android-report.md`,
   "Cloud or local"). One made without says nothing about AI.
+
+## Simple and complex questions
+
+Built 2026-11-17, not yet checked on the development PC. The owner
+asked: "For some image checks Haiku is clearly good enough, for others
+we may need a more powerful model that would be wasted on simpler
+checks. We need to be able to set the model per group of checks -
+simple, more complex, hard perhaps?", and then: "build the two now and
+add escalation".
+
+- **Two groups for each kind of check.** Each closed question a check
+  asks is simple or complex. The model for text-based checks and the
+  model for vision-based checks are now each kind's model for simple
+  questions, as saved before, so a project's settings and its queued
+  tasks keep working. Each kind also has a model for complex questions.
+  Text-based checks have the two groups as well, so that they work the
+  same way when the first one is built.
+- **The same model by default.** The model for complex questions is "The
+  same model as simple questions" until another is chosen, so choosing
+  one model for a kind of check, with the project's API key for a Claude
+  model, is enough. It can also be no model, or any profile that can do
+  what the kind needs.
+- **Which group a question is in.** Each question says its group by its
+  request's use: `vision-checks` for a simple question,
+  `vision-checks-complex` for a complex one, and the same for text. The
+  three questions asked now (images of text, text shown as a heading,
+  images with no text alternative) are simple. No complex question is
+  built yet.
+- **Asking again.** A simple question that the model for simple
+  questions does not settle, as its two answers differ or it agreed that
+  the pictures do not tell, is asked again of the model for complex
+  questions, where that is another model. It is asked as runs 3 and 4,
+  or run 3 alone for a repeatable model, a local model at temperature 0.
+  Its answers decide the finding, and the finding says why it was asked:
+  for example "Claude Haiku 5.5, a cloud model, the project's model for
+  simple questions, could not tell, so the question was asked again of
+  the project's model for complex questions; Claude Sonnet 5.5, a cloud
+  model, inferred ...". The finding is that model's inference. Where the
+  question asked again fails, the first model's answers stand, a
+  warning, and the check's note says why. A settled question is not
+  asked again, so the stronger model is paid for only where the first
+  one did not settle the question.
+- **Kept answers.** The answers asked again are kept and reused as the
+  others are (`android-vision-checks.md`, "Keeping it repeatable"): by
+  their request, and for images with no text alternative by the image's
+  signature, rule 4. The Checks tab reads them for the model for complex
+  questions as it reads the first model's for the model for simple ones;
+  a question that needs asking again whose answer is not kept yet is
+  left unanswered, so "Ask the project's model" can ask it, and the note
+  counts it as waiting for the model for complex questions.
+- **In the catalog.** Migration 0048 adds `complex_text_checks_model` and
+  `complex_vision_checks_model` to `projects`: null for the same model
+  as simple questions, an empty name for no model, or the profile's
+  name. A check task is queued with the model each group asks, by its
+  use (`ProjectModels.ForChecks`), and its row names both.
+- **In the settings window.** The window has five lists, with a line
+  saying how the groups work: report analysis, then each kind's simple
+  and complex questions. The lists for complex questions start with
+  "The same model as simple questions", then "No model", then the
+  profiles. Their text wraps, with no scrolling sideways.
 
 ## Grouping screens across recordings
 

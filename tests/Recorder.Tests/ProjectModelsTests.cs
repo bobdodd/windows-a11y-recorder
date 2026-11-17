@@ -31,7 +31,7 @@ public sealed class ProjectModelsTests
         Assert.Equal(new ProjectModels("Text", null, "Vision"), models);
         Assert.True(models.Any);
         Assert.Null(models.With(ModelUses.Report, " ").Report);
-        Assert.Equal(new Dictionary<string, string> { [ModelUses.VisionChecks] = "Vision" }, models.ForChecks());
+        Assert.Equal(new Dictionary<string, string> { [ModelUses.VisionChecks] = "Vision", [ModelUses.ComplexVisionChecks] = "Vision" }, models.ForChecks());
         Assert.Throws<ArgumentOutOfRangeException>(() => models.For("summary"));
     }
 
@@ -59,14 +59,86 @@ public sealed class ProjectModelsTests
     [Fact]
     public void The_models_are_named_by_use_in_words()
     {
-        Assert.Equal("report analysis, Text; text-based checks, no model; vision-based checks, Gone (not offered on this PC)",
-            AnalysisPlayer.ModelsLine(Settings, new ProjectModels("Text", null, "Gone"), ModelUses.All));
+        Assert.Equal("report analysis, Text; text-based checks, no model; complex questions of text-based checks, the same model as simple questions; " +
+            "vision-based checks, Gone (not offered on this PC); complex questions of vision-based checks, no model",
+            AnalysisPlayer.ModelsLine(Settings, new ProjectModels("Text", null, "Gone") { ComplexVisionChecks = ProjectModels.NoModel }, ModelUses.All));
         Assert.Equal("No model.", AnalysisPlayer.TaskModelsLine(new Dictionary<string, string>(), aiAnalysis: true));
         Assert.Equal("No model.", AnalysisPlayer.TaskModelsLine(new Dictionary<string, string> { [ModelCapabilities.Text] = "Text" }, aiAnalysis: false));
         Assert.Equal("Models: report analysis, Vision.",
             AnalysisPlayer.TaskModelsLine(new Dictionary<string, string> { [ModelCapabilities.Text] = "Vision", [ModelCapabilities.Image] = "Vision" }, aiAnalysis: true));
         Assert.Equal("Models: text-based checks, Text; vision-based checks, Vision.",
             AnalysisPlayer.TaskModelsLine(new Dictionary<string, string> { [ModelUses.VisionChecks] = "Vision", [ModelUses.TextChecks] = "Text" }, aiAnalysis: true));
+    }
+
+    // projects.md, "Simple and complex questions" (owner, 2026-11-17).
+    [Fact]
+    public void Complex_questions_ask_the_model_for_simple_ones_unless_another_or_none_is_chosen()
+    {
+        var models = new ProjectModels(null, "Text", "Vision");
+        Assert.Equal("Vision", models.For(ModelUses.ComplexVisionChecks));
+        Assert.Equal("Text", models.For(ModelUses.ComplexTextChecks));
+        Assert.Null(models.Chosen(ModelUses.ComplexVisionChecks));
+        Assert.Null(CheckQuestions.EscalationProfile(models, ModelUses.VisionChecks));
+
+        var other = models.With(ModelUses.ComplexVisionChecks, "Big");
+        Assert.Equal("Big", other.For(ModelUses.ComplexVisionChecks));
+        Assert.Equal("Big", CheckQuestions.EscalationProfile(other, ModelUses.VisionChecks));
+        Assert.Equal("Big", other.ForChecks()[ModelUses.ComplexVisionChecks]);
+
+        var none = models.With(ModelUses.ComplexVisionChecks, ProjectModels.NoModel);
+        Assert.Null(none.For(ModelUses.ComplexVisionChecks));
+        Assert.Equal(ProjectModels.NoModel, none.Chosen(ModelUses.ComplexVisionChecks));
+        Assert.False(none.ForChecks().ContainsKey(ModelUses.ComplexVisionChecks));
+        Assert.Null(CheckQuestions.EscalationProfile(none, ModelUses.VisionChecks));
+        Assert.Null(none.With(ModelUses.ComplexVisionChecks, null).ComplexVisionChecks);
+
+        // No model for simple questions is none for complex ones that are the same.
+        Assert.Null(ProjectModels.None.For(ModelUses.ComplexVisionChecks));
+        Assert.True(ProjectModels.None.With(ModelUses.ComplexTextChecks, "Text").Any);
+        Assert.Equal(ModelCapabilities.Image, ModelUses.Capability(ModelUses.ComplexVisionChecks));
+        Assert.Equal(ModelUses.ComplexTextChecks, ModelUses.Complex(ModelUses.TextChecks));
+        Assert.Equal(ModelUses.VisionChecks, ModelUses.Simple(ModelUses.ComplexVisionChecks));
+    }
+
+    [Fact]
+    public void The_choices_for_complex_questions_start_with_the_same_model_then_no_model()
+    {
+        Assert.Equal([(null, "The same model as simple questions"), ("", "No model"), ("Vision", "Vision")],
+            AnalysisPlayer.ModelChoices(Settings, ModelUses.ComplexVisionChecks, null));
+        Assert.Equal(3, AnalysisPlayer.ModelChoices(Settings, ModelUses.ComplexVisionChecks, ProjectModels.NoModel).Count);
+        Assert.Equal("Text (cannot take images)", AnalysisPlayer.ModelChoices(Settings, ModelUses.ComplexVisionChecks, "Text")[^1].Label);
+    }
+
+    [Fact]
+    public void A_question_is_not_settled_by_two_answers_or_by_agreeing_it_cannot_tell()
+    {
+        var logo = new ClosedAnswerOf("logotype", "A brand name.");
+        var cannot = new ClosedAnswerOf("cannot-tell", "Too small.");
+        Assert.False(CheckQuestions.Unsettled(logo, logo, "cannot-tell"));
+        Assert.True(CheckQuestions.Unsettled(logo, cannot, "cannot-tell"));
+        Assert.True(CheckQuestions.Unsettled(cannot, cannot, "cannot-tell"));
+
+        var big = new GroupAnswers(logo, new ClosedAnswerOf("logotype", "A logo."), "Big", Cloud: true);
+        var split = new QuestionAnswers(new GroupAnswers(logo, cannot, "Small", Cloud: true), big);
+        var judged = CheckQuestions.Judge(split, group => AndroidImagesOfText.Interpret(group.One, group.Two, group.Model, group.Cloud));
+        Assert.Equal(("Big", true), (judged.Model, judged.Cloud));
+        Assert.StartsWith("Small, a cloud model, the project's model for simple questions, gave two answers, logotype and cannot-tell, " +
+            "so the question was asked again of the project's model for complex questions; Big, a cloud model, inferred from the pictures twice", judged.Text, StringComparison.Ordinal);
+
+        var once = CheckQuestions.Judge(new QuestionAnswers(new GroupAnswers(cannot, cannot, "Small", Cloud: false), null),
+            group => AndroidImagesOfText.Interpret(group.One, group.Two, group.Model, group.Cloud));
+        Assert.StartsWith("Small, a local model, could not tell", once.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Kept_answers_of_the_model_for_complex_questions_are_read_from_run_three()
+    {
+        static KeptAnswer Kept(string answer) => new(System.Text.Json.JsonDocument.Parse($$"""{ "reason": "r", "answer": "{{answer}}" }""").RootElement, AnalysisWorker.ServiceBasis, "{}");
+        var kept = new Dictionary<string, KeptAnswer> { ["q-3"] = Kept("logotype"), ["q-4"] = Kept("cannot-tell") };
+        var answers = CheckQuestions.FromKept(kept, run => $"q-{run}", CheckQuestions.EscalatedRun, "Big");
+        Assert.Equal(("logotype", "cannot-tell", true), (answers!.One.Answer, answers.Two.Answer, answers.Cloud));
+        Assert.Null(CheckQuestions.FromKept(kept, run => $"q-{run}", 1, "Big"));
+        Assert.Null(CheckQuestions.FromKept(new Dictionary<string, KeptAnswer> { ["q-3"] = Kept("logotype") }, run => $"q-{run}", 3, "Big"));
     }
 
     [Fact]

@@ -6,7 +6,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Npgsql;
 using Recorder.Analysis;
+using Recorder.Analysis.Android;
 using Recorder.Database;
+using Recorder.Session;
 using static Recorder.Tests.DatabaseTestSupport;
 
 namespace Recorder.Tests;
@@ -86,6 +88,34 @@ internal sealed class NoModelKind : IAnalysisTaskKind
     {
         Told.Add(context.NoModel(ModelUses.TextChecks));
         return Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// A task kind for the tests: one simple closed question of a
+/// vision-based check, asked again of the model for complex questions
+/// where it is not settled (projects.md, "Simple and complex questions").
+/// </summary>
+internal sealed class EscalatingKind : IAnalysisTaskKind
+{
+    public const string Name = "escalating";
+
+    public string Kind => Name;
+
+    public int Version => 1;
+
+    public QuestionAnswers? Answers { get; private set; }
+
+    public List<string> Failures { get; } = [];
+
+    public async Task RunAsync(AnalysisTaskContext context, CancellationToken cancellationToken)
+    {
+        var request = new ModelRequest("escalating-check", 1, "Ask.", "E1: fact", [new ModelImage("E2", "image/png", [1])], ["answer"], new HashSet<string> { "E1", "E2" }) with
+        {
+            Use = ModelUses.VisionChecks,
+            Answers = ["logotype", "cannot-tell"],
+        };
+        Answers = await CheckQuestions.AskAsync(context, run => $"question-{run}", request, "cannot-tell", Failures, cancellationToken);
     }
 }
 
@@ -1766,7 +1796,12 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         var project = (await catalog.ProjectOfAsync(recording, Token))!.Value.ProjectId;
         Assert.Equal(ProjectModels.None, await catalog.ProjectModelsAsync(project, Token));
 
-        var chosen = new ProjectModels("Claude Opus 5.5", null, "This PC, with images") { ProtectedAnthropicKey = "protected-key" };
+        var chosen = new ProjectModels("Claude Opus 5.5", null, "This PC, with images")
+        {
+            ProtectedAnthropicKey = "protected-key",
+            ComplexTextChecks = ProjectModels.NoModel,
+            ComplexVisionChecks = "Claude Opus 5.5",
+        };
         Assert.True(await catalog.SaveProjectModelsAsync(project, chosen, Token));
         Assert.Equal(chosen, await catalog.ProjectModelsAsync(project, Token));
         Assert.Null(await catalog.ProjectModelsAsync(Guid.NewGuid(), Token));
@@ -1874,6 +1909,71 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Assert.Empty(await catalog.SignedAnswersAsync("signed-check", 2, "This PC", "qwen", project, null, Token));
         Assert.Empty(await catalog.SignedAnswersAsync("signed-check", 1, "This PC", "other", project, null, Token));
         Assert.Empty(await catalog.SignedAnswersAsync("signed-check", 1, "This PC", "qwen", null, null, Token));
+    }
+
+    // projects.md, "Simple and complex questions": a simple question the
+    // model for simple questions cannot settle is asked again, as run 3,
+    // of the model for complex questions, whose answer decides.
+    [Fact]
+    public async Task A_simple_question_not_settled_is_asked_again_of_the_model_for_complex_questions()
+    {
+        var catalog = await CatalogAsync();
+        var settings = SettingsWith(3,
+            Profile("This PC", "qwen", ModelCapabilities.Text, ModelCapabilities.Image),
+            Profile("Big", "big", ModelCapabilities.Text, ModelCapabilities.Image));
+        var endpoint = new StandInEndpoint
+        {
+            Answer = (profile, _, _) => Task.FromResult(CheckAnswer(profile.Name == "Big" ? "logotype" : "cannot-tell")),
+        };
+        var profiles = new Dictionary<string, string> { [ModelUses.VisionChecks] = "This PC", [ModelUses.ComplexVisionChecks] = "Big" };
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), EscalatingKind.Name, 1, profiles, cancellationToken: Token);
+        var kind = new EscalatingKind();
+
+        await new AnalysisWorker(catalog, settings, [kind], endpoint, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
+        Assert.Empty(kind.Failures);
+        var answers = Assert.IsType<QuestionAnswers>(kind.Answers);
+        Assert.Equal(("cannot-tell", "This PC"), (answers.First.One.Answer, answers.First.Model));
+        var escalated = Assert.IsType<GroupAnswers>(answers.Escalated);
+        Assert.Equal(("logotype", "Big"), (escalated.One.Answer, escalated.Model));
+
+        // Both models are repeatable here, so each is asked once.
+        Assert.Equal(["complete This PC", "complete Big"], endpoint.Calls.Where(call => call.StartsWith("complete", StringComparison.Ordinal)));
+        Assert.Equal(["question-1", "question-3"], (await RowsAsync("SELECT step_key FROM analysis_attempts WHERE task_id = $1 ORDER BY step_key", task)).Select(row => (string)row["step_key"]!));
+        var inference = CheckQuestions.Judge(answers, group => AndroidImagesOfText.Interpret(group.One, group.Two, group.Model, group.Cloud));
+        Assert.Equal(PhoneCheckLevel.Info, inference.Level);
+        Assert.Equal("Big", inference.Model);
+        Assert.StartsWith("This PC, a local model, the project's model for simple questions, could not tell, so the question was asked again of the project's model for complex questions; Big, a local model, inferred", inference.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_settled_question_or_one_model_for_both_groups_asks_nothing_more()
+    {
+        var catalog = await CatalogAsync();
+        var settings = SettingsWith(3,
+            Profile("This PC", "qwen", ModelCapabilities.Text, ModelCapabilities.Image),
+            Profile("Big", "big", ModelCapabilities.Text, ModelCapabilities.Image));
+
+        // Settled by the model for simple questions.
+        var settled = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(CheckAnswer("logotype")) };
+        var profiles = new Dictionary<string, string> { [ModelUses.VisionChecks] = "This PC", [ModelUses.ComplexVisionChecks] = "Big" };
+        await catalog.QueueTaskAsync(await RecordingAsync(), EscalatingKind.Name, 1, profiles, cancellationToken: Token);
+        var kind = new EscalatingKind();
+        await new AnalysisWorker(catalog, settings, [kind], settled, options: Fast).RunUntilEmptyAsync(Token);
+        Assert.Null(kind.Answers!.Escalated);
+        Assert.Equal(["complete This PC"], settled.Calls.Where(call => call.StartsWith("complete", StringComparison.Ordinal)));
+
+        // Not settled, but the model for complex questions is the same.
+        var unsettled = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(CheckAnswer("cannot-tell")) };
+        var same = new ProjectModels(null, null, "This PC").ForChecks();
+        Assert.Equal("This PC", same[ModelUses.ComplexVisionChecks]);
+        await catalog.QueueTaskAsync(await RecordingAsync(), EscalatingKind.Name, 1, same, cancellationToken: Token);
+        var again = new EscalatingKind();
+        await new AnalysisWorker(catalog, settings, [again], unsettled, options: Fast).RunUntilEmptyAsync(Token);
+        Assert.Equal("cannot-tell", again.Answers!.First.One.Answer);
+        Assert.Null(again.Answers.Escalated);
+        Assert.Single(unsettled.Calls, call => call.StartsWith("complete", StringComparison.Ordinal));
     }
 
     [Fact]

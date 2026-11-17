@@ -374,8 +374,9 @@ public partial class MainWindow
             AnalysisPlayer.ModelsLine(models.Choices(_analysisSettings), models, ModelUses.All) + ".";
         AnalysisModelsTextBlock.Visibility = Visibility.Visible;
         ChecksModelsTextBlock.Text = "Models for checks, from the project's settings: " +
-            AnalysisPlayer.ModelsLine(models.Choices(_analysisSettings), models, [ModelUses.TextChecks, ModelUses.VisionChecks]) +
-            ". The images-of-text check, the check of text shown as a heading and the check of images with no text alternative ask the model for vision-based checks about the images and text their rules leave; no check uses the model for text-based checks yet.";
+            AnalysisPlayer.ModelsLine(models.Choices(_analysisSettings), models, [ModelUses.TextChecks, ModelUses.ComplexTextChecks, ModelUses.VisionChecks, ModelUses.ComplexVisionChecks]) +
+            ". The images-of-text check, the check of text shown as a heading and the check of images with no text alternative ask the model for vision-based checks about the images and text their rules leave, as simple questions; " +
+            "a question it answers two ways, or cannot tell, is asked again of the model for complex questions where that is another model. No check uses the model for text-based checks yet.";
 
         // The model may have changed, so its kept answers are read again.
         _ = ApplyKeptAnswersAsync();
