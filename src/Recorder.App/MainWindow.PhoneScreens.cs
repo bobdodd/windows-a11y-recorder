@@ -81,6 +81,17 @@ public partial class MainWindow
     private PhoneDescribedImageRun? _phoneDescribedImagesRules;
     private (PhoneDescribedImageRun Rules, IReadOnlyList<DescribedImageRequests> Requests)? _describedImageRequests;
     private int _describedImagesUnanswered;
+
+    // The screen title check, the same way (android-checks.md, step 22);
+    // its kept answers are found by the title, what a screen reader says,
+    // the text OCR read and, where given, the screen's picture, in the
+    // project, from the model for text-based checks or, for a screen images
+    // cover half of, for vision-based checks.
+    private PhoneScreenTitleRun? _phoneScreenTitles;
+    private PhoneScreenTitleRun? _phoneScreenTitlesRules;
+    private (PhoneScreenTitleRun Rules, IReadOnlyList<ScreenTitleRequest> Requests)? _screenTitleRequests;
+    private int _titleTextUnanswered;
+    private int _titleVisionUnanswered;
     private PhoneLabelInNameRun? _phoneLabelInName;
     private PhoneCheckSettings? _checkSettings;
 
@@ -145,6 +156,11 @@ public partial class MainWindow
             _phoneDescribedImagesRules = null;
             _describedImageRequests = null;
             _describedImagesUnanswered = 0;
+            _phoneScreenTitles = null;
+            _phoneScreenTitlesRules = null;
+            _screenTitleRequests = null;
+            _titleTextUnanswered = 0;
+            _titleVisionUnanswered = 0;
             _phoneLabelInName = null;
             _shownFinding = null;
             if (_playbackArchive is { PhoneScreens.Recorded: true } opened)
@@ -270,6 +286,13 @@ public partial class MainWindow
             : PhoneDescribedImageRun.Run(run, archive.PhoneScreens, archive.TalkBackSpeech, archive.PhoneAccessibility);
         _phoneDescribedImages = _phoneDescribedImagesRules;
         _describedImagesUnanswered = _phoneDescribedImagesRules?.Questions.Count ?? 0;
+
+        // The screen title check is level A, so the same at both audit
+        // levels; its kept answers are given with the images' below.
+        _phoneScreenTitlesRules = run is null ? null : PhoneScreenTitleRun.Run(run, archive.PhoneScreens);
+        _phoneScreenTitles = _phoneScreenTitlesRules;
+        _titleTextUnanswered = _phoneScreenTitlesRules?.TextQuestions ?? 0;
+        _titleVisionUnanswered = _phoneScreenTitlesRules?.PicturedQuestions ?? 0;
         JudgeTextContrast();
 
         // Non-text contrast has one level, AA (WCAG 2.2's 1.4.11), so is
@@ -303,9 +326,11 @@ public partial class MainWindow
     }
 
     // Gives the images-of-text check, the check of text shown as a heading,
-    // the check of images with no text alternative and the icon and
-    // description checks the answers the project's model for vision-based
-    // checks has given to their questions, in any task, as they are kept
+    // the check of images with no text alternative, the icon and
+    // description checks and the screen title check the answers the
+    // project's model for vision-based checks (or, for a screen title asked
+    // with only text, text-based checks) has given to their questions, in
+    // any task, as they are kept
     // by their requests, or for an image with no text alternative or a
     // described image by its pixels, its text and what a screen reader
     // says on the screen, in the project; the model is not asked here.
@@ -317,6 +342,7 @@ public partial class MainWindow
         await ApplyKeptHeadingAnswersAsync();
         await ApplyKeptImageAlternativeAnswersAsync();
         await ApplyKeptDescribedImageAnswersAsync();
+        await ApplyKeptScreenTitleAnswersAsync();
     }
 
     private async Task ApplyKeptImageAnswersAsync()
@@ -588,6 +614,102 @@ public partial class MainWindow
         ShowPhoneScreenRows();
     }
 
+    private async Task ApplyKeptScreenTitleAnswersAsync()
+    {
+        if (_phoneScreenTitlesRules is not { } rules)
+        {
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        if (rules.Questions.Count == 0)
+        {
+            _titleTextUnanswered = 0;
+            _titleVisionUnanswered = 0;
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        string? Problem(string use, string? name, int questions) =>
+            questions == 0
+                ? null
+                : name is null
+                    ? $"the project's settings choose no model for {ModelUses.Name(use)}"
+                    : ProjectModels.Problem(ProjectChoices, use, name);
+        var textName = _openProjectModels?.TextChecks;
+        var visionName = _openProjectModels?.VisionChecks;
+        var catalog = AnalysisCatalogOrNull;
+        var textProblem = Problem(ModelUses.TextChecks, textName, rules.TextQuestions) ?? (catalog is null && rules.TextQuestions > 0 ? "the analysis catalog is not open" : null);
+        var visionProblem = Problem(ModelUses.VisionChecks, visionName, rules.PicturedQuestions) ?? (catalog is null && rules.PicturedQuestions > 0 ? "the analysis catalog is not open" : null);
+        var none = new Dictionary<PhoneScreenTitleQuestion, PhoneScreenTitleAnswer>();
+        PhoneScreenTitleRun shown;
+        if ((rules.TextQuestions == 0 || textProblem is not null) && (rules.PicturedQuestions == 0 || visionProblem is not null))
+        {
+            shown = rules.Judged(none, AndroidScreenTitles.NotAsked(rules, textProblem, visionProblem));
+        }
+        else
+        {
+            try
+            {
+                if (_screenTitleRequests is not { } made || !ReferenceEquals(made.Rules, rules))
+                {
+                    var requests = await Task.Run(() => AndroidScreenTitles.Requests(rules, PhonePictures.Load));
+                    made = (rules, requests);
+                    _screenTitleRequests = made;
+                }
+
+                async Task<ScreenTitleKept?> KeptAsync(string template, string? name, string? problem, (string Name, ModelProfile Profile)? complex)
+                {
+                    if (problem is not null || name is null || ProjectChoices.Profile(name) is not { } profile)
+                    {
+                        return null;
+                    }
+
+                    var signed = await catalog!.SignedAnswersAsync(
+                        template, AndroidScreenTitles.TemplateVersion, name, profile.Model, _openProjectId, _analysisRecordingId, CancellationToken.None);
+                    var complexSigned = complex is { } other
+                        ? await catalog.SignedAnswersAsync(
+                            template, AndroidScreenTitles.TemplateVersion, other.Name, other.Profile.Model, _openProjectId, _analysisRecordingId, CancellationToken.None)
+                        : null;
+                    return new ScreenTitleKept(signed, name, complexSigned, complex?.Name);
+                }
+
+                var text = await KeptAsync(AndroidScreenTitles.TextTemplate, textName, textProblem, ComplexTextModel());
+                var vision = await KeptAsync(AndroidScreenTitles.PicturedTemplate, visionName, visionProblem, ComplexVisionModel());
+                shown = AndroidScreenTitles.FromKept(rules, made.Requests, text, vision, textProblem, visionProblem);
+            }
+            catch (Exception exception) when (exception is NpgsqlException or InvalidOperationException or IOException or ObjectDisposedException)
+            {
+                shown = rules.Judged(none, $"the model's kept answers could not be read: {exception.Message}");
+            }
+        }
+
+        // The recording changed while the answers were read.
+        if (!ReferenceEquals(rules, _phoneScreenTitlesRules))
+        {
+            return;
+        }
+
+        // A question the model for complex questions has not yet answered
+        // is not judged, so is counted with those not yet asked.
+        _phoneScreenTitles = shown;
+        _titleTextUnanswered = textProblem is not null ? 0 : shown.Questions.Count(question => !question.Pictured && !shown.Answers.ContainsKey(question));
+        _titleVisionUnanswered = visionProblem is not null ? 0 : shown.Questions.Count(question => question.Pictured && !shown.Answers.ContainsKey(question));
+        UpdateAskChecksModelButton();
+        ShowPhoneScreenRows();
+    }
+
+    // The project's model for complex questions of text-based checks, as
+    // for vision-based checks below; null where there is none the project
+    // can use.
+    private (string Name, ModelProfile Profile)? ComplexTextModel() =>
+        _openProjectModels is { } models &&
+        CheckQuestions.EscalationProfile(models, ModelUses.TextChecks) is { } name &&
+        ProjectModels.Problem(ProjectChoices, ModelUses.ComplexTextChecks, name) is null &&
+        ProjectChoices.Profile(name) is { } profile
+            ? (name, profile)
+            : null;
+
     // The project's model for complex questions of vision-based checks,
     // where a question the model for simple ones does not settle is asked
     // again of another (projects.md, "Simple and complex questions"), and
@@ -618,13 +740,19 @@ public partial class MainWindow
     // the project's model for vision-based checks has not answered, while no
     // model checks of the recording are queued or running, and only where
     // the project can use that model and, where another is chosen for
-    // complex questions, that one too (owner, 2026-11-17).
+    // complex questions, that one too (owner, 2026-11-17). A screen title
+    // asked with only text is for the model for text-based checks, the
+    // same way.
     private void UpdateAskChecksModelButton()
     {
         var waiting = _analysisTasks?.Any(task => task.Kind == AndroidModelChecksKind.Name &&
             task.State is AnalysisTaskStates.Queued or AnalysisTaskStates.Running) == true;
-        AskChecksModelButton.IsEnabled = _imagesOfTextUnanswered + _headingLookUnanswered + _imageAlternativeUnanswered + _describedImagesUnanswered > 0 && !waiting && _analysisRecordingId is not null &&
-            _openProjectModels is { VisionChecks: not null } models && models.ChecksProblem(ProjectChoices, ModelUses.VisionChecks) is null;
+        var models = _openProjectModels;
+        var vision = _imagesOfTextUnanswered + _headingLookUnanswered + _imageAlternativeUnanswered + _describedImagesUnanswered + _titleVisionUnanswered > 0 &&
+            models is { VisionChecks: not null } && models.ChecksProblem(ProjectChoices, ModelUses.VisionChecks) is null;
+        var text = _titleTextUnanswered > 0 &&
+            models is { TextChecks: not null } && models.ChecksProblem(ProjectChoices, ModelUses.TextChecks) is null;
+        AskChecksModelButton.IsEnabled = (vision || text) && !waiting && _analysisRecordingId is not null;
     }
 
     private async void AskChecksModelButton_Click(object sender, RoutedEventArgs e)
@@ -830,7 +958,7 @@ public partial class MainWindow
         {
             if (_phoneChecks is not null || _phoneTextContrast is not null || _phoneNonTextContrast is not null || _phoneImagesOfText is not null ||
                 _phoneLabelInName is not null || _phoneHeadingLook is not null || _phoneImageAlternative is not null ||
-                _phoneDescribedImages is not null)
+                _phoneDescribedImages is not null || _phoneScreenTitles is not null)
             {
                 // The status message check follows every snapshot, settled
                 // or not, so can find a message in a visit too brief to
@@ -1027,6 +1155,23 @@ public partial class MainWindow
             }
         }
 
+        if (_phoneScreenTitles is { SnapshotsRead: > 0 } titles)
+        {
+            var title = PhoneCheckNames.Title(PhoneCheckNames.TitleNotDescriptive);
+            var findings = titles.For(visit);
+            if (findings.Count > 0)
+            {
+                AddCheckRows(findings);
+            }
+            else
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{title}: {ScreenTitleState(titles, visit)}", shownAt, null)
+                {
+                    IsCheck = true,
+                });
+            }
+        }
+
         if (_phoneLabelInName is { } labels)
         {
             var findings = labels.For(visit);
@@ -1054,6 +1199,44 @@ public partial class MainWindow
 
     // A row for each check of the findings, saying how many at each level,
     // then a row for each finding.
+    // What became of a visit's screen in the screen title check, where it
+    // made no finding: each screen is checked once, on its first visit OCR
+    // read a picture of (rule 2).
+    private static string ScreenTitleState(PhoneScreenTitleRun titles, PhoneVisit visit)
+    {
+        if (titles.Of(visit.Screen) is not { } of)
+        {
+            return "not checked, as OCR read no picture of this screen.";
+        }
+
+        if (of.Visit != visit)
+        {
+            return $"checked once for the screen, on visit {of.Visit.Number.ToString(CultureInfo.CurrentCulture)}.";
+        }
+
+        switch (of.State)
+        {
+            case PhoneScreenTitleState.Untitled:
+                return "not checked, as the screen has no title.";
+            case PhoneScreenTitleState.Matched:
+                var match = of.Match switch
+                {
+                    PhoneTitleMatch.Heading => "a heading on the screen",
+                    PhoneTitleMatch.OcrLine => "a line of the text OCR read on the screen",
+                    _ => "all a screen reader says for an item on the screen",
+                };
+                return $"no finding, as the title \"{of.Title}\" is {match}.";
+        }
+
+        var question = titles.Questions.FirstOrDefault(item => item.Visit == visit);
+        if (question is not null && titles.Answers.TryGetValue(question, out var answer))
+        {
+            return $"no finding, as {answer.Inference.Text}.";
+        }
+
+        return $"the title \"{of.Title}\" is for the model for {(question?.Pictured == true ? "vision-based" : "text-based")} checks, and not yet judged.";
+    }
+
     private void AddCheckRows(IReadOnlyList<PhoneFinding> findings, string measured = "", int indent = 3)
     {
         foreach (var check in findings.GroupBy(finding => finding.Check))
@@ -1384,6 +1567,23 @@ public partial class MainWindow
                     $"{described.Fit:N0} judged to fit, not confirmed, {Count(described.NotIcons, "control")} whose image was judged not to be an icon, " +
                     $"and {Count(described.Unanswered, "described image")} not judged" +
                     (described.ModelNote is { } describedNote ? $": {describedNote}." : ".");
+        }
+
+        if (_phoneScreenTitles is { } titles)
+        {
+            var titleName = PhoneCheckNames.Title(PhoneCheckNames.TitleNotDescriptive);
+            var titleFindings = titles.Findings.Count == 0
+                ? "no findings"
+                : $"{Count(titles.Findings.Count, "finding")} ({Levels(titles.Findings)})";
+            summary += titles.SnapshotsRead == 0
+                ? $" {titleName}: not checked, as it needs the text OCR read on the screens' pictures."
+                : $" {titleName}: {titleFindings}, from {Count(titles.Screens, "screen")} OCR read a picture of, each once: " +
+                    $"{titles.Untitled:N0} with no title, left to the check of a screen with no title, " +
+                    $"{titles.Matched:N0} whose title is exactly a heading, a line OCR read or an item a screen reader says on the screen, so describes it, " +
+                    $"and {titles.Questions.Count:N0} for the project's models, {titles.TextQuestions:N0} with only text, for the model for text-based checks, and " +
+                    $"{titles.PicturedQuestions:N0} with the screen's picture, as images cover at least half of it, for the model for vision-based checks; in Chrome, the web page's title is judged. " +
+                    $"{titles.Described:N0} judged to describe {(titles.Described == 1 ? "its screen" : "their screens")}, not confirmed, and {Count(titles.Unanswered, "screen")} not judged" +
+                    (titles.ModelNote is { } titleNote ? $": {titleNote}." : ".");
         }
 
         if (_phoneLabelInName is { } labels)

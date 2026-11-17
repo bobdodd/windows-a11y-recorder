@@ -222,6 +222,23 @@ public static class AndroidImageAlternative
     }
 
     /// <summary>
+    /// What an answer given with no picture is kept against: laid out as
+    /// <see cref="Signature"/>, with no width, height or thumbnail, so that
+    /// <see cref="SameImage"/> finds the same only for the same texts.
+    /// The screen title check's for a title asked with only text.
+    /// </summary>
+    public static byte[] TextSignature(string nearby, string screenText)
+    {
+        ArgumentNullException.ThrowIfNull(nearby);
+        ArgumentNullException.ThrowIfNull(screenText);
+        var signature = new byte[SignatureLength];
+        signature[0] = SignatureVersion;
+        SHA256.HashData(Encoding.UTF8.GetBytes(nearby), signature.AsSpan(9, 32));
+        SHA256.HashData(Encoding.UTF8.GetBytes(screenText), signature.AsSpan(41, 32));
+        return signature;
+    }
+
+    /// <summary>
     /// Whether two signatures are of the same image: the same version, the
     /// same width and height, the same text beside it, the same that a
     /// screen reader says on the screen, and every channel of

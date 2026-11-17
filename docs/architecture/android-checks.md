@@ -3904,6 +3904,164 @@ and of two answers.
 - What a screen reader says is the tree's order, not the order a screen
   reader moved in on the recording.
 
+## Step 22: a screen title that does not describe its screen
+
+### The owner's decision (2026-11-17)
+
+Asked what came next after the icon and description checks, the owner
+noted that every screen of one app has the same title, and asked for
+the check to be added to the existing 2.4.2 testing. Offered eight rules and two ways
+to treat Chrome from the measurement below, the owner chose: "Add the
+screen title does not describe its screen check with rules 1 to 8 and
+Chrome option A".
+
+1. **One issue.** "Screen title does not describe its screen"
+   (`screen-title-not-descriptive`), WCAG2ICT 2.4.2, a third issue
+   beside "No screen title" and "Screen title shared with other
+   screens". A screen can have both a shared title and this one, as
+   their remedies differ.
+2. **Which screens.** Each titled screen once, from its first settled
+   snapshot OCR read. An untitled screen is left to "No screen title".
+3. **No model where the title is the screen's own text.** A title that
+   is exactly a heading shown on the screen, a whole line of the text
+   OCR read, or all that a screen reader says for one item, comparing
+   only letters and digits in lower case, describes its screen with no
+   model asked. A title only within such text, such as "Settings" in
+   "Search Settings", goes to the model.
+4. **What the model is given.** The title, what a screen reader says on
+   the whole screen and the text OCR read, each marked with where it
+   came from, and the screen's picture where images cover at least half
+   of the screen.
+5. **Chrome, option A.** Chrome's screens are included, and the part of
+   the title after "Chrome: ", the web page's title, is judged.
+6. **Levels.** A title judged not to describe its screen is a warning
+   for a person to verify, medium impact if confirmed, as the other
+   2.4.2 issues.
+7. **No model.** With AI off, or no model chosen, a screen that needs
+   one is counted as not checked, and no finding is made.
+8. **One answer for one screen.** A saved answer is reused only where
+   the title, what a screen reader says, the OCR text and, where given,
+   the picture are unchanged.
+
+### What the standards say (checked in cited documents)
+
+- [WCAG 2.2's 2.4.2](https://www.w3.org/WAI/WCAG22/Understanding/page-titled.html)
+  asks for titles that describe topic or purpose, and
+  [WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/) applies it to a
+  software's screens. A title shared by many screens, or one that is
+  only the app's name, can fail to say which screen a person is on.
+
+### Measured first (2026-11-17)
+
+A probe, with no model, read the 20 recordings with phone screens on
+the development PC: 50 screens, all titled, 17 sharing a title in
+their app, none untitled.
+
+- **Rule 3 passed 16 of the 50** by an exact match: Settings' own
+  screens, TalkBack's screens, and a mail app's "Primary".
+- **34 would go to the model:** the main Settings screen ("Settings",
+  matched only within "Search Settings"), the launcher's "Home" and
+  "Apps list", Chrome's "Chrome: " and the page's title, and one app's
+  16 screens, all titled with the app's name as the window title.
+- **Images.** 5 screens were at least half images, Chrome's new tab at
+  88% and one app's library screen at 60%; the next highest was 29%.
+  So the picture is given only from half the screen.
+- **The app's name.** App labels are not recorded, so a title that is
+  only the app's name cannot be found without a model; the package
+  name is given to the model.
+
+### As built
+
+- **The rules.** `PhoneScreenTitleRun` (`Recorder.Session`) reads each
+  settled snapshot OCR read (`SnapshotsRead`) and takes each screen
+  once, at its first such snapshot (`Screens`). The title is
+  `PhoneScreenChecks.ScreenTitle`'s, the first pane title or else the
+  window title, with where it came from. A screen with none is counted
+  (`Untitled`). `PageTitle` gives Chrome's web page title, for
+  `com.android.chrome` and its beta, dev and canary packages (rule 5).
+- **Rule 3.** `Match` compares the judged title, letters and digits in
+  lower case, with the shown headings' speakable text, then each line
+  OCR read, then each item a screen reader stops on; a match is counted
+  (`Matched`) with which it was.
+- **Rule 4.** What a screen reader says is each item
+  `PhoneTreeChecks.ShouldFocusView` stops on with text, in the tree's
+  order, joined by " | "; the OCR text is the lines from the top, joined
+  by " / "; each is cut to 4,000 characters from its start. The share
+  of the screen images cover is sampled on a 60 by 60 grid over the
+  root's bounds, from visible ImageViews; from 0.5 the question is
+  pictured (`PicturedQuestions`), else text only (`TextQuestions`).
+- **The questions.** `AndroidScreenTitles` (`Recorder.Analysis`) asks
+  `android-screen-title`, with no picture, of the project's model for
+  text-based checks, and `android-screen-title-pictured`, with picture
+  A, the whole screen at half size with nothing outlined, of its model
+  for vision-based checks, each version 1, with step keys made from the
+  request's SHA-256. The question gives the app's package, the title and
+  where a screen reader is given it, for Chrome the page's title, what a
+  screen reader says and the OCR text, noting that OCR may misread, and
+  asks whether the title describes the screen: describes-the-screen,
+  does-not-describe (such as only the app's name on a screen with a
+  purpose of its own, a word that would fit any screen, or the title of
+  a different screen) or cannot-tell, reason first.
+- **Rule 8, the signature.** As the image check's: for a pictured
+  question, the whole screen's pixels; for a text question, the same
+  layout with no size or thumbnail
+  (`AndroidImageAlternative.TextSignature`), so only the same texts
+  match. The text is where the title came from, the title, the page's
+  title and the OCR text, and what a screen reader says. An answer kept
+  on a task of the project, by the same profile and model, is copied
+  into the task. Asking with a signature is shared with the icon and
+  description checks (`SignedAsker`).
+- **The model for complex questions.** As for the other checks, a
+  question not settled is asked again of the model for complex
+  questions of the same kind, text or vision, where the project chooses
+  another.
+- **Rule 6, the levels.** Agreed does-not-describe: a warning, the
+  model's inference, ending "a person should verify this". Agreed
+  cannot-tell, or two answers: a warning ending "check manually".
+  Agreed describes-the-screen: no finding, counted (`Described`). Every
+  answer is the model's inference, so the report says AI was used even
+  where no finding was made.
+- **Rule 7.** Before any answer, and with no model for a question's
+  kind, no finding is made; the note says how many were not judged and
+  why, for text-based and vision-based checks apart.
+- **Where it runs.** The Android report, the project report and the
+  model checks ask after the icon and description checks; the model
+  checks' Markdown has a section, "Screen titles", and the report's
+  limits give the check's note. The Checks tab gives a row under each
+  visit: the finding, or that the screen was checked on another visit,
+  has no title, has a title that is its own text, was judged to
+  describe it, or is not yet judged; and the summary gives the counts.
+  "Ask the project's model" is enabled while a title is not judged and
+  the project can use the model for its kind.
+- **Guidance.** `android-check-guidance.json` has the check, impact
+  medium, criterion 2.4.2, with remediation for Views, Compose, a web
+  page in Chrome, Flutter and React Native.
+
+### Checked
+
+The solution builds with no warnings, and the tests pass, 2,662 of
+them, with the 10 that need Windows failing as before. The new tests
+cover made-up screens: a title matching a heading, a heading with other
+punctuation, an OCR line or a spoken item, and a title only within
+them; an untitled screen; what a screen reader says and the OCR text
+given; the image share under and over half; no OCR; Chrome's page
+title; findings only from warnings, with the rest counted; the
+requests' use, template, picture and signatures, the same texts being
+the same screen; kept answers judging a warning and a title that
+describes its screen; no kept answers and no model; and the levels of
+each answer and of two answers.
+
+### Limits
+
+- The model judges from the package name, not the app's label, which
+  is not recorded.
+- Each screen is judged on its first snapshot OCR read; a screen whose
+  content changes later is not judged again.
+- How well the check finds a real failure is not measured; the sample
+  had none confirmed.
+- What a screen reader says is the tree's order, not the order a screen
+  reader moved in on the recording.
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A

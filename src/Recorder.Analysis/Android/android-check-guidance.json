@@ -553,6 +553,21 @@
       "sources": ["wcag-2.4.2", "wcag2ict", "android-views", "flutter-bridge"]
     },
     {
+      "check": "screen-title-not-descriptive",
+      "title": "Screen title does not describe its screen",
+      "issue": "The screen has a title, but it does not say what the screen is for or what it shows, such as only the app's name on a screen with a purpose of its own, a word that would fit any screen, or the title of a different screen.",
+      "why": "A title tells people where they are when a screen opens; one that does not describe the screen leaves screen reader users to explore to find out, and makes it hard to tell screens apart.",
+      "affects": ["People who use a screen reader", "People with cognitive disabilities or limited short-term memory"],
+      "impact": "medium",
+      "criteria": ["2.4.2"],
+      "related": [],
+      "basis": "WCAG 2.4.2 as WCAG2ICT applies it to software, from the tree and the recorded picture: a title that is not exactly the screen's own heading, a line of text OCR read or an item a screen reader says, judged by the project's model for text-based checks from what a screen reader says on the screen and the text OCR read, or by its model for vision-based checks with the screen's picture where images cover at least half of it. In Chrome, the web page's title within the screen's title is judged. Every finding is a warning, the model's inference, for a person to verify; with no model there is no finding.",
+      "android": "Make each screen's title say what the screen is for or shows, such as \"Order history\" rather than only the app's name: the activity's title (android:label or setTitle), or a pane title with android:accessibilityPaneTitle or View.setAccessibilityPaneTitle; in Compose, Modifier.semantics { paneTitle = ... }. For a web page, give the page a title element that describes it.",
+      "flutter": "Wrap a title that describes the screen in Semantics(namesRoute: true) inside the route, rather than the app's name; Flutter sets the route's name as the pane title.",
+      "reactNative": "Give each screen a title in the navigator that says what the screen is for, and announce it when the screen opens.",
+      "sources": ["wcag-2.4.2", "wcag2ict", "android-views", "android-activity", "compose-semantics", "flutter-semantics", "flutter-bridge"]
+    },
+    {
       "check": "no-heading",
       "title": "Screen with no heading",
       "issue": "No item shown on the screen is marked as a heading.",

@@ -1383,6 +1383,260 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.EndsWith("; check manually", split.Text, StringComparison.Ordinal);
     }
 
+    // Step 22: screen titles. A window of made-up items: a heading, a
+    // line of text, a button and an image from the top of the screen down
+    // to the given place; its title is a pane title, or the window's title.
+    private static PhoneCheckWindow TitledScreen(string? paneTitle, string? windowTitle = null, int imageBottom = 600)
+    {
+        AndroidTreeNode Node(int index, int? parent, (int Left, int Top, int Right, int Bottom) bounds, string className,
+            string? description = null, string? text = null, bool clickable = false, bool heading = false, string? pane = null) =>
+            ImageNode(index, parent, bounds, className, description, text) with { Clickable = clickable, Heading = heading, PaneTitle = pane };
+        return new PhoneCheckWindow(512, 1,
+        [
+            Node(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout", pane: paneTitle),
+            Node(1, 0, (40, 100, 1040, 200), "android.widget.TextView", text: "Recent notes", heading: true),
+            Node(2, 0, (0, 300, 1080, imageBottom), "android.widget.ImageView"),
+            Node(3, 0, (40, 2000, 1040, 2100), "android.widget.TextView", text: "Shopping list"),
+            Node(4, 0, (40, 2200, 500, 2300), "android.widget.Button", text: "Add a note", clickable: true),
+        ], windowTitle);
+    }
+
+    private (PhoneScreenTitleRun Run, PhoneVisit Visit) ScreenTitleRun(PhoneCheckWindow window, string? engine = "Windows OCR, en-US", params string[] ocr)
+    {
+        var lines = ocr
+            .Select((text, index) => new PhoneTextLine(null, window.Items[0], PhoneTextPlace.FoundByOcr, null, text,
+                new PhoneBounds(100, 700 + (index * 80), 700, 740 + (index * 80)), null, 40))
+            .ToArray();
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var measured = PhoneContrastRun.Of([.. visit.SettledSnapshots.Take(2).Select(at =>
+            new PhoneContrastSnapshot(
+                visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                new PhoneContrastPicture(PhonePictureKind.Screenshot, at.MonotonicNanoseconds, "p.png", "p.png"),
+                engine, lines, null, window))]);
+        return (PhoneScreenTitleRun.Run(measured, archive.PhoneScreens), visit);
+    }
+
+    // Rules 2 and 3: a title that is exactly a heading, a line OCR read or
+    // an item a screen reader says, letters and digits compared, describes
+    // its screen with no model; a title only within such text is asked
+    // about, once for the screen, from its first snapshot.
+    [Theory]
+    [InlineData("Recent notes", PhoneTitleMatch.Heading)]
+    [InlineData("recent-notes!", PhoneTitleMatch.Heading)]
+    [InlineData("Notes for today", PhoneTitleMatch.OcrLine)]
+    [InlineData("Add a note", PhoneTitleMatch.SpokenItem)]
+    [InlineData("Notes", PhoneTitleMatch.None)]
+    public void ScreenTitles_ATitleThatIsTheScreensOwnTextIsNotAsked(string title, PhoneTitleMatch match)
+    {
+        var (run, visit) = ScreenTitleRun(TitledScreen(title), ocr: ["Notes for today"]);
+
+        Assert.Equal((2, 1, 0), (run.SnapshotsRead, run.Screens, run.Untitled));
+        var screen = run.Of(visit.Screen);
+        Assert.NotNull(screen);
+        Assert.Equal((match, title.Trim(), visit), (screen.Value.Match, screen.Value.Title, screen.Value.Visit));
+        Assert.Equal(match == PhoneTitleMatch.None ? PhoneScreenTitleState.Asked : PhoneScreenTitleState.Matched, screen.Value.State);
+        Assert.Equal(match == PhoneTitleMatch.None ? 1 : 0, run.Questions.Count);
+        Assert.Equal(match == PhoneTitleMatch.None ? 0 : 1, run.Matched);
+        Assert.Empty(run.Findings);
+    }
+
+    // Rules 2 and 4: an untitled screen is left to "No screen title"; an
+    // asked screen is given what a screen reader says and OCR's text, and
+    // its picture only where images cover at least half of it; with no
+    // OCR, nothing is checked.
+    [Fact]
+    public void ScreenTitles_AsksWithTheScreensTextAndItsPictureOnlyWhereImagesCoverHalfOfIt()
+    {
+        var (untitled, _) = ScreenTitleRun(TitledScreen(null));
+
+        Assert.Equal((1, 1, 0), (untitled.Screens, untitled.Untitled, untitled.Questions.Count));
+
+        var (text, visit) = ScreenTitleRun(TitledScreen(null, "Acme Notes"), ocr: ["Shopping list", "Recent notes"]);
+        var question = Assert.Single(text.Questions);
+
+        Assert.Equal(("Acme Notes", "window title", null), (question.Title, question.TitleSource, question.PageTitle));
+        Assert.Equal("Recent notes | Shopping list | Add a note", question.Spoken);
+        Assert.Equal("Shopping list / Recent notes", question.Ocr);
+        Assert.Equal(visit, question.Visit);
+        Assert.Equal("its window title, \"Acme Notes\"", question.Time.Measured);
+        Assert.InRange(question.ImageShare, 0.12, 0.14);
+        Assert.False(question.Pictured);
+        Assert.Equal((1, 0), (text.TextQuestions, text.PicturedQuestions));
+
+        var (pictured, _) = ScreenTitleRun(TitledScreen(null, "Acme Notes", imageBottom: 1500));
+
+        Assert.True(Assert.Single(pictured.Questions).Pictured);
+        Assert.Equal((0, 1), (pictured.TextQuestions, pictured.PicturedQuestions));
+
+        var (unread, _) = ScreenTitleRun(TitledScreen("Notes"), engine: null);
+
+        Assert.Equal((0, 0, 0), (unread.SnapshotsRead, unread.Screens, unread.Questions.Count));
+        Assert.Equal("Screen title does not describe its screen (WCAG2ICT 2.4.2)", PhoneCheckNames.Title(PhoneCheckNames.TitleNotDescriptive));
+    }
+
+    // Rule 5, option A: in Chrome, the web page's title is judged.
+    [Theory]
+    [InlineData("com.android.chrome", "Chrome: Acme Notes help", "Acme Notes help")]
+    [InlineData("com.chrome.beta", "Chrome: Sign in", "Sign in")]
+    [InlineData("com.android.chrome", "Chrome", null)]
+    [InlineData("com.android.chrome", "Chrome: ", null)]
+    [InlineData("com.example.notes", "Chrome: Acme Notes help", null)]
+    public void ScreenTitles_PageTitle_IsChromesWebPageTitle(string package, string title, string? page) =>
+        Assert.Equal(page, PhoneScreenTitleRun.PageTitle(package, title));
+
+    // Rule 4's share of a screen images cover, on a grid.
+    [Fact]
+    public void ScreenTitles_ImageShare_CountsOverlappingImagesOnce()
+    {
+        var frame = new PhoneBounds(0, 0, 1000, 2000);
+
+        Assert.Equal(0, PhoneScreenTitleRun.ImageShare(frame, []));
+        Assert.Equal(0.5, PhoneScreenTitleRun.ImageShare(frame, [new PhoneBounds(0, 0, 1000, 1000), new PhoneBounds(0, 500, 1000, 1000)]), 2);
+        Assert.Equal(1, PhoneScreenTitleRun.ImageShare(frame, [new PhoneBounds(-10, -10, 1010, 2010)]), 2);
+        Assert.Equal(PhoneTitleMatch.None, PhoneScreenTitleRun.Match("...", ["..."], [], []));
+    }
+
+    // Rule 6: only an answer that the title does not describe its screen,
+    // cannot tell or two answers makes a finding; the rest are counted.
+    [Fact]
+    public void ScreenTitles_Judged_MakesFindingsOnlyOfWarnings_AndCountsTheRest()
+    {
+        var (run, _) = ScreenTitleRun(TitledScreen(null, "Acme Notes"));
+        var question = Assert.Single(run.Questions);
+        var info = new PhoneInference(PhoneCheckLevel.Info, "describes", Inferred: true, "Model", Cloud: false);
+        var warning = new PhoneInference(PhoneCheckLevel.Warning, "does not describe", Inferred: true, "Model", Cloud: true);
+
+        var describes = run.Judged(new Dictionary<PhoneScreenTitleQuestion, PhoneScreenTitleAnswer>
+        {
+            [question] = new(PhoneScreenTitleOutcome.Describes, info),
+        }, "1 answered");
+
+        Assert.Empty(describes.Findings);
+        Assert.Equal((1, 0, "1 answered"), (describes.Described, describes.Unanswered, describes.ModelNote));
+        Assert.Single(describes.Inferences);
+
+        var judged = run.Judged(new Dictionary<PhoneScreenTitleQuestion, PhoneScreenTitleAnswer>
+        {
+            [question] = new(PhoneScreenTitleOutcome.Finding, warning),
+        }, null);
+
+        var finding = Assert.Single(judged.Findings);
+        Assert.Equal((PhoneCheckNames.TitleNotDescriptive, PhoneCheckLevel.Warning, "Acme Notes"), (finding.Check, finding.Level, finding.Label));
+        Assert.Same(warning, finding.Inference);
+        Assert.Same(finding, Assert.Single(judged.For(question.Visit)));
+        Assert.Equal(1, judged.Matched + judged.Questions.Count);
+    }
+
+    // Rules 4, 5 and 8: a text question is for the model for text-based
+    // checks with no picture, a pictured one for vision-based checks with
+    // the whole screen; kept answers judge them, by their signatures.
+    [Fact]
+    public void ScreenTitles_RequestsAndKeptAnswersJudgeEachScreen()
+    {
+        var (run, _) = ScreenTitleRun(TitledScreen(null, "Acme Notes"), ocr: ["Recent notes"]);
+        var (pictured, _) = ScreenTitleRun(TitledScreen(null, "Acme Notes", imageBottom: 1500));
+        var rgb = new uint[1080 * 2400];
+        Array.Fill(rgb, 0x203040u);
+        var pixels = new PhonePixels(1080, 2400, rgb);
+        var text = Recorder.Analysis.Android.AndroidScreenTitles.RequestOf(run.Questions[0], null);
+        var picture = Recorder.Analysis.Android.AndroidScreenTitles.RequestOf(pictured.Questions[0], pixels);
+
+        Assert.Matches("^screen-title-[0-9a-f]{16}$", text.Request.Key);
+        Assert.Equal((Recorder.Analysis.ModelUses.TextChecks, Recorder.Analysis.Android.AndroidScreenTitles.TextTemplate, 0),
+            (text.Request.Request.Use, text.Request.Request.PromptTemplate, text.Request.Request.Images.Count));
+        Assert.Equal((Recorder.Analysis.ModelUses.VisionChecks, Recorder.Analysis.Android.AndroidScreenTitles.PicturedTemplate, 1),
+            (picture.Request.Request.Use, picture.Request.Request.PromptTemplate, picture.Request.Request.Images.Count));
+        Assert.Equal((text.Use, picture.Use), (Recorder.Analysis.ModelUses.TextChecks, Recorder.Analysis.ModelUses.VisionChecks));
+        Assert.Equal(Recorder.Analysis.Android.AndroidScreenTitles.Answers, text.Request.Request.Answers);
+        Assert.True(text.Request.Request.ReusedAcrossTasks);
+        Assert.Contains("has the title \"Acme Notes\", which a screen reader is given as the screen's window title.", text.Request.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("item by item in the app's order: \"Recent notes | Shopping list | Add a note\"", text.Request.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("which may misread some words: \"Recent notes\"", text.Request.Request.Input, StringComparison.Ordinal);
+        Assert.DoesNotContain("Picture A", text.Request.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("Picture A is the whole screen.", picture.Request.Request.Input, StringComparison.Ordinal);
+        Assert.EndsWith("then give the answer.", text.Request.Request.Input, StringComparison.Ordinal);
+
+        // The same texts are the same screen with no picture; different
+        // OCR text is not.
+        var again = Recorder.Analysis.Android.AndroidScreenTitles.RequestOf(run.Questions[0], null);
+        var (otherOcr, _) = ScreenTitleRun(TitledScreen(null, "Acme Notes"), ocr: ["Archive"]);
+        var other = Recorder.Analysis.Android.AndroidScreenTitles.RequestOf(otherOcr.Questions[0], null);
+
+        Assert.True(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(text.Request.Signature, again.Request.Signature));
+        Assert.False(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(text.Request.Signature, other.Request.Signature));
+        Assert.False(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(text.Request.Signature, picture.Request.Signature));
+
+        static JsonElement Output(string answer) =>
+            JsonSerializer.SerializeToElement(new { answer, reason = "The title is only the app's name." });
+        var elsewhere = Guid.NewGuid();
+        Recorder.Analysis.SignedAnswer Answer(int step, byte[] signature, string answer) =>
+            new(Guid.NewGuid(), elsewhere, $"screen-title-0123456789abcdef-{step}", signature,
+                new(Output(answer), "service", """{"temperature": null}"""));
+        Recorder.Analysis.Android.ScreenTitleKept Kept(string answer) =>
+            new([Answer(1, text.Request.Signature, answer), Answer(2, text.Request.Signature, answer)], "Haiku");
+
+        var findings = Recorder.Analysis.Android.AndroidScreenTitles.FromKept(run, [text], Kept("does-not-describe"), null);
+
+        var finding = Assert.Single(findings.Findings);
+        Assert.Equal((PhoneCheckNames.TitleNotDescriptive, PhoneCheckLevel.Warning), (finding.Check, finding.Level));
+        Assert.StartsWith(
+            "Haiku, a cloud model, inferred from what a screen reader says on the screen and the text OCR read twice for the same screen, by its title, what a screen reader says and the text OCR read, that the screen's title, \"Acme Notes\", does not describe its screen",
+            finding.Inference!.Text, StringComparison.Ordinal);
+        Assert.EndsWith("; a person should verify this", finding.Inference.Text, StringComparison.Ordinal);
+        Assert.Equal(
+            "1 screen title left by the rules is for Haiku; 1 screen title answered: 0 judged to describe their screens, not confirmed, and 1 warning",
+            findings.ModelNote);
+
+        var describes = Recorder.Analysis.Android.AndroidScreenTitles.FromKept(run, [text], Kept("describes-the-screen"), null);
+
+        Assert.Empty(describes.Findings);
+        Assert.Equal(1, describes.Described);
+
+        // With no kept answers, or no model, nothing is judged (rule 7).
+        var none = Recorder.Analysis.Android.AndroidScreenTitles.FromKept(run, [text], null, null);
+
+        Assert.Equal((0, 1), (none.Answers.Count, none.Unanswered));
+        Assert.EndsWith(", 1 screen title not yet asked", none.ModelNote, StringComparison.Ordinal);
+
+        var noModel = Recorder.Analysis.Android.AndroidScreenTitles.FromKept(run, [text], null, null, textNone: "the project's settings choose no model for text-based checks");
+
+        Assert.Empty(noModel.Findings);
+        Assert.EndsWith(
+            "; 1 screen title left by the rules was not judged, as no model may be used for text-based checks: the project's settings choose no model for text-based checks",
+            noModel.ModelNote, StringComparison.Ordinal);
+        Assert.DoesNotContain("not yet asked", noModel.ModelNote, StringComparison.Ordinal);
+    }
+
+    // Rule 6's levels, and the web page's title in Chrome's.
+    [Theory]
+    [InlineData("describes-the-screen", PhoneCheckLevel.Info, "that the screen's title, \"Acme Notes\", describes its screen, not confirmed")]
+    [InlineData("does-not-describe", PhoneCheckLevel.Warning, "; a person should verify this")]
+    [InlineData("cannot-tell", PhoneCheckLevel.Warning, "could not tell from what a screen reader says on the screen and the text OCR read twice whether the screen's title, \"Acme Notes\", describes its screen")]
+    public void ScreenTitles_Interpret_GivesEachAgreedAnswersLevel(string answer, PhoneCheckLevel level, string says)
+    {
+        var (run, _) = ScreenTitleRun(TitledScreen(null, "Acme Notes"));
+        var asked = run.Questions[0];
+
+        var inference = Recorder.Analysis.Android.AndroidScreenTitles.Interpret(new(answer, "First."), new(answer, "Second."), "Haiku", cloud: false, asked);
+
+        Assert.Equal((level, true, false), (inference.Level, inference.Inferred, inference.Cloud));
+        Assert.StartsWith("Haiku, a local model,", inference.Text, StringComparison.Ordinal);
+        Assert.Contains(says, inference.Text, StringComparison.Ordinal);
+
+        var split = Recorder.Analysis.Android.AndroidScreenTitles.Interpret(new(answer, "First."), new(answer == "cannot-tell" ? "does-not-describe" : "cannot-tell", "Second."), "Haiku", cloud: false, asked);
+
+        Assert.Equal(PhoneCheckLevel.Warning, split.Level);
+        Assert.Contains("gave two answers", split.Text, StringComparison.Ordinal);
+
+        var repeatable = new Recorder.Analysis.ClosedAnswerOf(answer, "First.");
+        var chrome = Recorder.Analysis.Android.AndroidScreenTitles.Interpret(repeatable, repeatable, "Haiku", cloud: true,
+            asked with { PageTitle = "Acme Notes help" });
+
+        Assert.Contains("the web page's title, \"Acme Notes help\", in the screen's title,", chrome.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(" twice", chrome.Text, StringComparison.Ordinal);
+    }
+
     // The body text is the height most of the characters have.
     [Fact]
     public void HeadingLook_BodyHeight_IsTheMedianInkHeightByCharacters()

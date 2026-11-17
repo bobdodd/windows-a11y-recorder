@@ -361,16 +361,7 @@ public static class AndroidImagesOfText
     // outside its bounds.
     internal static Rgb Screen(PhonePixels pixels, PhoneBounds bounds)
     {
-        var (outWidth, outHeight) = (Math.Max(1, pixels.Width / ScreenDivisor), Math.Max(1, pixels.Height / ScreenDivisor));
-        var result = new uint[outWidth * outHeight];
-        for (var y = 0; y < outHeight; y++)
-        {
-            for (var x = 0; x < outWidth; x++)
-            {
-                result[(y * outWidth) + x] = pixels.At(x * ScreenDivisor, y * ScreenDivisor);
-            }
-        }
-
+        var (outWidth, outHeight, result) = Whole(pixels);
         var (left, top, right, bottom) = (bounds.Left / ScreenDivisor, bounds.Top / ScreenDivisor, bounds.Right / ScreenDivisor, bounds.Bottom / ScreenDivisor);
         for (var y = Math.Max(0, top - Outline); y < Math.Min(outHeight, bottom + Outline); y++)
         {
@@ -384,6 +375,29 @@ public static class AndroidImagesOfText
         }
 
         return new Rgb(outWidth, outHeight, result);
+    }
+
+    // The whole screen at half size, with nothing outlined: the screen
+    // title check's picture A.
+    internal static Rgb Screen(PhonePixels pixels)
+    {
+        var (outWidth, outHeight, result) = Whole(pixels);
+        return new Rgb(outWidth, outHeight, result);
+    }
+
+    private static (int Width, int Height, uint[] Pixels) Whole(PhonePixels pixels)
+    {
+        var (outWidth, outHeight) = (Math.Max(1, pixels.Width / ScreenDivisor), Math.Max(1, pixels.Height / ScreenDivisor));
+        var result = new uint[outWidth * outHeight];
+        for (var y = 0; y < outHeight; y++)
+        {
+            for (var x = 0; x < outWidth; x++)
+            {
+                result[(y * outWidth) + x] = pixels.At(x * ScreenDivisor, y * ScreenDivisor);
+            }
+        }
+
+        return (outWidth, outHeight, result);
     }
 
     // An RGB PNG, the same bytes for the same pixels.

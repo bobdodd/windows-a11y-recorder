@@ -468,37 +468,7 @@ public sealed class PhoneImageAlternativeRun
     {
         ArgumentNullException.ThrowIfNull(window);
         ArgumentNullException.ThrowIfNull(image);
-        var stops = new List<string>();
-        var mark = -1;
-        var seen = new HashSet<PhoneCheckItem>();
-        void Walk(PhoneCheckItem item)
-        {
-            if (!seen.Add(item))
-            {
-                return;
-            }
-
-            if (item == image)
-            {
-                mark = stops.Count;
-                stops.Add(ImageMark);
-            }
-            else if (PhoneTreeChecks.ShouldFocusView(item) && PhoneTreeChecks.SpeakableText(item).Trim() is { Length: > 0 } said)
-            {
-                stops.Add(said);
-            }
-
-            foreach (var child in item.Children)
-            {
-                Walk(child);
-            }
-        }
-
-        foreach (var top in window.Items.Where(item => item.Parent is null))
-        {
-            Walk(top);
-        }
-
+        var stops = Stops(window, image, out var mark);
         if (mark < 0)
         {
             mark = stops.Count;
@@ -533,5 +503,50 @@ public sealed class PhoneImageAlternativeRun
 
         var kept = string.Join(Separator, stops.Skip(first).Take(last - first + 1));
         return (first > 0 ? "..." + Separator : "") + kept + (last < stops.Count - 1 ? Separator + "..." : "");
+    }
+
+    /// <summary>
+    /// What a screen reader says on the screen, item by item: each item a
+    /// screen reader would stop on (<see cref="PhoneTreeChecks.ShouldFocusView"/>)
+    /// with text to say, in the tree's order, and <see cref="ImageMark"/>
+    /// in the place of the image where one is given; its place, or -1.
+    /// Also the screen title check's (<see cref="PhoneScreenTitleRun"/>).
+    /// </summary>
+    internal static List<string> Stops(PhoneCheckWindow window, PhoneCheckItem? image, out int mark)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        var stops = new List<string>();
+        var at = -1;
+        var seen = new HashSet<PhoneCheckItem>();
+        void Walk(PhoneCheckItem item)
+        {
+            if (!seen.Add(item))
+            {
+                return;
+            }
+
+            if (image is not null && item == image)
+            {
+                at = stops.Count;
+                stops.Add(ImageMark);
+            }
+            else if (PhoneTreeChecks.ShouldFocusView(item) && PhoneTreeChecks.SpeakableText(item).Trim() is { Length: > 0 } said)
+            {
+                stops.Add(said);
+            }
+
+            foreach (var child in item.Children)
+            {
+                Walk(child);
+            }
+        }
+
+        foreach (var top in window.Items.Where(item => item.Parent is null))
+        {
+            Walk(top);
+        }
+
+        mark = at;
+        return stops;
     }
 }

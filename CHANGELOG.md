@@ -8,6 +8,27 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Screen titles
+
+- A new check, "Screen title does not describe its screen" (WCAG2ICT
+  2.4.2), beside "No screen title" and "Screen title shared with other
+  screens"; a screen can have both a shared title and this one.
+- Each titled screen is checked once. A title that is exactly a
+  heading on the screen, a line of the text OCR read or an item a
+  screen reader says passes with no model.
+- Any other title is asked of the project's model for text-based
+  checks, with what a screen reader says and the OCR text, or of its
+  model for vision-based checks with the screen's picture too, where
+  images cover at least half the screen. In Chrome, the web page's
+  title is judged.
+- A title judged not to describe its screen is a warning for a person
+  to verify, medium impact; cannot tell, or two answers, a warning to
+  check manually. With no model, no finding is made, and the counts
+  say how many were not judged.
+- Answers are kept against the title, what a screen reader says, the
+  OCR text and, where given, the picture, and asked again of the model
+  for complex questions where the first do not settle them.
+
 ### Icons and descriptions
 
 - Two new checks, "Icon that contradicts its control's name" and

@@ -104,6 +104,16 @@ public static class PhoneCheckNames
     public const string DescriptionNotMatchingImage = "description-not-matching-image";
 
     /// <summary>
+    /// A screen title that does not describe its screen (step 22,
+    /// PhoneScreenTitleRun), WCAG2ICT 2.4.2, one discrete issue beside
+    /// "No screen title" and "Screen title shared with other screens"
+    /// (owner, 2026-11-17): a warning from the project's model for
+    /// text-based checks, or for vision-based checks where images cover
+    /// half the screen, for a person to verify; none without a model.
+    /// </summary>
+    public const string TitleNotDescriptive = "screen-title-not-descriptive";
+
+    /// <summary>
     /// Label in Name (step 9), from the tree's text and OCR's: the name
     /// does not contain the visible label, and the name contains it but
     /// does not start with it. Not one of the tree's checks.
@@ -227,6 +237,7 @@ public static class PhoneCheckNames
         SliderNoRange => "Slider with no range information (WCAG 4.1.2)",
         TitleMissing => "No screen title (WCAG2ICT 2.4.2)",
         TitleShared => "Screen title shared with other screens (WCAG2ICT 2.4.2)",
+        TitleNotDescriptive => "Screen title does not describe its screen (WCAG2ICT 2.4.2)",
         NoHeading => "No heading (WCAG 1.3.1)",
         FirstHeadingLow => "First heading far from the top",
         ManyHeadings => "Many headings",

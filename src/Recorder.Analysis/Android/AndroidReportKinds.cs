@@ -17,7 +17,10 @@ namespace Recorder.Analysis.Android;
 /// (AndroidHeadingLook), the check of images with no text alternative
 /// about the images its rules leave (AndroidImageAlternative), the icon and
 /// description checks about the described images theirs leave
-/// (AndroidDescribedImages), and the report says AI was used. With no model
+/// (AndroidDescribedImages); where it chooses a model for text-based
+/// checks, or for vision-based checks for a screen images cover half of,
+/// the screen title check asks it about the titles its rules leave
+/// (AndroidScreenTitles); and the report says AI was used. With no model
 /// it gives the same report for the same recording, settings and guidance.
 /// </summary>
 public sealed class AndroidReportKind : IAnalysisTaskKind
@@ -255,7 +258,9 @@ public sealed class AndroidSummaryKind : IAnalysisTaskKind
 /// checks run as the Android report runs them, and the project's model for
 /// vision-based checks asked about each image of text, each piece of text
 /// shown as a heading, each image with no text alternative and each
-/// described image their rules leave, as the Checks tab's "Ask the
+/// described image their rules leave, and the project's model for
+/// text-based checks, or vision-based checks, each screen title the screen
+/// title check's rules leave, as the Checks tab's "Ask the
 /// project's model" queues it. Its
 /// answers are kept by their requests, and an image's also by its pixels
 /// and the text beside it, so the Checks tab and a report show them
@@ -283,7 +288,7 @@ public sealed class AndroidModelChecksKind : IAnalysisTaskKind
             .Append(CultureInfo.InvariantCulture, $"# Model checks: {recording}\n\n");
         if (audit.ImagesOfText is not { } run)
         {
-            return text.Append("The colours could not be measured, so the images-of-text check, the check of text shown as a heading, the check of images with no text alternative and the icon and description checks did not run")
+            return text.Append("The colours could not be measured, so the images-of-text check, the check of text shown as a heading, the check of images with no text alternative, the icon and description checks and the screen title check did not run")
                 .Append(audit.MeasureProblem is { } problem ? ": " + problem : "").Append(".\n").ToString();
         }
 
@@ -340,6 +345,24 @@ public sealed class AndroidModelChecksKind : IAnalysisTaskKind
             {
                 text.Append(CultureInfo.InvariantCulture,
                     $"- {PhoneCheckNames.Title(finding.Check)}, {finding.Screen.Package}, \"{finding.Screen.Name}\", visit {finding.Visit.Number}, {finding.Label}: {finding.Text}\n");
+            }
+        }
+
+        if (audit.ScreenTitles is { } titles)
+        {
+            text.Append("\n## Screen titles\n\n")
+                .Append(CultureInfo.InvariantCulture,
+                    $"Of {titles.Screens} screens on the pictures OCR read, {titles.Untitled} had no title and {titles.Matched} had a title that is their own heading, a line OCR read or an item a screen reader says; the rules left {titles.Questions.Count} for the project's models.");
+            if (titles.ModelNote is { } titleNote)
+            {
+                text.Append(' ').Append(char.ToUpperInvariant(titleNote[0])).Append(titleNote.AsSpan(1)).Append('.');
+            }
+
+            text.Append("\n\n");
+            foreach (var finding in titles.Findings)
+            {
+                text.Append(CultureInfo.InvariantCulture,
+                    $"- {finding.Screen.Package}, \"{finding.Screen.Name}\", visit {finding.Visit.Number}, {finding.Label}: {finding.Text}\n");
             }
         }
 
@@ -404,6 +427,7 @@ internal static class AndroidReportRun
             audit = await AndroidHeadingLook.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
             audit = await AndroidImageAlternative.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
             audit = await AndroidDescribedImages.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
+            audit = await AndroidScreenTitles.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
             if (modelChecksOnly)
             {
                 var named = await context.Catalog.RecordingAsync(task.Recording, cancellationToken).ConfigureAwait(false);
@@ -501,6 +525,7 @@ internal static class AndroidReportRun
                 audit = await AndroidHeadingLook.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
                 audit = await AndroidImageAlternative.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
                 audit = await AndroidDescribedImages.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
+                audit = await AndroidScreenTitles.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
                 parts.Add(Input(archive, audit, label, opened.Incomplete) with { StartedUtc = new DateTimeOffset(recording.StartedUtc, TimeSpan.Zero) });
                 keys.Add(key);
             }
