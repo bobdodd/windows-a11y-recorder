@@ -6,14 +6,15 @@ namespace Recorder.Analysis;
 /// <summary>
 /// A check's answer to one narrow question (android-vision-checks.md,
 /// "Keeping it repeatable", points 1 and 2): one of the question's fixed
-/// answers, and one sentence saying what shows it.
+/// answers, and one sentence saying what shows it, written before the
+/// answer (point 7).
 /// </summary>
 public sealed record ClosedAnswerOf(string Answer, string Reason);
 
 /// <summary>
 /// The shape a check's question is answered in, and the recorder's own check
-/// of it: a JSON object with an "answer", one of the fixed answers, and a
-/// "reason" that is not empty. Output that fails is refused, never repaired.
+/// of it: a JSON object with a "reason" that is not empty and an "answer",
+/// one of the fixed answers. Output that fails is refused, never repaired.
 /// </summary>
 public static class ClosedAnswer
 {
@@ -21,7 +22,13 @@ public static class ClosedAnswer
 
     public const string ReasonMember = "reason";
 
-    /// <summary>The JSON schema the server is asked to hold the answer to.</summary>
+    /// <summary>
+    /// The JSON schema the server is asked to hold the answer to: the
+    /// reason first and the answer after it, so that the answer is written
+    /// after what shows it, not before (measured 2026-11-17: asked answer
+    /// first, Claude Haiku 5.5 gave answers its own reasons contradicted;
+    /// asked reason first, none of the answers read did).
+    /// </summary>
     public static JsonObject Schema(IReadOnlyList<string> answers)
     {
         ArgumentNullException.ThrowIfNull(answers);
@@ -30,14 +37,14 @@ public static class ClosedAnswer
             ["type"] = "object",
             ["properties"] = new JsonObject
             {
+                [ReasonMember] = new JsonObject { ["type"] = "string", ["minLength"] = 1 },
                 [AnswerMember] = new JsonObject
                 {
                     ["type"] = "string",
                     ["enum"] = new JsonArray([.. answers.Select(answer => JsonValue.Create(answer))]),
                 },
-                [ReasonMember] = new JsonObject { ["type"] = "string", ["minLength"] = 1 },
             },
-            ["required"] = new JsonArray(AnswerMember, ReasonMember),
+            ["required"] = new JsonArray(ReasonMember, AnswerMember),
             ["additionalProperties"] = false,
         };
     }

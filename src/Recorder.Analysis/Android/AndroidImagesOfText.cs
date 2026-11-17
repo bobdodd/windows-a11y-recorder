@@ -34,7 +34,10 @@ public static class AndroidImagesOfText
 {
     public const string Template = "android-image-of-text";
 
-    public const int TemplateVersion = 1;
+    // Version 2 (2026-11-17): the reason asked for before the answer
+    // (ClosedAnswer.Schema; android-vision-checks.md, "Keeping it
+    // repeatable", point 7).
+    public const int TemplateVersion = 2;
 
     public const string Logotype = "logotype";
 
@@ -74,7 +77,7 @@ public static class AndroidImagesOfText
         "- picture-with-other-content: the text is part of a picture with significant other visual content, such as a photograph or an illustration, and is not the picture's main content.\n" +
         "- could-be-text: the text could be shown as real text, styled by the app, with the same look; it is an image of text.\n" +
         "- cannot-tell: the pictures do not show enough to judge.\n" +
-        "Give the answer, and one sentence saying what in the pictures shows it.";
+        "First write one sentence saying what in the pictures shows the answer, then give the answer.";
 
     /// <summary>
     /// The requests of a run's questions, in the questions' order; a

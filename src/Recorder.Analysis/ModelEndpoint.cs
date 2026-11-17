@@ -86,8 +86,9 @@ public sealed record ModelRequest(
     /// The fixed answers of a check's question (android-vision-checks.md,
     /// "Keeping it repeatable", point 2), or null for a step answered in
     /// sections of statements. Where given, the answer is a JSON object
-    /// with an "answer", one of these, and a "reason", one sentence saying
-    /// what shows it; an answer outside the set is refused, never patched.
+    /// with a "reason", one sentence saying what shows it, and then an
+    /// "answer", one of these; an answer outside the set is refused, never
+    /// patched.
     /// The step then has no sections.
     /// </summary>
     public IReadOnlyList<string>? Answers { get; init; }

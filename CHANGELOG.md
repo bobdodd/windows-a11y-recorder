@@ -30,6 +30,16 @@ Changes on `main` since 1.1.0, not yet released.
   said does not count (question version 2). The answer is given again
   only where a screen reader also says the same on the screen.
 
+### The reason before the answer
+
+- Every check that asks a model one closed question (images of text,
+  text shown as a heading, images with no text alternative) now asks
+  for the one-sentence reason first and the answer after it, so the
+  answer is given after what shows it. Measured on 51 images: asked
+  answer first, some answers were contradicted by their own reasons;
+  asked reason first, none of the answers read were. Each question's
+  template version was raised, so earlier answers are not reused.
+
 ### Text shown as a heading
 
 - A new check, "Text shown as a heading, not marked as one" (WCAG

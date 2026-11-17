@@ -840,7 +840,9 @@ attempts marks each one reused.
 Built on 2026-11-16 for the images-of-text check
 (`android-vision-checks.md`, "Images of text, as built"). A check's
 question is a step whose request names its fixed answers: the server is
-held to a schema of one answer from the set and a reason, the worker's
+held to a schema of a reason and then one answer from the set (the
+reason first since 2026-11-17, `android-vision-checks.md`, "Keeping it
+repeatable", point 7), the worker's
 own check refuses anything else, and the answers are recorded with the
 attempt's settings, so that other steps' settings are as they were.
 

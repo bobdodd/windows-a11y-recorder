@@ -31,7 +31,10 @@ public static class AndroidHeadingLook
 {
     public const string Template = "android-text-shown-as-heading";
 
-    public const int TemplateVersion = 1;
+    // Version 2 (2026-11-17): the reason asked for before the answer
+    // (ClosedAnswer.Schema; android-vision-checks.md, "Keeping it
+    // repeatable", point 7).
+    public const int TemplateVersion = 2;
 
     public const string Heading = "heading";
 
@@ -62,7 +65,7 @@ public static class AndroidHeadingLook
         "- heading: it is shown as a heading or title, of the screen or of the content after it, by its size, weight, colour, case or place.\n" +
         "- not-heading: it is not a heading, such as a message, a value, the label of a single field or value, a button, a caption or ordinary text.\n" +
         "- cannot-tell: the pictures do not show enough to judge.\n" +
-        "Give the answer, and one sentence saying what in the pictures shows it.";
+        "First write one sentence saying what in the pictures shows the answer, then give the answer.";
 
     /// <summary>
     /// The requests of a run's questions, in the questions' order; a

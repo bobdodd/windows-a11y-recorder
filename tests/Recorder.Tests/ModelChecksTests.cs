@@ -36,12 +36,12 @@ public sealed class ModelChecksTests
     }
 
     [Fact]
-    public void A_closed_answers_schema_names_its_answers_and_asks_for_a_reason()
+    public void A_closed_answers_schema_asks_for_a_reason_and_then_one_of_its_answers()
     {
         var schema = ClosedAnswer.Schema(Answers);
 
         Assert.Equal(
-            """{"type":"object","properties":{"answer":{"type":"string","enum":["logotype","could-be-text","cannot-tell"]},"reason":{"type":"string","minLength":1}},"required":["answer","reason"],"additionalProperties":false}""",
+            """{"type":"object","properties":{"reason":{"type":"string","minLength":1},"answer":{"type":"string","enum":["logotype","could-be-text","cannot-tell"]}},"required":["reason","answer"],"additionalProperties":false}""",
             schema.ToJsonString());
         Assert.Null(ClosedAnswer.Read(JsonSerializer.SerializeToElement(new { answer = "logotype" })));
     }

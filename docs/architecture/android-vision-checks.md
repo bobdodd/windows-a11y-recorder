@@ -486,6 +486,21 @@ Adopted by the owner, 2026-11-15. The same approach as the summaries
    and how much that takes, and how often the answers agree with the
    owner's on a sample. The owner then chooses the rules, as for every
    check so far.
+7. **The reason before the answer.** A closed answer is a JSON object
+   with the reason first and the answer after it
+   (`ClosedAnswer.Schema`), and each question ends "First write one
+   sentence saying what in the pictures shows the answer, then give the
+   answer." Added 2026-11-17, at the owner's request ("Make the changes
+   and commit"), after measuring it on the check of images with a
+   description: asked for the answer first, Claude Haiku 5.5 gave some
+   answers that its own reasons contradicted, the same way both times,
+   such as "contradicts" for a house icon named "Open the home page"
+   with the reason that the icon matches; asked for the reason first, on the same
+   51 images, all 220 replies came back reason first and none of the
+   answers read contradicted its reason. Every check asked so far was
+   given a new template version: images of text 2, text shown as a
+   heading 2, and images with no text alternative 3, so no answer given
+   in the old order is reused.
 
 ## Measuring before building
 

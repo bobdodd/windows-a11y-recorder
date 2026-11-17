@@ -40,7 +40,10 @@ public static class AndroidImageAlternative
     // Version 2 (2026-11-16, the owner: "Pass the screen reader's text for
     // the whole screen to the image check"): what a screen reader says on
     // the screen, and information judged against it, not the text drawn.
-    public const int TemplateVersion = 2;
+    // Version 3 (2026-11-17): the reason asked for before the answer
+    // (ClosedAnswer.Schema; android-vision-checks.md, "Keeping it
+    // repeatable", point 7).
+    public const int TemplateVersion = 3;
 
     public const string Informative = "informative";
 
@@ -103,7 +106,7 @@ public static class AndroidImageAlternative
         "- informative: it gives information that what a screen reader says on this screen does not, such as a photograph or illustration of the content, a chart, a status, a logo that names something, or an icon whose meaning what a screen reader says does not give.\n" +
         "- decorative: it gives no information that a screen reader user would miss: it only decorates, repeats what a screen reader already says on this screen, or is a line, a background or a flourish.\n" +
         "- cannot-tell: the pictures do not show enough to judge, such as when nothing can be seen inside the outline.\n" +
-        "Give the answer, and one sentence saying what in the pictures shows it.";
+        "First write one sentence saying what in the pictures shows the answer, then give the answer.";
 
     /// <summary>
     /// The requests of a run's questions, in the questions' order; a

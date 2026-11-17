@@ -3712,6 +3712,10 @@ the screen reader's text for the whole screen to the image check".
   signature (version 2) adds the SHA-256 of what a screen reader says
   on the screen, with the image's place marked, so an answer is given
   again only for the same image where a screen reader says the same.
+- On 2026-11-17 the reason was asked for before the answer, for every
+  check's question (`android-vision-checks.md`, "Keeping it
+  repeatable", point 7). The template is version 3, so answers to
+  version 2 are not reused.
 
 ## Decisions on the open questions (2026-11-11)
 
