@@ -92,6 +92,18 @@ public static class PhoneCheckNames
     public const string ImageNoTextAlternative = "image-no-text-alternative";
 
     /// <summary>
+    /// The icon and description checks (step 21, PhoneDescribedImageRun),
+    /// WCAG 1.1.1, each one discrete issue (owner, 2026-11-17): an image
+    /// that is a control whose icon is the usual symbol for something other
+    /// than its name says, and an image that is not a control whose
+    /// description does not match what it shows. Each is a warning from
+    /// the project's model for vision-based checks, for a person to
+    /// verify; there is no finding without one.
+    /// </summary>
+    public const string IconContradictsName = "icon-contradicts-name";
+    public const string DescriptionNotMatchingImage = "description-not-matching-image";
+
+    /// <summary>
     /// Label in Name (step 9), from the tree's text and OCR's: the name
     /// does not contain the visible label, and the name contains it but
     /// does not start with it. Not one of the tree's checks.
@@ -203,6 +215,8 @@ public static class PhoneCheckNames
         ImageOfTextAaa => "Image of text (WCAG 1.4.9, AAA)",
         TextShownAsHeading => "Text shown as a heading, not marked as one (WCAG 1.3.1)",
         ImageNoTextAlternative => "Image with no text alternative (WCAG 1.1.1)",
+        IconContradictsName => "Icon that contradicts its control's name (WCAG 1.1.1)",
+        DescriptionNotMatchingImage => "Description that does not match its image (WCAG 1.1.1)",
         LabelNotInName => "Label not in name (WCAG 2.5.3)",
         LabelNotAtStart => "Label not at the start of the name (WCAG 2.5.3, best practice)",
         ClickableNotFocusable => "Clickable but not focusable (WCAG 2.1.1)",

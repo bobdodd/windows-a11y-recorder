@@ -77,6 +77,10 @@ public partial class MainWindow
     private PhoneImageAlternativeRun? _phoneImageAlternativeRules;
     private (PhoneImageAlternativeRun Rules, IReadOnlyList<ImageAlternativeRequest> Requests)? _imageAlternativeRequests;
     private int _imageAlternativeUnanswered;
+    private PhoneDescribedImageRun? _phoneDescribedImages;
+    private PhoneDescribedImageRun? _phoneDescribedImagesRules;
+    private (PhoneDescribedImageRun Rules, IReadOnlyList<DescribedImageRequests> Requests)? _describedImageRequests;
+    private int _describedImagesUnanswered;
     private PhoneLabelInNameRun? _phoneLabelInName;
     private PhoneCheckSettings? _checkSettings;
 
@@ -137,6 +141,10 @@ public partial class MainWindow
             _phoneImageAlternativeRules = null;
             _imageAlternativeRequests = null;
             _imageAlternativeUnanswered = 0;
+            _phoneDescribedImages = null;
+            _phoneDescribedImagesRules = null;
+            _describedImageRequests = null;
+            _describedImagesUnanswered = 0;
             _phoneLabelInName = null;
             _shownFinding = null;
             if (_playbackArchive is { PhoneScreens.Recorded: true } opened)
@@ -254,6 +262,14 @@ public partial class MainWindow
             : PhoneImageAlternativeRun.Run(run, archive.PhoneScreens, archive.PhoneDevice, archive.TalkBackSpeech, archive.PhoneAccessibility);
         _phoneImageAlternative = _phoneImageAlternativeRules;
         _imageAlternativeUnanswered = _phoneImageAlternativeRules?.Questions.Count ?? 0;
+
+        // The icon and description checks are level A, so the same at both
+        // audit levels; their kept answers are given with the images' below.
+        _phoneDescribedImagesRules = run is null
+            ? null
+            : PhoneDescribedImageRun.Run(run, archive.PhoneScreens, archive.TalkBackSpeech, archive.PhoneAccessibility);
+        _phoneDescribedImages = _phoneDescribedImagesRules;
+        _describedImagesUnanswered = _phoneDescribedImagesRules?.Questions.Count ?? 0;
         JudgeTextContrast();
 
         // Non-text contrast has one level, AA (WCAG 2.2's 1.4.11), so is
@@ -286,18 +302,21 @@ public partial class MainWindow
         _ = ApplyKeptAnswersAsync();
     }
 
-    // Gives the images-of-text check, the check of text shown as a heading
-    // and the check of images with no text alternative the answers the
-    // project's model for vision-based checks has given to their
-    // questions, in any task, as they are kept by their requests, or for
-    // an image with no text alternative by its pixels, the text beside it
-    // and what a screen reader says on the screen, in the project; the model is not asked here. With no model chosen, what the
-    // rules leave stays a warning, and the summary says why.
+    // Gives the images-of-text check, the check of text shown as a heading,
+    // the check of images with no text alternative and the icon and
+    // description checks the answers the project's model for vision-based
+    // checks has given to their questions, in any task, as they are kept
+    // by their requests, or for an image with no text alternative or a
+    // described image by its pixels, its text and what a screen reader
+    // says on the screen, in the project; the model is not asked here.
+    // With no model chosen, what the rules leave stays a warning, or for
+    // a described image is not judged, and the summary says why.
     private async Task ApplyKeptAnswersAsync()
     {
         await ApplyKeptImageAnswersAsync();
         await ApplyKeptHeadingAnswersAsync();
         await ApplyKeptImageAlternativeAnswersAsync();
+        await ApplyKeptDescribedImageAnswersAsync();
     }
 
     private async Task ApplyKeptImageAnswersAsync()
@@ -494,6 +513,81 @@ public partial class MainWindow
         ShowPhoneScreenRows();
     }
 
+    private async Task ApplyKeptDescribedImageAnswersAsync()
+    {
+        if (_phoneDescribedImagesRules is not { } rules)
+        {
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        if (rules.Questions.Count == 0)
+        {
+            _describedImagesUnanswered = 0;
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        var name = _openProjectModels?.VisionChecks;
+        var problem = name is null
+            ? "the project's settings choose no model for vision-based checks"
+            : ProjectModels.Problem(ProjectChoices, ModelUses.VisionChecks, name);
+        var none = new Dictionary<PhoneDescribedImageQuestion, PhoneDescribedImageAnswer>();
+        PhoneDescribedImageRun shown;
+        if (problem is not null || AnalysisCatalogOrNull is not { } catalog || ProjectChoices.Profile(name!) is not { } profile)
+        {
+            shown = rules.Judged(none, AndroidDescribedImages.NotAsked(rules.Questions.Count, problem ?? "the analysis catalog is not open"));
+        }
+        else
+        {
+            try
+            {
+                if (_describedImageRequests is not { } made || !ReferenceEquals(made.Rules, rules))
+                {
+                    var requests = await Task.Run(() => AndroidDescribedImages.Requests(rules, PhonePictures.Load));
+                    made = (rules, requests);
+                    _describedImageRequests = made;
+                }
+
+                string[] templates = [AndroidDescribedImages.KindTemplate, AndroidDescribedImages.IconTemplate, AndroidDescribedImages.DescriptionTemplate];
+                var signed = new Dictionary<string, IReadOnlyList<SignedAnswer>>(StringComparer.Ordinal);
+                Dictionary<string, IReadOnlyList<SignedAnswer>>? complexSigned = null;
+                var complex = ComplexVisionModel();
+                foreach (var template in templates)
+                {
+                    signed[template] = await catalog.SignedAnswersAsync(
+                        template, AndroidDescribedImages.TemplateVersion, name!, profile.Model, _openProjectId, _analysisRecordingId, CancellationToken.None);
+                    if (complex is not null)
+                    {
+                        complexSigned ??= new Dictionary<string, IReadOnlyList<SignedAnswer>>(StringComparer.Ordinal);
+                        complexSigned[template] = await catalog.SignedAnswersAsync(
+                            template, AndroidDescribedImages.TemplateVersion, complex.Value.Name, complex.Value.Profile.Model,
+                            _openProjectId, _analysisRecordingId, CancellationToken.None);
+                    }
+                }
+
+                shown = AndroidDescribedImages.FromKept(rules, made.Requests, signed, name!, complexSigned, complex?.Name);
+            }
+            catch (Exception exception) when (exception is NpgsqlException or InvalidOperationException or IOException or ObjectDisposedException)
+            {
+                shown = rules.Judged(none, $"the model's kept answers could not be read: {exception.Message}");
+            }
+        }
+
+        // The recording changed while the answers were read.
+        if (!ReferenceEquals(rules, _phoneDescribedImagesRules))
+        {
+            return;
+        }
+
+        // A question the model for complex questions has not yet answered
+        // is not judged, so is counted with those not yet asked.
+        _phoneDescribedImages = shown;
+        _describedImagesUnanswered = problem is not null ? 0 : shown.Unanswered;
+        UpdateAskChecksModelButton();
+        ShowPhoneScreenRows();
+    }
+
     // The project's model for complex questions of vision-based checks,
     // where a question the model for simple ones does not settle is asked
     // again of another (projects.md, "Simple and complex questions"), and
@@ -529,7 +623,7 @@ public partial class MainWindow
     {
         var waiting = _analysisTasks?.Any(task => task.Kind == AndroidModelChecksKind.Name &&
             task.State is AnalysisTaskStates.Queued or AnalysisTaskStates.Running) == true;
-        AskChecksModelButton.IsEnabled = _imagesOfTextUnanswered + _headingLookUnanswered + _imageAlternativeUnanswered > 0 && !waiting && _analysisRecordingId is not null &&
+        AskChecksModelButton.IsEnabled = _imagesOfTextUnanswered + _headingLookUnanswered + _imageAlternativeUnanswered + _describedImagesUnanswered > 0 && !waiting && _analysisRecordingId is not null &&
             _openProjectModels is { VisionChecks: not null } models && models.ChecksProblem(ProjectChoices, ModelUses.VisionChecks) is null;
     }
 
@@ -735,7 +829,8 @@ public partial class MainWindow
         if (visit.SettledSnapshots.Count == 0)
         {
             if (_phoneChecks is not null || _phoneTextContrast is not null || _phoneNonTextContrast is not null || _phoneImagesOfText is not null ||
-                _phoneLabelInName is not null || _phoneHeadingLook is not null || _phoneImageAlternative is not null)
+                _phoneLabelInName is not null || _phoneHeadingLook is not null || _phoneImageAlternative is not null ||
+                _phoneDescribedImages is not null)
             {
                 // The status message check follows every snapshot, settled
                 // or not, so can find a message in a visit too brief to
@@ -900,6 +995,35 @@ public partial class MainWindow
             else
             {
                 AddCheckRows(findings, $", from {Count(count, "image")}");
+            }
+        }
+
+        if (_phoneDescribedImages is { SnapshotsRead: > 0 } described)
+        {
+            var findings = described.For(visit);
+            var count = described.ImagesIn(visit);
+            foreach (var check in new[] { PhoneCheckNames.IconContradictsName, PhoneCheckNames.DescriptionNotMatchingImage })
+            {
+                var title = PhoneCheckNames.Title(check);
+                var ofCheck = findings.Where(finding => finding.Check == check).ToList();
+                var text = !described.Read(visit)
+                    ? $"{title}: not checked, as OCR read no picture of this visit."
+                    : count == 0
+                        ? $"{title}: no described images in this visit."
+                        : ofCheck.Count == 0
+                            ? $"{title}: no findings, from {Count(count, "described image")}."
+                            : null;
+                if (text is not null)
+                {
+                    _phoneScreenRows.Add(new PhoneScreenRowView(3, text, shownAt, null)
+                    {
+                        IsCheck = true,
+                    });
+                }
+                else
+                {
+                    AddCheckRows(ofCheck, $", from {Count(count, "described image")}");
+                }
             }
         }
 
@@ -1244,6 +1368,22 @@ public partial class MainWindow
                     $"{Count(alternatives.OutOfStep, "image")} on a picture out of step with the tree {(alternatives.OutOfStep == 1 ? "was" : "were")} not judged, " +
                     $"and {Count(alternatives.Questions.Count, "image")} {(alternatives.Questions.Count == 1 ? "is" : "are")} for the model for vision-based checks, whose answer decides whether it gives information" +
                     (alternatives.ModelNote is { } alternativeNote ? $": {alternativeNote}." : ".");
+        }
+
+        if (_phoneDescribedImages is { } described)
+        {
+            var describedTitle = $"{PhoneCheckNames.Title(PhoneCheckNames.IconContradictsName)} and {PhoneCheckNames.Title(PhoneCheckNames.DescriptionNotMatchingImage)}";
+            var describedFindings = described.Findings.Count == 0
+                ? "no findings"
+                : $"{Count(described.Findings.Count, "finding")} ({Levels(described.Findings)})";
+            summary += described.SnapshotsRead == 0
+                ? $" {describedTitle}: not checked, as they need OCR's words to tell a picture out of step with the tree."
+                : $" {describedTitle}: {describedFindings}, from {Count(described.Images, "described image")} on the pictures OCR read, " +
+                    $"{Count(described.Controls, "control")} among them; a control's icon is judged against its name, and an image that is not a control against its description, by the model for vision-based checks only. " +
+                    $"{Count(described.OutOfStep, "image")} on a picture out of step with the tree {(described.OutOfStep == 1 ? "was" : "were")} not judged; " +
+                    $"{described.Fit:N0} judged to fit, not confirmed, {Count(described.NotIcons, "control")} whose image was judged not to be an icon, " +
+                    $"and {Count(described.Unanswered, "described image")} not judged" +
+                    (described.ModelNote is { } describedNote ? $": {describedNote}." : ".");
         }
 
         if (_phoneLabelInName is { } labels)

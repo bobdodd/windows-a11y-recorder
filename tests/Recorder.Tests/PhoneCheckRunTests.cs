@@ -1154,6 +1154,235 @@ public sealed class PhoneCheckRunTests : IDisposable
             ((png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19], (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23]);
     }
 
+    // Step 21: icons and descriptions. A window of made-up items: an icon
+    // that is a control with a name, an image with a description inside a
+    // row a screen reader stops on, an image with no description, and an
+    // image with a description that is not important for accessibility.
+    private static PhoneCheckWindow DescribedImages()
+    {
+        AndroidTreeNode Node(int index, int? parent, (int Left, int Top, int Right, int Bottom) bounds, string className,
+            string? description = null, string? text = null, bool clickable = false, bool important = true) =>
+            ImageNode(index, parent, bounds, className, description, text) with { Clickable = clickable, ImportantForAccessibility = important };
+        return new PhoneCheckWindow(512, 1,
+        [
+            Node(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout"),
+            Node(1, 0, (20, 100, 140, 220), "android.widget.ImageView", description: "Navigate up", clickable: true),
+            Node(2, 0, (0, 400, 1080, 600), "android.widget.LinearLayout", clickable: true),
+            Node(3, 2, (20, 420, 180, 580), "android.widget.ImageView", description: "Sunny"),
+            Node(4, 2, (220, 460, 900, 540), "android.widget.TextView", text: "18 degrees"),
+            Node(5, 0, (300, 100, 400, 200), "android.widget.ImageView"),
+            Node(6, 0, (500, 100, 600, 200), "android.widget.ImageView", description: "Hidden", important: false),
+        ]);
+    }
+
+    private PhoneDescribedImageRun DescribedImageRun(string? engine = "Windows OCR, en-US", params string[] outside)
+    {
+        var window = DescribedImages();
+        var lines = outside
+            .Select((text, index) => new PhoneTextLine(null, window.Items[0], PhoneTextPlace.FoundByOcr, null, text,
+                new PhoneBounds(100, 1700 + (index * 80), 700, 1740 + (index * 80)), null, 40))
+            .ToArray();
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var measured = PhoneContrastRun.Of([.. visit.SettledSnapshots.Take(2).Select(at =>
+            new PhoneContrastSnapshot(
+                visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                new PhoneContrastPicture(PhonePictureKind.Screenshot, at.MonotonicNanoseconds, "p.png", "p.png"),
+                engine, lines, null, window))]);
+        return PhoneDescribedImageRun.Run(measured, archive.PhoneScreens);
+    }
+
+    // Rules 2 and 8: an image with a description of its own that a screen
+    // reader is given is asked about, once in a visit; no finding is made
+    // before a model's answer.
+    [Fact]
+    public void DescribedImages_AsksAboutEachDescribedImageOnceInAVisit_AndFindsNothingWithoutAModel()
+    {
+        var run = DescribedImageRun();
+        var window = DescribedImages();
+
+        Assert.Equal((2, 2, 1, 0), (run.SnapshotsRead, run.Images, run.Controls, run.OutOfStep));
+        Assert.Empty(run.Findings);
+        Assert.Equal(2, run.Unanswered);
+        Assert.Collection(run.Questions,
+            icon =>
+            {
+                Assert.Equal((window.Items[1].Identity, true, "Navigate up"), (icon.Identity, icon.IsControl, icon.Description));
+                Assert.Equal((PhoneCheckNames.IconContradictsName, PhoneDescriptionSpeaker.Image), (icon.Check, icon.SpokenBy));
+                Assert.Equal("an image that is a control, named \"Navigate up\"; from the phone's screenshot", icon.Time.Measured);
+                Assert.Contains("[the outlined image]", icon.ScreenText, StringComparison.Ordinal);
+            },
+            image =>
+            {
+                Assert.Equal((window.Items[3].Identity, false, "Sunny"), (image.Identity, image.IsControl, image.Description));
+                Assert.Equal((PhoneCheckNames.DescriptionNotMatchingImage, PhoneDescriptionSpeaker.Holder), (image.Check, image.SpokenBy));
+                Assert.Contains("18 degrees", image.Spoken, StringComparison.Ordinal);
+                Assert.Equal("an image that is not a control, with the description \"Sunny\"; from the phone's screenshot", image.Time.Measured);
+            });
+        Assert.Equal("Icon that contradicts its control's name (WCAG 1.1.1)", PhoneCheckNames.Title(PhoneCheckNames.IconContradictsName));
+        Assert.Equal("Description that does not match its image (WCAG 1.1.1)", PhoneCheckNames.Title(PhoneCheckNames.DescriptionNotMatchingImage));
+
+        // With no OCR, the pictures cannot be told in step.
+        var unread = DescribedImageRun(engine: null);
+
+        Assert.Equal((0, 0, 0), (unread.SnapshotsRead, unread.Images, unread.Questions.Count));
+    }
+
+    // Rule 3: an image on a picture out of step with the tree is counted,
+    // not asked about.
+    [Fact]
+    public void DescribedImages_DoesNotAskAboutAnImageOnAPictureOutOfStepWithTheTree()
+    {
+        var run = DescribedImageRun(outside: ["Inbox", "Promotions", "Meeting at noon"]);
+
+        Assert.Equal((2, 4), (run.Images, run.OutOfStep));
+        Assert.Empty(run.Questions);
+    }
+
+    // Rule 7: only a contradiction, a mismatch, cannot tell or two answers
+    // make a finding; the rest are counted.
+    [Fact]
+    public void DescribedImages_Judged_MakesFindingsOnlyOfWarnings_AndCountsTheRest()
+    {
+        var run = DescribedImageRun();
+        var info = new PhoneInference(PhoneCheckLevel.Info, "fits", Inferred: true, "Model", Cloud: false);
+        var warning = new PhoneInference(PhoneCheckLevel.Warning, "does not match", Inferred: true, "Model", Cloud: true);
+
+        var fits = run.Judged(new Dictionary<PhoneDescribedImageQuestion, PhoneDescribedImageAnswer>
+        {
+            [run.Questions[0]] = new(PhoneDescribedImageOutcome.NotAnIcon, info),
+            [run.Questions[1]] = new(PhoneDescribedImageOutcome.Fits, info),
+        }, "2 answered");
+
+        Assert.Empty(fits.Findings);
+        Assert.Equal((1, 1, 0, "2 answered"), (fits.Fit, fits.NotIcons, fits.Unanswered, fits.ModelNote));
+        Assert.Equal(2, fits.Inferences.Count());
+
+        var mismatch = run.Judged(new Dictionary<PhoneDescribedImageQuestion, PhoneDescribedImageAnswer>
+        {
+            [run.Questions[1]] = new(PhoneDescribedImageOutcome.Finding, warning),
+        }, null);
+
+        var finding = Assert.Single(mismatch.Findings);
+        Assert.Equal((PhoneCheckNames.DescriptionNotMatchingImage, PhoneCheckLevel.Warning), (finding.Check, finding.Level));
+        Assert.Same(warning, finding.Inference);
+        Assert.Equal(2, finding.Times.Count);
+        Assert.Equal(1, mismatch.Unanswered);
+        Assert.Same(finding, Assert.Single(mismatch.For(finding.Visit)));
+    }
+
+    // Rules 4 to 6: a control's image has the kind question and the icon
+    // question; an image that is not a control the description question,
+    // with what a screen reader says for the row that holds it; kept
+    // answers judge them, both runs needed for a model that is not
+    // repeatable.
+    [Fact]
+    public void DescribedImages_RequestsAndKeptAnswersJudgeEachImage()
+    {
+        var run = DescribedImageRun();
+        var rgb = new uint[1080 * 2400];
+        Array.Fill(rgb, 0x203040u);
+        var pixels = new PhonePixels(1080, 2400, rgb);
+        var icon = Recorder.Analysis.Android.AndroidDescribedImages.RequestsOf(run.Questions[0], pixels);
+        var image = Recorder.Analysis.Android.AndroidDescribedImages.RequestsOf(run.Questions[1], pixels);
+
+        Assert.Matches("^image-kind-[0-9a-f]{16}$", icon.Kind!.Key);
+        Assert.Matches("^icon-name-[0-9a-f]{16}$", icon.Main.Key);
+        Assert.Null(image.Kind);
+        Assert.Matches("^image-description-[0-9a-f]{16}$", image.Main.Key);
+        Assert.Equal(Recorder.Analysis.Android.AndroidDescribedImages.Kinds, icon.Kind.Request.Answers);
+        Assert.Equal(Recorder.Analysis.Android.AndroidDescribedImages.IconAnswers, icon.Main.Request.Answers);
+        Assert.Equal(Recorder.Analysis.Android.AndroidDescribedImages.DescriptionAnswers, image.Main.Request.Answers);
+        Assert.Equal(Recorder.Analysis.ModelUses.VisionChecks, icon.Main.Request.Use);
+        Assert.True(icon.Main.Request.ReusedAcrossTasks);
+        Assert.Equal(2, icon.Main.Request.Images.Count);
+        Assert.Contains("Its name, which a screen reader says for it, is \"Navigate up\".", icon.Main.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("the control's name, \"Navigate up\"", icon.Main.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("The outlined image's text alternative, as the app gives it, is \"Sunny\".", image.Main.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("18 degrees", image.Main.Request.Input, StringComparison.Ordinal);
+        Assert.EndsWith("then give the answer.", image.Main.Request.Input, StringComparison.Ordinal);
+
+        // The kind and icon questions are of the same image, so are kept
+        // against the same signature; the image that is not a control is not.
+        Assert.True(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(icon.Kind.Signature, icon.Main.Signature));
+        Assert.False(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(icon.Main.Signature, image.Main.Signature));
+
+        static JsonElement Output(string answer) =>
+            JsonSerializer.SerializeToElement(new { answer, reason = "The pictures show it." });
+        var elsewhere = Guid.NewGuid();
+        Recorder.Analysis.SignedAnswer Answer(string key, int step, byte[] signature, string answer) =>
+            new(Guid.NewGuid(), elsewhere, $"{key}-0123456789abcdef-{step}", signature,
+                new(Output(answer), "service", """{"temperature": null}"""));
+        IReadOnlyDictionary<string, IReadOnlyList<Recorder.Analysis.SignedAnswer>> Signed(
+            string kind, string iconAnswer, string description, bool both = true) =>
+            new Dictionary<string, IReadOnlyList<Recorder.Analysis.SignedAnswer>>
+            {
+                [Recorder.Analysis.Android.AndroidDescribedImages.KindTemplate] = both
+                    ? [Answer("image-kind", 1, icon.Kind.Signature, kind), Answer("image-kind", 2, icon.Kind.Signature, kind)]
+                    : [Answer("image-kind", 1, icon.Kind.Signature, kind)],
+                [Recorder.Analysis.Android.AndroidDescribedImages.IconTemplate] =
+                    [Answer("icon-name", 1, icon.Main.Signature, iconAnswer), Answer("icon-name", 2, icon.Main.Signature, iconAnswer)],
+                [Recorder.Analysis.Android.AndroidDescribedImages.DescriptionTemplate] =
+                    [Answer("image-description", 1, image.Main.Signature, description), Answer("image-description", 2, image.Main.Signature, description)],
+            };
+
+        // Both agree the control's image is a logo, so its name is not
+        // judged against it; the description matches.
+        var logo = Recorder.Analysis.Android.AndroidDescribedImages.FromKept(run, [icon, image], Signed("logo", "symbol-for-something-else", "matches"), "Haiku");
+
+        Assert.Empty(logo.Findings);
+        Assert.Equal((1, 1, 0), (logo.Fit, logo.NotIcons, logo.Unanswered));
+        Assert.True(logo.Inferences.All(inference => inference.Cloud && inference.Inferred));
+        Assert.Equal(
+            "2 described images left by the rules are for Haiku; 2 described images answered: 1 judged to fit, not confirmed, " +
+            "1 judged not to be icons, so not judged against their names, and 0 warnings", logo.ModelNote);
+
+        // An icon judged a symbol for something else, and a description
+        // that does not match, are warnings for a person to verify.
+        var contradicts = Recorder.Analysis.Android.AndroidDescribedImages.FromKept(run, [icon, image], Signed("icon", "symbol-for-something-else", "does-not-match"), "Haiku");
+
+        Assert.Equal(
+            [(PhoneCheckNames.IconContradictsName, PhoneCheckLevel.Warning), (PhoneCheckNames.DescriptionNotMatchingImage, PhoneCheckLevel.Warning)],
+            contradicts.Findings.Select(finding => (finding.Check, finding.Level)));
+        Assert.All(contradicts.Findings, finding => Assert.EndsWith("; a person should verify this", finding.Inference!.Text, StringComparison.Ordinal));
+        Assert.StartsWith(
+            "Haiku, a cloud model, inferred from the pictures twice for the same image, by its pixels, its description and what a screen reader says on the screen, that the icon is the usual symbol",
+            contradicts.Findings[0].Inference!.Text, StringComparison.Ordinal);
+
+        // A kind with one run of two is not yet an answer for a model that
+        // is not repeatable, so the control is not judged.
+        var half = Recorder.Analysis.Android.AndroidDescribedImages.FromKept(run, [icon, image], Signed("icon", "fits-the-name", "matches", both: false), "Haiku");
+
+        Assert.Empty(half.Findings);
+        Assert.Equal((1, 1), (half.Fit, half.Unanswered));
+        Assert.EndsWith(", 1 described image not yet asked", half.ModelNote, StringComparison.Ordinal);
+    }
+
+    // Rule 7's levels, for the icon and the description questions.
+    [Theory]
+    [InlineData(0, "fits-the-name", PhoneCheckLevel.Info, "that the icon fits the control's name, \"Navigate up\", not confirmed")]
+    [InlineData(0, "symbol-for-something-else", PhoneCheckLevel.Warning, "; a person should verify this")]
+    [InlineData(0, "cannot-tell", PhoneCheckLevel.Warning, "could not tell from the pictures twice whether the icon fits the control's name, \"Navigate up\"")]
+    [InlineData(1, "matches", PhoneCheckLevel.Info, "that the description, \"Sunny\", matches what the image shows, not confirmed")]
+    [InlineData(1, "does-not-match", PhoneCheckLevel.Warning, "that the description, \"Sunny\", does not match what the image shows")]
+    [InlineData(1, "cannot-tell", PhoneCheckLevel.Warning, "; check manually")]
+    public void DescribedImages_Interpret_GivesEachAgreedAnswersLevel(int question, string answer, PhoneCheckLevel level, string says)
+    {
+        var asked = DescribedImageRun().Questions[question];
+
+        var inference = Recorder.Analysis.Android.AndroidDescribedImages.Interpret(new(answer, "First."), new(answer, "Second."), "Haiku", cloud: false, asked);
+
+        Assert.Equal((level, true, false), (inference.Level, inference.Inferred, inference.Cloud));
+        Assert.StartsWith("Haiku, a local model,", inference.Text, StringComparison.Ordinal);
+        Assert.Contains(says, inference.Text, StringComparison.Ordinal);
+
+        var split = Recorder.Analysis.Android.AndroidDescribedImages.Interpret(new(answer, "First."), new("cannot-tell" == answer ? "matches" : "cannot-tell", "Second."), "Haiku", cloud: false, asked);
+
+        Assert.Equal(PhoneCheckLevel.Warning, split.Level);
+        Assert.Contains("gave two answers", split.Text, StringComparison.Ordinal);
+        Assert.EndsWith("; check manually", split.Text, StringComparison.Ordinal);
+    }
+
     // The body text is the height most of the characters have.
     [Fact]
     public void HeadingLook_BodyHeight_IsTheMedianInkHeightByCharacters()

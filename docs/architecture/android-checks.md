@@ -3717,6 +3717,193 @@ the screen reader's text for the whole screen to the image check".
   repeatable", point 7). The template is version 3, so answers to
   version 2 are not reused.
 
+## Step 21: icons and descriptions
+
+### The owner's decision (2026-11-17)
+
+Asked to build the description-matches-image check, then offered eight
+rules from the measurement below, the owner chose: "Build rules 1 to 8
+for the icon and description checks as proposed". Earlier, told that
+an icon whose name it contradicts could be found, the owner had said:
+"That sounds a good idea, just warning with recommended human
+verification. We will save testing charts and captions until I have
+content that requires it".
+
+1. **Two findings, one issue each.** "Icon that contradicts its
+   control's name" (`icon-contradicts-name`), for an image that is a
+   control, and "Description that does not match its image"
+   (`description-not-matching-image`), for an image that is not a
+   control but has a description of its own. Both are WCAG 1.1.1.
+   2.5.3 is not given: Label in Name is about a visible text label, and
+   an icon has no text.
+2. **Which images.** An ImageView or a class drawn from one, visible,
+   important for accessibility, with a content description or text of
+   its own.
+3. **Pictures out of step.** An image on a picture out of step with the
+   tree is not asked about there, as for the image check (step 20,
+   rule 3).
+4. **The kind question first, for controls.** A control's image is
+   asked what kind of image it is, and its name is judged against it
+   unless both answers agree it is not an icon (a photograph, an
+   illustration, a logo, a chart, text or a decoration).
+5. **The questions as measured, reason first,** with what a screen
+   reader says on the whole screen and the image's place marked. The
+   icon question's answers are fits-the-name,
+   symbol-for-something-else and cannot-tell; the description
+   question's are matches, does-not-match and cannot-tell.
+6. **One answer for one image.** The answer is kept against the image's
+   own pixels, its name or description, and what a screen reader says
+   on the screen, so the same image is given the first answer again.
+7. **Levels.** A contradiction or a mismatch is a warning recommending
+   that a person verify it, high impact if confirmed. Cannot tell, or
+   two answers that are still two after the model for complex
+   questions, is a warning to check manually. Fits or matches is no
+   finding, and is counted as judged to fit, not confirmed.
+8. **No model.** With no model for vision-based checks, there is no
+   finding for each image, and the counts say how many were not
+   judged.
+
+Left out, for later: a decorative image that is announced (its own row
+in `android-vision-checks.md`); whether a description gives the
+image's purpose; charts and captions, until there is content that
+needs them.
+
+### What the standards say (checked in cited documents)
+
+- [WCAG 2.2's 1.1.1](https://www.w3.org/WAI/WCAG22/Understanding/non-text-content.html)
+  asks that a text alternative serve the equivalent purpose of the
+  non-text content, and that a control's be its name, describing its
+  purpose. An icon that is the usual symbol for something other than
+  its name, or a description of something an image does not show,
+  gives a person who sees it and a person who hears it different
+  things.
+
+### Measured first (2026-11-17)
+
+A probe read the 20 recordings with phone screens on the development
+PC. Rule 2 chose 148 images, 86 of them controls and 62 not (measured).
+The probe asked about 51 different images, 44 controls and 7 not.
+
+- **The kind question.** Both answers agreed for all 51: 43 icons, 5
+  illustrations and 3 logos. 6 of the 44 controls were logos or
+  illustrations, such as cards, so their names were not judged against
+  them.
+- **The icon question, Claude Haiku 5.5, reason first.** Of the 38
+  controls asked, 36 fit their names in both answers. Chrome's update
+  arrow, named "Update available. More options", was given two
+  answers on one screen, and the account initial, a letter in a
+  circle, was cannot tell. A second run gave the same answers for 110
+  of 116 question pairs; the 6 that changed were these borderline
+  images.
+- **The description question.** 6 of the 7 matched. Haiku answered
+  that "Colour inversion animation" does not match a still
+  illustration of chat bubbles, as no animation can be seen.
+- **Claude Sonnet 5.5** judged all 38 icons to fit and all 7
+  descriptions to match, every pair agreeing, including Chrome's
+  update arrow and the account initial.
+- **Cost.** 220 requests cost about US$0.055 with Haiku and US$1.074
+  with Sonnet, at the models' prices. So Haiku is asked first, and a
+  question it does not settle is asked again of the model for complex
+  questions where the project chooses one.
+- No real defect was found in the sample, so finding a contradiction
+  or a mismatch is not yet measured; it waits for test content made to
+  have them.
+
+### As built
+
+- **The rules.** `PhoneDescribedImageRun` (`Recorder.Session`) reads
+  each settled snapshot OCR read, and each visible image with bounds,
+  important for accessibility, with a content description, or where it
+  has none its own text (rule 2). It is a control where it is
+  clickable, long clickable, focusable or focusable by a screen reader.
+  An image on a picture `PhoneImagesOfTextRun.OutOfStepAt` finds out of
+  step is counted (`OutOfStep`) and not asked about (rule 3). Each
+  image is counted once in a visit (`Images`, `Controls`), and asked
+  about once in a visit, with a time for each snapshot it was seen on
+  in step.
+- **What a screen reader says for it.** The image, where a screen
+  reader stops on it (`PhoneTreeChecks.ShouldFocusView`), or else the
+  nearest item holding it that a screen reader stops on, with what it
+  says there. What a screen reader says on the screen is given as for
+  the image check, with "[the outlined image]" at the image's place.
+- **The questions.** `AndroidDescribedImages` (`Recorder.Analysis`)
+  gives picture A, the whole screen with the image outlined, and
+  picture B, a close-up enlarged when the image is small, as the image
+  check does. The question gives the app, the screen, the image's name
+  or description, which item a screen reader says it for and what it
+  says there, and what a screen reader says on the screen, then asks
+  one of three questions, each ending "First write one sentence saying
+  what in the pictures shows the answer, then give the answer.":
+  `android-image-kind`, `android-icon-name` and
+  `android-image-description`, each version 1, with step keys made
+  from the request's SHA-256.
+- **Rule 4.** A control's kind question is asked first. Where both of
+  the deciding model's answers agree on a kind other than icon or
+  cannot tell, the control is counted as not an icon (`NotIcons`), as
+  information, and its icon question is not asked.
+- **Rule 6, the signature.** As the image check's, with the image's
+  pixels, its size, what a screen reader says on the screen, and in
+  place of the text beside it, whether it is a control and its name, or
+  for an image that is not a control its description, the item a
+  screen reader says it for and what it says there. A control's kind
+  and icon questions share the signature, kept apart by their
+  templates. An answer kept on a task of the project, by the same
+  profile and model, is copied into the task; the same image in the
+  same run takes the answer already given.
+- **The model for complex questions.** A question whose two answers
+  differ, or are cannot tell, is asked again of the model for complex
+  questions where the project chooses another (runs 3 and 4), and its
+  answers decide the finding.
+- **Rule 7, the levels.** Agreed symbol-for-something-else or
+  does-not-match: a warning, the model's inference, ending "a person
+  should verify this". Agreed cannot-tell, or two answers: a warning
+  ending "check manually". Agreed fits-the-name or matches: no
+  finding, counted (`Fit`). Every answer is the model's inference, so
+  the report says AI was used even where no finding was made
+  (`AndroidAudit.Inferences`).
+- **Rule 8.** Before any answer, and with no model, the run makes no
+  finding; `Unanswered` counts the questions, and the note says why.
+- **Where it runs.** The Android report, the project report and the
+  model checks ask after the image check; the model checks' Markdown
+  has a section, "Icons and descriptions", and the report's limits give
+  the check's note. The Checks tab gives a row for each of the two
+  checks under each visit, and the summary gives the findings, the
+  images, the controls, those out of step, those judged to fit, those
+  not icons and those not judged. "Ask the project's model" is enabled
+  while a described image is not judged.
+- **Guidance.** `android-check-guidance.json` has both checks, impact
+  high, criterion 1.1.1, with remediation for Views, Compose, Flutter
+  and React Native: a name that says what the control does with the
+  icon commonly used for it, and a description that says what the
+  image shows or stands for.
+
+### Checked
+
+The solution builds with no warnings, and the tests pass, 2,642 of
+them, with the 10 that need Windows failing as before and one timing
+test of the Android companion that failed under load and passes on its
+own. The new tests cover made-up items: an icon that is a control, an image with a
+description inside a row a screen reader stops on, an image with no
+description and an image not important for accessibility; no OCR; a
+picture out of step; findings only from warnings, with the rest
+counted; the requests' keys, answers and text; the shared signature of
+a control's two questions; kept answers judging a logo as not an icon,
+a symbol for something else and a mismatch as warnings, and a kind
+with one run of two not yet an answer; and the levels of each answer
+and of two answers.
+
+### Limits
+
+- Only images in the tree are checked, as for the image check.
+- A control whose image is text, such as an initial in a circle, is
+  asked the icon question unless both answers agree it is text.
+- Whether a description gives the image's purpose, rather than naming
+  what it shows, is not asked.
+- No contradiction or mismatch was in the measured sample, so how well
+  the check finds one is not measured.
+- What a screen reader says is the tree's order, not the order a screen
+  reader moved in on the recording.
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A

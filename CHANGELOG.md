@@ -8,6 +8,26 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Icons and descriptions
+
+- Two new checks, "Icon that contradicts its control's name" and
+  "Description that does not match its image" (both WCAG 1.1.1), for
+  an image with a description or text of its own: a control's icon is
+  judged against its name, and another image against its description,
+  by the project's model for vision-based checks only.
+- A control's image is first asked what kind of image it is; a logo,
+  an illustration or another image that is not an icon is not judged
+  against its name.
+- A contradiction or a mismatch is a warning for a person to verify;
+  cannot tell, or two answers, a warning to check manually; an icon
+  that fits or a description that matches is no finding, counted.
+  With no model, no finding is made, and the counts say how many were
+  not judged.
+- The answers are kept against the image's pixels, its name or
+  description and what a screen reader says on the screen, and asked
+  again of the model for complex questions where the first do not
+  settle them.
+
 ### Images with no text alternative
 
 - A new check, "Image with no text alternative" (WCAG 1.1.1), finds an

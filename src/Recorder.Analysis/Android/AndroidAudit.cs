@@ -9,10 +9,11 @@ namespace Recorder.Analysis.Android;
 /// recording's events, then the colours measured on each settled snapshot's
 /// picture, with OCR finding the text, and the checks judged from that
 /// measurement. No model is used here; the questions of the images-of-text
-/// check, the check of text shown as a heading and the check of images with
-/// no text alternative are asked after, where a model may be used
-/// (<see cref="AndroidImagesOfText"/>, <see cref="AndroidHeadingLook"/>,
-/// <see cref="AndroidImageAlternative"/>; android-report.md, "The audit").
+/// check, the check of text shown as a heading, the check of images with
+/// no text alternative and the icon and description checks are asked
+/// after, where a model may be used (<see cref="AndroidImagesOfText"/>,
+/// <see cref="AndroidHeadingLook"/>, <see cref="AndroidImageAlternative"/>,
+/// <see cref="AndroidDescribedImages"/>; android-report.md, "The audit").
 /// </summary>
 public sealed class AndroidAudit
 {
@@ -50,6 +51,9 @@ public sealed class AndroidAudit
     /// <summary>Images with no text alternative (android-checks.md, step 20).</summary>
     public PhoneImageAlternativeRun? ImageAlternative { get; private init; }
 
+    /// <summary>Icons that contradict their controls' names, and descriptions that do not match their images (android-checks.md, step 21).</summary>
+    public PhoneDescribedImageRun? DescribedImages { get; private init; }
+
     /// <summary>The findings of the whole app, not of one visit, such as no live region in the app.</summary>
     public IReadOnlyList<PhoneFinding> AppFindings => Tree.AppFindings;
 
@@ -67,17 +71,21 @@ public sealed class AndroidAudit
         .. LabelInName?.For(visit) ?? [],
         .. HeadingLook?.For(visit) ?? [],
         .. ImageAlternative?.For(visit) ?? [],
+        .. DescribedImages?.For(visit) ?? [],
     ];
 
     /// <summary>
     /// Whether any finding is a model's inference, so that a report says
     /// AI was used in the testing, and whether a cloud model was
-    /// (android-vision-checks.md, decision 2).
+    /// (android-vision-checks.md, decision 2). The icon and description
+    /// checks give every answer, as most make no finding.
     /// </summary>
     public IReadOnlyList<PhoneInference> Inferences =>
     [
         .. (ImagesOfText?.Findings ?? []).Concat(HeadingLook?.Findings ?? []).Concat(ImageAlternative?.Findings ?? [])
-            .Select(finding => finding.Inference).OfType<PhoneInference>().Where(inference => inference.Inferred),
+            .Select(finding => finding.Inference).OfType<PhoneInference>()
+            .Concat(DescribedImages?.Inferences ?? [])
+            .Where(inference => inference.Inferred),
     ];
 
     /// <summary>
@@ -87,7 +95,7 @@ public sealed class AndroidAudit
     public AndroidAudit WithImagesOfText(PhoneImagesOfTextRun run)
     {
         ArgumentNullException.ThrowIfNull(run);
-        return Copy(run, HeadingLook, ImageAlternative);
+        return Copy(run, HeadingLook, ImageAlternative, DescribedImages);
     }
 
     /// <summary>
@@ -98,7 +106,7 @@ public sealed class AndroidAudit
     public AndroidAudit WithHeadingLook(PhoneHeadingLookRun run)
     {
         ArgumentNullException.ThrowIfNull(run);
-        return Copy(ImagesOfText, run, ImageAlternative);
+        return Copy(ImagesOfText, run, ImageAlternative, DescribedImages);
     }
 
     /// <summary>
@@ -109,10 +117,22 @@ public sealed class AndroidAudit
     public AndroidAudit WithImageAlternative(PhoneImageAlternativeRun run)
     {
         ArgumentNullException.ThrowIfNull(run);
-        return Copy(ImagesOfText, HeadingLook, run);
+        return Copy(ImagesOfText, HeadingLook, run, DescribedImages);
     }
 
-    private AndroidAudit Copy(PhoneImagesOfTextRun? images, PhoneHeadingLookRun? headings, PhoneImageAlternativeRun? alternatives) =>
+    /// <summary>
+    /// The audit with the icon and description checks judged by a model's
+    /// answers (<see cref="AndroidDescribedImages"/>), every other check as
+    /// it was.
+    /// </summary>
+    public AndroidAudit WithDescribedImages(PhoneDescribedImageRun run)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        return Copy(ImagesOfText, HeadingLook, ImageAlternative, run);
+    }
+
+    private AndroidAudit Copy(
+        PhoneImagesOfTextRun? images, PhoneHeadingLookRun? headings, PhoneImageAlternativeRun? alternatives, PhoneDescribedImageRun? described) =>
         new(Tree, Level, HoldSeconds)
         {
             Measured = Measured,
@@ -123,6 +143,7 @@ public sealed class AndroidAudit
             LabelInName = LabelInName,
             HeadingLook = headings,
             ImageAlternative = alternatives,
+            DescribedImages = described,
         };
 
     /// <summary>Every finding, the app's first.</summary>
@@ -186,5 +207,6 @@ public sealed class AndroidAudit
             LabelInName = measured is null ? null : PhoneLabelInNameRun.Run(measured, screens),
             HeadingLook = measured is null ? null : PhoneHeadingLookRun.Run(measured, screens),
             ImageAlternative = measured is null ? null : PhoneImageAlternativeRun.Run(measured, screens, device, speech, accessibility),
+            DescribedImages = measured is null ? null : PhoneDescribedImageRun.Run(measured, screens, speech, accessibility),
         };
 }

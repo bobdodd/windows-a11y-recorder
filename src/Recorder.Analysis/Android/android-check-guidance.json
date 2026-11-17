@@ -373,6 +373,36 @@
       "sources": ["wcag-1.1.1", "android-views", "compose-semantics", "flutter-semantics", "flutter-image-label", "rn-accessibility"]
     },
     {
+      "check": "icon-contradicts-name",
+      "title": "Icon that contradicts its control's name",
+      "issue": "A control shown as an icon has a name that says one thing while its icon is the usual symbol for something else, such as a bin icon on a control named \"Save\".",
+      "why": "A person who sees the icon and a person who hears the name expect different things. Screen reader users who can see some of the screen, and people who use voice control by saying what a control is called, are misled, and either the name or the icon gives the wrong idea of what the control does.",
+      "affects": ["People who use a screen reader and can see some of the screen", "People who use voice control, such as Voice Access", "People with cognitive disabilities", "People who are blind and use a screen reader, where the name is the one that is wrong"],
+      "impact": "high",
+      "criteria": ["1.1.1"],
+      "related": [],
+      "basis": "WCAG 1.1.1, from the tree and the recorded picture: an image that is a control, with a description or text of its own as its name, judged against the picture only by the project's model for vision-based checks, which first says whether the image is an icon at all. Every finding is a warning, the model's inference, for a person to verify; with no model there is no finding.",
+      "android": "Make the content description say what the control does, and use the icon commonly used for that action; in Compose, set the contentDescription of the Icon or IconButton to match it. Where the icon is right, correct the name; where the name is right, change the icon.",
+      "flutter": "Make the IconButton's tooltip or the Semantics label say what the control does, and use the icon commonly used for that action.",
+      "reactNative": "Make the accessibilityLabel say what the control does, and use the icon commonly used for that action.",
+      "sources": ["wcag-1.1.1", "android-views", "compose-semantics", "flutter-semantics", "flutter-tooltip", "rn-accessibility"]
+    },
+    {
+      "check": "description-not-matching-image",
+      "title": "Description that does not match its image",
+      "issue": "An image that is not a control has a content description or text that names or describes something the image does not show, or contradicts it.",
+      "why": "Screen reader users are given the description in place of the image, so a description that does not match gives them the wrong information, and people who can see some of the screen hear something other than what is shown.",
+      "affects": ["People who are blind and use a screen reader such as TalkBack", "People with low vision who use a screen reader", "People who are deaf-blind and use a braille display"],
+      "impact": "high",
+      "criteria": ["1.1.1"],
+      "related": [],
+      "basis": "WCAG 1.1.1, from the tree and the recorded picture: an image that is not a control, with a description or text of its own, judged against the picture only by the project's model for vision-based checks. Every finding is a warning, the model's inference, for a person to verify; with no model there is no finding.",
+      "android": "Give the image a content description that says what it shows or stands for, with android:contentDescription or setContentDescription; in Compose, set the contentDescription of the Image. Where the image only decorates, mark it as not important for accessibility, or in Compose give it contentDescription = null.",
+      "flutter": "Give the image a semanticLabel, or wrap it in Semantics(label: ...), that says what it shows or stands for; wrap a decorative image in ExcludeSemantics.",
+      "reactNative": "Give the image an accessibilityLabel (or alt) that says what it shows or stands for; hide a decorative image with accessible={false} and importantForAccessibility=\"no\".",
+      "sources": ["wcag-1.1.1", "android-views", "compose-semantics", "flutter-semantics", "flutter-image-label", "rn-accessibility"]
+    },
+    {
       "check": "label-not-in-name",
       "title": "Visible label not in the spoken name",
       "issue": "The words shown on a control are not part of the name a screen reader or voice control uses for it.",

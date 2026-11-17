@@ -525,8 +525,9 @@ public static class AndroidImageAlternative
     private static string Count(int count) =>
         string.Create(CultureInfo.CurrentCulture, $"{count:N0} {(count == 1 ? "image" : "images")}");
 
-    // The image's bounds on the picture, or null where none of it is on it.
-    private static PhoneBounds? Clamp(PhoneBounds bounds, PhonePixels pixels)
+    // The image's bounds on the picture, or null where none of it is on it;
+    // also the icon and description checks' (AndroidDescribedImages).
+    internal static PhoneBounds? Clamp(PhoneBounds bounds, PhonePixels pixels)
     {
         var left = Math.Clamp(bounds.Left, 0, pixels.Width);
         var top = Math.Clamp(bounds.Top, 0, pixels.Height);
@@ -537,8 +538,9 @@ public static class AndroidImageAlternative
 
     // The image and the screen round it, outlined, enlarged up to four
     // times so its shorter side is at least 192 pixels, and made smaller
-    // when its longer side would pass 1,024.
-    private static AndroidImagesOfText.Rgb CloseUp(PhonePixels pixels, PhoneBounds box)
+    // when its longer side would pass 1,024; also the icon and description
+    // checks' picture B.
+    internal static AndroidImagesOfText.Rgb CloseUp(PhonePixels pixels, PhoneBounds box)
     {
         var left = Math.Clamp(box.Left - Pad, 0, pixels.Width - 1);
         var top = Math.Clamp(box.Top - Pad, 0, pixels.Height - 1);

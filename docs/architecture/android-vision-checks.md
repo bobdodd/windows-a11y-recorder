@@ -162,7 +162,8 @@ Each row is one issue, so that its remediation can be specific.
 | Check | WCAG | What the model is asked | Chosen without a model |
 | --- | --- | --- | --- |
 | A name that does not describe the control | 4.1.2, 2.4.6 | Does this name say what the control does? | Controls with a name, such as "Button", "icon_3" or "image", or any name, by sample |
-| A name that contradicts its icon | 1.1.1, 2.5.3 | Does the icon in this outline show what the name says? | Controls with an icon and a content description, and no text |
+| A name that contradicts its icon | 1.1.1 | Does the icon in this outline fit the control's name? | Controls with an image and a description or text of their own; built, see "Icons and descriptions, as built" |
+| A description that does not match its image | 1.1.1 | Does the description fit what the outlined image shows? | Images that are not controls, with a description or text of their own; built, see "Icons and descriptions, as built" |
 | An informative image with no description | 1.1.1 | Is this image informative or decorative? | Image items with no name |
 | A decorative image that is announced | 1.1.1 | Is this image informative or decorative? | Image items with a name, beside text that says the same or nothing |
 | A label that is only placeholder text | 3.3.2 | Is there a visible label beside this field once text is typed? | Fields whose hint was the only text, before and after typing |
@@ -474,6 +475,22 @@ reader's text for the whole screen to the image check"), and the answer
 is given again only where a screen reader says the same on the screen
 ("Pass the screen reader text to the image check's rule 4 matching
 too").
+
+### Icons and descriptions, as built
+
+Built on 2026-11-17, at the owner's request, "Build rules 1 to 8 for
+the icon and description checks as proposed". Step 21 of
+`android-checks.md` has the measurement and the rules: images with a
+description or text of their own, found without a model; for a
+control, a question of what kind of image it is, then whether its icon
+fits its name; for an image that is not a control, whether its
+description fits what it shows. Each answer is kept against the image's
+pixels, its name or description and what a screen reader says on the
+screen, as the image check's are. A contradiction or a mismatch is a
+warning for a person to verify; cannot tell, or two answers, a warning
+to check manually; fits or matches no finding, counted. 2.5.3 is not
+given for the icon check, as Label in Name is about a visible text
+label and an icon has none.
 
 ### Simple and complex questions, measured on 2026-11-17
 
