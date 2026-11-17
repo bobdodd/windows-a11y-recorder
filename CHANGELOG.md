@@ -8,6 +8,25 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Decorative images
+
+- A new check, "Decorative image announced by a screen reader" (WCAG
+  1.1.1), from the images with a description of their own that a
+  screen reader says.
+- An image that is a control, or whose description is all that the
+  item holding it says, names that control or item, so is not asked
+  about.
+- Any other is asked of the project's model for vision-based checks,
+  with the whole screen, a close-up and what a screen reader says on
+  the screen, the image's own description marked as the image's,
+  whether it is informative or decorative.
+- Decorative is a warning for a person to verify, low impact; cannot
+  tell, or two answers, a warning to check manually. With no model, no
+  finding is made, and the counts say how many were not judged.
+- Answers are kept against the image's pixels, its description and
+  what a screen reader says, and asked again of the model for complex
+  questions where the first do not settle them.
+
 ### Screen titles
 
 - A new check, "Screen title does not describe its screen" (WCAG2ICT

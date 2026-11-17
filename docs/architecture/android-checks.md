@@ -3764,7 +3764,7 @@ content that requires it".
    judged.
 
 Left out, for later: a decorative image that is announced (its own row
-in `android-vision-checks.md`); whether a description gives the
+in `android-vision-checks.md`, built as step 23); whether a description gives the
 image's purpose; charts and captions, until there is content that
 needs them.
 
@@ -4059,6 +4059,159 @@ each answer and of two answers.
   content changes later is not judged again.
 - How well the check finds a real failure is not measured; the sample
   had none confirmed.
+- What a screen reader says is the tree's order, not the order a screen
+  reader moved in on the recording.
+
+## Step 23: a decorative image that is announced
+
+### The owner's decision (2026-11-17)
+
+Offered three AI checks to build next, the owner chose a decorative
+image that a screen reader announces. Offered eight rules from the
+measurement below, the owner chose: "Build rules 1 to 8 for the
+decorative image check with low impact".
+
+1. **One issue.** "Decorative image announced by a screen reader"
+   (`decorative-image-announced`), WCAG 1.1.1.
+2. **Which images.** An image with a description of its own that a
+   screen reader says, the images the icon and description checks
+   choose (step 21, rule 2), whether a screen reader stops on the image
+   or says its description as part of the item that holds it.
+3. **Names are not asked about.** An image that is a control, or whose
+   description is all that the item holding it says, gives that control
+   or item its name, so is not asked about: a control needs a name
+   whatever its image shows. A poor name belongs to a separate check.
+4. **The question.** The model for vision-based checks is given picture
+   A, the whole screen with the image outlined, and picture B, a
+   close-up, as for the other image checks, with what a screen reader
+   says on the screen, the image's own description marked as coming
+   from the image, so that it is not taken as other text that says the
+   same. It answers informative, decorative or cannot-tell, reason
+   first.
+5. **Levels.** Decorative is a warning for a person to verify, low
+   impact if confirmed. Cannot tell, or two answers that are still two
+   after the model for complex questions, is a warning to check
+   manually. Informative is no finding, and is counted.
+6. **One answer for one image.** The answer is kept against the image's
+   pixels, its description, what a screen reader says for it and what a
+   screen reader says on the screen, and asked again of the model for
+   complex questions where not settled.
+7. **No model.** With no model for vision-based checks, nothing is
+   judged, and the counts say how many images were not checked.
+8. **Pictures out of step.** An image on a picture out of step with the
+   tree is not asked about there, as for the other image checks.
+
+### What the standards say (checked in cited documents)
+
+- [WCAG 2.2's 1.1.1](https://www.w3.org/WAI/WCAG22/Understanding/non-text-content.html)
+  asks that non-text content that is pure decoration be implemented so
+  that assistive technology can ignore it. An image that only decorates,
+  or only repeats what the text beside it says, and that a screen reader
+  announces, does not.
+
+### Measured first (2026-11-17)
+
+A probe, with no model, read the 20 recordings with phone screens on
+the development PC. The icon and description checks' rules chose 146
+images with a description of their own, on pictures in step, on 17
+recordings, and a screen reader says every one.
+
+- **84 are controls,** spoken by the image itself: Settings' "Navigate
+  up", previews, Chrome's toolbar, a mail app, the launcher and an app's
+  library cards.
+- **62 are spoken by an item that holds them.** For 51, the description
+  is all the item says: 48 icons in the launcher's search bar (the
+  Google app, AI Mode, voice search and camera search) and 3 Settings
+  illustrations of the colour inversion animation. So rule 3 leaves
+  them.
+- **11 are said with other text:** the launcher weather widget's icons,
+  "Cloudy" 10 times and "Flurries" once, said as "Cloudy, 7°". These are
+  the only questions for the model in the sample.
+- **No measure without a model.** No description was repeated at its
+  own stop, in the stops before or after, or in text within 24 dp, and
+  none was a generic word such as "image" or "icon". Text nearby matched
+  unrelated app labels, such as an app's name above the search bar's
+  icons, so it is not used.
+- **Circularity.** In step 21's probe, Haiku answered the "Flurries"
+  icon decorative twice, counting the widget's "Flurries, 3°", which
+  includes the icon's own description, as other text; Sonnet gave
+  decorative and informative. So the question marks the image's own
+  description (rule 4).
+
+### As built
+
+- **The rules.** `PhoneDecorativeImageRun` (`Recorder.Session`) takes
+  the questions of `PhoneDescribedImageRun`, the described images once
+  each in a visit on pictures in step (rules 2 and 8), so it reads no
+  picture again. `StateOf` compares letters and digits in lower case: a
+  description no item a screen reader stops on says is not spoken
+  (`NotSpoken`), for example where the holder has a description of its
+  own; else an image that is a control is a control's name
+  (`Controls`); an image spoken by its holder whose text is only the
+  description is that item's name (`ItemNames`); any other is asked
+  (`Questions`), said with other text by its holder or alone by the
+  image itself.
+- **The question.** `AndroidDecorativeImages` (`Recorder.Analysis`) asks
+  `android-image-decorative`, version 1, of the project's model for
+  vision-based checks, with the same pictures as the icon and
+  description checks and a step key made from the request's SHA-256.
+  The question gives the image's description and, where its holder says
+  it, what the holder says, noting that the image's own words in it are
+  the image's text alternative and not other text, and what a screen
+  reader says on the screen with the image's place marked. It asks
+  whether the image is informative (it gives information nothing else a
+  screen reader says on the screen gives, leaving out its own
+  description), decorative (it only decorates, or only repeats other
+  text a screen reader says) or cannot-tell, reason first.
+- **Rule 6, the signature.** As the icon and description checks': the
+  image's pixels, its description, which item says it and what that
+  item says, and what a screen reader says on the screen. An answer
+  kept on a task of the project, by the same profile and model, is
+  copied into the task (`SignedAsker`), and a question not settled is
+  asked again of the model for complex questions.
+- **Rule 5, the levels.** Agreed decorative: a warning, the model's
+  inference, ending "a person should verify this". Agreed cannot-tell,
+  or two answers: a warning ending "check manually". Agreed
+  informative: no finding, counted (`Informative`). Every answer is the
+  model's inference, so the report says AI was used even where no
+  finding was made.
+- **Rule 7.** Before any answer, and with no model for vision-based
+  checks, no finding is made; the note says how many images were not
+  judged and why.
+- **Where it runs.** The Android report, the project report and the
+  model checks ask after the screen title check; the model checks'
+  Markdown has a section, "Decorative images", and the report's limits
+  give the check's note. The Checks tab gives a row under each visit:
+  the findings, or how many images were not said, were names of
+  controls or of the items holding them, were judged informative or are
+  not yet judged; and the summary gives the counts. "Ask the project's
+  model" is enabled while an image is not judged.
+- **Guidance.** `android-check-guidance.json` has the check, impact
+  low, criterion 1.1.1, with remediation for Views, Compose, Flutter
+  and React Native.
+
+### Checked
+
+The solution builds with no warnings, and the tests pass, 2,673 of
+them, with the 10 that need Windows failing as before. The new tests
+cover made-up items: a control's image, an image in a row with other
+text, an image that is all its row says, an image a screen reader stops
+on alone, and an image in a row with a description of its own; a
+picture out of step; the letters-and-digits comparison; findings only
+from warnings, with the rest counted; the requests' key, answers and
+text, the image's own description marked; kept answers judging one
+image informative and one decorative; no kept answers and no model;
+and the levels of each answer and of two answers.
+
+### Limits
+
+- Only images in the tree with a description of their own are checked.
+  A decorative image drawn as part of another view, or a description
+  given only to its holder, is not.
+- A control's image, and an image that names the item holding it, are
+  not asked about, even where the image is decorative.
+- No decorative image announced was in the measured sample, so how well
+  the check finds one is not measured, and needs content that has one.
 - What a screen reader says is the tree's order, not the order a screen
   reader moved in on the recording.
 

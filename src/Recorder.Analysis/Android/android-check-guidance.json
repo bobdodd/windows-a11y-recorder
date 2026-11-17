@@ -403,6 +403,21 @@
       "sources": ["wcag-1.1.1", "android-views", "compose-semantics", "flutter-semantics", "flutter-image-label", "rn-accessibility"]
     },
     {
+      "check": "decorative-image-announced",
+      "title": "Decorative image announced by a screen reader",
+      "issue": "An image that only decorates, or only repeats what other text a screen reader says on the screen already gives, has a content description or text of its own, so a screen reader announces it.",
+      "why": "Screen reader users hear words that add nothing, which slows them down and can make them think there is more to the screen than there is; where the image repeats the text beside it, they hear the same thing twice.",
+      "affects": ["People who are blind and use a screen reader such as TalkBack", "People with low vision who use a screen reader", "People who are deaf-blind and use a braille display"],
+      "impact": "low",
+      "criteria": ["1.1.1"],
+      "related": [],
+      "basis": "WCAG 1.1.1, from the tree and the recorded picture: an image that is not a control, with a description or text of its own that a screen reader says, as the image or with other text for the item that holds it; an image whose description is all the item holding it says, so that item's name, is left out. Judged against the whole screen and what a screen reader says on it only by the project's model for vision-based checks. Every finding is a warning, the model's inference, for a person to verify; with no model there is no finding.",
+      "android": "Remove the content description of a decorative image and mark it as not important for accessibility, with android:importantForAccessibility=\"no\" or setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO); in Compose, give the Image or Icon contentDescription = null.",
+      "flutter": "Wrap a decorative image in ExcludeSemantics, or set excludeFromSemantics: true on the Image and give it no semanticLabel.",
+      "reactNative": "Hide a decorative image from screen readers with accessible={false} and importantForAccessibility=\"no\", and give it no accessibilityLabel or alt.",
+      "sources": ["wcag-1.1.1", "android-views", "compose-semantics", "flutter-semantics", "flutter-image-label", "rn-accessibility"]
+    },
+    {
       "check": "label-not-in-name",
       "title": "Visible label not in the spoken name",
       "issue": "The words shown on a control are not part of the name a screen reader or voice control uses for it.",

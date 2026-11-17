@@ -148,6 +148,14 @@ public sealed class PhoneDescribedImageRun
     /// <summary>Whether OCR read a picture of the visit, so its images were checked.</summary>
     public bool Read(PhoneVisit visit) => _visitsRead.Contains(visit);
 
+    /// <summary>Every time a question's image was seen in its visit on a picture in step, for the decorative image check's findings.</summary>
+    internal IReadOnlyList<PhoneFindingTime> TimesOf(PhoneDescribedImageQuestion question) =>
+        _times.TryGetValue((question.Visit, question.Identity), out var times) ? times : [question.Time];
+
+    /// <summary>The label of a question's image, for the decorative image check's findings.</summary>
+    internal string LabelOf(PhoneDescribedImageQuestion question) =>
+        _labels.GetValueOrDefault((question.Visit, question.Identity), question.Description);
+
     /// <summary>The described images in the visit, once each.</summary>
     public int ImagesIn(PhoneVisit visit) =>
         _imagesByVisit.TryGetValue(visit, out var count) ? count : 0;

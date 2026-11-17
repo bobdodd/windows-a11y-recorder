@@ -114,6 +114,15 @@ public static class PhoneCheckNames
     public const string TitleNotDescriptive = "screen-title-not-descriptive";
 
     /// <summary>
+    /// A decorative image that a screen reader announces (step 23,
+    /// PhoneDecorativeImageRun), WCAG 1.1.1, one discrete issue (owner,
+    /// 2026-11-17): a warning from the project's model for vision-based
+    /// checks, for a person to verify, low impact if confirmed; none
+    /// without a model.
+    /// </summary>
+    public const string DecorativeAnnounced = "decorative-image-announced";
+
+    /// <summary>
     /// Label in Name (step 9), from the tree's text and OCR's: the name
     /// does not contain the visible label, and the name contains it but
     /// does not start with it. Not one of the tree's checks.
@@ -238,6 +247,7 @@ public static class PhoneCheckNames
         TitleMissing => "No screen title (WCAG2ICT 2.4.2)",
         TitleShared => "Screen title shared with other screens (WCAG2ICT 2.4.2)",
         TitleNotDescriptive => "Screen title does not describe its screen (WCAG2ICT 2.4.2)",
+        DecorativeAnnounced => "Decorative image announced by a screen reader (WCAG 1.1.1)",
         NoHeading => "No heading (WCAG 1.3.1)",
         FirstHeadingLow => "First heading far from the top",
         ManyHeadings => "Many headings",

@@ -1175,9 +1175,11 @@ public sealed class PhoneCheckRunTests : IDisposable
         ]);
     }
 
-    private PhoneDescribedImageRun DescribedImageRun(string? engine = "Windows OCR, en-US", params string[] outside)
+    private PhoneDescribedImageRun DescribedImageRun(string? engine = "Windows OCR, en-US", params string[] outside) =>
+        DescribedImageRunOf(DescribedImages(), engine, outside);
+
+    private PhoneDescribedImageRun DescribedImageRunOf(PhoneCheckWindow window, string? engine, string[] outside)
     {
-        var window = DescribedImages();
         var lines = outside
             .Select((text, index) => new PhoneTextLine(null, window.Items[0], PhoneTextPlace.FoundByOcr, null, text,
                 new PhoneBounds(100, 1700 + (index * 80), 700, 1740 + (index * 80)), null, 40))
@@ -1635,6 +1637,177 @@ public sealed class PhoneCheckRunTests : IDisposable
 
         Assert.Contains("the web page's title, \"Acme Notes help\", in the screen's title,", chrome.Text, StringComparison.Ordinal);
         Assert.DoesNotContain(" twice", chrome.Text, StringComparison.Ordinal);
+    }
+
+    // Step 23: decorative images. A window of made-up items: an icon that
+    // is a control; an image in a row with other text; an image that is
+    // all its row says; an image a screen reader stops on alone; and an
+    // image in a row whose own description is all a screen reader says.
+    private static PhoneCheckWindow DecorativeImages()
+    {
+        AndroidTreeNode Node(int index, int? parent, (int Left, int Top, int Right, int Bottom) bounds, string className,
+            string? description = null, string? text = null, bool clickable = false) =>
+            ImageNode(index, parent, bounds, className, description, text) with { Clickable = clickable };
+        return new PhoneCheckWindow(512, 1,
+        [
+            Node(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout"),
+            Node(1, 0, (20, 100, 140, 220), "android.widget.ImageView", description: "Navigate up", clickable: true),
+            Node(2, 0, (0, 400, 1080, 600), "android.widget.LinearLayout", clickable: true),
+            Node(3, 2, (20, 420, 180, 580), "android.widget.ImageView", description: "Sunny"),
+            Node(4, 2, (220, 460, 900, 540), "android.widget.TextView", text: "18 degrees"),
+            Node(5, 0, (0, 700, 1080, 900), "android.widget.LinearLayout", clickable: true),
+            Node(6, 5, (20, 720, 180, 880), "android.widget.ImageView", description: "Search"),
+            Node(7, 0, (300, 1000, 700, 1200), "android.widget.ImageView", description: "Flourish"),
+            Node(8, 0, (0, 1300, 1080, 1500), "android.widget.LinearLayout", description: "Weather card", clickable: true),
+            Node(9, 8, (20, 1320, 180, 1480), "android.widget.ImageView", description: "Rain"),
+        ]);
+    }
+
+    private PhoneDecorativeImageRun DecorativeImageRun(params string[] outside) =>
+        PhoneDecorativeImageRun.Run(DescribedImageRunOf(DecorativeImages(), "Windows OCR, en-US", outside));
+
+    // Rules 2, 3 and 7: an image whose description a screen reader does not
+    // say, a control's image, and an image that is all its row says are
+    // not asked about; an image said with other text, or alone, is; no
+    // finding is made before a model's answer.
+    [Fact]
+    public void DecorativeImages_AsksOnlyAboutImagesSaidWithOtherTextOrAlone_AndFindsNothingWithoutAModel()
+    {
+        var run = DecorativeImageRun();
+
+        Assert.Equal((5, 1, 1, 1), (run.Images, run.NotSpoken, run.Controls, run.ItemNames));
+        Assert.Equal(["Sunny", "Flourish"], run.Questions.Select(question => question.Description));
+        Assert.Equal([PhoneDescriptionSpeaker.Holder, PhoneDescriptionSpeaker.Image], run.Questions.Select(question => question.SpokenBy));
+        Assert.Empty(run.Findings);
+        Assert.Equal(2, run.Unanswered);
+        Assert.Equal("Decorative image announced by a screen reader (WCAG 1.1.1)", PhoneCheckNames.Title(PhoneCheckNames.DecorativeAnnounced));
+        var visit = run.Questions[0].Visit;
+        Assert.Equal((5, 2, true), (run.ImagesIn(visit), run.AskedIn(visit), run.Read(visit)));
+        Assert.Equal(
+            [PhoneDecorativeState.Control, PhoneDecorativeState.Asked, PhoneDecorativeState.ItemName, PhoneDecorativeState.Asked, PhoneDecorativeState.NotSpoken],
+            run.In(visit).Select(image => image.State));
+
+        // Rule 8: an image on a picture out of step with the tree is not asked about.
+        var outOfStep = DecorativeImageRun("Inbox", "Promotions", "Meeting at noon");
+
+        Assert.True(outOfStep.OutOfStep > 0);
+        Assert.Empty(outOfStep.Questions);
+    }
+
+    // Rule 3's comparison, letters and digits only.
+    [Theory]
+    [InlineData(false, PhoneDescriptionSpeaker.Holder, "Cloudy", "Cloudy, 7°", PhoneDecorativeState.Asked)]
+    [InlineData(false, PhoneDescriptionSpeaker.Holder, "Voice search", "Voice search.", PhoneDecorativeState.ItemName)]
+    [InlineData(false, PhoneDescriptionSpeaker.Image, "Flourish", "Flourish", PhoneDecorativeState.Asked)]
+    [InlineData(true, PhoneDescriptionSpeaker.Image, "Navigate up", "Navigate up", PhoneDecorativeState.Control)]
+    [InlineData(false, PhoneDescriptionSpeaker.Holder, "Rain", "Weather card", PhoneDecorativeState.NotSpoken)]
+    [InlineData(false, PhoneDescriptionSpeaker.Nothing, "Rain", "", PhoneDecorativeState.NotSpoken)]
+    public void DecorativeImages_StateOf_ComparesLettersAndDigits(bool control, PhoneDescriptionSpeaker spokenBy, string description, string spoken, PhoneDecorativeState state) =>
+        Assert.Equal(state, PhoneDecorativeImageRun.StateOf(control, spokenBy, description, spoken));
+
+    // Rule 5: only decorative, cannot tell or two answers make a finding;
+    // informative is counted.
+    [Fact]
+    public void DecorativeImages_Judged_MakesFindingsOnlyOfWarnings_AndCountsTheRest()
+    {
+        var run = DecorativeImageRun();
+        var info = new PhoneInference(PhoneCheckLevel.Info, "informative", Inferred: true, "Model", Cloud: false);
+        var warning = new PhoneInference(PhoneCheckLevel.Warning, "decorative", Inferred: true, "Model", Cloud: true);
+
+        var judged = run.Judged(new Dictionary<PhoneDescribedImageQuestion, PhoneDecorativeAnswer>
+        {
+            [run.Questions[0]] = new(PhoneDecorativeOutcome.Informative, info),
+            [run.Questions[1]] = new(PhoneDecorativeOutcome.Finding, warning),
+        }, "2 answered");
+
+        var finding = Assert.Single(judged.Findings);
+        Assert.Equal((PhoneCheckNames.DecorativeAnnounced, PhoneCheckLevel.Warning, "ImageView described as \"Flourish\""), (finding.Check, finding.Level, finding.Label));
+        Assert.Same(warning, finding.Inference);
+        Assert.Equal(2, finding.Times.Count);
+        Assert.Equal((1, 0, "2 answered"), (judged.Informative, judged.Unanswered, judged.ModelNote));
+        Assert.Equal(2, judged.Inferences.Count());
+        Assert.Same(finding, Assert.Single(judged.For(finding.Visit)));
+        Assert.Equal((1, 1), (judged.Controls, judged.ItemNames));
+    }
+
+    // Rules 4 and 6: the question marks the image's own description as
+    // the image's, and kept answers judge each image.
+    [Fact]
+    public void DecorativeImages_RequestsAndKeptAnswersJudgeEachImage()
+    {
+        var run = DecorativeImageRun();
+        var rgb = new uint[1080 * 2400];
+        Array.Fill(rgb, 0x203040u);
+        var pixels = new PhonePixels(1080, 2400, rgb);
+        var held = Recorder.Analysis.Android.AndroidDecorativeImages.RequestOf(run.Questions[0], pixels);
+        var alone = Recorder.Analysis.Android.AndroidDecorativeImages.RequestOf(run.Questions[1], pixels);
+
+        Assert.Matches("^image-decorative-[0-9a-f]{16}$", held.Key);
+        Assert.Equal(Recorder.Analysis.Android.AndroidDecorativeImages.Answers, held.Request.Answers);
+        Assert.Equal((Recorder.Analysis.ModelUses.VisionChecks, true, 2), (held.Request.Use, held.Request.ReusedAcrossTasks, held.Request.Images.Count));
+        Assert.Contains("The outlined image's text alternative, as the app gives it, is \"Sunny\".", held.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("the words \"Sunny\" in it are the image's own text alternative, not other text.", held.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("18 degrees", held.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("A screen reader stops on the image itself", alone.Request.Input, StringComparison.Ordinal);
+        Assert.EndsWith("then give the answer.", held.Request.Input, StringComparison.Ordinal);
+        Assert.False(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(held.Signature, alone.Signature));
+
+        static JsonElement Output(string answer) =>
+            JsonSerializer.SerializeToElement(new { answer, reason = "The pictures show it." });
+        var elsewhere = Guid.NewGuid();
+        Recorder.Analysis.SignedAnswer Answer(string key, int step, byte[] signature, string answer) =>
+            new(Guid.NewGuid(), elsewhere, $"{key}-{step}", signature,
+                new(Output(answer), "service", """{"temperature": null}"""));
+        IReadOnlyList<Recorder.Analysis.SignedAnswer> Signed(string first, string second) =>
+        [
+            Answer("image-decorative-0123456789abcdef", 1, held.Signature, first), Answer("image-decorative-0123456789abcdef", 2, held.Signature, first),
+            Answer("image-decorative-fedcba9876543210", 1, alone.Signature, second), Answer("image-decorative-fedcba9876543210", 2, alone.Signature, second),
+        ];
+        var requests = Recorder.Analysis.Android.AndroidDecorativeImages.Requests(run, _ => pixels);
+
+        Assert.Equal(2, requests.Count);
+
+        var judged = Recorder.Analysis.Android.AndroidDecorativeImages.FromKept(run, requests, Signed("informative", "decorative"), "Haiku");
+
+        var finding = Assert.Single(judged.Findings);
+        Assert.Equal((PhoneCheckNames.DecorativeAnnounced, PhoneCheckLevel.Warning, "ImageView described as \"Flourish\""), (finding.Check, finding.Level, finding.Label));
+        Assert.StartsWith(
+            "Haiku, a cloud model, inferred from the pictures twice for the same image, by its pixels, its description and what a screen reader says on the screen, that the image a screen reader announces as \"Flourish\" is decorative",
+            finding.Inference!.Text, StringComparison.Ordinal);
+        Assert.EndsWith("; a person should verify this", finding.Inference.Text, StringComparison.Ordinal);
+        Assert.Equal(1, judged.Informative);
+        Assert.Equal("2 images left by the rules are for Haiku; 2 images answered: 1 judged informative, not confirmed, and 1 warning", judged.ModelNote);
+
+        // With no kept answers nothing is judged (rule 7).
+        var none = Recorder.Analysis.Android.AndroidDecorativeImages.FromKept(run, requests, [], "Haiku");
+
+        Assert.Equal((0, 2), (none.Answers.Count, none.Unanswered));
+        Assert.EndsWith(", 2 images not yet asked", none.ModelNote, StringComparison.Ordinal);
+        Assert.Equal(
+            "2 images left by the rules were not judged, as no model may be used for vision-based checks: no model",
+            Recorder.Analysis.Android.AndroidDecorativeImages.NotAsked(2, "no model"));
+    }
+
+    // Rule 5's levels.
+    [Theory]
+    [InlineData("informative", PhoneCheckLevel.Info, "that the image a screen reader announces as \"Sunny\" is informative, not confirmed")]
+    [InlineData("decorative", PhoneCheckLevel.Warning, "is decorative, so a screen reader should not announce it")]
+    [InlineData("cannot-tell", PhoneCheckLevel.Warning, "could not tell from the pictures twice whether the image a screen reader announces as \"Sunny\" is informative or decorative")]
+    public void DecorativeImages_Interpret_GivesEachAgreedAnswersLevel(string answer, PhoneCheckLevel level, string says)
+    {
+        var asked = DecorativeImageRun().Questions[0];
+
+        var inference = Recorder.Analysis.Android.AndroidDecorativeImages.Interpret(new(answer, "First."), new(answer, "Second."), "Haiku", cloud: false, asked);
+
+        Assert.Equal((level, true, false), (inference.Level, inference.Inferred, inference.Cloud));
+        Assert.StartsWith("Haiku, a local model,", inference.Text, StringComparison.Ordinal);
+        Assert.Contains(says, inference.Text, StringComparison.Ordinal);
+
+        var split = Recorder.Analysis.Android.AndroidDecorativeImages.Interpret(new(answer, "First."), new(answer == "cannot-tell" ? "decorative" : "cannot-tell", "Second."), "Haiku", cloud: false, asked);
+
+        Assert.Equal(PhoneCheckLevel.Warning, split.Level);
+        Assert.Contains("gave two answers", split.Text, StringComparison.Ordinal);
+        Assert.EndsWith("; check manually", split.Text, StringComparison.Ordinal);
     }
 
     // The body text is the height most of the characters have.

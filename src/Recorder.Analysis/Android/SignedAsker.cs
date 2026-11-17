@@ -8,8 +8,8 @@ namespace Recorder.Analysis.Android;
 /// given that answer; one answered on an earlier task is given its
 /// first answer, copied into this task; any other is asked, and asked
 /// again of the model for complex questions where it is not settled.
-/// The icon and description checks' (step 21) and the screen title
-/// check's (step 22); "the same image" is the same signature, which for a
+/// The icon and description checks' (step 21), the screen title check's
+/// (step 22) and the decorative image check's (step 23); "the same image" is the same signature, which for a
 /// question with no picture is the same texts.
 /// </summary>
 internal sealed class SignedAsker(

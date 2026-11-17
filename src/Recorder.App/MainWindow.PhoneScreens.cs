@@ -92,6 +92,14 @@ public partial class MainWindow
     private (PhoneScreenTitleRun Rules, IReadOnlyList<ScreenTitleRequest> Requests)? _screenTitleRequests;
     private int _titleTextUnanswered;
     private int _titleVisionUnanswered;
+
+    // The decorative image check, the same way (android-checks.md, step
+    // 23); its kept answers are found by the image's pixels, its
+    // description and what a screen reader says on the screen.
+    private PhoneDecorativeImageRun? _phoneDecorativeImages;
+    private PhoneDecorativeImageRun? _phoneDecorativeImagesRules;
+    private (PhoneDecorativeImageRun Rules, IReadOnlyList<(PhoneDescribedImageQuestion Question, DescribedImageRequest Request)> Requests)? _decorativeRequests;
+    private int _decorativeUnanswered;
     private PhoneLabelInNameRun? _phoneLabelInName;
     private PhoneCheckSettings? _checkSettings;
 
@@ -161,6 +169,10 @@ public partial class MainWindow
             _screenTitleRequests = null;
             _titleTextUnanswered = 0;
             _titleVisionUnanswered = 0;
+            _phoneDecorativeImages = null;
+            _phoneDecorativeImagesRules = null;
+            _decorativeRequests = null;
+            _decorativeUnanswered = 0;
             _phoneLabelInName = null;
             _shownFinding = null;
             if (_playbackArchive is { PhoneScreens.Recorded: true } opened)
@@ -293,6 +305,12 @@ public partial class MainWindow
         _phoneScreenTitles = _phoneScreenTitlesRules;
         _titleTextUnanswered = _phoneScreenTitlesRules?.TextQuestions ?? 0;
         _titleVisionUnanswered = _phoneScreenTitlesRules?.PicturedQuestions ?? 0;
+
+        // The decorative image check takes the images the icon and
+        // description checks choose, so is the same at both audit levels.
+        _phoneDecorativeImagesRules = _phoneDescribedImagesRules is null ? null : PhoneDecorativeImageRun.Run(_phoneDescribedImagesRules);
+        _phoneDecorativeImages = _phoneDecorativeImagesRules;
+        _decorativeUnanswered = _phoneDecorativeImagesRules?.Questions.Count ?? 0;
         JudgeTextContrast();
 
         // Non-text contrast has one level, AA (WCAG 2.2's 1.4.11), so is
@@ -343,6 +361,7 @@ public partial class MainWindow
         await ApplyKeptImageAlternativeAnswersAsync();
         await ApplyKeptDescribedImageAnswersAsync();
         await ApplyKeptScreenTitleAnswersAsync();
+        await ApplyKeptDecorativeAnswersAsync();
     }
 
     private async Task ApplyKeptImageAnswersAsync()
@@ -699,6 +718,71 @@ public partial class MainWindow
         ShowPhoneScreenRows();
     }
 
+    private async Task ApplyKeptDecorativeAnswersAsync()
+    {
+        if (_phoneDecorativeImagesRules is not { } rules)
+        {
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        if (rules.Questions.Count == 0)
+        {
+            _decorativeUnanswered = 0;
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        var name = _openProjectModels?.VisionChecks;
+        var problem = name is null
+            ? $"the project's settings choose no model for {ModelUses.Name(ModelUses.VisionChecks)}"
+            : ProjectModels.Problem(ProjectChoices, ModelUses.VisionChecks, name);
+        var none = new Dictionary<PhoneDescribedImageQuestion, PhoneDecorativeAnswer>();
+        PhoneDecorativeImageRun shown;
+        if (problem is not null || AnalysisCatalogOrNull is not { } catalog || ProjectChoices.Profile(name!) is not { } profile)
+        {
+            shown = rules.Judged(none, AndroidDecorativeImages.NotAsked(rules.Questions.Count, problem ?? "the analysis catalog is not open"));
+        }
+        else
+        {
+            try
+            {
+                if (_decorativeRequests is not { } made || !ReferenceEquals(made.Rules, rules))
+                {
+                    var requests = await Task.Run(() => AndroidDecorativeImages.Requests(rules, PhonePictures.Load));
+                    made = (rules, requests);
+                    _decorativeRequests = made;
+                }
+
+                var signed = await catalog.SignedAnswersAsync(
+                    AndroidDecorativeImages.Template, AndroidDecorativeImages.TemplateVersion, name!, profile.Model, _openProjectId, _analysisRecordingId, CancellationToken.None);
+                var complex = ComplexVisionModel();
+                var complexSigned = complex is { } other
+                    ? await catalog.SignedAnswersAsync(
+                        AndroidDecorativeImages.Template, AndroidDecorativeImages.TemplateVersion, other.Name, other.Profile.Model, _openProjectId, _analysisRecordingId, CancellationToken.None)
+                    : null;
+                shown = AndroidDecorativeImages.FromKept(rules, made.Requests, signed, name!, complexSigned, complex?.Name);
+            }
+            catch (Exception exception) when (exception is NpgsqlException or InvalidOperationException or IOException or ObjectDisposedException)
+            {
+                shown = rules.Judged(none, $"the model's kept answers could not be read: {exception.Message}");
+            }
+        }
+
+        // The recording changed while the answers were read.
+        if (!ReferenceEquals(rules, _phoneDecorativeImagesRules))
+        {
+            return;
+        }
+
+        // A question the model for complex questions has not yet answered
+        // is not judged, so is counted with those not yet asked.
+        _phoneDecorativeImages = shown;
+        _decorativeUnanswered = problem is not null ? 0 : shown.Unanswered;
+        UpdateAskChecksModelButton();
+        ShowPhoneScreenRows();
+    }
+
     // The project's model for complex questions of text-based checks, as
     // for vision-based checks below; null where there is none the project
     // can use.
@@ -748,7 +832,7 @@ public partial class MainWindow
         var waiting = _analysisTasks?.Any(task => task.Kind == AndroidModelChecksKind.Name &&
             task.State is AnalysisTaskStates.Queued or AnalysisTaskStates.Running) == true;
         var models = _openProjectModels;
-        var vision = _imagesOfTextUnanswered + _headingLookUnanswered + _imageAlternativeUnanswered + _describedImagesUnanswered + _titleVisionUnanswered > 0 &&
+        var vision = _imagesOfTextUnanswered + _headingLookUnanswered + _imageAlternativeUnanswered + _describedImagesUnanswered + _titleVisionUnanswered + _decorativeUnanswered > 0 &&
             models is { VisionChecks: not null } && models.ChecksProblem(ProjectChoices, ModelUses.VisionChecks) is null;
         var text = _titleTextUnanswered > 0 &&
             models is { TextChecks: not null } && models.ChecksProblem(ProjectChoices, ModelUses.TextChecks) is null;
@@ -958,7 +1042,7 @@ public partial class MainWindow
         {
             if (_phoneChecks is not null || _phoneTextContrast is not null || _phoneNonTextContrast is not null || _phoneImagesOfText is not null ||
                 _phoneLabelInName is not null || _phoneHeadingLook is not null || _phoneImageAlternative is not null ||
-                _phoneDescribedImages is not null || _phoneScreenTitles is not null)
+                _phoneDescribedImages is not null || _phoneScreenTitles is not null || _phoneDecorativeImages is not null)
             {
                 // The status message check follows every snapshot, settled
                 // or not, so can find a message in a visit too brief to
@@ -1172,6 +1256,31 @@ public partial class MainWindow
             }
         }
 
+        if (_phoneDecorativeImages is { SnapshotsRead: > 0 } decorative)
+        {
+            var title = PhoneCheckNames.Title(PhoneCheckNames.DecorativeAnnounced);
+            var findings = decorative.For(visit);
+            var count = decorative.ImagesIn(visit);
+            var text = !decorative.Read(visit)
+                ? $"{title}: not checked, as OCR read no picture of this visit."
+                : count == 0
+                    ? $"{title}: no described images in this visit."
+                    : findings.Count == 0
+                        ? $"{title}: {DecorativeState(decorative, visit)}"
+                        : null;
+            if (text is not null)
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, text, shownAt, null)
+                {
+                    IsCheck = true,
+                });
+            }
+            else
+            {
+                AddCheckRows(findings, $", from {Count(decorative.AskedIn(visit), "image")} asked about");
+            }
+        }
+
         if (_phoneLabelInName is { } labels)
         {
             var findings = labels.For(visit);
@@ -1235,6 +1344,44 @@ public partial class MainWindow
         }
 
         return $"the title \"{of.Title}\" is for the model for {(question?.Pictured == true ? "vision-based" : "text-based")} checks, and not yet judged.";
+    }
+
+    // What became of a visit's described images in the decorative image
+    // check, where it made no finding: how many were not said, were names
+    // of controls or of the items holding them, and were judged or not.
+    private static string DecorativeState(PhoneDecorativeImageRun decorative, PhoneVisit visit)
+    {
+        var images = decorative.In(visit).ToList();
+        int Of(PhoneDecorativeState state) => images.Count(image => image.State == state);
+        var asked = images.Where(image => image.State == PhoneDecorativeState.Asked).Select(image => image.Image).ToList();
+        var informative = asked.Count(image => decorative.Answers.ContainsKey(image));
+        var parts = new List<string>();
+        if (Of(PhoneDecorativeState.NotSpoken) is > 0 and var notSpoken)
+        {
+            parts.Add($"{Count(notSpoken, "image")} not said by a screen reader");
+        }
+
+        if (Of(PhoneDecorativeState.Control) is > 0 and var controls)
+        {
+            parts.Add($"{Count(controls, "image")} that {(controls == 1 ? "is a control" : "are controls")}, so {(controls == 1 ? "its description is the control's name" : "their descriptions are the controls' names")}");
+        }
+
+        if (Of(PhoneDecorativeState.ItemName) is > 0 and var names)
+        {
+            parts.Add($"{Count(names, "image")} whose description is all the item holding {(names == 1 ? "it" : "them")} says, so that item's name");
+        }
+
+        if (informative > 0)
+        {
+            parts.Add($"{Count(informative, "image")} judged informative, not confirmed");
+        }
+
+        if (asked.Count - informative is > 0 and var waiting)
+        {
+            parts.Add($"{Count(waiting, "image")} for the model for vision-based checks, not yet judged");
+        }
+
+        return $"no findings, from {Count(images.Count, "described image")}: {string.Join("; ", parts)}.";
     }
 
     private void AddCheckRows(IReadOnlyList<PhoneFinding> findings, string measured = "", int indent = 3)
@@ -1584,6 +1731,22 @@ public partial class MainWindow
                     $"{titles.PicturedQuestions:N0} with the screen's picture, as images cover at least half of it, for the model for vision-based checks; in Chrome, the web page's title is judged. " +
                     $"{titles.Described:N0} judged to describe {(titles.Described == 1 ? "its screen" : "their screens")}, not confirmed, and {Count(titles.Unanswered, "screen")} not judged" +
                     (titles.ModelNote is { } titleNote ? $": {titleNote}." : ".");
+        }
+
+        if (_phoneDecorativeImages is { } decorative)
+        {
+            var decorativeName = PhoneCheckNames.Title(PhoneCheckNames.DecorativeAnnounced);
+            var decorativeFindings = decorative.Findings.Count == 0
+                ? "no findings"
+                : $"{Count(decorative.Findings.Count, "finding")} ({Levels(decorative.Findings)})";
+            summary += decorative.SnapshotsRead == 0
+                ? $" {decorativeName}: not checked, as it needs OCR's words to tell a picture out of step with the tree."
+                : $" {decorativeName}: {decorativeFindings}, from {Count(decorative.Images, "described image")} on pictures in step with the tree: " +
+                    $"{decorative.NotSpoken:N0} not said by a screen reader, {decorative.Controls:N0} that are controls and {decorative.ItemNames:N0} whose description is all the item holding them says, so names, not asked; " +
+                    $"{Count(decorative.Questions.Count, "image")} that a screen reader says, with other text or alone, for the model for vision-based checks to judge informative or decorative. " +
+                    $"{Count(decorative.OutOfStep, "image")} on a picture out of step with the tree {(decorative.OutOfStep == 1 ? "was" : "were")} not judged; " +
+                    $"{decorative.Informative:N0} judged informative, not confirmed, and {Count(decorative.Unanswered, "image")} not judged" +
+                    (decorative.ModelNote is { } decorativeNote ? $": {decorativeNote}." : ".");
         }
 
         if (_phoneLabelInName is { } labels)

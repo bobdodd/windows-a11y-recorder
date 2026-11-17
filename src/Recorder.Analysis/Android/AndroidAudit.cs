@@ -10,11 +10,12 @@ namespace Recorder.Analysis.Android;
 /// picture, with OCR finding the text, and the checks judged from that
 /// measurement. No model is used here; the questions of the images-of-text
 /// check, the check of text shown as a heading, the check of images with
-/// no text alternative, the icon and description checks and the screen
-/// title check are asked after, where a model may be used
+/// no text alternative, the icon and description checks, the screen
+/// title check and the decorative image check are asked after, where a model may be used
 /// (<see cref="AndroidImagesOfText"/>, <see cref="AndroidHeadingLook"/>,
 /// <see cref="AndroidImageAlternative"/>, <see cref="AndroidDescribedImages"/>,
-/// <see cref="AndroidScreenTitles"/>; android-report.md, "The audit").
+/// <see cref="AndroidScreenTitles"/>, <see cref="AndroidDecorativeImages"/>;
+/// android-report.md, "The audit").
 /// </summary>
 public sealed class AndroidAudit
 {
@@ -39,6 +40,7 @@ public sealed class AndroidAudit
         ImageAlternative = other.ImageAlternative;
         DescribedImages = other.DescribedImages;
         ScreenTitles = other.ScreenTitles;
+        DecorativeImages = other.DecorativeImages;
     }
 
     public PhoneCheckRun Tree { get; }
@@ -74,6 +76,9 @@ public sealed class AndroidAudit
     /// <summary>Screen titles that do not describe their screens (android-checks.md, step 22).</summary>
     public PhoneScreenTitleRun? ScreenTitles { get; private init; }
 
+    /// <summary>Decorative images that a screen reader announces (android-checks.md, step 23).</summary>
+    public PhoneDecorativeImageRun? DecorativeImages { get; private init; }
+
     /// <summary>The findings of the whole app, not of one visit, such as no live region in the app.</summary>
     public IReadOnlyList<PhoneFinding> AppFindings => Tree.AppFindings;
 
@@ -93,14 +98,15 @@ public sealed class AndroidAudit
         .. ImageAlternative?.For(visit) ?? [],
         .. DescribedImages?.For(visit) ?? [],
         .. ScreenTitles?.For(visit) ?? [],
+        .. DecorativeImages?.For(visit) ?? [],
     ];
 
     /// <summary>
     /// Whether any finding is a model's inference, so that a report says
     /// AI was used in the testing, and whether a cloud model was
     /// (android-vision-checks.md, decision 2). The icon and description
-    /// checks and the screen title check give every answer, as most make
-    /// no finding.
+    /// checks, the screen title check and the decorative image check give
+    /// every answer, as most make no finding.
     /// </summary>
     public IReadOnlyList<PhoneInference> Inferences =>
     [
@@ -108,6 +114,7 @@ public sealed class AndroidAudit
             .Select(finding => finding.Inference).OfType<PhoneInference>()
             .Concat(DescribedImages?.Inferences ?? [])
             .Concat(ScreenTitles?.Inferences ?? [])
+            .Concat(DecorativeImages?.Inferences ?? [])
             .Where(inference => inference.Inferred),
     ];
 
@@ -164,6 +171,17 @@ public sealed class AndroidAudit
         return new(this) { ScreenTitles = run };
     }
 
+    /// <summary>
+    /// The audit with the decorative image check judged by a model's
+    /// answers (<see cref="AndroidDecorativeImages"/>), every other check
+    /// as it was.
+    /// </summary>
+    public AndroidAudit WithDecorativeImages(PhoneDecorativeImageRun run)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        return new(this) { DecorativeImages = run };
+    }
+
     /// <summary>Every finding, the app's first.</summary>
     public IEnumerable<PhoneFinding> All(PhoneScreenTimeline screens)
     {
@@ -214,8 +232,12 @@ public sealed class AndroidAudit
         PhoneScreenTimeline screens,
         PhoneDeviceTimeline device,
         TalkBackSpeechTimeline? speech = null,
-        PhoneAccessibilityTimeline? accessibility = null) =>
-        new(tree, level, holdSeconds)
+        PhoneAccessibilityTimeline? accessibility = null)
+    {
+        // The decorative image check takes the images the icon and
+        // description checks choose (step 23).
+        var described = measured is null ? null : PhoneDescribedImageRun.Run(measured, screens, speech, accessibility);
+        return new(tree, level, holdSeconds)
         {
             Measured = measured,
             MeasureProblem = problem,
@@ -225,7 +247,9 @@ public sealed class AndroidAudit
             LabelInName = measured is null ? null : PhoneLabelInNameRun.Run(measured, screens),
             HeadingLook = measured is null ? null : PhoneHeadingLookRun.Run(measured, screens),
             ImageAlternative = measured is null ? null : PhoneImageAlternativeRun.Run(measured, screens, device, speech, accessibility),
-            DescribedImages = measured is null ? null : PhoneDescribedImageRun.Run(measured, screens, speech, accessibility),
+            DescribedImages = described,
             ScreenTitles = measured is null ? null : PhoneScreenTitleRun.Run(measured, screens),
+            DecorativeImages = described is null ? null : PhoneDecorativeImageRun.Run(described),
         };
+    }
 }

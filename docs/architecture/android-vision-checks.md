@@ -11,7 +11,8 @@ and 6, step 1 of the order in decision 7) was built on 2026-11-15, and
 replaced the same day by each project's models, chosen in its settings
 (decision 8; `projects.md`, "The project's models"). The first check
 with a model, images of text, was built on 2026-11-16 (see "Images of
-text, as built"); the others are not built. Each is to be measured on
+text, as built"), and those marked "built" in the tables since; the
+others are not built. Each is to be measured on
 the recordings to hand before its rules are set, as the earlier checks
 were (see `android-checks.md` and `android-checks-candidates.md`).
 
@@ -165,7 +166,7 @@ Each row is one issue, so that its remediation can be specific.
 | A name that contradicts its icon | 1.1.1 | Does the icon in this outline fit the control's name? | Controls with an image and a description or text of their own; built, see "Icons and descriptions, as built" |
 | A description that does not match its image | 1.1.1 | Does the description fit what the outlined image shows? | Images that are not controls, with a description or text of their own; built, see "Icons and descriptions, as built" |
 | An informative image with no description | 1.1.1 | Is this image informative or decorative? | Image items with no name |
-| A decorative image that is announced | 1.1.1 | Is this image informative or decorative? | Image items with a name, beside text that says the same or nothing |
+| A decorative image that is announced | 1.1.1 | Is this image informative or decorative? | Images that are not controls whose description a screen reader says with other text, or alone; built, see "Decorative images, as built" |
 | A label that is only placeholder text | 3.3.2 | Is there a visible label beside this field once text is typed? | Fields whose hint was the only text, before and after typing |
 
 ### Structure
@@ -505,6 +506,20 @@ screen's picture too, where images cover at least half the screen. In
 Chrome, the web page's title is judged. A title judged not to describe
 its screen is a warning for a person to verify; cannot tell, or two
 answers, a warning to check manually; describes, no finding, counted.
+
+### Decorative images, as built
+
+Built on 2026-11-17, at the owner's request, "Build rules 1 to 8 for
+the decorative image check with low impact". Step 23 of
+`android-checks.md` has the measurement and the rules: of the images
+the icon and description checks choose, one that is a control, or
+whose description is all the item holding it says, names that control
+or item, so is not asked about; any other that a screen reader says is
+asked whether it is informative or decorative, with the whole screen,
+a close-up and what a screen reader says on the screen, the image's
+own description marked as the image's. Decorative is a warning for a
+person to verify, low impact; cannot tell, or two answers, a warning
+to check manually; informative no finding, counted.
 
 ### Simple and complex questions, measured on 2026-11-17
 
