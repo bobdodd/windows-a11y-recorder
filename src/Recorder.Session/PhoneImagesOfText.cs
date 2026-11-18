@@ -9,8 +9,9 @@ namespace Recorder.Session;
 /// "Images of text with Claude, and four rules"): the visit and the
 /// image's identity, the first time it was judged with the picture and the
 /// image's bounds there, what OCR read inside it once the rules have left
-/// lines out, and its description. The 1.4.5 finding and, at AAA, the
-/// 1.4.9 finding of the image share one question.
+/// lines out, and its description, for a web image its alt text, and
+/// whether it is a web image (android-checks.md, step 26). The 1.4.5
+/// finding and, at AAA, the 1.4.9 finding of the image share one question.
 /// </summary>
 public sealed record PhoneImageOfTextQuestion(
     PhoneVisit Visit,
@@ -18,7 +19,8 @@ public sealed record PhoneImageOfTextQuestion(
     PhoneFindingTime Time,
     PhoneContrastPicture Picture,
     string Ocr,
-    string? Description)
+    string? Description,
+    bool Web = false)
 {
     public string App => Visit.Screen.Package;
 
@@ -40,8 +42,8 @@ public sealed record PhoneInference(PhoneCheckLevel Level, string Text, bool Inf
 /// Step 8 of android-checks.md, images of text (WCAG 1.4.5; 1.4.9 as well at
 /// the AAA audit level), from the words OCR read on each settled snapshot's
 /// picture (step 4b): an image in the tree, an ImageView or a class drawn
-/// from one, inside whose bounds OCR read words that no text item holds is a
-/// probable image of text, a warning, as the criterion's exceptions are not
+/// from one, or a web image (android.widget.Image, step 26), inside whose
+/// bounds OCR read words that no text item holds is a probable image of text, a warning, as the criterion's exceptions are not
 /// judged. Words go to the smallest image they are in; words held by an item's
 /// text or hint, as an item drawn over the image, are the app's text. A
 /// description holding the words does not make them text: it is what a
@@ -195,12 +197,14 @@ public sealed class PhoneImagesOfTextRun
             run._visitsRead.Add(visit);
             var state = PhoneCheckRun.StateAt(visit, snapshot.Settled.MonotonicNanoseconds);
             var density = device.DensityAt(snapshot.TakenBy.MonotonicNanoseconds)?.PixelsPerDp;
+            // Step 26, rule 1: a web image is an image as an ImageView is,
+            // for every rule.
             var images = window.Items
-                .Where(item => item.InstanceOf(PhoneTextMatching.ImageViewClass) && item.Node.VisibleToUser && !item.Bounds.IsEmpty)
+                .Where(item => PhoneTextMatching.IsImage(item) && item.Node.VisibleToUser && !item.Bounds.IsEmpty)
                 .ToList();
-            var inside = InImages(images, snapshot.Lines);
+            var inside = InImages(images, snapshot.Lines, PhoneTextMatching.IsImage);
             var caption = new Lazy<Caption>(() => CaptionAt(snapshot.Settled.MonotonicNanoseconds, talkBack, speech, accessibility));
-            var step = new Lazy<(bool OutOfStep, int Unexplained, int Found)>(() => Step(snapshot, images, caption.Value));
+            var step = new Lazy<(bool OutOfStep, int Unexplained, int Found)>(() => Step(snapshot, images, caption.Value, PhoneTextMatching.IsImage));
             var flutter = DrawsWithFlutter(device, visit.Screen.Package);
             foreach (var image in images)
             {
@@ -235,6 +239,7 @@ public sealed class PhoneImagesOfTextRun
                 var edge = rest.Where(line => !Within(line.Box, image.Bounds)).ToList();
                 rest = [.. rest.Except(edge)];
                 var beside = rest.Where(line => HeldBeside(line, image, window)).ToList();
+                var alt = AltText(image);
                 var kept = rest.Except(beside).ToList();
                 run.CaptionLines += said.Count;
                 run.EdgeLines += edge.Count;
@@ -249,7 +254,7 @@ public sealed class PhoneImagesOfTextRun
 
                 // Rule 4: an app that draws its own text, with an image
                 // whose description holds every word left.
-                if (flutter && DescriptionHolds(image.Node.ContentDescription, kept))
+                if (flutter && DescriptionHolds(alt, kept))
                 {
                     run.ManualChecks++;
                     var manual = $"{read}; {OwnText}; {Source(snapshot.Picture.Kind)}";
@@ -271,7 +276,7 @@ public sealed class PhoneImagesOfTextRun
                 if (time is not null && !run._questions.ContainsKey((visit, image.Identity)))
                 {
                     run._questions[(visit, image.Identity)] = new PhoneImageOfTextQuestion(
-                        visit, image.Identity, time, snapshot.Picture, Ocr(kept), image.Node.ContentDescription);
+                        visit, image.Identity, time, snapshot.Picture, Ocr(kept), alt, PhoneTextMatching.IsWebImage(image));
                 }
 
                 PhoneFindingTime? Add(Dictionary<(PhoneVisit, string, string), PhoneFinding> into, string check, PhoneCheckLevel findingLevel, string measuredText)
@@ -279,7 +284,7 @@ public sealed class PhoneImagesOfTextRun
                     var key = (visit, check, image.Identity);
                     if (!into.TryGetValue(key, out var finding))
                     {
-                        into[key] = finding = new PhoneFinding(check, findingLevel, visit, image.Identity, image.Label);
+                        into[key] = finding = new PhoneFinding(check, findingLevel, visit, image.Identity, image.Label) { Web = IsWeb(image) };
                     }
 
                     if (finding._times.Count > 0 && finding._times[^1].Snapshot.EventId == snapshot.Settled.EventId)
@@ -369,7 +374,7 @@ public sealed class PhoneImagesOfTextRun
 
             // The exceptions are no longer "not judged" where a model's
             // answer judged them; the answer says what it made of them.
-            var copy = new PhoneFinding(finding.Check, answer.Level, finding.Visit, finding.Identity, finding.Label) { Inference = answer };
+            var copy = new PhoneFinding(finding.Check, answer.Level, finding.Visit, finding.Identity, finding.Label) { Inference = answer, Web = finding.Web };
             copy._times.AddRange(finding._times.Select(time => time with
             {
                 Measured = time.Measured.Replace("; " + Exceptions145, "", StringComparison.Ordinal)
@@ -489,7 +494,8 @@ public sealed class PhoneImagesOfTextRun
         bool talkBack,
         TalkBackSpeechTimeline speech,
         PhoneAccessibilityTimeline accessibility) =>
-        Step(snapshot, images, CaptionAt(snapshot.Settled.MonotonicNanoseconds, talkBack, speech, accessibility));
+        Step(snapshot, images, CaptionAt(snapshot.Settled.MonotonicNanoseconds, talkBack, speech, accessibility),
+            item => item.InstanceOf(PhoneTextMatching.ImageViewClass));
 
     /// <summary>
     /// Rule 1, for the check of text on screen not in the tree
@@ -509,10 +515,11 @@ public sealed class PhoneImagesOfTextRun
     // TalkBack's, and those outnumber the text items it found where the tree
     // places them. Too few found alone is not enough: OCR misses small
     // labels over a photograph.
-    private static (bool OutOfStep, int Unexplained, int Found) Step(PhoneContrastSnapshot snapshot, List<PhoneCheckItem> images, Caption caption)
+    private static (bool OutOfStep, int Unexplained, int Found) Step(
+        PhoneContrastSnapshot snapshot, List<PhoneCheckItem> images, Caption caption, Func<PhoneCheckItem, bool> isImage)
     {
         var found = snapshot.Lines
-            .Where(line => line.Item is { } owner && !owner.InstanceOf(PhoneTextMatching.ImageViewClass) &&
+            .Where(line => line.Item is { } owner && !isImage(owner) &&
                 line.Place is PhoneTextPlace.AppTextPlacedByOcr or PhoneTextPlace.AppTextOnItemBounds)
             .GroupBy(line => line.Item!)
             .Count(group => group.Any(line => line.Place == PhoneTextPlace.AppTextPlacedByOcr));
@@ -545,7 +552,7 @@ public sealed class PhoneImagesOfTextRun
         var reach = Math.Max(2, line.WordsHeight);
         var bounds = image.Bounds;
         return window.Items.Any(other =>
-            other != image && !other.InstanceOf(PhoneTextMatching.ImageViewClass) && other.Node.VisibleToUser && !other.Bounds.IsEmpty &&
+            other != image && !PhoneTextMatching.IsImage(other) && other.Node.VisibleToUser && !other.Bounds.IsEmpty &&
             other.Bounds.Left <= bounds.Right + reach && other.Bounds.Right >= bounds.Left - reach &&
             other.Bounds.Top <= bounds.Bottom + reach && other.Bounds.Bottom >= bounds.Top - reach &&
             PhoneTextMatching.Spelling(other.Text + " " + other.Node.ContentDescription).Contains(spelt, StringComparison.Ordinal));
@@ -630,8 +637,10 @@ public sealed class PhoneImagesOfTextRun
     /// </summary>
     internal static Dictionary<PhoneCheckItem, List<PhoneTextLine>> InImages(
         IReadOnlyList<PhoneCheckItem> images,
-        IReadOnlyList<PhoneTextLine> lines)
+        IReadOnlyList<PhoneTextLine> lines,
+        Func<PhoneCheckItem, bool>? isImage = null)
     {
+        isImage ??= item => item.InstanceOf(PhoneTextMatching.ImageViewClass);
         var bySize = images
             .OrderBy(image => (long)image.Bounds.Width * image.Bounds.Height)
             .ThenBy(image => image.Node.Index)
@@ -639,7 +648,7 @@ public sealed class PhoneImagesOfTextRun
         var inside = new Dictionary<PhoneCheckItem, List<PhoneTextLine>>();
         foreach (var line in lines)
         {
-            if (string.IsNullOrWhiteSpace(line.OcrText) || IsAppsText(line))
+            if (string.IsNullOrWhiteSpace(line.OcrText) || IsAppsText(line, isImage))
             {
                 continue;
             }
@@ -667,9 +676,9 @@ public sealed class PhoneImagesOfTextRun
     // A line the app shows as text: its item, not an image, has text or a
     // hint that OCR's words matched; an item matched by its description
     // alone shows no text of its own.
-    private static bool IsAppsText(PhoneTextLine line) =>
+    private static bool IsAppsText(PhoneTextLine line, Func<PhoneCheckItem, bool> isImage) =>
         line.Item is { } item &&
-        !item.InstanceOf(PhoneTextMatching.ImageViewClass) &&
+        !isImage(item) &&
         (!string.IsNullOrWhiteSpace(item.Text) || !string.IsNullOrWhiteSpace(item.Node.Hint));
 
     // What OCR read inside the image, how tall, and whether its description
@@ -705,20 +714,47 @@ public sealed class PhoneImagesOfTextRun
     // matching (letters and digits, the characters OCR confuses as one).
     private static string Described(PhoneCheckItem image, IReadOnlyList<PhoneTextLine> lines)
     {
-        if (string.IsNullOrWhiteSpace(image.Node.ContentDescription))
+        var alt = AltText(image);
+        if (string.IsNullOrWhiteSpace(alt))
         {
-            return "it has no description";
+            return PhoneTextMatching.IsWebImage(image) ? "it has no alt text" : "it has no description";
         }
 
-        var description = PhoneTextMatching.Spelling(image.Node.ContentDescription);
+        var description = PhoneTextMatching.Spelling(alt);
         var words = lines
             .SelectMany(line => line.OcrText!.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
             .Select(PhoneTextMatching.Spelling)
             .Where(word => word.Length >= 2)
             .ToList();
         var held = words.Count(word => description.Contains(word, StringComparison.Ordinal));
+        var its = PhoneTextMatching.IsWebImage(image) ? "its alt text" : "its description";
         return held == words.Count
-            ? "its description holds them"
-            : held == 0 ? "its description holds none of them" : "its description holds some of them";
+            ? $"{its} holds them"
+            : held == 0 ? $"{its} holds none of them" : $"{its} holds some of them";
     }
+
+    /// <summary>
+    /// What a screen reader is given for the image: its description; for a
+    /// web image, whose alt text a browser may give as its text or its
+    /// description, both (android-checks.md, step 26, rule 2).
+    /// </summary>
+    internal static string? AltText(PhoneCheckItem image)
+    {
+        if (!PhoneTextMatching.IsWebImage(image))
+        {
+            return image.Node.ContentDescription;
+        }
+
+        var parts = new[] { image.Node.Text, image.Node.ContentDescription }
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .Select(part => part!.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        return parts.Count == 0 ? null : string.Join(" ", parts);
+    }
+
+    // Web content (step 26, rule 4): a web image, or an item inside a
+    // WebView.
+    private static bool IsWeb(PhoneCheckItem image) =>
+        PhoneTextMatching.IsWebImage(image) || PhoneTreeChecks.HasWebViewAncestor(image);
 }

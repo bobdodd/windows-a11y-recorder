@@ -1857,8 +1857,8 @@ text found by OCR in no item is not part of this step.
 - The exceptions are not judged, as above.
 - OCR misses stylised, small or low-contrast text, so an image of text
   can be missed; a picture drawn in a view that is not an `ImageView`
-  (a custom view, or a Compose image left out of the tree) is not
-  looked at. Text found by OCR in no item is a separate candidate, not
+  or, since step 26, a web image (a custom view, or a Compose image
+  left out of the tree) is not looked at. Text found by OCR in no item is a separate candidate, not
   built.
 - A later AI-free confirmation is in `android-checks-candidates.md`:
   text in an image does not grow with Android's font size.
@@ -4619,10 +4619,114 @@ model; and the levels of each answer and of two answers.
   all said in different items is taken as held.
 - A line inside a small item with words of its own is taken as a
   misread, even where the item also draws other text.
-- The image of text check looks only at ImageViews, so text in a web
-  image is left by this check to a check that does not read it.
 - How well the check finds drawn text is not measured; the sample had
   none.
+
+## Step 26: web images in the images-of-text check
+
+### The owner's decision (2026-11-18)
+
+Asked why web images were not tested as images of text, and told it was
+a gap, the owner asked to "Extend the images-of-text check to count web
+images and measure it on my recordings first". Offered five rules from
+the measurement below, the owner chose: "yes, update the images of text
+to handle web images using the 5 proposed rules and handle the alt text
+issue". The alt text issue is an image that has not loaded, whose alt
+text the browser draws in its place: rule 3 was first offered as no
+rule, and is built as a question to the model, below.
+
+### Measured on the development PC's recordings (2026-11-18)
+
+A probe, with no model, ran the images-of-text rules on the 20
+recordings on the PC, with and without web images, and was deleted
+after.
+
+- **The probe's copy of the rules** gave the recorder's findings on all
+  20 recordings: 17 findings and 5 not judged, from 145 snapshots OCR
+  read.
+- **Web images** (`android.widget.Image`, the class a WebView or a
+  browser gives an `img`): 9 on all visits, seen 96 times, all inside a
+  WebView, in a browser and an email app. OCR read no words in 6.
+- **The 3 with words:** a picture of three phone screens, a finding
+  with 2 misread lines kept after 3 lines held beside it were set aside,
+  a picture with significant other visual content for the model to
+  judge; a logo, not judged as its picture was out of step with the
+  tree; and an email's image that had not loaded, whose alt text the
+  browser drew in the image's box, passed only because TalkBack's
+  caption rule set the line aside.
+- **Alt text** was in the image's description in all 3, never in its
+  text.
+- **No knock-on effect:** counting web images changed the outcome of no
+  ImageView, no line inside a web image was held by another item's
+  text, and no other class named as an image was seen.
+
+### As built
+
+1. **A web image is an image.** A visible `android.widget.Image` with an
+   area counts as an image everywhere the images-of-text check uses
+   images: the lines inside it, the items beside it (an image is not an
+   item beside another), the app's own text (a line an image holds is
+   not the app's text) and the count of a picture out of step with the
+   tree. The four rules before it are unchanged
+   (`PhoneTextMatching.IsImage`). The checks that borrow the
+   out-of-step count, of an image with no text alternative (step 20)
+   and of an icon and its description (step 21), still count
+   ImageViews only.
+2. **Alt text from the text as well.** A browser may give an image's
+   alt text as its text or its description, so a web image's alt text
+   is both, the same words once (`PhoneImagesOfTextRun.AltText`). It is
+   what "its alt text holds them" or "it has no alt text" is measured
+   against, what Flutter's rule of a described image holding the words
+   reads, and what the model is given.
+3. **An image that has not loaded.** No rule without a model can tell a
+   browser's stand-in for an image from an image of text, so the
+   model's question for a web image says that the image is on a web
+   page, and that a browser that has not loaded an image draws a
+   stand-in in its place, such as its alt text or a broken-image icon;
+   it names the image's alt text as such, and adds a sixth answer,
+   `not-loaded`. Both answers agreeing that it had not loaded makes the
+   finding "not run", as the image itself was not seen, with the
+   model's reason and "check with the image loaded"; at AAA the 1.4.9
+   finding is the same. Answers that differ are a warning, as before.
+   An ImageView's question, its five answers and its key are as they
+   were, so answers kept for ImageViews still hold; the template stays
+   version 2.
+4. **Web remediation.** A finding on a web image, or on an image inside
+   a WebView, is marked as web content (`PhoneFinding.Web`), and the
+   report gives it "Suggested remediation for web content:" in place of
+   Android's, with no Flutter or React Native remediation, and the web's
+   sources (WCAG techniques C22 and H37) in place of Android's. At
+   1.4.5: "Show the words as HTML text styled with CSS instead of an
+   image. Keep images of text only for logos or where the look is
+   essential, and give the img element alt text with the same words."
+   The impact stays medium at 1.4.5 and low at 1.4.9. The guidance file
+   is version 4 ([android-report.md](android-report.md)).
+5. **The check of text not in the tree** (step 25) needs no change: it
+   already leaves a line inside a web image to this check, which now
+   reads it, so the gap is gone from its limits.
+
+### Checked
+
+The solution builds with no warnings, and the tests pass, 2,698 of
+them, with the tests that need Windows failing as before. The new tests
+cover a web image inside a WebView beside an ImageView, each a finding
+and only the web image's marked as web content; a web image's alt text
+from its text, its description, both, the same words in both, and
+neither; the web image's question and answers and the ImageView's
+unchanged; two answers that it had not loaded making the finding not
+run; and the report's web remediation and sources for a web image, and
+Android's for an ImageView.
+
+### Limits
+
+- The sample had 3 web images with words, so how often a web image of
+  text is found, and how well the model tells an image that had not
+  loaded, is not measured.
+- A finding is web content only by its image's class or a WebView above
+  it; a web page drawn in a view of another class is not known as one.
+- Only the images-of-text checks count web images and give web
+  remediation; the other image checks (steps 20, 21 and 23) still look
+  only at ImageViews.
 
 ## Decisions on the open questions (2026-11-11)
 

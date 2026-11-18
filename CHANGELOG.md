@@ -8,6 +8,23 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Web images in the images-of-text check
+
+- The images-of-text check now looks at web images, the images on a web
+  page shown in an app, as it does at ImageViews, for 1.4.5 and, at
+  AAA, 1.4.9.
+- A web image's alt text is read from its text as well as its
+  description, and the finding says whether its alt text holds the
+  words OCR read.
+- The model is told the image is on a web page, and can answer that it
+  had not loaded, with the browser's stand-in drawn in its place; two
+  such answers make the finding not run. An ImageView's question is
+  unchanged, so its kept answers still hold.
+- A finding on a web image, or on an image inside a WebView, gives the
+  remediation for web content in place of Android's, with WCAG
+  techniques C22 and H37 as its sources. The guidance file is version
+  4.
+
 ### Text not in the tree
 
 - A new check, "Text on screen not in the accessibility tree" (WCAG

@@ -70,6 +70,13 @@ public sealed class PhoneFinding
     /// </summary>
     public PhoneInference? Inference { get; internal init; }
 
+    /// <summary>
+    /// Whether the item is web content: a web image, or an item inside a
+    /// WebView, so that its remediation is the web's (android-checks.md,
+    /// step 26, rule 4). Set by the checks that tell it.
+    /// </summary>
+    public bool Web { get; internal init; }
+
     /// <summary>The finding as its row says it.</summary>
     public string Text
     {

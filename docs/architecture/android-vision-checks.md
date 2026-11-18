@@ -442,6 +442,16 @@ repeatable".
   findings mark each inferred level,
   give the model's answer in its own row, and add ", if confirmed" to the
   impact; "Limits" gives the check's note on the model.
+- **Web images** (2026-11-18, step 26 of `android-checks.md`). A web
+  image is an image to the rules, and its alt text, from its text or
+  its description, is given as "the image's alt text". Its question
+  adds that the image is on a web page and that a browser that has not
+  loaded an image draws a stand-in in its place, such as its alt text
+  or a broken-image icon, and a sixth answer, "not-loaded": both
+  answers agreeing on it make the finding "not run", as the image was
+  not seen. An ImageView's question and answers are unchanged, so the
+  template stays version 2 and the answers kept for ImageViews still
+  hold.
 
 ### Text shown as a heading, as built
 

@@ -116,8 +116,6 @@ public sealed class PhoneTextNotInTreeRun
     /// <summary>The most characters of what a screen reader says on the screen given to a model; the start is kept.</summary>
     public const int MostCharacters = 4000;
 
-    private const string WebImageClass = "android.widget.Image";
-
     private readonly Dictionary<PhoneVisit, List<PhoneFinding>> _byVisit = [];
     private readonly List<PhoneTextNotInTreeEntry> _entries = [];
     private readonly HashSet<PhoneVisit> _visitsRead = [];
@@ -260,7 +258,7 @@ public sealed class PhoneTextNotInTreeRun
             var items = window.Items;
             var frame = items[0].Bounds;
             var images = items
-                .Where(item => (item.InstanceOf(PhoneTextMatching.ImageViewClass) || item.Node.ClassName == WebImageClass) &&
+                .Where(item => PhoneTextMatching.IsImage(item) &&
                     item.Node.VisibleToUser && !item.Bounds.IsEmpty)
                 .ToList();
             var said = PhoneImagesOfTextRun.CaptionSaid(snapshot.Settled.MonotonicNanoseconds, talkBack, speech, accessibility);

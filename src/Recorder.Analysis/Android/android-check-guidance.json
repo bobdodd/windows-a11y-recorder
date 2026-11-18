@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "note": "Fixed text for each Android check, shown with every finding in the Android report and summary (docs/architecture/android-report.md). The impact levels, high, medium and low as in the project's other tools, are the recorder's default judgement of an issue once confirmed; they are not measured. Each check's sources support its text.",
   "impact": [
     { "level": "high", "meaning": "Can stop the people it affects from completing a task, or make a task very hard for them or likely to fail." },
@@ -72,7 +72,9 @@
     "rn-accessibility": { "title": "React Native: Accessibility", "url": "https://reactnative.dev/docs/accessibility" },
     "rn-accessibilityinfo": { "title": "React Native: AccessibilityInfo", "url": "https://reactnative.dev/docs/accessibilityinfo" },
     "rn-view": { "title": "React Native: View", "url": "https://reactnative.dev/docs/view" },
-    "rn-text-style": { "title": "React Native: Text style props", "url": "https://reactnative.dev/docs/text-style-props" }
+    "rn-text-style": { "title": "React Native: Text style props", "url": "https://reactnative.dev/docs/text-style-props" },
+    "web-c22": { "title": "WCAG Technique C22: Using CSS to control visual presentation of text", "url": "https://www.w3.org/WAI/WCAG22/Techniques/css/C22" },
+    "web-h37": { "title": "WCAG Technique H37: Using alt attributes on img elements", "url": "https://www.w3.org/WAI/WCAG22/Techniques/html/H37" }
   },
   "criteria": {
     "1.1.1": { "name": "Non-text Content", "level": "A", "source": "wcag-1.1.1" },
@@ -325,7 +327,8 @@
       "android": "Show the words as real text, in a TextView or Compose Text, styled as needed. Keep images of text only for logos or where the look is essential, and give them a content description with the same words.",
       "flutter": "Show the words with a Text widget instead of an Image; for a logo, set the Image's semanticLabel to its words.",
       "reactNative": "Show the words with a Text element instead of an Image; for a logo, set accessibilityLabel to its words.",
-      "sources": ["wcag-1.4.5", "scanner-labels", "flutter-image-label"]
+      "web": "Show the words as HTML text styled with CSS instead of an image. Keep images of text only for logos or where the look is essential, and give the img element alt text with the same words.",
+      "sources": ["wcag-1.4.5", "scanner-labels", "flutter-image-label", "web-c22", "web-h37"]
     },
     {
       "check": "image-of-text-aaa",
@@ -340,7 +343,8 @@
       "android": "Show the words as real text; keep images of text only for logos or where the look is essential.",
       "flutter": "Show the words with a Text widget; keep images of text only for logos.",
       "reactNative": "Show the words with a Text element; keep images of text only for logos.",
-      "sources": ["wcag-1.4.9"]
+      "web": "Show the words as HTML text styled with CSS; keep images of text only for logos.",
+      "sources": ["wcag-1.4.9", "web-c22"]
     },
     {
       "check": "text-shown-as-heading",

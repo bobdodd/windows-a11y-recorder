@@ -711,7 +711,7 @@ public static class PhoneTreeChecks
         return false;
     }
 
-    private static bool HasWebViewAncestor(PhoneCheckItem view)
+    internal static bool HasWebViewAncestor(PhoneCheckItem view)
     {
         for (var ancestor = view.Parent; ancestor is not null; ancestor = ancestor.Parent)
         {

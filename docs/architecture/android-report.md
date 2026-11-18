@@ -240,7 +240,12 @@ Then the finding's picture (see "Pictures"), and these paragraphs:
   "Suggested remediation for Flutter:" and "for React Native:" only when
   the recorder found that framework's library in the app (see
   [framework metadata](android-framework-metadata.md)). A framework's
-  sources are listed only with its remediation.
+  sources are listed only with its remediation. A finding in web
+  content shown in the app, a web image or an item inside a WebView,
+  is given "Suggested remediation for web content:" in place of these,
+  with the web's sources in place of Android's, as it is fixed in the
+  web page ([android-checks.md](android-checks.md), step 26, rule 4).
+  Only the images-of-text checks give web remediation so far.
 - "Sources:", each with its title and address.
 
 Two snapshots can be shown by the same video frame, when the picture did
@@ -254,7 +259,8 @@ The fixed text of every check is in
 the program. It holds, for each of the 43 checks: the title, the issue,
 why it matters, who it affects, the impact level, the WCAG success
 criteria and related ones, the basis, the remediation for Android,
-Flutter and React Native, and its sources. The sources and criteria are
+Flutter and React Native, for a check that can find an issue in web
+content the remediation for web content, and its sources. The sources and criteria are
 listed once, by key, with their titles and addresses. A test checks
 that every check the recorder has is in the file, that every key
 resolves, and that the file holds no em dash.
@@ -268,7 +274,10 @@ shown only by a bottom line and of text shown as a heading, and brought
 the bases of the non-text contrast, target-size and images-of-text
 checks up to their rules; a basis says what is judged, and from what,
 without naming the model, as the finding's level and its own row say
-where a model's answer was used.
+where a model's answer was used. Version 4 (2026-11-18) added the
+remediation for web content to the images-of-text checks, at 1.4.5 and
+1.4.9, with the WCAG techniques C22 (CSS to control the presentation of
+text) and H37 (alt attributes on img elements) as its sources.
 
 ### The impact levels
 

@@ -426,6 +426,22 @@ public static class PhoneTextMatching
 {
     internal const string ImageViewClass = "android.widget.ImageView";
 
+    /// <summary>
+    /// The class a WebView or browser gives an image of its page (an HTML
+    /// <c>img</c>); Android itself has no such widget (android-checks.md,
+    /// step 26).
+    /// </summary>
+    internal const string WebImageClass = "android.widget.Image";
+
+    /// <summary>
+    /// An image to the images-of-text check: an ImageView or a class drawn
+    /// from one, or a web image (android-checks.md, step 26, rule 1).
+    /// </summary>
+    internal static bool IsImage(PhoneCheckItem item) => item.InstanceOf(ImageViewClass) || IsWebImage(item);
+
+    /// <summary>A web image: an item of the class a WebView or browser gives an image.</summary>
+    internal static bool IsWebImage(PhoneCheckItem item) => item.Node.ClassName == WebImageClass;
+
     // A box is widened by this share of its height on each side, so the
     // background around the letters is in it, within the item.
     private const double Margin = 0.2;

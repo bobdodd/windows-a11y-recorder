@@ -52,6 +52,7 @@ public sealed class ModelChecksTests
     [InlineData("picture-with-other-content", PhoneCheckLevel.Info, "so it is not an image of text, not confirmed")]
     [InlineData("could-be-text", PhoneCheckLevel.Error, "so it is an image of text; whether a user can customize it is not judged")]
     [InlineData("cannot-tell", PhoneCheckLevel.Warning, "check manually")]
+    [InlineData("not-loaded", PhoneCheckLevel.NotRun, "the image had not loaded and the browser drew a stand-in in its place, so the image itself was not seen and the check is not run on it, not confirmed")]
     public void Two_answers_that_agree_judge_the_image_as_an_inference(string answer, PhoneCheckLevel level, string says)
     {
         var inference = AndroidImagesOfText.Interpret(new(answer, "First reason."), new(answer, "Second reason."), "Gemma", cloud: false);

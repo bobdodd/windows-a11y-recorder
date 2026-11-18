@@ -49,7 +49,17 @@ public static class AndroidImagesOfText
 
     public const string CannotTell = "cannot-tell";
 
+    /// <summary>
+    /// A web image's sixth answer (android-checks.md, step 26, rule 3): the
+    /// image had not loaded, and what is drawn is the browser's stand-in for
+    /// it, such as its alt text or a broken-image icon.
+    /// </summary>
+    public const string NotLoaded = "not-loaded";
+
     public static readonly IReadOnlyList<string> Answers = [Logotype, Essential, PictureWithOtherContent, CouldBeText, CannotTell];
+
+    /// <summary>A web image's answers: the five, and that it had not loaded.</summary>
+    public static readonly IReadOnlyList<string> WebAnswers = [Logotype, Essential, PictureWithOtherContent, CouldBeText, NotLoaded, CannotTell];
 
     public const string Instructions =
         "You judge one image in an Android app for WCAG 2.2 success criterion 1.4.5, Images of Text. " +
@@ -66,16 +76,25 @@ public static class AndroidImagesOfText
 
     private const int LongestCrop = 1024;
 
-    /// <summary>The question's text, as measured on 2026-11-15.</summary>
-    public static string Question(string app, string screenName, string ocr, string? description) =>
+    /// <summary>
+    /// The question's text, as measured on 2026-11-15. For a web image
+    /// (android-checks.md, step 26, rule 3) it says the image is on a web
+    /// page, gives its alt text, and adds the answer that it had not loaded;
+    /// an ImageView's question is as it was, so its kept answers still hold.
+    /// </summary>
+    public static string Question(string app, string screenName, string ocr, string? description, bool web = false) =>
         $"Picture A is the whole screen of the Android app {app}, on its screen \"{screenName}\", with the image outlined in cyan. Picture B is the image itself, at full size.\n" +
+        (web ? "The image is on a web page shown in the app. A browser that has not loaded an image draws a stand-in in its place, such as its alt text or a broken-image icon.\n" : "") +
         $"What OCR read inside the image: {ocr}\n" +
-        (string.IsNullOrWhiteSpace(description) ? "The image has no description for a screen reader.\n" : $"The image's description for a screen reader: \"{description}\"\n") +
+        (web
+            ? string.IsNullOrWhiteSpace(description) ? "The image has no alt text for a screen reader.\n" : $"The image's alt text for a screen reader: \"{description}\"\n"
+            : string.IsNullOrWhiteSpace(description) ? "The image has no description for a screen reader.\n" : $"The image's description for a screen reader: \"{description}\"\n") +
         "Which one is true of the text drawn in the image?\n" +
         "- logotype: the text is part of a logo or brand name.\n" +
         "- essential: this particular presentation of the text is essential to what is shown, such as a photograph of a sign, a signature, or a sample of a typeface or of a text size.\n" +
         "- picture-with-other-content: the text is part of a picture with significant other visual content, such as a photograph or an illustration, and is not the picture's main content.\n" +
         "- could-be-text: the text could be shown as real text, styled by the app, with the same look; it is an image of text.\n" +
+        (web ? "- not-loaded: the image has not loaded, and what is drawn is the browser's stand-in for it, such as its alt text or a broken-image icon.\n" : "") +
         "- cannot-tell: the pictures do not show enough to judge.\n" +
         "First write one sentence saying what in the pictures shows the answer, then give the answer.";
 
@@ -117,7 +136,7 @@ public static class AndroidImagesOfText
         var bounds = question.Bounds;
         var screen = Png(Screen(pixels, bounds));
         var crop = Png(Crop(pixels, bounds));
-        var input = Question(question.App, question.ScreenName, question.Ocr, question.Description);
+        var input = Question(question.App, question.ScreenName, question.Ocr, question.Description, question.Web);
         var request = new ModelRequest(
             Template,
             TemplateVersion,
@@ -128,7 +147,7 @@ public static class AndroidImagesOfText
             new HashSet<string>(StringComparer.Ordinal))
         {
             Use = ModelUses.VisionChecks,
-            Answers = Answers,
+            Answers = question.Web ? WebAnswers : Answers,
             ReusedAcrossTasks = true,
         };
 
@@ -240,7 +259,9 @@ public static class AndroidImagesOfText
     /// pictures do not tell, or not agreed, a warning to check manually.
     /// The 1.4.9 finding of an image takes the same: a logotype is
     /// essential, and text in a picture with significant other visual
-    /// content is not an image of text by WCAG's definition.
+    /// content is not an image of text by WCAG's definition. A web image
+    /// agreed not to have loaded is a check not run, as the image itself was
+    /// not seen (android-checks.md, step 26, rule 3).
     /// </summary>
     public static PhoneInference Interpret(ClosedAnswerOf first, ClosedAnswerOf second, string model, bool cloud)
     {
@@ -266,6 +287,9 @@ public static class AndroidImagesOfText
                 Inferred: true, model, cloud),
             PictureWithOtherContent => new PhoneInference(PhoneCheckLevel.Info,
                 $"{who} inferred from the pictures{twice} that the text is part of a picture with significant other visual content, so it is not an image of text, not confirmed: \"{first.Reason}\"",
+                Inferred: true, model, cloud),
+            NotLoaded => new PhoneInference(PhoneCheckLevel.NotRun,
+                $"{who} inferred from the pictures{twice} that the image had not loaded and the browser drew a stand-in in its place, so the image itself was not seen and the check is not run on it, not confirmed: \"{first.Reason}\"; check with the image loaded",
                 Inferred: true, model, cloud),
             CouldBeText => new PhoneInference(PhoneCheckLevel.Error,
                 $"{who} inferred from the pictures{twice} that the text could be shown as real text with the same look, so it is an image of text; whether a user can customize it is not judged: \"{first.Reason}\"",

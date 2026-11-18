@@ -24,7 +24,9 @@ public sealed record GuidanceCriterion(string Name, string Level, string Source)
 /// title, what the issue is, why it matters, who it affects, its impact
 /// once confirmed, the success criteria it fails and those it relates to,
 /// what the check rests on, the remediation for Android, Flutter and React
-/// Native, and its sources.
+/// Native, and its sources. A check that can find an issue in web content
+/// shown in the app also gives the web's remediation, which a web finding
+/// is given in place of the others (android-checks.md, step 26, rule 4).
 /// </summary>
 public sealed record CheckGuidance(
     string Check,
@@ -39,7 +41,8 @@ public sealed record CheckGuidance(
     string Android,
     string Flutter,
     string ReactNative,
-    IReadOnlyList<string> Sources);
+    IReadOnlyList<string> Sources,
+    string? Web = null);
 
 /// <summary>
 /// The guidance for every Android check, read from the file built into the

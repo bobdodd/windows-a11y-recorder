@@ -2483,6 +2483,119 @@ public sealed class PhoneCheckRunTests : IDisposable
             ((png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19], (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23]);
     }
 
+    // Step 26: a web image is an image to the check. A WebView holds a
+    // web image whose alt text the browser gave as its text, and an
+    // ImageView beside it; OCR read words inside each that no item holds.
+    private static (PhoneCheckWindow Window, PhoneTextLine[] Lines) WebPictures(string? altText = "Spring offer", string? altDescription = null)
+    {
+        var window = new PhoneCheckWindow(512, 1,
+        [
+            ImageNode(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout"),
+            ImageNode(1, 0, (0, 200, 1080, 1800), "android.webkit.WebView"),
+            ImageNode(2, 1, (59, 324, 1022, 724), "android.widget.Image", altDescription, altText),
+            ImageNode(3, 0, (59, 1900, 1022, 2300), "android.widget.ImageView"),
+        ]);
+        PhoneTextLine[] lines =
+        [
+            new(null, window.Items[2], PhoneTextPlace.FoundByOcr, null, "Sale 50%", new PhoneBounds(100, 400, 500, 442), null, 42),
+            new(null, window.Items[3], PhoneTextPlace.FoundByOcr, null, "Free delivery", new PhoneBounds(100, 2000, 600, 2042), null, 42),
+        ];
+        return (window, lines);
+    }
+
+    // Rules 1, 2 and 4: the web image's words are a finding, as the
+    // ImageView's are; its alt text, given as its text, is what its
+    // question and its measurement name; and only its finding is web
+    // content.
+    [Fact]
+    public void ImagesOfText_CountsAWebImage_ReadsItsAltText_AndMarksItsFindingWeb()
+    {
+        var pictures = WebPictures();
+        var run = ImagesOfTextRun(pictures);
+
+        Assert.Equal(2, run.Findings.Count);
+        var web = run.Findings.Single(finding => finding.Identity == pictures.Window.Items[2].Identity);
+        var view = run.Findings.Single(finding => finding.Identity == pictures.Window.Items[3].Identity);
+        Assert.True(web.Web);
+        Assert.False(view.Web);
+        Assert.Contains("its alt text holds none of them", web.Times[0].Measured, StringComparison.Ordinal);
+        Assert.Contains("it has no description", view.Times[0].Measured, StringComparison.Ordinal);
+        var question = run.QuestionOf(web)!;
+        Assert.True(question.Web);
+        Assert.Equal("Spring offer", question.Description);
+        Assert.False(run.QuestionOf(view)!.Web);
+    }
+
+    // Rule 2: a web image's alt text may be its text, its description, or
+    // both; the same words given twice are given once.
+    [Theory]
+    [InlineData("Sale 50%", null, "Sale 50%", "its alt text holds them")]
+    [InlineData(null, "Sale 50%", "Sale 50%", "its alt text holds them")]
+    [InlineData("Sale 50%", "Sale 50%", "Sale 50%", "its alt text holds them")]
+    [InlineData("Sale", "Half price", "Sale Half price", "its alt text holds some of them")]
+    [InlineData(null, null, null, "it has no alt text")]
+    public void ImagesOfText_TakesAWebImagesAltTextFromItsTextOrDescription(string? text, string? description, string? alt, string says)
+    {
+        var pictures = WebPictures(text, description);
+        var run = ImagesOfTextRun(pictures);
+
+        var web = run.Findings.Single(finding => finding.Identity == pictures.Window.Items[2].Identity);
+        Assert.Contains(says, web.Times[0].Measured, StringComparison.Ordinal);
+        Assert.Equal(alt, run.QuestionOf(web)!.Description);
+    }
+
+    // Rule 3: a web image's question says it is on a web page, gives its
+    // alt text, and adds the answer that it had not loaded; an ImageView's
+    // question and answers are as they were.
+    [Fact]
+    public void ImagesOfText_AsksOfAWebImageWhetherItHadLoaded_AndOfAnImageViewAsBefore()
+    {
+        var pictures = WebPictures();
+        var run = ImagesOfTextRun(pictures);
+        var rgb = new uint[1080 * 2400];
+        Array.Fill(rgb, 0x203040u);
+        var pixels = new PhonePixels(1080, 2400, rgb);
+        var web = run.Questions.Single(question => question.Web);
+        var view = run.Questions.Single(question => !question.Web);
+
+        var ofWeb = Recorder.Analysis.Android.AndroidImagesOfText.RequestOf(web, pixels);
+        var ofView = Recorder.Analysis.Android.AndroidImagesOfText.RequestOf(view, pixels);
+
+        Assert.Equal(Recorder.Analysis.Android.AndroidImagesOfText.WebAnswers, ofWeb.Request.Answers);
+        Assert.Contains("not-loaded", ofWeb.Request.Answers!);
+        Assert.Contains("The image is on a web page shown in the app.", ofWeb.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("The image's alt text for a screen reader: \"Spring offer\"", ofWeb.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("- not-loaded: the image has not loaded", ofWeb.Request.Input, StringComparison.Ordinal);
+        Assert.Equal(Recorder.Analysis.Android.AndroidImagesOfText.Answers, ofView.Request.Answers);
+        Assert.DoesNotContain("web page", ofView.Request.Input, StringComparison.Ordinal);
+        Assert.DoesNotContain("not-loaded", ofView.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("The image has no description for a screen reader.", ofView.Request.Input, StringComparison.Ordinal);
+        Assert.Equal(
+            Recorder.Analysis.Android.AndroidImagesOfText.Question("App", "Screen", "OCR read", null),
+            Recorder.Analysis.Android.AndroidImagesOfText.Question("App", "Screen", "OCR read", null, web: false));
+    }
+
+    // Rule 3: a web image both answers agree had not loaded is not run,
+    // and its finding keeps its web mark.
+    [Fact]
+    public void ImagesOfText_AWebImageThatHadNotLoaded_IsNotRun()
+    {
+        var pictures = WebPictures();
+        var run = ImagesOfTextRun(pictures);
+        var web = run.Questions.Single(question => question.Web);
+        var answer = Recorder.Analysis.Android.AndroidImagesOfText.Interpret(
+            new Recorder.Analysis.ClosedAnswerOf("not-loaded", "A broken-image icon with its alt text."),
+            new Recorder.Analysis.ClosedAnswerOf("not-loaded", "The browser's stand-in for an image."),
+            "Claude Haiku 5.5", cloud: true);
+
+        var judged = run.Judged(new Dictionary<PhoneImageOfTextQuestion, PhoneInference> { [web] = answer }, null);
+
+        var finding = judged.Findings.Single(finding => finding.Identity == web.Identity);
+        Assert.Equal(PhoneCheckLevel.NotRun, finding.Level);
+        Assert.True(finding.Web);
+        Assert.Contains("had not loaded", finding.Inference!.Text, StringComparison.Ordinal);
+    }
+
     // Answers kept by their requests judge the run for the Checks tab: a
     // repeatable model's one answer, a cloud model's two.
     [Fact]

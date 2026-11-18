@@ -636,6 +636,35 @@ public sealed class AndroidReportTests : IDisposable
         Assert.DoesNotContain("AI is used", plainClient, StringComparison.Ordinal);
     }
 
+    // A finding on a web image is given the remediation for web content,
+    // with the web's sources, in place of Android's (android-checks.md,
+    // step 26, rule 4); a finding on an ImageView is given Android's.
+    [Fact]
+    public void Report_WithAWebImageOfText_GivesTheRemediationForWebContent()
+    {
+        var inference = Recorder.Analysis.Android.AndroidImagesOfText.Interpret(
+            new("could-be-text", "Plain words on a flat colour."), new("could-be-text", "Plain words."), "Claude Haiku 5.5", cloud: true);
+        var (input, guidance, evidence) = Recording(imageOfText: inference, webImage: true);
+        var check = guidance.Checks.Single(entry => entry.Check == PhoneCheckNames.ImageOfText);
+
+        var markdown = AndroidReport.Write(input, guidance, evidence, null, Path.Combine(_folder, "pictures"), "pictures", new DateTime(2026, 11, 18, 12, 0, 0, DateTimeKind.Utc));
+
+        Assert.NotNull(check.Web);
+        Assert.Contains("Suggested remediation for web content: " + check.Web, markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("Suggested remediation for Android: " + check.Android, markdown, StringComparison.Ordinal);
+        Assert.Contains(guidance.Sources["web-c22"].Url, markdown, StringComparison.Ordinal);
+        Assert.Contains(guidance.Sources["web-h37"].Url, markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain(guidance.Sources["scanner-labels"].Url, markdown, StringComparison.Ordinal);
+        Assert.Contains("Suggested remediation for web content:", AndroidReport.Labels);
+
+        var (plain, _, plainEvidence) = Recording(sessionKey: "t", within: "view", imageOfText: inference);
+        var ofView = AndroidReport.Write(plain, guidance, plainEvidence, null, Path.Combine(_folder, "view", "pictures"), "pictures", new DateTime(2026, 11, 18, 12, 0, 0, DateTimeKind.Utc));
+        Assert.Contains("Suggested remediation for Android: " + check.Android, ofView, StringComparison.Ordinal);
+        Assert.DoesNotContain("Suggested remediation for web content:", ofView, StringComparison.Ordinal);
+        Assert.DoesNotContain(guidance.Sources["web-c22"].Url, ofView, StringComparison.Ordinal);
+        Assert.Contains(guidance.Sources["scanner-labels"].Url, ofView, StringComparison.Ordinal);
+    }
+
     // A finding of text shown as a heading follows the template of every
     // finding: its table, the model's answer, the guidance's paragraphs and
     // its sources, in the auditor's report and the client's.
@@ -674,7 +703,7 @@ public sealed class AndroidReportTests : IDisposable
     // of the phone at 1.5 seconds.
     private (AndroidReportInput Input, AndroidGuidance Guidance, AndroidEvidence Evidence) Recording(
         bool returns = false, string sessionKey = "s", string? version = null, string? within = null, PhoneInference? imageOfText = null,
-        PhoneInference? heading = null)
+        PhoneInference? heading = null, bool webImage = false)
     {
         var folder = within is null ? _folder : Path.Combine(_folder, within);
         Directory.CreateDirectory(folder);
@@ -735,7 +764,7 @@ public sealed class AndroidReportTests : IDisposable
             var window = new PhoneCheckWindow(512, 1,
             [
                 new AndroidTreeNode { Index = 0, ClassName = "android.widget.FrameLayout", Bounds = new AndroidNodeBounds(0, 0, 1080, 2404), Checked = "unchecked", ImportantForAccessibility = true, VisibleToUser = true },
-                new AndroidTreeNode { Index = 1, Parent = 0, ClassName = "android.widget.ImageView", Bounds = new AndroidNodeBounds(100, 400, 900, 800), Checked = "unchecked", ImportantForAccessibility = true, VisibleToUser = true },
+                new AndroidTreeNode { Index = 1, Parent = 0, ClassName = webImage ? "android.widget.Image" : "android.widget.ImageView", Bounds = new AndroidNodeBounds(100, 400, 900, 800), Checked = "unchecked", ImportantForAccessibility = true, VisibleToUser = true },
             ]);
             PhoneTextLine[] lines = [new(null, window.Items[1], PhoneTextPlace.FoundByOcr, null, "Sale 50%", new PhoneBounds(200, 500, 600, 560), null, 60)];
             var measured = PhoneContrastRun.Of(

@@ -99,7 +99,8 @@ public static class AndroidReport
     public static readonly IReadOnlyList<string> Labels =
     [
         "What the issue is:", "Why it matters:", "Who it affects:", "Suggested remediation for Android:",
-        "Suggested remediation for Flutter:", "Suggested remediation for React Native:", "Picture:", "Sources:",
+        "Suggested remediation for Flutter:", "Suggested remediation for React Native:",
+        "Suggested remediation for web content:", "Picture:", "Sources:",
     ];
 
     /// <summary>
@@ -384,7 +385,7 @@ public static class AndroidReport
                 ? "A finding seen on more than one visit to a screen, in one recording or in several, the same check at the same level on the same item, is given once, under \"Findings on more than one visit\" before the screen's visits, with what was measured and when it was seen on each visit, and the app's version in each recording."
                 : "A finding seen on more than one visit to a screen, the same check at the same level on the same item, is given once, under \"Findings on more than one visit\" before the screen's visits, with what was measured and when it was seen on each visit.");
             Paragraph("In the pictures, each item is outlined in cyan between two black bands, with the finding's number in black on cyan beside it. A small item also has a zoomed picture, taken from the picture at full size. A finding about the whole screen has no outline.");
-            Paragraph("The remediation is given for Android's own Views and Jetpack Compose, and also for Flutter or React Native when the recorder found that framework's library in the app. The recorder reads which libraries are bundled in the app's files, not which framework drew each screen, and not finding one does not mean the app is native Android.");
+            Paragraph("The remediation is given for Android's own Views and Jetpack Compose, and also for Flutter or React Native when the recorder found that framework's library in the app. The recorder reads which libraries are bundled in the app's files, not which framework drew each screen, and not finding one does not mean the app is native Android. An issue found in web content shown in the app, such as an image on a web page, is given the remediation for web content instead, as it is fixed in the web page.");
             Paragraph(_several
                 ? "References such as [E3] are to the evidence list at the end, which gives each one's recording and its time in that recording."
                 : "References such as [E3] are to the evidence list at the end, which gives each one's time in the recording.");
@@ -935,8 +936,21 @@ public static class AndroidReport
             Paragraph("What the issue is: " + check.Issue);
             Paragraph("Why it matters: " + check.Why);
             Paragraph("Who it affects: " + string.Join("; ", check.Affects) + ".");
-            Paragraph("Suggested remediation for Android: " + check.Android);
-            var frameworks = Frameworks(finding.Screen.Package);
+            // An issue in web content shown in the app, a web image or an
+            // item inside a WebView, is fixed in the web page, so it is
+            // given the web's remediation in place of the app's
+            // (android-checks.md, step 26, rule 4).
+            var web = check.Web is not null && numbered.Visits.Any(on => on.Finding.Web);
+            var frameworks = web ? [] : Frameworks(finding.Screen.Package);
+            if (web)
+            {
+                Paragraph("Suggested remediation for web content: " + check.Web);
+            }
+            else
+            {
+                Paragraph("Suggested remediation for Android: " + check.Android);
+            }
+
             if (frameworks.Contains("Flutter"))
             {
                 Paragraph("Suggested remediation for Flutter: " + check.Flutter);
@@ -951,11 +965,15 @@ public static class AndroidReport
             foreach (var key in check.Sources)
             {
                 // A framework's sources go with its remediation, only when the
-                // framework was found.
+                // framework was found; the web's go only with the web's, and
+                // Android's own only with Android's.
                 var framework = key.StartsWith("flutter-", StringComparison.Ordinal) ? "Flutter"
                     : key.StartsWith("rn-", StringComparison.Ordinal) ? "React Native"
                     : null;
-                if ((framework is null || frameworks.Contains(framework)) && guidance.Sources.TryGetValue(key, out var source))
+                var shown = key.StartsWith("web-", StringComparison.Ordinal) ? web
+                    : IsAndroidSource(key) ? !web
+                    : framework is null || frameworks.Contains(framework);
+                if (shown && guidance.Sources.TryGetValue(key, out var source))
                 {
                     // The client's report links each source by its title,
                     // so that the link says where it goes.
@@ -963,6 +981,12 @@ public static class AndroidReport
                 }
             }
         }
+
+        // A source for Android's own remediation, which a web finding is
+        // not given.
+        private static bool IsAndroidSource(string key) =>
+            key.StartsWith("android-", StringComparison.Ordinal) || key.StartsWith("scanner-", StringComparison.Ordinal) ||
+            key.StartsWith("atf-", StringComparison.Ordinal) || key.StartsWith("compose-", StringComparison.Ordinal);
 
         private string Criteria(CheckGuidance? check)
         {
