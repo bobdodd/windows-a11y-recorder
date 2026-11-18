@@ -78,6 +78,7 @@ public partial class MainWindow
         _projectShownFor = null;
         Title = AppTitle;
         AnalysisProjectTextBlock.Visibility = Visibility.Collapsed;
+        HideChecksToast();
         _analysisSessionDirectory = _playbackArchive?.SessionDirectory;
         _analysisTasks = null;
         _analysisTasksShown = "";
@@ -168,10 +169,18 @@ public partial class MainWindow
 
             var tasks = await catalog.TasksAsync(recording, CancellationToken.None);
             _analysisUsage = await catalog.ServiceUsageAsync(recording, CancellationToken.None);
+
+            // The model checks' toasts are spoken in place of their tasks'
+            // lines here, so a screen reader does not say both.
+            var toasts = ModelChecksProgress.Changes(_analysisTasks, tasks);
+            var spoken = AnalysisPlayer.Changes(_analysisTasks, tasks.Where(task => task.Kind != AndroidModelChecksKind.Name).ToList());
             foreach (var message in AnalysisPlayer.Changes(_analysisTasks, tasks))
             {
                 ShowAnalysisStatus(message);
-                _busy.AnnounceAnalysis(message);
+                if (spoken.Contains(message))
+                {
+                    _busy.AnnounceAnalysis(message);
+                }
             }
 
             // A task that asks the model for vision-based checks has kept
@@ -182,9 +191,11 @@ public partial class MainWindow
                 before.FirstOrDefault(earlier => earlier.TaskId == task.TaskId)?.State is { } was && was != AnalysisTaskStates.Done);
             _analysisTasks = tasks;
             UpdateAskChecksModelButton();
-            if (answered)
+            ShowModelChecksToasts(toasts.Where(change => change.Stage != ModelChecksStage.Finished));
+            var finished = toasts.LastOrDefault(change => change.Stage == ModelChecksStage.Finished);
+            if (answered || finished is not null)
             {
-                _ = ApplyKeptAnswersAsync();
+                _ = ApplyKeptAnswersAsync(finished);
             }
 
             ShowTasks(tasks, tasks.Count == 0 ? "No analysis has been queued for this recording." : null);
@@ -394,30 +405,40 @@ public partial class MainWindow
                 aiAnalysis: true);
 
     // A recording's task, queued with the project's models as they are now.
-    private async Task QueueAsync(string kind, Guid? rerunOfTaskId = null)
+    // Whether it was queued; where it was not, the status line says why.
+    // The model checks' toasts tell screen readers of their task, so the
+    // Checks window's button queues it without the status line's words
+    // being spoken as well (announce: false).
+    private async Task<bool> QueueAsync(string kind, Guid? rerunOfTaskId = null, bool announce = true)
     {
         if (AnalysisCatalogOrNull is not { } catalog || _analysisRecordingId is not { } recording || _analysisSessionDirectory is null)
         {
             ShowAnalysisStatus("Open a recording that is in the catalog to queue its analysis.");
-            return;
+            return false;
         }
 
         try
         {
             if (ProfilesFor(kind, await CurrentModelsAsync(catalog)) is not { } profiles)
             {
-                return;
+                return false;
             }
 
             await catalog.QueueTaskAsync(recording, kind, KindVersion(kind), profiles, sessionDirectory: _analysisSessionDirectory, rerunOfTaskId: rerunOfTaskId, aiAnalysis: profiles.Count > 0, cancellationToken: CancellationToken.None);
             ShowAnalysisStatus(QueuedWith(kind, profiles));
-            _busy.AnnounceCompleted(AnalysisStatusTextBlock.Text);
+            if (announce)
+            {
+                _busy.AnnounceCompleted(AnalysisStatusTextBlock.Text);
+            }
+
             StartWorker();
             await ReadAnalysisAsync();
+            return true;
         }
         catch (NpgsqlException exception)
         {
             ShowAnalysisStatus($"The task could not be queued: {exception.Message}");
+            return false;
         }
     }
 

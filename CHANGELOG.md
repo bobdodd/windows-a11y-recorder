@@ -8,6 +8,18 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Toasts for the model checks
+
+- "Ask the project's model" in the Checks window is followed by toasts
+  at the foot of the window: when the model checks are queued and
+  waiting, when they start, and when they are complete, failed or
+  cancelled. "Complete" is shown once the answers are in the findings,
+  and says how many questions are still not judged.
+- A toast stays until Close is pressed or the next replaces it, does not
+  cover the tabs or take focus, and is spoken by screen readers. The
+  Analysis window's line for the model checks is no longer spoken as
+  well.
+
 ### The Checks window's Summary tab
 
 - The Checks window has two tabs, Findings and Summary. The paragraph of

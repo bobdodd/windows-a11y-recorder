@@ -396,6 +396,18 @@ public partial class MainWindow
         _ = ApplyKeptAnswersAsync();
     }
 
+    // The kept answers shown, then, where a task of the model checks
+    // finished, its toast, so that it says how many questions are still
+    // not judged once the answers are in the findings.
+    private async Task ApplyKeptAnswersAsync(ModelChecksChange? finished)
+    {
+        await ApplyKeptAnswersAsync();
+        if (finished is not null)
+        {
+            ShowModelChecksToasts([finished]);
+        }
+    }
+
     // Gives the images-of-text check, the check of text shown as a heading,
     // the check of images with no text alternative, the icon and
     // description checks and the screen title check the answers the
@@ -1057,10 +1069,17 @@ public partial class MainWindow
         AskChecksModelButton.IsEnabled = (vision || text) && !waiting && _analysisRecordingId is not null;
     }
 
+    // The toasts then say when the task waits, starts and ends
+    // (ShowModelChecksToasts); where it could not be queued, a toast says
+    // why, as the status line saying so is in the Analysis window.
     private async void AskChecksModelButton_Click(object sender, RoutedEventArgs e)
     {
         AskChecksModelButton.IsEnabled = false;
-        await QueueAsync(AndroidModelChecksKind.Name);
+        if (!await QueueAsync(AndroidModelChecksKind.Name, announce: false))
+        {
+            ShowChecksToast("Model checks were not queued. " + AnalysisStatusTextBlock.Text);
+        }
+
         UpdateAskChecksModelButton();
     }
 

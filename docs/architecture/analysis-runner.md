@@ -461,6 +461,9 @@ player (2026-10-13)". Passed its system test on the target machine on
   `Recorder.App.Analysis`, and shown in a second line of the status bar
   until the next. Results already waiting when a recording is opened are
   shown as unread, not announced.
+  The model checks are the exception: the Checks window's toasts are
+  announced in place of their lines (android-checks.md, "Toasts for the
+  model checks").
 - **The reading view** opens each report in its own window. Headings have
   their heading level for screen readers. Each paragraph, list item, or
   quote is followed by its reference buttons, such as "E3 00:00:04", named

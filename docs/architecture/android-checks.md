@@ -474,6 +474,52 @@ level and the project's models were one paragraph above the list. Built
 - The counts are those the paragraph gave. Where a sentence held several,
   it was split or reworded so that each stands as a line.
 
+Pushed at 1e7a5fb. On 2026-11-18 the owner checked the Summary tab on the
+target machine: "I have checked the summary tab and it appears correct."
+
+### Toasts for the model checks
+
+The owner, 2026-11-18: "The next issue I have is with the checks window
+and the "Ask to project's model" button. We need toasts to say when the
+checking has started and when it is complete." Until then the button
+queued the model checks with nothing in the Checks window to say so: the
+queued line and the line when the task ended were in the Analysis
+window's status line, and screen readers were told them. Built
+2026-11-18 (`ModelChecksProgress` in `Recorder.Analysis`,
+`MainWindow.ChecksToast.cs`).
+
+- The Checks window shows one toast at a time, at its foot, under the
+  tabs. A toast says what the task of the model checks did since the last
+  read of the queue, every 3 seconds: queued and not yet started, as the
+  worker may be busy with another task; started; complete; failed, with
+  the reason; or cancelled. A new toast replaces the one shown.
+- "Model checks complete." is shown once the model's answers are in the
+  Findings and Summary tabs, not when the worker ends, and says how many
+  of the questions the rules leave are still not judged, if any, as the
+  Summary tab gives them by check.
+- Where the button could not queue the task, a toast says why.
+- The toast stays until its Close button is pressed, the next toast
+  replaces it or another recording is opened. A message that goes by
+  itself can be missed or be gone before it is read (WCAG 2.2.1).
+- It is a row of its own under the tabs, not drawn over them, so it never
+  hides the item with keyboard focus (WCAG 2.4.11), and it takes no focus
+  as it appears. Screen readers are told its text as it is shown, as a UI
+  Automation notification, activity `Recorder.App.Analysis`; the model
+  checks' lines in the status line are not spoken as well, so a screen
+  reader does not say both. Closing it with the keyboard moves focus to
+  "Ask the project's model" where it is enabled, else to the tab shown.
+- Its text is selectable and copied with Ctrl+C, as elsewhere, and wraps.
+  Its edge, #75736F, is 3.07 to 1 against its own background, #2A2926,
+  and 3.6 to 1 against the window's, #1C1B19 (WCAG 1.4.11); its text,
+  #CDCCCA, is 9.1 to 1 on its background. Close is 44 by 44 pixels or
+  more.
+- The toasts are for the task of the model checks, whether "Ask the
+  project's model" or the Analysis window's Run again queued it. The
+  Android report and summary, which ask the same models, have no toasts.
+- While the Checks window is closed, the toast is kept and is there when
+  it opens; screen readers are told it either way. The player's own
+  window shows no toast.
+
 The checks run when the recording is opened, from its stored snapshots
 and frames. Keeping their results beside the recording was proposed in
 case they were slow; step 3 measured them at 0.1 to 0.2 seconds for the

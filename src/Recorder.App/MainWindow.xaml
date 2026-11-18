@@ -1638,6 +1638,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
               </Grid.RowDefinitions>
               <!-- The settings the checks run with, and the button that asks
                    the project's model, above both tabs, as they change what
@@ -1849,6 +1850,50 @@
                   </ScrollViewer>
                 </TabItem>
               </TabControl>
+              <!-- The toast for "Ask the project's model" (owner,
+                   2026-11-18: "We need toasts to say when the checking has
+                   started and when it is complete"; android-checks.md,
+                   "Toasts for the model checks"). It is a row of its own at
+                   the foot of the window, not drawn over the tabs, so it
+                   never hides the item with focus (WCAG 2.4.11). It stays
+                   until Close is pressed or the next toast replaces it, as
+                   a message that goes by itself can be missed (2.2.1). It
+                   takes no focus; screen readers are told its text as it
+                   changes. Its edge, #75736F, is 3.07 to 1 against its own
+                   #2A2926 and 3.6 to 1 against the window's #1C1B19
+                   (1.4.11), and its text, #CDCCCA on #2A2926, 9.1 to 1. -->
+              <Border x:Name="ChecksToast"
+                      Grid.Row="3"
+                      Margin="0,8,0,0"
+                      Padding="12,8,8,8"
+                      HorizontalAlignment="Right"
+                      MaxWidth="560"
+                      Background="#2A2926"
+                      BorderBrush="{StaticResource PanelBorder}"
+                      BorderThickness="2"
+                      Visibility="Collapsed"
+                      AutomationProperties.Name="Model checks message">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <local:SelectableText x:Name="ChecksToastText"
+                                        Grid.Column="0"
+                                        VerticalAlignment="Center"
+                                        Margin="0,0,12,0"
+                                        Foreground="#CDCCCA"
+                                        TextWrapping="Wrap" />
+                  <Button x:Name="ChecksToastCloseButton"
+                          Grid.Column="1"
+                          Style="{StaticResource AnalysisButton}"
+                          Margin="0"
+                          VerticalAlignment="Center"
+                          Content="Close"
+                          AutomationProperties.Name="Close the model checks message"
+                          Click="ChecksToastCloseButton_Click" />
+                </Grid>
+              </Border>
             </Grid>
           </ContentControl>
           <ContentControl x:Name="AnalysisPanel"
