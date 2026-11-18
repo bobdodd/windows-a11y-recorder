@@ -141,7 +141,7 @@ public static class AnalysisPlayer
             switch (task.State)
             {
                 case AnalysisTaskStates.Done:
-                    messages.Add($"{name} finished. Its result is in the Analysis tab.");
+                    messages.Add($"{name} finished. Its result is in the Analysis window.");
                     break;
                 case AnalysisTaskStates.Failed:
                     messages.Add($"{name} failed: {task.Failure ?? "no reason was recorded"}");
@@ -156,7 +156,7 @@ public static class AnalysisPlayer
     }
 
     /// <summary>
-    /// The worker's line in the Analysis tab, from its status file and
+    /// The worker's line in the Analysis window, from its status file and
     /// whether its process is running: what it is doing and the model
     /// loaded, or that it has stopped.
     /// </summary>
@@ -294,7 +294,7 @@ public static class AnalysisPlayer
     }
 
     /// <summary>
-    /// A task's models in words, for its row on the Analysis tab: the
+    /// A task's models in words, for its row on the Analysis window: the
     /// profiles it was queued with, by use, or that it was queued with no
     /// model. A summary's profiles are by capability, text and images,
     /// which are both report analysis; a check task's by the check's use.
@@ -363,7 +363,7 @@ public static class AnalysisPlayer
     }
 
     /// <summary>
-    /// A task's line on the Analysis tab for what it sent to Anthropic: the
+    /// A task's line on the Analysis window for what it sent to Anthropic: the
     /// attempts, the tokens, and the estimated cost at the prices its
     /// profiles held, or why there is no estimate.
     /// </summary>

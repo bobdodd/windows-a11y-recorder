@@ -262,7 +262,7 @@ public partial class MainWindow
     // report is written under the recordings' folder, in Projects.
     private async void AndroidProjectReportMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        ShowAnalysisTab();
+        ShowAnalysisWindow();
         await QueueProjectAsync(AndroidProjectReportKind.Name);
     }
 

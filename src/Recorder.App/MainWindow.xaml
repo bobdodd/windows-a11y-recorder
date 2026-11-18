@@ -67,21 +67,21 @@
       <Setter Property="Focusable" Value="False" />
       <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
     </Style>
-    <!-- A tab's button to open it in its own window: an icon, Windows'
-         "open in new window" glyph, with the full text as its name and tip,
-         as the owner asked (2026-10-12). A 44 by 44 pixel target, as the
-         change buttons, and the single-click way to tear a tab out, for
-         WCAG 2.5.7, as dragging the tab is the other way. -->
-    <Style x:Key="TearOutButton" TargetType="Button">
-      <Setter Property="Width" Value="44" />
-      <Setter Property="Height" Value="44" />
+    <!-- A button that opens or closes a panel's window (owner,
+         2026-11-18): a toggle, pressed while the window is open, at least
+         44 by 44 pixels. Pressed, its text is also bold, so its state is
+         not shown by colour alone. -->
+    <Style x:Key="PanelWindowToggle" TargetType="ToggleButton">
       <Setter Property="MinHeight" Value="44" />
-      <Setter Property="Margin" Value="8,0,-6,0" />
-      <Setter Property="Padding" Value="0" />
-      <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
-      <Setter Property="FontSize" Value="16" />
-      <Setter Property="Content" Value="&#xE8A7;" />
-      <Setter Property="ToolTip" Value="{Binding (AutomationProperties.Name), RelativeSource={RelativeSource Self}}" />
+      <Setter Property="MinWidth" Value="44" />
+      <Setter Property="Margin" Value="0,0,8,8" />
+      <Setter Property="Padding" Value="12,4" />
+      <Setter Property="ToolTip" Value="{Binding (AutomationProperties.HelpText), RelativeSource={RelativeSource Self}}" />
+      <Style.Triggers>
+        <Trigger Property="IsChecked" Value="True">
+          <Setter Property="FontWeight" Value="SemiBold" />
+        </Trigger>
+      </Style.Triggers>
     </Style>
     <Style x:Key="ColumnSplitter" TargetType="GridSplitter">
       <Setter Property="Width" Value="5" />
@@ -470,7 +470,7 @@
                 <local:SelectableText Margin="0,8,0,0"
                            Foreground="{StaticResource MutedText}"
                            TextWrapping="Wrap"
-                           Text="A recording of the phone records the companion app's connection, the phone's clock, its display's rotation and size, and the phone's screen as a video stream and as a picture for each change, which the player shows and an MP4 export saves. It also records the phone's sound, shows its level while recording and plays it on this PC, and records this PC's microphone. When TalkBack is on, the companion app raises the phone's Accessibility volume to at least 80% as the recording starts and leaves it there. The player shows and plays the phone's sound as &quot;Phone sound&quot;, in the system sound's place, and an MP4 export saves it. It records every touch on the phone's screen and every hardware key, such as volume and power, with each finger's position in screen pixels. The player draws each finger on the phone's picture as a yellow circle, numbered when there is more than one, with its path, and shows the touches and keys as &quot;Touches&quot; and &quot;Phone keys&quot; in the mouse's and keyboard's places. It records every line TalkBack writes to the phone's log, and what TalkBack said, read from those lines, when TalkBack's log output level is Verbose. The player shows what TalkBack said as &quot;TalkBack said&quot; in the screen reader's place, with each utterance's text in a strip under the Screen reader lane, interrupted ones marked, and its words in the properties panel. It also records every accessibility event the phone sends to accessibility services, with the item each one came from, and snapshots of the phone's accessibility tree: every window's items as the recording starts and when a window changes, and a window's items again when its content changes. The player shows the events and the snapshots as &quot;Accessibility events&quot; in UI Automation's place, draws a yellow outline on the phone's picture around the item with accessibility focus, and shows the tree at the playhead in the Accessibility tree tab, with that item marked &quot;accessibility focus&quot;. It records the phone's accessibility settings, such as color inversion, magnification, font size and the services on, as the recording starts and stops and each time one changes, and the properties panel shows them at the playhead, in the Windows settings' place, with &quot;Phone settings&quot; as their filter. It reads the phone's display density as the recording starts and stops, and the version of each app it saw as the recording stops, and the Checks tab shows them. It saves a screenshot the companion app takes of the phone's screen as the recording starts and each time a window has had no change for half a second, for measuring colours without the video's compression. It records how the phone itself is held, upright, sideways or flat, from the companion app's own sensor, for the orientation check." />
+                           Text="A recording of the phone records the companion app's connection, the phone's clock, its display's rotation and size, and the phone's screen as a video stream and as a picture for each change, which the player shows and an MP4 export saves. It also records the phone's sound, shows its level while recording and plays it on this PC, and records this PC's microphone. When TalkBack is on, the companion app raises the phone's Accessibility volume to at least 80% as the recording starts and leaves it there. The player shows and plays the phone's sound as &quot;Phone sound&quot;, in the system sound's place, and an MP4 export saves it. It records every touch on the phone's screen and every hardware key, such as volume and power, with each finger's position in screen pixels. The player draws each finger on the phone's picture as a yellow circle, numbered when there is more than one, with its path, and shows the touches and keys as &quot;Touches&quot; and &quot;Phone keys&quot; in the mouse's and keyboard's places. It records every line TalkBack writes to the phone's log, and what TalkBack said, read from those lines, when TalkBack's log output level is Verbose. The player shows what TalkBack said as &quot;TalkBack said&quot; in the screen reader's place, with each utterance's text in a strip under the Screen reader lane, interrupted ones marked, and its words in the properties panel. It also records every accessibility event the phone sends to accessibility services, with the item each one came from, and snapshots of the phone's accessibility tree: every window's items as the recording starts and when a window changes, and a window's items again when its content changes. The player shows the events and the snapshots as &quot;Accessibility events&quot; in UI Automation's place, draws a yellow outline on the phone's picture around the item with accessibility focus, and shows the tree at the playhead in the Accessibility tree window, with that item marked &quot;accessibility focus&quot;. It records the phone's accessibility settings, such as color inversion, magnification, font size and the services on, as the recording starts and stops and each time one changes, and the properties panel shows them at the playhead, in the Windows settings' place, with &quot;Phone settings&quot; as their filter. It reads the phone's display density as the recording starts and stops, and the version of each app it saw as the recording stops, and the Checks window shows them. It saves a screenshot the companion app takes of the phone's screen as the recording starts and each time a window has had no change for half a second, for measuring colours without the video's compression. It records how the phone itself is held, upright, sideways or flat, from the companion app's own sensor, for the orientation check." />
               </StackPanel>
             </GroupBox>
 
@@ -869,7 +869,7 @@
                         Click="DetailsToggle_Click"
                         AutomationProperties.Name="Details"
                         AutomationProperties.AcceleratorKey="Ctrl+Shift+D"
-                        AutomationProperties.HelpText="Shows or hides the browser navigation and selected event values under the timeline." />
+                        AutomationProperties.HelpText="Shows or hides the buttons of the inspection windows and the selected event values under the timeline." />
           <StackPanel Grid.Column="2" Orientation="Horizontal">
           <ToggleButton x:Name="PropertiesToggle"
                         Margin="0,0,8,0"
@@ -1051,7 +1051,7 @@
                                         LookupFailed="TimelineControl_LookupFailed"
                                         PositionRequested="TimelineControl_PositionRequested"
                                         AutomationProperties.Name="Selectable session event timeline"
-                                        AutomationProperties.HelpText="Click an event, or use Left, Right, Home, and End to move within a lane and Up and Down to move between lanes while focused, to inspect captured values. Click the NVDA mode strip, under the Screen reader lane, to move the playhead there. Click the NVDA window strip under it, or move into it with Up or Down, to select an NVDA window's events, then use Left, Right, Home, and End to step through them. In a recording of a phone, click the TalkBack said strip, under the Screen reader lane, to select an utterance; the properties panel gives its text and the words reached. The screen visits strip under it shows each visit's screen; click it to move the playhead there, and the Checks tab lists the visits." />
+                                        AutomationProperties.HelpText="Click an event, or use Left, Right, Home, and End to move within a lane and Up and Down to move between lanes while focused, to inspect captured values. Click the NVDA mode strip, under the Screen reader lane, to move the playhead there. Click the NVDA window strip under it, or move into it with Up or Down, to select an NVDA window's events, then use Left, Right, Home, and End to step through them. In a recording of a phone, click the TalkBack said strip, under the Screen reader lane, to select an utterance; the properties panel gives its text and the words reached. The screen visits strip under it shows each visit's screen; click it to move the playhead there, and the Checks window lists the visits." />
         </Border>
         <Grid Grid.Row="1" Margin="0,8,0,4">
           <Grid.ColumnDefinitions>
@@ -1104,99 +1104,78 @@
           <ColumnDefinition Width="8" />
           <ColumnDefinition Width="3*" MinWidth="360" />
         </Grid.ColumnDefinitions>
-        <!-- Two tabs: the browser navigations, and the reading position's
-             steps (screen-reader-activity.md, "4b, the list of steps").
-             The tabs and each step are at least 44 pixels high, for a
-             head pointer or eye tracking. -->
-        <!-- The tabs take the player's dark panels and light text, as the
-             group boxes do: #CDCCCA on #1C1B19 is 10.7 to 1, and on an
-             unselected tab's #201F1D 10.3 to 1. The selected tab has a bar
-             of #B79CE6 along its top, 7.3 to 1 against the panel, and bold
-             text, so it is not shown by colour alone. Each tab's edge is
-             #75736F, 3.5 to 1 or more against the panels; a focused tab's
-             edge takes the system highlight colour, at the same width, so
-             nothing moves. Windows' default white
-             tab panel left the light text at a low contrast (owner's
-             screenshots, 2026-10-12). -->
-        <Border Grid.Column="0"
-                Background="{StaticResource PanelBackground}"
-                BorderBrush="{StaticResource PanelBorder}"
-                BorderThickness="1">
-          <local:SelectableText x:Name="AllTabsTornOutTextBlock"
-                     Margin="12"
-                     TextWrapping="Wrap"
-                     Visibility="Collapsed"
-                     Text="Each of these tabs is in its own window. Close a window to put its tab back here." />
-        </Border>
-        <TabControl x:Name="DetailsTabControl"
-                    Grid.Column="0"
-                    Background="{StaticResource PanelBackground}"
-                    BorderBrush="{StaticResource PanelBorder}"
-                    Foreground="#CDCCCA"
-                    Padding="0"
-                    AutomationProperties.Name="Browser navigations and reading position steps">
-          <TabControl.Resources>
-            <Style TargetType="TabItem">
-              <Setter Property="MinHeight" Value="44" />
-              <Setter Property="MinWidth" Value="44" />
-              <Setter Property="Padding" Value="12,4" />
-              <Setter Property="Foreground" Value="#CDCCCA" />
-              <Setter Property="Background" Value="#201F1D" />
-              <Setter Property="BorderBrush" Value="#75736F" />
-              <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-              <Setter Property="Template">
-                <Setter.Value>
-                  <ControlTemplate TargetType="TabItem">
-                    <Border x:Name="TabBorder"
-                            Margin="0,0,2,0"
-                            Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="2,2,2,0">
-                      <Grid>
-                        <Border x:Name="SelectedBar"
-                                Height="3"
-                                VerticalAlignment="Top"
-                                Background="Transparent" />
-                        <ContentPresenter ContentSource="Header"
-                                          Margin="{TemplateBinding Padding}"
-                                          HorizontalAlignment="Center"
-                                          VerticalAlignment="Center"
-                                          RecognizesAccessKey="True" />
-                      </Grid>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                      <Trigger Property="IsMouseOver" Value="True">
-                        <Setter TargetName="TabBorder" Property="Background" Value="#2A2926" />
-                      </Trigger>
-                      <Trigger Property="IsSelected" Value="True">
-                        <Setter TargetName="TabBorder" Property="Background" Value="{StaticResource PanelBackground}" />
-                        <Setter TargetName="SelectedBar" Property="Background" Value="#B79CE6" />
-                        <Setter Property="FontWeight" Value="SemiBold" />
-                      </Trigger>
-                      <Trigger Property="IsKeyboardFocused" Value="True">
-                        <Setter TargetName="TabBorder" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
-                      </Trigger>
-                    </ControlTemplate.Triggers>
-                  </ControlTemplate>
-                </Setter.Value>
-              </Setter>
-            </Style>
-          </TabControl.Resources>
-          <TabItem x:Name="BrowserNavigationTab"
-                   AutomationProperties.Name="Browser navigation correlation"
-                   PreviewMouseLeftButtonDown="DetailsTab_PreviewMouseLeftButtonDown"
-                   PreviewMouseMove="DetailsTab_PreviewMouseMove"
-                   PreviewMouseLeftButtonUp="DetailsTab_PreviewMouseLeftButtonUp"
-                   LostMouseCapture="DetailsTab_LostMouseCapture">
-            <TabItem.Header>
-              <StackPanel Orientation="Horizontal">
-                <TextBlock VerticalAlignment="Center" Text="Browser navigation correlation" />
-                <Button Style="{StaticResource TearOutButton}"
-                        Tag="{Binding ElementName=BrowserNavigationTab}"
-                        Click="TearOutButton_Click"
-                        AutomationProperties.Name="Open Browser navigation correlation in its own window" />
-              </StackPanel>
-            </TabItem.Header>
+        <!-- The panels under the timeline open in windows of their own,
+             each by its toggle button, as they did not fit in the space
+             under the video (owner, 2026-11-18; player-layout.md,
+             "Windows opened by buttons"). A toggle is pressed while its
+             window is open; pressing it again closes the window, and
+             closing the window releases it. Each button is at least 44
+             pixels high, for a head pointer or eye tracking. -->
+        <GroupBox Grid.Column="0"
+                  Padding="8"
+                  Header="Inspection windows">
+          <ScrollViewer VerticalScrollBarVisibility="Auto"
+                        HorizontalScrollBarVisibility="Disabled"
+                        Focusable="False">
+            <WrapPanel x:Name="PanelWindowButtons"
+                       AutomationProperties.Name="Inspection windows">
+              <ToggleButton x:Name="BrowserNavigationWindowToggle"
+                            Style="{StaticResource PanelWindowToggle}"
+                            Tag="{Binding ElementName=BrowserNavigationPanel}"
+                            Click="PanelWindowToggle_Click"
+                            AutomationProperties.Name="Browser navigation correlation"
+                            AutomationProperties.HelpText="Opens or closes the Browser navigation correlation window.">
+                <TextBlock Text="Browser navigation correlation" />
+              </ToggleButton>
+              <ToggleButton x:Name="ReadingStepsWindowToggle"
+                            Style="{StaticResource PanelWindowToggle}"
+                            Tag="{Binding ElementName=ReadingStepsPanel}"
+                            Click="PanelWindowToggle_Click"
+                            AutomationProperties.Name="Reading position steps"
+                            AutomationProperties.HelpText="Opens or closes the Reading position steps window.">
+                <TextBlock Text="Reading position steps" />
+              </ToggleButton>
+              <ToggleButton x:Name="AnnouncementsWindowToggle"
+                            Style="{StaticResource PanelWindowToggle}"
+                            Tag="{Binding ElementName=AnnouncementsPanel}"
+                            Click="PanelWindowToggle_Click"
+                            AutomationProperties.Name="NVDA had to announce"
+                            AutomationProperties.HelpText="Opens or closes the NVDA had to announce window.">
+                <TextBlock Text="NVDA had to announce" />
+              </ToggleButton>
+              <ToggleButton x:Name="AccessibilityTreeWindowToggle"
+                            Style="{StaticResource PanelWindowToggle}"
+                            Tag="{Binding ElementName=AccessibilityTreePanel}"
+                            Click="PanelWindowToggle_Click"
+                            AutomationProperties.Name="Accessibility tree"
+                            AutomationProperties.HelpText="Opens or closes the Accessibility tree window.">
+                <TextBlock Text="Accessibility tree" />
+              </ToggleButton>
+              <ToggleButton x:Name="ChecksWindowToggle"
+                            Style="{StaticResource PanelWindowToggle}"
+                            Tag="{Binding ElementName=ChecksPanel}"
+                            Click="PanelWindowToggle_Click"
+                            AutomationProperties.Name="Checks"
+                            AutomationProperties.HelpText="Opens or closes the Checks window.">
+                <TextBlock Text="Checks" />
+              </ToggleButton>
+              <ToggleButton x:Name="AnalysisWindowToggle"
+                            Style="{StaticResource PanelWindowToggle}"
+                            Tag="{Binding ElementName=AnalysisPanel}"
+                            Click="PanelWindowToggle_Click"
+                            AutomationProperties.Name="Analysis"
+                            AutomationProperties.HelpText="Opens or closes the Analysis window.">
+                <TextBlock x:Name="AnalysisButtonText" Text="Analysis" />
+              </ToggleButton>
+            </WrapPanel>
+          </ScrollViewer>
+        </GroupBox>
+        <!-- Each panel's content is kept here, not shown, while its window
+             is closed, so the player keeps it up to date. -->
+        <Grid x:Name="PanelHost" Grid.Column="0" Visibility="Collapsed">
+          <ContentControl x:Name="BrowserNavigationPanel"
+                          Focusable="False"
+                          AutomationProperties.Name="Browser navigation correlation">
           <Grid Margin="8">
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto" />
@@ -1248,22 +1227,10 @@
                      AutomationProperties.Name="Browser navigation correlation summary"
                      Text="Open a recording with browser evidence to inspect navigation correlation." />
           </Grid>
-          </TabItem>
-          <TabItem x:Name="ReadingStepsTab"
-                   AutomationProperties.Name="Reading position steps"
-                   PreviewMouseLeftButtonDown="DetailsTab_PreviewMouseLeftButtonDown"
-                   PreviewMouseMove="DetailsTab_PreviewMouseMove"
-                   PreviewMouseLeftButtonUp="DetailsTab_PreviewMouseLeftButtonUp"
-                   LostMouseCapture="DetailsTab_LostMouseCapture">
-            <TabItem.Header>
-              <StackPanel Orientation="Horizontal">
-                <TextBlock VerticalAlignment="Center" Text="Reading position steps" />
-                <Button Style="{StaticResource TearOutButton}"
-                        Tag="{Binding ElementName=ReadingStepsTab}"
-                        Click="TearOutButton_Click"
-                        AutomationProperties.Name="Open Reading position steps in its own window" />
-              </StackPanel>
-            </TabItem.Header>
+          </ContentControl>
+          <ContentControl x:Name="ReadingStepsPanel"
+                          Focusable="False"
+                          AutomationProperties.Name="Reading position steps">
             <Grid Margin="8">
               <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -1366,26 +1333,10 @@
                 </ListBox.ItemTemplate>
               </ListBox>
             </Grid>
-          </TabItem>
-          <!-- What NVDA had to announce at each reading position step
-               (screen-reader-activity.md, "What NVDA had to announce"): as
-               the list of steps, marked at the playhead but never scrolled
-               by itself; Show current step scrolls to it. -->
-          <TabItem x:Name="AnnouncementsTab"
-                   AutomationProperties.Name="NVDA had to announce"
-                   PreviewMouseLeftButtonDown="DetailsTab_PreviewMouseLeftButtonDown"
-                   PreviewMouseMove="DetailsTab_PreviewMouseMove"
-                   PreviewMouseLeftButtonUp="DetailsTab_PreviewMouseLeftButtonUp"
-                   LostMouseCapture="DetailsTab_LostMouseCapture">
-            <TabItem.Header>
-              <StackPanel Orientation="Horizontal">
-                <TextBlock VerticalAlignment="Center" Text="NVDA had to announce" />
-                <Button Style="{StaticResource TearOutButton}"
-                        Tag="{Binding ElementName=AnnouncementsTab}"
-                        Click="TearOutButton_Click"
-                        AutomationProperties.Name="Open NVDA had to announce in its own window" />
-              </StackPanel>
-            </TabItem.Header>
+          </ContentControl>
+          <ContentControl x:Name="AnnouncementsPanel"
+                          Focusable="False"
+                          AutomationProperties.Name="NVDA had to announce">
             <Grid Margin="8">
               <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -1465,22 +1416,10 @@
                 </ListBox.ItemTemplate>
               </ListBox>
             </Grid>
-          </TabItem>
-          <TabItem x:Name="AccessibilityTreeTab"
-                   AutomationProperties.Name="Accessibility tree"
-                   PreviewMouseLeftButtonDown="DetailsTab_PreviewMouseLeftButtonDown"
-                   PreviewMouseMove="DetailsTab_PreviewMouseMove"
-                   PreviewMouseLeftButtonUp="DetailsTab_PreviewMouseLeftButtonUp"
-                   LostMouseCapture="DetailsTab_LostMouseCapture">
-            <TabItem.Header>
-              <StackPanel Orientation="Horizontal">
-                <TextBlock VerticalAlignment="Center" Text="Accessibility tree" />
-                <Button Style="{StaticResource TearOutButton}"
-                        Tag="{Binding ElementName=AccessibilityTreeTab}"
-                        Click="TearOutButton_Click"
-                        AutomationProperties.Name="Open Accessibility tree in its own window" />
-              </StackPanel>
-            </TabItem.Header>
+          </ContentControl>
+          <ContentControl x:Name="AccessibilityTreePanel"
+                          Focusable="False"
+                          AutomationProperties.Name="Accessibility tree">
             <!-- The page's accessibility tree at the playhead
                  (screen-reader-activity.md, "4c, the tree view"): read only,
                  each row at least 44 pixels high with a 44 by 44 pixel
@@ -1608,28 +1547,10 @@
                 </TreeView.ItemTemplate>
               </TreeView>
             </Grid>
-          </TabItem>
-          <!-- A phone recording's apps, screens, visits and states
-               (android-checks.md, step 1), grouped by app then screen, with
-               how each screen was named. A visit or state moves the
-               playhead to its start. The visit at the playhead is marked,
-               but the list never scrolls by itself; Show current visit
-               scrolls to it. Text wraps; there is no horizontal scrollbar. -->
-          <TabItem x:Name="ChecksTab"
-                   AutomationProperties.Name="Checks"
-                   PreviewMouseLeftButtonDown="DetailsTab_PreviewMouseLeftButtonDown"
-                   PreviewMouseMove="DetailsTab_PreviewMouseMove"
-                   PreviewMouseLeftButtonUp="DetailsTab_PreviewMouseLeftButtonUp"
-                   LostMouseCapture="DetailsTab_LostMouseCapture">
-            <TabItem.Header>
-              <StackPanel Orientation="Horizontal">
-                <TextBlock VerticalAlignment="Center" Text="Checks" />
-                <Button Style="{StaticResource TearOutButton}"
-                        Tag="{Binding ElementName=ChecksTab}"
-                        Click="TearOutButton_Click"
-                        AutomationProperties.Name="Open Checks in its own window" />
-              </StackPanel>
-            </TabItem.Header>
+          </ContentControl>
+          <ContentControl x:Name="ChecksPanel"
+                          Focusable="False"
+                          AutomationProperties.Name="Checks">
             <Grid Margin="8">
               <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -1720,7 +1641,7 @@
               <StackPanel Grid.Row="1">
                 <!-- The project's models for checks, shown here because a
                      torn-out Checks window has no menu and the vision
-                     checks run from this tab (owner, 2026-11-15;
+                     checks run from this window (owner, 2026-11-15;
                      projects.md, "The project's models"). The button
                      queues the model checks, which ask the project's model
                      for vision-based checks about the images of text the
@@ -1736,7 +1657,7 @@
                           Style="{StaticResource AnalysisButton}"
                           Content="Ask the project's model"
                           IsEnabled="False"
-                          AutomationProperties.HelpText="Queues the model checks: the project's model for vision-based checks is asked about each image of text, each piece of text shown as a heading and each image with no text alternative the rules leave that it has not answered. Its answers are kept and shown in this tab."
+                          AutomationProperties.HelpText="Queues the model checks: the project's model for vision-based checks is asked about each image of text, each piece of text shown as a heading and each image with no text alternative the rules leave that it has not answered. Its answers are kept and shown in this window."
                           Click="AskChecksModelButton_Click" />
                 </WrapPanel>
                 <local:SelectableText x:Name="ChecksStatusTextBlock"
@@ -1751,7 +1672,7 @@
                        ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                        VirtualizingPanel.ScrollUnit="Pixel"
                        AutomationProperties.Name="Apps, screens, visits and findings"
-                       AutomationProperties.HelpText="Click a row, or press Enter or Space on it, to move the playhead to the start of its visit or state; a screen's or an app's row moves it to the first visit. A finding's row moves it to the first time the finding was seen, selects its item in the Accessibility tree tab and outlines it on the phone's picture; Previous time and Next time step through the other times.">
+                       AutomationProperties.HelpText="Click a row, or press Enter or Space on it, to move the playhead to the start of its visit or state; a screen's or an app's row moves it to the first visit. A finding's row moves it to the first time the finding was seen, selects its item in the Accessibility tree window and outlines it on the phone's picture; Previous time and Next time step through the other times.">
                 <ListBox.ItemContainerStyle>
                   <Style TargetType="ListBoxItem">
                     <Setter Property="MinHeight" Value="44" />
@@ -1815,25 +1736,10 @@
                 </ListBox.ItemTemplate>
               </ListBox>
             </Grid>
-          </TabItem>
-          <!-- The session's analysis tasks (analysis-runner.md, "The
-               player"): the worker's line, queuing a summary with the
-               profile to use, and each task with its buttons. -->
-          <TabItem x:Name="AnalysisTab"
-                   AutomationProperties.Name="Analysis"
-                   PreviewMouseLeftButtonDown="DetailsTab_PreviewMouseLeftButtonDown"
-                   PreviewMouseMove="DetailsTab_PreviewMouseMove"
-                   PreviewMouseLeftButtonUp="DetailsTab_PreviewMouseLeftButtonUp"
-                   LostMouseCapture="DetailsTab_LostMouseCapture">
-            <TabItem.Header>
-              <StackPanel Orientation="Horizontal">
-                <TextBlock x:Name="AnalysisTabHeaderText" VerticalAlignment="Center" Text="Analysis" />
-                <Button Style="{StaticResource TearOutButton}"
-                        Tag="{Binding ElementName=AnalysisTab}"
-                        Click="TearOutButton_Click"
-                        AutomationProperties.Name="Open Analysis in its own window" />
-              </StackPanel>
-            </TabItem.Header>
+          </ContentControl>
+          <ContentControl x:Name="AnalysisPanel"
+                          Focusable="False"
+                          AutomationProperties.Name="Analysis">
             <Grid Margin="8">
               <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -1899,13 +1805,13 @@
                             AutomationProperties.Name="Analysis tasks" />
               </ScrollViewer>
             </Grid>
-          </TabItem>
-        </TabControl>
+          </ContentControl>
+        </Grid>
         <!-- Drawn as the other splitters are, so it can be seen: it was
              transparent (docs/architecture/player-contrast.md). -->
         <GridSplitter Grid.Column="1"
                       Style="{StaticResource ColumnSplitter}"
-                      AutomationProperties.Name="Resize browser correlation and event values" />
+                      AutomationProperties.Name="Resize inspection windows and event values" />
         <GroupBox Grid.Column="2"
                   Padding="8"
                   Header="Selected event values">

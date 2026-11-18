@@ -137,7 +137,7 @@ public sealed class AnalysisPlayerTests
 
         var messages = AnalysisPlayer.Changes(before, after);
 
-        Assert.Contains("Recording summary finished. Its result is in the Analysis tab.", messages);
+        Assert.Contains("Recording summary finished. Its result is in the Analysis window.", messages);
         Assert.Contains("Recording summary failed: The model is not loaded.", messages);
         Assert.Equal(2, messages.Count);
     }

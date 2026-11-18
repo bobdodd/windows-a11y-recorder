@@ -8,6 +8,17 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Inspection windows opened by buttons
+
+- The tabs under the timeline are replaced by toggle buttons, one for
+  each of Browser navigation correlation, Reading position steps, NVDA
+  had to announce, Accessibility tree, Checks and Analysis. A button
+  opens its panel in a window of its own, and closes it when pressed
+  again; closing the window from the window releases the button.
+- The buttons wrap when the region is narrow. A window first opens over
+  the player and keeps its place and size for the session.
+- Dragging a tab out, and the tab strip, are removed.
+
 ### Web images in the images-of-text check
 
 - The images-of-text check now looks at web images, the images on a web

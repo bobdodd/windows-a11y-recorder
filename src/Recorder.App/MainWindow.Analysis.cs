@@ -175,7 +175,7 @@ public partial class MainWindow
             }
 
             // A task that asks the model for vision-based checks has kept
-            // its answers by now, so the Checks tab shows them.
+            // its answers by now, so the Checks window shows them.
             var answered = _analysisTasks is { } before && tasks.Any(task =>
                 task.State == AnalysisTaskStates.Done &&
                 task.Kind is AndroidModelChecksKind.Name or AndroidReportKind.Name or AndroidSummaryKind.Name or AndroidProjectReportKind.Name &&
@@ -211,8 +211,8 @@ public partial class MainWindow
     {
         var unread = AnalysisPlayer.Unread(tasks);
         var header = unread == 0 ? "Analysis" : $"Analysis ({unread.ToString(CultureInfo.CurrentCulture)} unread)";
-        AnalysisTabHeaderText.Text = header;
-        AutomationProperties.SetName(AnalysisTab, header);
+        AnalysisButtonText.Text = header;
+        AutomationProperties.SetName(AnalysisWindowToggle, header);
         // A task's usage is part of what is shown, so that its tokens and
         // cost are kept up to date while it runs.
         var shown = string.Join(";", tasks.Select(task => $"{task.TaskId}:{task.State}:{task.ReadUtc}:{task.FinishedUtc}:" +
@@ -360,7 +360,7 @@ public partial class MainWindow
         if (models?.Report is not { } name)
         {
             ShowAnalysisStatus($"{AnalysisPlayer.KindName(kind)} needs a model, so it was not queued: the project's settings choose no model for report analysis. " +
-                "Choose one in Project settings, in the Project menu or the Analysis tab.");
+                "Choose one in Project settings, in the Project menu or the Analysis window.");
             return null;
         }
 
@@ -433,7 +433,7 @@ public partial class MainWindow
 
     private async void SummariseMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        ShowAnalysisTab();
+        ShowAnalysisWindow();
         await QueueSummaryAsync();
     }
 
@@ -446,13 +446,13 @@ public partial class MainWindow
     // model for report analysis (android-report.md).
     private async void AndroidReportMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        ShowAnalysisTab();
+        ShowAnalysisWindow();
         await QueueAsync(AndroidReportKind.Name);
     }
 
     private async void AndroidSummaryMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        ShowAnalysisTab();
+        ShowAnalysisWindow();
         await QueueAsync(AndroidSummaryKind.Name);
     }
 
@@ -488,7 +488,7 @@ public partial class MainWindow
 
     private async void VisionMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        ShowAnalysisTab();
+        ShowAnalysisWindow();
         await QueueVisionAsync();
     }
 
@@ -667,19 +667,10 @@ public partial class MainWindow
         return null;
     }
 
-    private void ShowAnalysisMenuItem_Click(object sender, RoutedEventArgs e) => ShowAnalysisTab();
+    private void ShowAnalysisMenuItem_Click(object sender, RoutedEventArgs e) => ShowAnalysisWindow();
 
-    private void ShowAnalysisTab()
-    {
-        if (_tornTabs.TryGetValue(AnalysisTab, out var window))
-        {
-            window.Activate();
-            return;
-        }
-
-        DetailsTabControl.SelectedItem = AnalysisTab;
-        AnalysisTab.Focus();
-    }
+    // Opens the Analysis window, or brings it to the front.
+    private void ShowAnalysisWindow() => OpenPanelWindow(AnalysisPanel);
 
     private async void CapabilitiesMenuItem_Click(object sender, RoutedEventArgs e)
     {

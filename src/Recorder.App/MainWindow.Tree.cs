@@ -350,6 +350,26 @@ public partial class MainWindow
         ShowTreeRowRecord(view);
     }
 
+    // Whether a click landed on a button inside the row, such as Show, which
+    // handles it.
+    private static bool IsWithinButton(DependencyObject? element, DependencyObject stop)
+    {
+        for (var current = element; current is not null && !ReferenceEquals(current, stop); current = ParentOf(current))
+        {
+            if (current is System.Windows.Controls.Primitives.ButtonBase)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static DependencyObject? ParentOf(DependencyObject element) =>
+        element is System.Windows.Media.Visual or System.Windows.Media.Media3D.Visual3D
+            ? System.Windows.Media.VisualTreeHelper.GetParent(element)
+            : LogicalTreeHelper.GetParent(element);
+
     private void TreeRow_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && sender is TreeViewItem { DataContext: TreeRowView view, IsSelected: true })

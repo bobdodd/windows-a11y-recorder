@@ -2011,7 +2011,7 @@ public partial class MainWindow : Window
         }
 
         SaveLayout();
-        CloseTornTabs();
+        ClosePanelWindows();
         CloseReportWindows();
         _analysisTimer?.Stop();
         StopAndroidChecks();

@@ -104,7 +104,57 @@ when built.
 - The splitter is reachable by keyboard and named, like the existing
   splitters.
 
+## Windows opened by buttons
+
+The owner, 2026-11-18, with a screenshot of the tab strip under the
+recording: "The reality is the the checks, tree etc can't fit in the
+available real-estate below the recording. See screenshot. So let's
+replace them with push buttons that open the windows. They are
+push-buttons so the windows can be closed as well as opened from there.
+Closing a window from the window updates the push button". This replaces
+the tabs that tear out, below, built 2026-11-18
+(`MainWindow.PanelWindows.cs`).
+
+- Under the timeline, in place of the tabs, a group, "Inspection
+  windows", holds one toggle button for each panel: Browser navigation
+  correlation, Reading position steps, NVDA had to announce, Accessibility
+  tree, Checks, and Analysis. The buttons wrap onto more lines when the
+  region is narrow, with no horizontal scroll bar.
+- Each button is a toggle: pressed while its window is open. Pressing it
+  opens the window, or closes it if it is open. Closing the window from
+  the window itself releases the button, returns to the player and puts
+  the keyboard focus on that button, so it can be opened again at once.
+- A pressed button is shown in bold as well as in its pressed colour, so
+  its state is not shown by colour alone. To UI Automation it is a toggle
+  button named by its panel, and its state is on or off; its help text,
+  also its tip, says "Opens or closes the" panel's window.
+- The buttons are at least 44 by 44 pixels, like the Properties change
+  buttons.
+- A window first opens over the player, 640 by 520 pixels where the
+  screen allows, each panel a little further down and to the right so
+  they do not open on top of one another. Each keeps its place and size
+  for the rest of the session. Its title is the panel's name followed by
+  "Windows A11y Recorder".
+- The windows are owned by the player, as the torn-out tabs were (owner,
+  2026-11-12), so they stay in front of the player's window and are
+  minimised and restored with it, and they close with the player.
+- While its window is closed, a panel's content is kept, not shown, in
+  the player, so it stays up to date with the recording and the playhead.
+- The commands that start an analysis or a report, such as Summarise or
+  the Android report, open the Analysis window, as they selected the
+  Analysis tab before.
+- The Analysis button's name follows the Analysis panel's heading, as the
+  tab's name did.
+- The tab strip, its "open in new window" buttons and dragging a tab out
+  are removed. With no dragging, WCAG 2.5.7, Dragging Movements, no longer
+  applies to these panels.
+- The Details toggle (Ctrl+Shift+D) still shows or hides the region under
+  the timeline: now the buttons and the selected event values.
+
 ## Tabs that tear out
+
+Replaced on 2026-11-18 by the windows opened by buttons, above. Kept for
+the record.
 
 Agreed with the owner on 2026-10-12, as the player is already busy: the
 tabs of the panel under the timeline (Browser navigation correlation,
@@ -181,8 +231,8 @@ ever affect clickable lists (because they are never clicked)".
   the background, not the text"). The text now listens for the release
   with handled events too, and passes a click that selects nothing to
   its row once.
-- **Not selectable:** tab names, since a press there drags the tab out;
-  buttons, menus, check boxes, and the labels of fields, since a click
+- **Not selectable:** buttons, including the inspection windows'
+  toggles, menus, check boxes, and the labels of fields, since a click
   there acts or moves to the field; and the timeline's names and times,
   which are drawn, not laid out as text.
 - **The status line is cut off, not shortened with an ellipsis**, since a

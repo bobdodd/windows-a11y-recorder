@@ -302,7 +302,7 @@ internal sealed class ExportMp4Window : Window
         if (report.Entries is null)
         {
             _evidenceText.Text = "This report has no evidence list for MP4s, as it was written before reports had one. " +
-                "Run it again from the Analysis tab to use its numbers, or choose another.";
+                "Run it again from the Analysis window to use its numbers, or choose another.";
             return;
         }
 
@@ -408,7 +408,7 @@ internal sealed class ExportMp4Window : Window
 
         if (ChosenReport is { Entries: null })
         {
-            Say("The chosen report has no evidence list for MP4s. Run it again from the Analysis tab, or choose another report or None.");
+            Say("The chosen report has no evidence list for MP4s. Run it again from the Analysis window, or choose another report or None.");
             return;
         }
 
