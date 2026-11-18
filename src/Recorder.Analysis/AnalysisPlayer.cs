@@ -283,14 +283,24 @@ public static class AnalysisPlayer
     /// Analysis and Checks tabs show them: each use's profile by its label,
     /// or no model.
     /// </summary>
-    public static string ModelsLine(AnalysisSettings settings, ProjectModels models, IEnumerable<string> uses)
+    public static string ModelsLine(AnalysisSettings settings, ProjectModels models, IEnumerable<string> uses) =>
+        string.Join("; ", Models(settings, models, uses).Select(pair => $"{pair.Use}, {pair.Model}"));
+
+    /// <summary>
+    /// Each use's model in words, in the uses' order: the use's name, such
+    /// as "vision-based checks", and its model, such as "Claude Haiku 5.5
+    /// (sends to Anthropic)", "no model" or "the same model as simple
+    /// questions".
+    /// </summary>
+    public static IReadOnlyList<(string Use, string Model)> Models(AnalysisSettings settings, ProjectModels models, IEnumerable<string> uses)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(models);
-        return string.Join("; ", uses.Select(use => $"{ModelUses.Name(use)}, " +
-            (ModelUses.IsComplex(use) && models.Chosen(use) is null ? "the same model as simple questions"
+        ArgumentNullException.ThrowIfNull(uses);
+        return uses.Select(use => (ModelUses.Name(use),
+            ModelUses.IsComplex(use) && models.Chosen(use) is null ? "the same model as simple questions"
                 : models.For(use) is not { } name ? "no model"
-                : settings.Profile(name) is { } profile ? ProfileLabel(profile) : $"{name} (not offered on this PC)")));
+                : settings.Profile(name) is { } profile ? ProfileLabel(profile) : $"{name} (not offered on this PC)")).ToList();
     }
 
     /// <summary>

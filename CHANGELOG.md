@@ -8,6 +8,15 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### The Checks window's Summary tab
+
+- The Checks window has two tabs, Findings and Summary. The paragraph of
+  counts above the list is gone: the Findings tab keeps the list and a
+  short line about the playhead, and the Summary tab gives each check's
+  results and counts in sections with headings, one count to a line.
+- The Summary tab starts with the findings by check, then the audit
+  level and the project's models for checks, one to a line.
+
 ### Inspection windows opened by buttons
 
 - The tabs under the timeline are replaced by toggle buttons, one for

@@ -427,6 +427,53 @@ through the snapshots it was seen in. Each screen's row says how its
 title was found. Text wraps in the tab; there is no horizontal
 scrollbar.
 
+### The Summary tab
+
+The owner, 2026-11-18, with a screenshot of the Checks window: "The
+summary for a recording take most of the window even on full-screen and
+is unreadable text. The summary needs to be its own tab, and formatted
+for humans to read". Until then the counts of every check, the audit
+level and the project's models were one paragraph above the list. Built
+2026-11-18 (`PhoneChecksSummary` in `Recorder.Session`,
+`MainWindow.ChecksSummary.cs`).
+
+- The Checks window has two tabs, Findings and Summary. Above both are
+  the settings the checks run with, the audit level and "Phone turned
+  for", and "Ask the project's model", as they change what both tabs
+  show. Where the model cannot be asked, why is said under them, beside
+  the button it disables.
+- Findings holds Show current visit, Previous time and Next time, one
+  short line, and the list. The line says only what changes with the
+  playhead or while the checks run: the apps, screens and visits, the
+  visit at the playhead, whether a check is still running or could not
+  run, and which time of the chosen finding is shown.
+- Summary holds the rest, in sections, each with a heading (a heading to
+  UI Automation, level 2), its result in bold on a line of its own, such
+  as "11 findings: 5 errors, 6 warnings.", each count on a line of its
+  own after a drawn bullet, and how the check judges, or what it does not
+  look at, after them. The bullet is a shape, so a screen reader does not
+  say "bullet" before each line and it is not copied with the text.
+- The sections, in order: Recording; Findings by check, every check with
+  findings and how many at each level, or that the checks are still
+  running; the audit level, with each WCAG criterion it holds to on a
+  line; the project's models for checks, one use to a line; then each
+  check or group of checks, the checks of the tree first, then the text
+  read on the screens' pictures (the OCR engine, the snapshots measured
+  and any that could not be), then the contrast checks and the checks
+  that use OCR. Text field shown only by a bottom line has its own
+  section, apart from non-text contrast.
+- What the model said of a check's questions is split at each "; "
+  outside brackets, each part a line of its own after "Model's answers:".
+- The tab's text wraps, with no horizontal scrollbar, and is no wider
+  than 1,100 pixels, so its lines stay readable in a maximised window.
+  The text is selectable and copied with Ctrl+C, as elsewhere; the tab's
+  scroll area is a tab stop, so the arrow keys and Page Up and Page Down
+  scroll it.
+- The sections are laid out again only when what they say changes, not
+  as the playhead moves, so a selection in them holds.
+- The counts are those the paragraph gave. Where a sentence held several,
+  it was split or reworded so that each stands as a line.
+
 The checks run when the recording is opened, from its stored snapshots
 and frames. Keeping their results beside the recording was proposed in
 case they were slow; step 3 measured them at 0.1 to 0.2 seconds for the

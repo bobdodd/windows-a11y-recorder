@@ -1743,7 +1743,7 @@ public partial class MainWindow
         {
             _phoneScreenRows.Add(new PhoneScreenRowView(
                 indent,
-                $"{PhoneCheckNames.Title(check.Key)}: {Levels(check)}{measured}",
+                $"{PhoneCheckNames.Title(check.Key)}: {PhoneChecksSummary.Levels(check)}{measured}",
                 check.First().Times[0].Time,
                 null)
             {
@@ -1759,15 +1759,6 @@ public partial class MainWindow
         }
     }
 
-    // How many findings at each level: "6 errors, 2 not run".
-    private static string Levels(IEnumerable<PhoneFinding> findings) =>
-        string.Join(", ", findings
-            .GroupBy(finding => finding.Level)
-            .OrderBy(level => level.Key)
-            .Select(level => level.Key is PhoneCheckLevel.NotRun or PhoneCheckLevel.Info
-                ? string.Create(CultureInfo.CurrentCulture, $"{level.Count():N0} {PhoneCheckNames.Word(level.Key)}")
-                : Count(level.Count(), PhoneCheckNames.Word(level.Key))));
-
     private void DisplayPhoneVisitAt(long positionNanoseconds)
     {
         if (!_phoneScreensBound)
@@ -1780,6 +1771,7 @@ public partial class MainWindow
             ChecksStatusTextBlock.Text = _playbackArchive is null
                 ? "Open a recording of a phone to list its apps, screens and visits."
                 : "This recording holds no snapshot of a phone's app window, so it has no screens to list.";
+            RefreshChecksSummary();
             return;
         }
 
@@ -1804,361 +1796,29 @@ public partial class MainWindow
         var totals = $"{Count(screens.Apps.Count, "app")}, {Count(screens.Screens.Count, "screen")}, {Count(screens.Visits.Count, "visit")}.";
         ChecksStatusTextBlock.Text = (visit is null
             ? $"{totals} Before the first visit."
-            : $"{totals} Visit {visit.Number}, to {visit.Screen.Label}, at the playhead.") + " " + AuditSummary() + " " + ChecksSummary();
+            : $"{totals} Visit {visit.Number}, to {visit.Screen.Label}, at the playhead.") + ChecksState();
+        RefreshChecksSummary();
     }
 
-    // The audit level the checks were run at, and what it changes
-    // (owner, 2026-11-12: the level guides the checks and their reporting).
-    private string AuditSummary() => AuditLevel == PhoneAuditLevel.AAA
-        ? "Audit level AAA: text contrast is held to WCAG 1.4.6, targets to 44 by 44 dp (WCAG 2.5.5) as well as 2.5.8, and images of text to 1.4.9 as well as 1.4.5. " + TargetExceptions + " 2.5.5's exceptions for a target sized by Android and an essential presentation are not judged."
-        : "Audit level AA: text contrast is held to WCAG 1.4.3, targets to 2.5.8, and images of text to 1.4.5. " + TargetExceptions;
-
-    // The target-size exceptions judged from the tree (owner, 2026-11-16).
-    private const string NonTextRules =
-        "A text field needs its border, bottom line or background at 3:1 whatever text it shows, and text OCR read counts as a control's only when a word of it is in the item's text in the tree.";
-
-    private const string TargetExceptions =
-        "A target on a line of text passes as one in a sentence, and one with an equivalent target of the size and the same name passes, inferred from the name; " +
-        "each is information for a person to judge. A target inside or around another target is a warning, as they are one target only if they do the same thing, which the tree does not say.";
-
-    // What the checks found, or why they have not.
-    private string ChecksSummary()
+    // Under the Findings tab's buttons, only what changes with the
+    // playhead or while the checks run; the counts are in the Summary tab
+    // (owner, 2026-11-18: the summary "needs to be its own tab").
+    private string ChecksState()
     {
-        if (_phoneChecksProblem is { } problem)
-        {
-            return $"The checks of the tree could not be run: {problem} {ContrastSummary()}";
-        }
-
-        if (_phoneChecks is not { } run)
-        {
-            return "Running the checks of the tree.";
-        }
-
-        var findings = run.Findings.Count == 0
-            ? "no findings"
-            : $"{Count(run.Findings.Count, "finding")} ({Levels(run.Findings)})";
-        var summary = string.Create(
-            CultureInfo.CurrentCulture,
-            $"Checks of the tree: {findings}, from {Count(run.SnapshotsChecked, "settled snapshot")}, in {run.Elapsed.TotalSeconds:0.0} seconds.");
-        var unfocusable = run.Findings.Where(finding => finding.Check == PhoneCheckNames.ClickableNotFocusable).ToList();
-        var unfocusableFindings = unfocusable.Count == 0
-            ? "no findings"
-            : $"{Count(unfocusable.Count, "finding")} ({Levels(unfocusable)})";
-        summary += string.Create(
-            CultureInfo.CurrentCulture,
-            $" {PhoneCheckNames.Title(PhoneCheckNames.ClickableNotFocusable)}, one of them: {unfocusableFindings}, from {Count(run.Clickable, "clickable item")} checked, {run.ClickableSetAside:N0} set aside inside a focusable clickable item; each is a warning, until a keyboard test confirms it.");
-        var fieldChecks = new HashSet<string>(StringComparer.Ordinal)
-        {
-            PhoneCheckNames.FieldNoLabel, PhoneCheckNames.FieldNoName, PhoneCheckNames.InvalidNoError,
-            PhoneCheckNames.ExpandableNoState, PhoneCheckNames.SliderNoRange,
-        };
-        var fieldFound = run.Findings.Where(finding => fieldChecks.Contains(finding.Check)).ToList();
-        var fieldFindings = fieldFound.Count == 0
-            ? "no findings"
-            : $"{Count(fieldFound.Count, "finding")} ({Levels(fieldFound)})";
-        summary += string.Create(
-            CultureInfo.CurrentCulture,
-            $" Fields and states, five of them: {fieldFindings}, from {Count(run.Fields, "field")}, {run.Invalid:N0} marked invalid, {Count(run.Expandable, "expandable item")} and {Count(run.Sliders, "slider")} checked; a field's label is only an item linked to it as its label (labeledBy), as a hint is not shown once text is typed.");
-        if (run.ExpandableNotRecorded > 0)
-        {
-            summary += $" The expanded state of {Count(run.ExpandableNotRecorded, "expandable item")} was not recorded, as the phone's Android is older than 16, so they were not checked.";
-        }
-
-        var statusFound = run.Findings.Where(finding => finding.Check == PhoneCheckNames.StatusNotAnnounced).Concat(run.AppFindings).ToList();
-        var statusFindings = statusFound.Count == 0
-            ? "no findings"
-            : $"{Count(statusFound.Count, "finding")} ({Levels(statusFound)})";
-        var brief = run.StatusRun
-            ? string.Create(
-                CultureInfo.CurrentCulture,
-                $"{Count(run.BriefMessages, "brief message")} (text shown and gone within 5 seconds, with no touch between), {run.BriefExposed:N0} of them in a live region, announced or in a titled pane that appeared with them")
-            : "brief messages not looked for, as no touches were recorded, so text going away by itself cannot be told from text a touch took away";
-        summary += string.Create(
-            CultureInfo.CurrentCulture,
-            $" Status messages (WCAG 4.1.3), two checks: {statusFindings}; {brief}; {Count(run.LiveRegionItems, "item")} in a live region, {Count(run.Announcements, "announcement")} and {Count(run.Toasts, "toast")} in the recording.");
-        var timingChecks = new[]
-        {
-            PhoneCheckNames.TextGoneByItself, PhoneCheckNames.TextGoneAsContentChanged, PhoneCheckNames.TextUpdatingByItself, PhoneCheckNames.MovingByItself,
-        };
-        var timingFound = run.Findings.Where(finding => timingChecks.Contains(finding.Check)).ToList();
-        var timingFindings = timingFound.Count == 0
-            ? "no findings"
-            : $"{Count(timingFound.Count, "finding")} ({Levels(timingFound)})";
-        var timeout = !run.SettingsRecorded
-            ? "Time to take action was not recorded, so texts gone within 5 seconds were looked at"
-            : run.TimeoutMilliseconds is { } milliseconds
-                ? string.Create(CultureInfo.CurrentCulture, $"Time to take action was set, at most {milliseconds / 1000.0:0.##} seconds, so texts gone sooner than it were looked at")
-                : "Time to take action was Default, so texts gone within 5 seconds were looked at";
-        var timed = run.StatusRun
-            ? string.Create(
-                CultureInfo.CurrentCulture,
-                $"{timeout}: {Count(run.TimedMessages, "text")} with no touch between, {run.TimedAlone:N0} of them gone with nothing new shown as they went; {Count(run.UpdatedItems, "item")} whose text changed in place with no touch")
-            : "text going away or updating by itself not looked for, as no touches were recorded";
-        var moving = run.MotionRun
-            ? string.Create(CultureInfo.CurrentCulture, $"{Count(run.MovingRuns, "part")} of the phone's video that kept changing for more than 5 seconds with no touch (from the video, so approximate)")
-            : "moving content not looked for, as it needs the phone's video and touches recorded";
-        summary += $" Timing (WCAG 2.2.1 and 2.2.2), four checks: {timingFindings}; {timed}; {moving}.";
-        var contextChecks = new[]
-        {
-            PhoneCheckNames.ContextOnFocus, PhoneCheckNames.ContextOnScreenReaderFocus, PhoneCheckNames.ContextOnInput,
-        };
-        var contextFound = run.Findings.Where(finding => contextChecks.Contains(finding.Check)).ToList();
-        var contextFindings = contextFound.Count == 0
-            ? "no findings"
-            : $"{Count(contextFound.Count, "finding")} ({Levels(contextFound)})";
-        var context = run.ContextRun
-            ? string.Create(
-                CultureInfo.CurrentCulture,
-                $"{Count(run.FocusMoves, "focus move")} by a key or a tap on a field, {Count(run.ScreenReaderFocusMoves, "TalkBack focus move")} after a gesture or key, and {Count(run.SettingChanges, "setting change")} (typing, checking, choosing or moving a slider); {run.ContextChanges:N0} {(run.ContextChanges == 1 ? "change" : "changes")} of context (a new screen or app, a window that took the focus, a pane, or the focus moving by itself) within 1.5 seconds of one, with nothing touched, pressed or clicked between")
-            : "not looked for, as no touches were recorded, so a tap that caused a change cannot be told from none";
-        summary += $" Changes of context (WCAG 3.2.1 and 3.2.2), three checks: {contextFindings}; {context}.";
-        var orientationFound = run.Findings.Where(finding => finding.Check == PhoneCheckNames.OrientationRestricted).ToList();
-        var orientationFindings = orientationFound.Count == 0
-            ? "no findings"
-            : $"{Count(orientationFound.Count, "finding")} ({Levels(orientationFound)})";
-        var orientation = run.OrientationRun
-            ? string.Create(
-                CultureInfo.CurrentCulture,
-                $"the phone was turned between upright and sideways {Count(run.OrientationTurns, "time")}, from the companion app's own sensor, and the screen stayed as it was, with Auto-rotate on, for {Count(run.OrientationHoldSeconds, "second")} or more after {Count(run.OrientationNotFollowed, "turn")} within a visit")
-            : $"not looked for, as {run.OrientationNotRun ?? "the checks did not run"}";
-        summary += $" Orientation (WCAG 1.3.4), one check: {orientationFindings}; {orientation}; it is looked for only while Auto-rotate is on.";
-        var sequenceChecks = new[] { PhoneCheckNames.SpacedLetters, PhoneCheckNames.SpaceColumns, PhoneCheckNames.LineBreakMidSentence };
-        var sequenceFound = run.Findings.Where(finding => sequenceChecks.Contains(finding.Check)).ToList();
-        var sequenceFindings = sequenceFound.Count == 0
-            ? "no findings"
-            : $"{Count(sequenceFound.Count, "finding")} ({Levels(sequenceFound)})";
-        summary += string.Create(
-            CultureInfo.CurrentCulture,
-            $" White space used for layout (WCAG 1.3.2), three checks: {sequenceFindings}, from {Count(run.SequenceTexts, "text")} looked at (each shown item's text, content description, hint, state description and pane title, from the tree, not OCR; text typed into a field is not looked at); letters of a word spaced apart (3 or more single letters, 2 or more Han, kana or Hangul, initialisms included), 2 or more lines with gaps of 2 or more spaces or a tab, and a line break before a lowercase letter with no . ! ? : or ; before it. Whether the order of the content makes sense is not looked for.");
-        if (run.TextFocusablePackages.Count > 0)
-        {
-            summary += $" In {string.Join(" and ", run.TextFocusablePackages)}, every item with text is focusable, as in an app drawn with Flutter, whose tree marks focusable what a screen reader can reach, so the tree does not show which items a keyboard reaches.";
-        }
-        if (run.WithoutDensity > 0)
-        {
-            summary += $" The touch target checks did not run on {Count(run.WithoutDensity, "settled snapshot")}, as no density was recorded for them.";
-        }
-
-        if (run.TargetsSeenWhole > 0)
-        {
-            summary += $" Touch target findings not run against the edge of a list that scrolls, dropped as another snapshot of the same visit showed the target whole and it was judged there: {run.TargetsSeenWhole:N0}.";
-        }
-
-        if (run.DensityChanged > 0)
-        {
-            summary += $" The touch target checks did not run on {Count(run.DensityChanged, "settled snapshot")} whose items were taken after the density changed during the visit, as they may have been laid out at either density.";
-        }
-
-        if (run.Problems.Count > 0)
-        {
-            summary += $" {Count(run.Problems.Count, "snapshot")} could not be checked: {string.Join("; ", run.Problems.Take(3))}{(run.Problems.Count > 3 ? "; and more" : string.Empty)}.";
-        }
-
-        summary += " " + ContrastSummary();
+        var state = _phoneChecksProblem is not null
+            ? " The checks of the tree could not be run; the Summary tab says why."
+            : _phoneChecks is null ? " Running the checks of the tree." : "";
+        state += _phoneContrastProblem is not null
+            ? " The contrast checks, of text and non-text, could not be run; the Summary tab says why."
+            : _phoneContrast is null || _phoneTextContrast is null ? " Measuring the contrast of text and non-text." : "";
         if (_shownFinding is { } shown)
         {
-            summary += string.Create(
+            state += string.Create(
                 CultureInfo.CurrentCulture,
                 $" Showing time {_shownFindingTime + 1:N0} of {shown.Times.Count:N0} of the chosen finding, outlined on the phone's picture while its items are shown.");
         }
 
-        return summary;
-    }
-
-    // What the contrast checks found, of text and non-text, or why they have not.
-    private string ContrastSummary()
-    {
-        if (_phoneContrastProblem is { } problem)
-        {
-            return $"The contrast checks, of text and non-text, could not be run: {problem}";
-        }
-
-        if (_phoneContrast is not { } measured || _phoneTextContrast is not { } contrast)
-        {
-            return "Measuring the contrast of text and non-text.";
-        }
-
-        var title = PhoneCheckNames.Title(contrast.Check);
-        var findings = contrast.Findings.Count == 0
-            ? "no findings"
-            : $"{Count(contrast.Findings.Count, "finding")} ({Levels(contrast.Findings)})";
-        var summary = string.Create(
-            CultureInfo.CurrentCulture,
-            $"{title}: {findings}, from {Count(contrast.Lines, "line")} of text measured, {contrast.Passed:N0} passed, on {Count(measured.Snapshots.Count, "settled snapshot")} ({measured.FromScreenshots:N0} from the phone's screenshots, {measured.FromFrames:N0} from the video), in {measured.Elapsed.TotalSeconds:0.0} seconds.");
-        if (_phoneNonTextContrast is { } nonText)
-        {
-            var ofCheck = nonText.Findings.Where(finding => finding.Check == PhoneCheckNames.NonTextContrast).ToList();
-            var bottomLines = nonText.Findings.Where(finding => finding.Check == PhoneCheckNames.FieldBottomLineOnly).ToList();
-            var nonTextFindings = ofCheck.Count == 0
-                ? "no findings"
-                : $"{Count(ofCheck.Count, "finding")} ({Levels(ofCheck)})";
-            var lineFindings = bottomLines.Count == 0 ? "no findings" : $"{Count(bottomLines.Count, "finding")} ({Levels(bottomLines)})";
-            summary += string.Create(
-                CultureInfo.CurrentCulture,
-                $" {PhoneCheckNames.Title(PhoneCheckNames.NonTextContrast)}, at AA, its only level: {nonTextFindings}, from {Count(nonText.Controls, "control")} measured, {nonText.Passed:N0} passed; graphics with no item in the tree are not checked. " +
-                $"{NonTextRules} {PhoneCheckNames.Title(PhoneCheckNames.FieldBottomLineOnly)}: {lineFindings}.");
-        }
-
-        if (_phoneImagesOfText is { } images)
-        {
-            var checks = images.Level == PhoneAuditLevel.AAA
-                ? $"{PhoneCheckNames.Title(PhoneCheckNames.ImageOfText)} and {PhoneCheckNames.Title(PhoneCheckNames.ImageOfTextAaa)}"
-                : PhoneCheckNames.Title(PhoneCheckNames.ImageOfText);
-            var imageFindings = images.Findings.Count == 0
-                ? "no findings"
-                : $"{Count(images.Findings.Count, "finding")} ({Levels(images.Findings)})";
-            summary += images.SnapshotsRead == 0
-                ? $" {checks}: not checked, as it needs OCR's words."
-                : string.Create(CultureInfo.CurrentCulture, $" {checks}: {imageFindings}, from {Count(images.Images, "image")} read by OCR, {images.Passed:N0} passed; ") +
-                    $"the words OCR read inside an image that no item's text holds are a probable image of text. " +
-                    $"Before any model, the rules left out {Count(images.CaptionLines, "line")} TalkBack was saying, {Count(images.EdgeLines, "line")} past an image's edge and {Count(images.NeighbourLines, "line")} an item beside the image holds; " +
-                    $"{Count(images.OutOfStep, "image")} on a picture out of step with the tree {(images.OutOfStep == 1 ? "was" : "were")} not judged, " +
-                    $"{Count(images.ManualChecks, "image")} {(images.ManualChecks == 1 ? "is" : "are")} for a manual check, as the app draws its own text with Flutter, " +
-                    $"and {Count(images.Questions.Count, "image")} {(images.Questions.Count == 1 ? "is" : "are")} for the model for vision-based checks, whose answer decides the exceptions" +
-                    (images.ModelNote is { } note ? $": {note}." : ".");
-        }
-
-        if (_phoneHeadingLook is { } headings)
-        {
-            var headingTitle = PhoneCheckNames.Title(PhoneCheckNames.TextShownAsHeading);
-            var headingFindings = headings.Findings.Count == 0
-                ? "no findings"
-                : $"{Count(headings.Findings.Count, "finding")} ({Levels(headings.Findings)})";
-            summary += headings.SnapshotsRead == 0
-                ? $" {headingTitle}: not checked, as it needs OCR's words."
-                : $" {headingTitle}: {headingFindings}, from {Count(headings.Items, "piece")} of text placed by OCR; " +
-                    $"text not marked as a heading whose letters are at least {PhoneHeadingLookRun.TallerBy.ToString("0.##", CultureInfo.CurrentCulture)} times as tall as the screen's body text, or one short line in capitals, is a probable heading. " +
-                    $"The rules left out {Count(headings.InControls, "piece")} of text inside an item that can be tapped or a field, as a control's text is its name, and {Count(headings.FieldLabels, "line")} in capitals directly above a field, as its label; " +
-                    $"{Count(headings.Questions.Count, "piece")} of text {(headings.Questions.Count == 1 ? "is" : "are")} for the model for vision-based checks" +
-                    (headings.ModelNote is { } headingNote ? $": {headingNote}." : ".");
-        }
-
-        if (_phoneImageAlternative is { } alternatives)
-        {
-            var alternativeTitle = PhoneCheckNames.Title(PhoneCheckNames.ImageNoTextAlternative);
-            var alternativeFindings = alternatives.Findings.Count == 0
-                ? "no findings"
-                : $"{Count(alternatives.Findings.Count, "finding")} ({Levels(alternatives.Findings)})";
-            summary += alternatives.SnapshotsRead == 0
-                ? $" {alternativeTitle}: not checked, as it needs OCR's words to tell a picture out of step with the tree."
-                : $" {alternativeTitle}: {alternativeFindings}, from {Count(alternatives.Images, "image")} on the pictures OCR read; " +
-                    "an image that is not a control, with no description, text or label, that no control with a name holds, says nothing to a screen reader. " +
-                    $"The rules left out {Count(alternatives.Named, "image")} with a name of {(alternatives.Named == 1 ? "its" : "their")} own, " +
-                    $"{Count(alternatives.Controls, "image")} that {(alternatives.Controls == 1 ? "is a control" : "are controls")}, as the tree's checks judge a control's name, " +
-                    $"{Count(alternatives.InNamedControls, "image")} inside a control with a name, " +
-                    $"{Count(alternatives.Covered, "image")} at least half under or over controls with a name, " +
-                    $"and {Count(alternatives.Thin, "image")} under {PhoneImageAlternativeRun.LeastSideDp.ToString("0.##", CultureInfo.CurrentCulture)} dp on the shorter side; " +
-                    $"{Count(alternatives.OutOfStep, "image")} on a picture out of step with the tree {(alternatives.OutOfStep == 1 ? "was" : "were")} not judged, " +
-                    $"and {Count(alternatives.Questions.Count, "image")} {(alternatives.Questions.Count == 1 ? "is" : "are")} for the model for vision-based checks, whose answer decides whether it gives information" +
-                    (alternatives.ModelNote is { } alternativeNote ? $": {alternativeNote}." : ".");
-        }
-
-        if (_phoneDescribedImages is { } described)
-        {
-            var describedTitle = $"{PhoneCheckNames.Title(PhoneCheckNames.IconContradictsName)} and {PhoneCheckNames.Title(PhoneCheckNames.DescriptionNotMatchingImage)}";
-            var describedFindings = described.Findings.Count == 0
-                ? "no findings"
-                : $"{Count(described.Findings.Count, "finding")} ({Levels(described.Findings)})";
-            summary += described.SnapshotsRead == 0
-                ? $" {describedTitle}: not checked, as they need OCR's words to tell a picture out of step with the tree."
-                : $" {describedTitle}: {describedFindings}, from {Count(described.Images, "described image")} on the pictures OCR read, " +
-                    $"{Count(described.Controls, "control")} among them; a control's icon is judged against its name, and an image that is not a control against its description, by the model for vision-based checks only. " +
-                    $"{Count(described.OutOfStep, "image")} on a picture out of step with the tree {(described.OutOfStep == 1 ? "was" : "were")} not judged; " +
-                    $"{described.Fit:N0} judged to fit, not confirmed, {Count(described.NotIcons, "control")} whose image was judged not to be an icon, " +
-                    $"and {Count(described.Unanswered, "described image")} not judged" +
-                    (described.ModelNote is { } describedNote ? $": {describedNote}." : ".");
-        }
-
-        if (_phoneScreenTitles is { } titles)
-        {
-            var titleName = PhoneCheckNames.Title(PhoneCheckNames.TitleNotDescriptive);
-            var titleFindings = titles.Findings.Count == 0
-                ? "no findings"
-                : $"{Count(titles.Findings.Count, "finding")} ({Levels(titles.Findings)})";
-            summary += titles.SnapshotsRead == 0
-                ? $" {titleName}: not checked, as it needs the text OCR read on the screens' pictures."
-                : $" {titleName}: {titleFindings}, from {Count(titles.Screens, "screen")} OCR read a picture of, each once: " +
-                    $"{titles.Untitled:N0} with no title, left to the check of a screen with no title, " +
-                    $"{titles.Matched:N0} whose title is exactly a heading, a line OCR read or an item a screen reader says on the screen, so describes it, " +
-                    $"and {titles.Questions.Count:N0} for the project's models, {titles.TextQuestions:N0} with only text, for the model for text-based checks, and " +
-                    $"{titles.PicturedQuestions:N0} with the screen's picture, as images cover at least half of it, for the model for vision-based checks; in Chrome, the web page's title is judged. " +
-                    $"{titles.Described:N0} judged to describe {(titles.Described == 1 ? "its screen" : "their screens")}, not confirmed, and {Count(titles.Unanswered, "screen")} not judged" +
-                    (titles.ModelNote is { } titleNote ? $": {titleNote}." : ".");
-        }
-
-        if (_phoneDecorativeImages is { } decorative)
-        {
-            var decorativeName = PhoneCheckNames.Title(PhoneCheckNames.DecorativeAnnounced);
-            var decorativeFindings = decorative.Findings.Count == 0
-                ? "no findings"
-                : $"{Count(decorative.Findings.Count, "finding")} ({Levels(decorative.Findings)})";
-            summary += decorative.SnapshotsRead == 0
-                ? $" {decorativeName}: not checked, as it needs OCR's words to tell a picture out of step with the tree."
-                : $" {decorativeName}: {decorativeFindings}, from {Count(decorative.Images, "described image")} on pictures in step with the tree: " +
-                    $"{decorative.NotSpoken:N0} not said by a screen reader, {decorative.Controls:N0} that are controls and {decorative.ItemNames:N0} whose description is all the item holding them says, so names, not asked; " +
-                    $"{Count(decorative.Questions.Count, "image")} that a screen reader says, with other text or alone, for the model for vision-based checks to judge informative or decorative. " +
-                    $"{Count(decorative.OutOfStep, "image")} on a picture out of step with the tree {(decorative.OutOfStep == 1 ? "was" : "were")} not judged; " +
-                    $"{decorative.Informative:N0} judged informative, not confirmed, and {Count(decorative.Unanswered, "image")} not judged" +
-                    (decorative.ModelNote is { } decorativeNote ? $": {decorativeNote}." : ".");
-        }
-
-        if (_phoneHeadingSections is { } sections)
-        {
-            var sectionName = PhoneCheckNames.Title(PhoneCheckNames.HeadingNotDescriptive);
-            var sectionFindings = sections.Findings.Count == 0
-                ? "no findings"
-                : $"{Count(sections.Findings.Count, "finding")} ({Levels(sections.Findings)})";
-            summary += sections.SnapshotsRead == 0
-                ? $" {sectionName}: not checked, as it needs the text OCR read on the screens' pictures."
-                : $" {sectionName}: {sectionFindings}, from {Count(sections.Marked, "marked heading")} and {Count(sections.Unmarked, "piece")} of text shown as a heading and judged one, each once a screen: " +
-                    $"{sections.ScreenTitles:N0} that are their screen's title, left to the screen title check, " +
-                    $"{sections.EmptySections:N0} with nothing under them on screen or in the tree, " +
-                    $"and {sections.Questions.Count:N0} for the project's models, {sections.TextQuestions:N0} with only text, for the model for text-based checks, and " +
-                    $"{sections.PicturedQuestions:N0} with the screen's picture, as images cover at least half of the section, for the model for vision-based checks; " +
-                    $"{Count(sections.NotJudgedHeadings, "piece")} of text shown as a heading not checked, as not judged a heading. " +
-                    $"{sections.Described:N0} judged to describe {(sections.Described == 1 ? "its section" : "their sections")}, not confirmed, and {Count(sections.Unanswered, "heading")} not judged" +
-                    (sections.ModelNote is { } sectionNote ? $": {sectionNote}." : ".");
-        }
-
-        if (_phoneTextNotInTree is { } notInTree)
-        {
-            var treeName = PhoneCheckNames.Title(PhoneCheckNames.TextNotInTree);
-            var treeFindings = notInTree.Findings.Count == 0
-                ? "no findings"
-                : $"{Count(notInTree.Findings.Count, "finding")} ({Levels(notInTree.Findings)})";
-            summary += notInTree.SnapshotsRead == 0
-                ? $" {treeName}: not checked, as it needs the text OCR read on the screens' pictures."
-                : $" {treeName}: {treeFindings}, from {Count(notInTree.Entries.Count, "line")} OCR read in no item's text, each once a visit, on {Count(notInTree.SnapshotsRead, "picture")}: " +
-                    $"{notInTree.Captions:N0} of TalkBack's caption, {notInTree.InImages:N0} inside images, left to the image of text check, {notInTree.ShortLines:N0} of fewer than 3 letters or digits, " +
-                    $"{notInTree.HeldElsewhere:N0} held by an item elsewhere on the screen, {notInTree.Misreads:N0} taken as a small item's own text misread, " +
-                    $"{notInTree.OtherSnapshots:N0} held by an item in another snapshot of the same visit, " +
-                    $"and {Count(notInTree.Questions.Count, "line")} for the model for vision-based checks. " +
-                    $"{Count(notInTree.OutOfStepSnapshots, "picture")} out of step with the tree, with {Count(notInTree.OutOfStepLines, "line")} in no item's text, {(notInTree.OutOfStepSnapshots == 1 ? "was" : "were")} not judged; " +
-                    $"{notInTree.Covered:N0} judged covered and {notInTree.NotText:N0} judged not text, not confirmed, and {Count(notInTree.Unanswered, "line")} not judged" +
-                    (notInTree.ModelNote is { } treeNote ? $": {treeNote}." : ".");
-        }
-
-        if (_phoneLabelInName is { } labels)
-        {
-            var labelFindings = labels.Findings.Count == 0
-                ? "no findings"
-                : $"{Count(labels.Findings.Count, "finding")} ({Levels(labels.Findings)})";
-            var read = labels.UsedOcr ? "the tree's text and, where it has none, OCR's" : "the tree's text";
-            summary += string.Create(
-                CultureInfo.CurrentCulture,
-                $" {PhoneLabelInNameRun.Title}: {labelFindings}, from {Count(labels.Controls, "control")} checked, {labels.Passed:N0} passed, {labels.Unread:N0} with no label read; the label is all the text inside a control, and the text of any item it is labelled by, from {read}, against its content description; text beside a control is not taken as its label.");
-        }
-
-        var engine = measured.Snapshots.Select(snapshot => snapshot.Engine).FirstOrDefault(name => !string.IsNullOrEmpty(name));
-        summary += measured.OcrUnavailable is { } unavailable
-            ? $" OCR was not used, as {unavailable}, so only the app's text was measured, on its items' bounds."
-            : engine is null ? string.Empty : $" The text was found with {engine}.";
-        if (measured.Problems.Count > 0)
-        {
-            summary += $" {Count(measured.Problems.Count, "snapshot")} could not be measured: {string.Join("; ", measured.Problems.Take(3))}{(measured.Problems.Count > 3 ? "; and more" : string.Empty)}.";
-        }
-
-        return summary;
+        return state;
     }
 
     private void ShowCurrentVisitButton_Click(object sender, RoutedEventArgs e)

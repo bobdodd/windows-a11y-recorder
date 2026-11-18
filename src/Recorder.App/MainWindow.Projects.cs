@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Automation;
@@ -359,27 +360,51 @@ public partial class MainWindow
         return true;
     }
 
-    // The open recording's project's models, in the Analysis tab and, for
-    // the checks, in the Checks tab, which wrap rather than scroll.
+    // The open recording's project's models, in the Analysis window and,
+    // for the checks, in the Checks window's Summary tab, as a list, one
+    // use to a line (owner, 2026-11-18: the summary "formatted for humans
+    // to read"). Why the model cannot be asked, where it cannot, is also
+    // shown above the tabs, beside the button it disables.
     private void ShowProjectModels()
     {
         if (_openProjectModels is not { } models)
         {
             AnalysisModelsTextBlock.Visibility = Visibility.Collapsed;
-            ChecksModelsTextBlock.Text = "Open a recording to see the models its project uses for checks.";
+            _checksModelsSection = null;
+            ChecksModelProblemTextBlock.Visibility = Visibility.Collapsed;
+            RefreshChecksSummary();
             return;
         }
 
         AnalysisModelsTextBlock.Text = "Models, from the project's settings: " +
             AnalysisPlayer.ModelsLine(models.Choices(_analysisSettings), models, ModelUses.All) + ".";
         AnalysisModelsTextBlock.Visibility = Visibility.Visible;
-        ChecksModelsTextBlock.Text = "Models for checks, from the project's settings: " +
-            AnalysisPlayer.ModelsLine(models.Choices(_analysisSettings), models, [ModelUses.TextChecks, ModelUses.ComplexTextChecks, ModelUses.VisionChecks, ModelUses.ComplexVisionChecks]) +
-            ". The images-of-text check, the check of text shown as a heading and the check of images with no text alternative ask the model for vision-based checks about the images and text their rules leave, as simple questions; " +
-            "a question it answers two ways, or cannot tell, is asked again of the model for complex questions where that is another model. No check uses the model for text-based checks yet." +
-            (models.ChecksProblem(models.Choices(_analysisSettings), ModelUses.VisionChecks) is { } problem
-                ? $" {problem} Until that is put right in the project's settings or on this PC, \"Ask the project's model\" is unavailable."
-                : "");
+        var points = AnalysisPlayer.Models(
+                models.Choices(_analysisSettings),
+                models,
+                [ModelUses.TextChecks, ModelUses.ComplexTextChecks, ModelUses.VisionChecks, ModelUses.ComplexVisionChecks])
+            .Select(pair => $"{char.ToUpper(pair.Use[0], CultureInfo.CurrentCulture)}{pair.Use[1..]}: {pair.Model}.")
+            .ToList();
+        var problem = models.ChecksProblem(models.Choices(_analysisSettings), ModelUses.VisionChecks);
+        if (problem is not null)
+        {
+            var unavailable = $"{problem} Until that is put right in the project's settings or on this PC, \"Ask the project's model\" is unavailable.";
+            points.Add(unavailable);
+            ChecksModelProblemTextBlock.Text = unavailable;
+            ChecksModelProblemTextBlock.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            ChecksModelProblemTextBlock.Visibility = Visibility.Collapsed;
+        }
+
+        _checksModelsSection = new PhoneSummarySection(
+            "Models for checks, from the project's settings",
+            null,
+            points,
+            "The images-of-text check, the check of text shown as a heading and the check of images with no text alternative ask the model for vision-based checks about the images and text their rules leave, as simple questions; " +
+            "a question it answers two ways, or cannot tell, is asked again of the model for complex questions where that is another model. No check uses the model for text-based checks yet.");
+        RefreshChecksSummary();
 
         // The model may have changed, so its kept answers are read again.
         _ = ApplyKeptAnswersAsync();

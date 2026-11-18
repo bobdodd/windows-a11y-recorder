@@ -71,6 +71,55 @@
          2026-11-18): a toggle, pressed while the window is open, at least
          44 by 44 pixels. Pressed, its text is also bold, so its state is
          not shown by colour alone. -->
+    <!-- The tabs of an inspection window, such as the Checks window's
+         Findings and Summary: the selected tab has a bar along its top and
+         a bold name, as well as its own background, so it is not shown by
+         colour alone. -->
+    <Style x:Key="InspectionTab" TargetType="TabItem">
+      <Setter Property="MinHeight" Value="44" />
+      <Setter Property="MinWidth" Value="44" />
+      <Setter Property="Padding" Value="12,4" />
+      <Setter Property="Foreground" Value="#CDCCCA" />
+      <Setter Property="Background" Value="#201F1D" />
+      <Setter Property="BorderBrush" Value="#75736F" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TabItem">
+            <Border x:Name="TabBorder"
+                    Margin="0,0,2,0"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="2,2,2,0">
+              <Grid>
+                <Border x:Name="SelectedBar"
+                        Height="3"
+                        VerticalAlignment="Top"
+                        Background="Transparent" />
+                <ContentPresenter ContentSource="Header"
+                                  Margin="{TemplateBinding Padding}"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  RecognizesAccessKey="True" />
+              </Grid>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="TabBorder" Property="Background" Value="#2A2926" />
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="TabBorder" Property="Background" Value="{StaticResource PanelBackground}" />
+                <Setter TargetName="SelectedBar" Property="Background" Value="#B79CE6" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <Style x:Key="PanelWindowToggle" TargetType="ToggleButton">
       <Setter Property="MinHeight" Value="44" />
       <Setter Property="MinWidth" Value="44" />
@@ -1584,45 +1633,25 @@
           <ContentControl x:Name="ChecksPanel"
                           Focusable="False"
                           AutomationProperties.Name="Checks">
-            <Grid Margin="8">
+<Grid Margin="8">
               <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
               </Grid.RowDefinitions>
+              <!-- The settings the checks run with, and the button that asks
+                   the project's model, above both tabs, as they change what
+                   both show. The project's models are listed in the Summary
+                   tab (owner, 2026-11-18: the summary "needs to be its own
+                   tab, and formatted for humans to read"). -->
               <WrapPanel Grid.Row="0" Margin="0,0,0,6">
-                <Button x:Name="ShowCurrentVisitButton"
-                        MinHeight="44"
-                        MinWidth="44"
-                        Margin="0,0,8,0"
-                        Padding="12,0"
-                        Content="Show current visit"
-                        Click="ShowCurrentVisitButton_Click"
-                        AutomationProperties.HelpText="Scrolls the list to the visit at the playhead. The list does not scroll by itself." />
-                <Button x:Name="PreviousFindingTimeButton"
-                        MinHeight="44"
-                        MinWidth="44"
-                        Margin="0,0,8,0"
-                        Padding="12,0"
-                        Content="Previous time"
-                        IsEnabled="False"
-                        Click="PreviousFindingTimeButton_Click"
-                        AutomationProperties.HelpText="Moves the playhead to the previous time the chosen finding was seen." />
-                <Button x:Name="NextFindingTimeButton"
-                        MinHeight="44"
-                        MinWidth="44"
-                        Padding="12,0"
-                        Content="Next time"
-                        IsEnabled="False"
-                        Click="NextFindingTimeButton_Click"
-                        AutomationProperties.HelpText="Moves the playhead to the next time the chosen finding was seen." />
                 <!-- The audit level, AA or AAA, which guides the checks and
                      their reporting (owner, 2026-11-12), kept between runs;
                      changing it runs the tree's checks again and works the
                      text contrast findings out again from the same
                      measurement. -->
                 <StackPanel Orientation="Horizontal"
-                            Margin="16,0,0,0">
+                            Margin="0,0,16,0">
                   <TextBlock VerticalAlignment="Center"
                              Margin="0,0,8,0"
                              Text="Audit level:" />
@@ -1652,7 +1681,7 @@
                      setting); kept between runs, and changing it runs the
                      tree's checks again. -->
                 <StackPanel Orientation="Horizontal"
-                            Margin="16,0,0,0">
+                            Margin="0,0,16,0">
                   <Label x:Name="OrientationHoldLabel"
                          VerticalAlignment="Center"
                          Margin="0,0,8,0"
@@ -1670,35 +1699,69 @@
                             AutomationProperties.HelpText="How long the phone must be held turned, with Auto-rotate on, before a screen that did not turn with it is an orientation finding (WCAG 1.3.4)."
                             SelectionChanged="OrientationHoldComboBox_SelectionChanged" />
                 </StackPanel>
-              </WrapPanel>
-              <StackPanel Grid.Row="1">
-                <!-- The project's models for checks, shown here because a
-                     torn-out Checks window has no menu and the vision
-                     checks run from this window (owner, 2026-11-15;
-                     projects.md, "The project's models"). The button
-                     queues the model checks, which ask the project's model
-                     for vision-based checks about the images of text the
-                     rules leave; its answers are kept and shown here
-                     (android-vision-checks.md, "Images of text, as built"). -->
-                <local:SelectableText x:Name="ChecksModelsTextBlock"
-                           Margin="0,0,0,6"
-                           TextWrapping="Wrap"
-                           Text="Open a recording to see the models its project uses for checks."
-                           AutomationProperties.Name="Models for checks" />
-                <WrapPanel Margin="0,0,0,6">
-                  <Button x:Name="AskChecksModelButton"
+                <Button x:Name="AskChecksModelButton"
                           Style="{StaticResource AnalysisButton}"
                           Content="Ask the project's model"
                           IsEnabled="False"
                           AutomationProperties.HelpText="Queues the model checks: the project's model for vision-based checks is asked about each image of text, each piece of text shown as a heading and each image with no text alternative the rules leave that it has not answered. Its answers are kept and shown in this window."
                           Click="AskChecksModelButton_Click" />
-                </WrapPanel>
-                <local:SelectableText x:Name="ChecksStatusTextBlock"
+              </WrapPanel>
+              <local:SelectableText x:Name="ChecksModelProblemTextBlock"
+                         Grid.Row="1"
+                         Margin="0,0,0,6"
+                         TextWrapping="Wrap"
+                         Visibility="Collapsed"
+                         AutomationProperties.Name="Why the project's model cannot be asked" />
+              <TabControl x:Name="ChecksTabControl"
+                          Grid.Row="2"
+                          Background="{StaticResource PanelBackground}"
+                          BorderBrush="{StaticResource PanelBorder}"
+                          Foreground="#CDCCCA"
+                          Padding="0"
+                          AutomationProperties.Name="Findings and summary">
+                <TabControl.Resources>
+                  <Style TargetType="TabItem" BasedOn="{StaticResource InspectionTab}" />
+                </TabControl.Resources>
+                <TabItem x:Name="ChecksFindingsTab" Header="Findings">
+                  <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <WrapPanel Grid.Row="0" Margin="0,0,0,6">
+                      <Button x:Name="ShowCurrentVisitButton"
+                        MinHeight="44"
+                        MinWidth="44"
+                        Margin="0,0,8,0"
+                        Padding="12,0"
+                        Content="Show current visit"
+                        Click="ShowCurrentVisitButton_Click"
+                        AutomationProperties.HelpText="Scrolls the list to the visit at the playhead. The list does not scroll by itself." />
+                <Button x:Name="PreviousFindingTimeButton"
+                        MinHeight="44"
+                        MinWidth="44"
+                        Margin="0,0,8,0"
+                        Padding="12,0"
+                        Content="Previous time"
+                        IsEnabled="False"
+                        Click="PreviousFindingTimeButton_Click"
+                        AutomationProperties.HelpText="Moves the playhead to the previous time the chosen finding was seen." />
+                <Button x:Name="NextFindingTimeButton"
+                        MinHeight="44"
+                        MinWidth="44"
+                        Padding="12,0"
+                        Content="Next time"
+                        IsEnabled="False"
+                        Click="NextFindingTimeButton_Click"
+                        AutomationProperties.HelpText="Moves the playhead to the next time the chosen finding was seen." />
+                    </WrapPanel>
+                    <local:SelectableText x:Name="ChecksStatusTextBlock"
+                           Grid.Row="1"
                            Margin="0,0,0,6"
                            TextWrapping="Wrap"
                            Text="Open a recording of a phone to list its apps, screens and visits." />
-              </StackPanel>
-              <ListBox x:Name="PhoneScreensListBox"
+                    <ListBox x:Name="PhoneScreensListBox"
                        Grid.Row="2"
                        MinHeight="70"
                        HorizontalContentAlignment="Stretch"
@@ -1768,6 +1831,24 @@
                   </DataTemplate>
                 </ListBox.ItemTemplate>
               </ListBox>
+                  </Grid>
+                </TabItem>
+                <!-- The checks' summary, in sections with headings, a result
+                     line and a line for each count (PhoneChecksSummary in
+                     Recorder.Session; android-checks.md, "The Summary
+                     tab"). It scrolls by itself from the keyboard, as its
+                     text is not a tab stop. -->
+                <TabItem x:Name="ChecksSummaryTab" Header="Summary">
+                  <ScrollViewer x:Name="ChecksSummaryScrollViewer"
+                                Padding="8"
+                                VerticalScrollBarVisibility="Auto"
+                                HorizontalScrollBarVisibility="Disabled"
+                                Focusable="True"
+                                AutomationProperties.Name="Summary of the checks">
+                    <StackPanel x:Name="ChecksSummaryPanel" MaxWidth="1100" HorizontalAlignment="Left" />
+                  </ScrollViewer>
+                </TabItem>
+              </TabControl>
             </Grid>
           </ContentControl>
           <ContentControl x:Name="AnalysisPanel"
