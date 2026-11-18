@@ -598,6 +598,21 @@
       "sources": ["wcag-2.4.6", "wcag2ict", "android-views", "compose-semantics", "flutter-semantics", "rn-accessibility"]
     },
     {
+      "check": "text-not-in-tree",
+      "title": "Text on screen not in the accessibility tree",
+      "issue": "Text shown on the screen is held by no item a screen reader can reach, such as text drawn on a canvas, painted by a custom view, or in an item hidden from accessibility services.",
+      "why": "A screen reader reads only what the app gives it; text that is shown but not given is silent, so people who cannot see the screen miss it entirely and may not know it is there.",
+      "affects": ["People who use a screen reader", "People who use switch access or voice access, which find items from the same tree"],
+      "impact": "high",
+      "criteria": ["1.1.1", "4.1.2"],
+      "related": ["1.3.1"],
+      "basis": "WCAG 1.1.1 and 4.1.2 as WCAG2ICT applies them to software, from the recorded picture and the tree: lines the PC's OCR read in no item's text, leaving out TalkBack's caption, lines inside images (left to the image of text check), lines of fewer than 3 letters or digits, lines a visible item elsewhere on the screen holds, lines inside a small item with text of its own (taken as that text misread), lines an item shown in another snapshot of the same visit holds, and pictures out of step with the tree, judged by the project's model for vision-based checks from the screen's picture with the line outlined and what a screen reader says on the screen. Every finding is a warning, the model's inference, for a person to verify; with no model there is no finding.",
+      "android": "Show text in a TextView or Compose Text rather than drawing it on a Canvas. Where a custom view must draw it, set the view's contentDescription to the same words, or expose each piece with ExploreByTouchHelper; in Compose, give a Canvas Modifier.semantics { contentDescription = ... }. Do not hide text a person needs with importantForAccessibility=\"no\" or Modifier.clearAndSetSemantics.",
+      "flutter": "Show text with a Text widget rather than painting it; for a CustomPaint, give the painter a semanticsBuilder, or wrap it in Semantics(label: ...). Do not wrap text a person needs in ExcludeSemantics.",
+      "reactNative": "Show text with a Text element; for text drawn in an SVG or canvas view, set accessible and accessibilityLabel to the same words. Do not hide text a person needs with importantForAccessibility=\"no-hide-descendants\" or accessibilityElementsHidden.",
+      "sources": ["wcag-1.1.1", "wcag-4.1.2", "wcag2ict", "android-views", "compose-semantics", "flutter-semantics", "rn-accessibility"]
+    },
+    {
       "check": "no-heading",
       "title": "Screen with no heading",
       "issue": "No item shown on the screen is marked as a heading.",

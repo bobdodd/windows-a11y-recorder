@@ -2064,6 +2064,197 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Contains("gave two answers", split.Text, StringComparison.Ordinal);
     }
 
+    // Step 25: text on screen not in the tree. A window of made-up items:
+    // a title, two lines of text, an image, a custom view that draws text
+    // with none of its own, a small button and an item not shown; and the
+    // lines OCR read in no item's text, one of each kind the rules sort.
+    private static PhoneCheckWindow DrawnTextScreen(params (int Index, string Text)[] more)
+    {
+        AndroidTreeNode Node(int index, int? parent, (int Left, int Top, int Right, int Bottom) bounds, string className,
+            string? text = null, bool clickable = false, bool visible = true) =>
+            ImageNode(index, parent, bounds, className, null, text) with { Clickable = clickable, VisibleToUser = visible };
+        return new PhoneCheckWindow(512, 1,
+        [
+            Node(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout"),
+            Node(1, 0, (40, 100, 1040, 200), "android.widget.TextView", "Daily summary"),
+            Node(2, 0, (40, 300, 1040, 380), "android.widget.TextView", "Steps today"),
+            Node(3, 0, (40, 400, 1040, 480), "android.widget.TextView", "Sleep score"),
+            Node(4, 0, (0, 600, 1080, 900), "android.widget.ImageView"),
+            Node(5, 0, (0, 1000, 1080, 1700), "com.example.ChartView"),
+            Node(6, 0, (40, 2100, 540, 2300), "android.widget.Button", "Start", clickable: true),
+            Node(7, 0, (0, 0, 0, 0), "android.widget.TextView", "Weekly goal reached", visible: false),
+            .. more.Select(each => Node(each.Index, 0, (40, 1800, 1040, 1880), "android.widget.TextView", each.Text)),
+        ], "Daily summary");
+    }
+
+    private static PhoneTextLine DrawnLine(PhoneCheckWindow window, string text, int container, int top) =>
+        new(null, window.Items[container], PhoneTextPlace.FoundByOcr, null, text, new PhoneBounds(60, top, 900, top + 50), null, 40);
+
+    private (PhoneTextNotInTreeRun Run, PhoneVisit Visit) DrawnTextRun(Func<PhoneCheckWindow, PhoneTextLine[]>? placed = null, string? engine = "Windows OCR, en-US")
+    {
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var first = DrawnTextScreen();
+        var second = DrawnTextScreen((8, "Resting heart rate"));
+        PhoneTextLine[] firstLines =
+        [
+            DrawnLine(first, "Steps today", 5, 1020),
+            DrawnLine(first, "Daily streak kept", 5, 1100),
+            DrawnLine(first, "Weekly goal reached", 5, 1300),
+            DrawnLine(first, "Resting heart rate", 5, 1500),
+            DrawnLine(first, "OK", 5, 1600),
+            DrawnLine(first, "Sale today", 4, 700),
+            DrawnLine(first, "Begin now", 6, 2150),
+            .. placed?.Invoke(first) ?? [],
+        ];
+        PhoneTextLine[] secondLines = [DrawnLine(second, "Daily streak kept", 5, 1100)];
+        var settled = visit.SettledSnapshots.Take(2).ToList();
+        PhoneContrastSnapshot Snapshot(int at, PhoneCheckWindow window, PhoneTextLine[] lines) =>
+            new(visit, settled[at], archive.PhoneAccessibility.TakenBy(settled[at], visit.WindowId)!,
+                new PhoneContrastPicture(PhonePictureKind.Screenshot, settled[at].MonotonicNanoseconds, $"p{at}.png", $"p{at}.png"),
+                engine, lines, null, window);
+        var measured = PhoneContrastRun.Of([Snapshot(0, first, firstLines), Snapshot(1, second, secondLines)]);
+        return (PhoneTextNotInTreeRun.Run(measured, archive.PhoneScreens), visit);
+    }
+
+    // Rules 1, 3 to 7 and 2c: each line once a visit; inside an image, too
+    // short, held by a visible item elsewhere, a small item's own text
+    // misread, or held by an item shown in another snapshot of the visit,
+    // is set aside; the rest are asked, with whether an item not shown
+    // holds the same text.
+    [Fact]
+    public void TextNotInTree_SortsEachLineOnceAVisit()
+    {
+        var (run, visit) = DrawnTextRun();
+
+        Assert.Equal((2, 0, 0), (run.SnapshotsRead, run.OutOfStepSnapshots, run.OutOfStepLines));
+        Assert.Equal(7, run.Entries.Count);
+        Assert.Equal((0, 1, 1, 1, 1, 1), (run.Captions, run.InImages, run.ShortLines, run.HeldElsewhere, run.Misreads, run.OtherSnapshots));
+        Assert.Equal(["Daily streak kept", "Weekly goal reached"], run.Questions.Select(question => question.Ocr));
+        var (drawn, hidden) = (run.Questions[0], run.Questions[1]);
+        Assert.Equal(("com.example.ChartView", null, false), (drawn.ContainerClass, drawn.ContainerText, drawn.HeldByHidden));
+        Assert.True(hidden.HeldByHidden);
+        Assert.EndsWith("\u001Focr dallystreakkept", drawn.Identity, StringComparison.Ordinal);
+        Assert.Contains("Daily summary", drawn.ScreenText, StringComparison.Ordinal);
+        Assert.Contains("that no item of the accessibility tree holds, though an item marked not shown holds the same text", hidden.Time.Measured, StringComparison.Ordinal);
+        Assert.True(run.Read(visit));
+        Assert.Empty(run.Findings);
+        Assert.Equal("Text on screen not in the accessibility tree (WCAG 1.1.1, 4.1.2)", PhoneCheckNames.Title(PhoneCheckNames.TextNotInTree));
+
+        // With no OCR, nothing is checked.
+        var (unread, _) = DrawnTextRun(engine: null);
+
+        Assert.Equal((0, 0), (unread.SnapshotsRead, unread.Entries.Count));
+    }
+
+    // Rule 2b: a picture is out of step where the tree has at least 3 text
+    // items and OCR found fewer than half of them where the tree places
+    // them; its lines are counted, not judged.
+    [Fact]
+    public void TextNotInTree_LeavesOutAPictureOutOfStepWithTheTree()
+    {
+        PhoneTextLine Placed(PhoneCheckWindow window, int item, PhoneTextPlace place) =>
+            new(window.Items[item], null, place, window.Items[item].Node.Text, null, window.Items[item].Bounds, null, 40);
+        var (outOfStep, _) = DrawnTextRun(window =>
+            [.. new[] { 1, 2, 3 }.Select(item => Placed(window, item, item == 1 ? PhoneTextPlace.AppTextPlacedByOcr : PhoneTextPlace.AppTextOnItemBounds))]);
+
+        Assert.Equal((1, 7), (outOfStep.OutOfStepSnapshots, outOfStep.OutOfStepLines));
+        Assert.Equal(["Daily streak kept"], outOfStep.Questions.Select(question => question.Ocr));
+
+        var (inStep, _) = DrawnTextRun(window =>
+            [.. new[] { 1, 2, 3 }.Select(item => Placed(window, item, item == 3 ? PhoneTextPlace.AppTextOnItemBounds : PhoneTextPlace.AppTextPlacedByOcr))]);
+
+        Assert.Equal(0, inStep.OutOfStepSnapshots);
+        Assert.Equal(2, inStep.Questions.Count);
+    }
+
+    // Rules 8 to 10: the request gives the screen and a close-up, the line,
+    // its item and what a screen reader says; kept answers judge each line
+    // by signature; drawn text is a warning, covered and not text counted.
+    [Fact]
+    public void TextNotInTree_RequestsAndKeptAnswersJudgeEachLine()
+    {
+        var (run, _) = DrawnTextRun();
+        var rgb = new uint[1080 * 2400];
+        Array.Fill(rgb, 0x203040u);
+        var pixels = new PhonePixels(1080, 2400, rgb);
+        var drawn = Recorder.Analysis.Android.AndroidTextNotInTree.RequestOf(run.Questions[0], pixels);
+        var hidden = Recorder.Analysis.Android.AndroidTextNotInTree.RequestOf(run.Questions[1], pixels);
+
+        Assert.Matches("^text-not-in-tree-[0-9a-f]{16}$", drawn.Key);
+        Assert.Equal((Recorder.Analysis.ModelUses.VisionChecks, Recorder.Analysis.Android.AndroidTextNotInTree.Template, 2),
+            (drawn.Request.Use, drawn.Request.PromptTemplate, drawn.Request.Images.Count));
+        Assert.Equal(Recorder.Analysis.Android.AndroidTextNotInTree.Answers, drawn.Request.Answers);
+        var input = drawn.Request.Input;
+        Assert.Contains("OCR read the outlined line as \"Daily streak kept\"", input, StringComparison.Ordinal);
+        Assert.Contains("inside an item of class com.example.ChartView that has no text of its own", input, StringComparison.Ordinal);
+        Assert.DoesNotContain("marks as not shown", input, StringComparison.Ordinal);
+        Assert.Contains("marks as not shown", hidden.Request.Input, StringComparison.Ordinal);
+        Assert.EndsWith("then give the answer.", input, StringComparison.Ordinal);
+        Assert.False(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(drawn.Signature, hidden.Signature));
+        Assert.True(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(
+            drawn.Signature, Recorder.Analysis.Android.AndroidTextNotInTree.RequestOf(run.Questions[0], pixels).Signature));
+
+        static JsonElement Output(string answer) =>
+            JsonSerializer.SerializeToElement(new { answer, reason = "The words are drawn on the chart." });
+        var elsewhere = Guid.NewGuid();
+        Recorder.Analysis.SignedAnswer Answer(string key, int step, byte[] signature, string answer) =>
+            new(Guid.NewGuid(), elsewhere, $"text-not-in-tree-{key}-{step}", signature,
+                new(Output(answer), "service", """{"temperature": null}"""));
+        IReadOnlyList<Recorder.Analysis.SignedAnswer> Kept(string first, string second) =>
+        [
+            Answer("0123456789abcdef", 1, drawn.Signature, first), Answer("0123456789abcdef", 2, drawn.Signature, first),
+            Answer("fedcba9876543210", 1, hidden.Signature, second), Answer("fedcba9876543210", 2, hidden.Signature, second),
+        ];
+
+        var judged = Recorder.Analysis.Android.AndroidTextNotInTree.FromKept(run, [(run.Questions[0], drawn), (run.Questions[1], hidden)], Kept("drawn-text", "covered"), "Haiku");
+
+        var finding = Assert.Single(judged.Findings);
+        Assert.Equal((PhoneCheckNames.TextNotInTree, PhoneCheckLevel.Warning, "'Daily streak kept'"), (finding.Check, finding.Level, finding.Label));
+        Assert.StartsWith(
+            "Haiku, a cloud model, inferred from the pictures twice for the same line, by its pixels, its text and item and what a screen reader says on the screen, that the text \"Daily streak kept\" is shown to users where a screen reader cannot reach it",
+            finding.Inference!.Text, StringComparison.Ordinal);
+        Assert.EndsWith("; a person should verify this", finding.Inference.Text, StringComparison.Ordinal);
+        Assert.Same(finding, Assert.Single(judged.For(finding.Visit)));
+        Assert.Equal((1, 0, 0), (judged.Covered, judged.NotText, judged.Unanswered));
+        Assert.Equal(2, judged.Inferences.Count());
+        Assert.Equal(
+            "2 lines left by the rules are for Haiku; 2 lines answered: 1 judged covered and 0 judged not text, not confirmed, and 1 warning",
+            judged.ModelNote);
+
+        var notText = Recorder.Analysis.Android.AndroidTextNotInTree.FromKept(run, [(run.Questions[0], drawn)], Kept("not-text", "covered"), "Haiku");
+
+        Assert.Empty(notText.Findings);
+        Assert.Equal((1, 1), (notText.NotText, notText.Unanswered));
+        Assert.EndsWith(", 1 line not yet asked", notText.ModelNote, StringComparison.Ordinal);
+        Assert.Equal(
+            "2 lines left by the rules were not judged, as no model may be used for vision-based checks: no model",
+            Recorder.Analysis.Android.AndroidTextNotInTree.NotAsked(2, "no model"));
+    }
+
+    // Rule 9's levels.
+    [Theory]
+    [InlineData("drawn-text", PhoneCheckLevel.Warning, "is shown to users where a screen reader cannot reach it")]
+    [InlineData("covered", PhoneCheckLevel.Info, "is behind a dialog, sheet or dimmed layer, or covered, not confirmed")]
+    [InlineData("not-text", PhoneCheckLevel.Info, "that the text \"Daily streak kept\" is not text, not confirmed")]
+    [InlineData("cannot-tell", PhoneCheckLevel.Warning, "could not tell from the pictures twice whether the text \"Daily streak kept\" is drawn where a screen reader cannot reach it")]
+    public void TextNotInTree_Interpret_GivesEachAgreedAnswersLevel(string answer, PhoneCheckLevel level, string says)
+    {
+        var asked = DrawnTextRun().Run.Questions[0];
+
+        var inference = Recorder.Analysis.Android.AndroidTextNotInTree.Interpret(new(answer, "First."), new(answer, "Second."), "Haiku", cloud: false, asked);
+
+        Assert.Equal((level, true, false), (inference.Level, inference.Inferred, inference.Cloud));
+        Assert.StartsWith("Haiku, a local model,", inference.Text, StringComparison.Ordinal);
+        Assert.Contains(says, inference.Text, StringComparison.Ordinal);
+
+        var split = Recorder.Analysis.Android.AndroidTextNotInTree.Interpret(new(answer, "First."), new(answer == "cannot-tell" ? "drawn-text" : "cannot-tell", "Second."), "Haiku", cloud: false, asked);
+
+        Assert.Equal(PhoneCheckLevel.Warning, split.Level);
+        Assert.Contains("gave two answers", split.Text, StringComparison.Ordinal);
+        Assert.EndsWith("; check manually", split.Text, StringComparison.Ordinal);
+    }
+
     // The body text is the height most of the characters have.
     [Fact]
     public void HeadingLook_BodyHeight_IsTheMedianInkHeightByCharacters()

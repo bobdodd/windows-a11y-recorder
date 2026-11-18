@@ -183,7 +183,7 @@ Each row is one issue, so that its remediation can be specific.
 
 | Check | WCAG | What the model is asked | Chosen without a model |
 | --- | --- | --- | --- |
-| Text shown on screen that is not in the tree | 1.1.1, 4.1.2 | Is this recognised text part of an item, or drawn? | Text found by OCR in the frame where no item's text or bounds match |
+| Text shown on screen that is not in the tree | 1.1.1, 4.1.2 | Is this text drawn where a screen reader cannot reach it, covered, or not text? | Lines OCR read in no item's text, leaving out pictures out of step, TalkBack's caption, lines in images, short lines, lines held elsewhere or in another snapshot of the visit, and a small item's own text misread; built, see "Text not in the tree, as built" |
 | A graphic with no item in the tree | 1.1.1 | Does this area hold a graphic that informs, such as a chart or progress bar? | Areas of the frame with detail and no item, as `android-checks.md` step 5 left for the vision model (owner, 2026-11-12) |
 | The contrast of such a graphic | 1.4.11 | Which parts of the graphic are needed to understand it? | The graphics above, then measured as non-text contrast is now |
 | Text that is cut off or overlaps | 1.4.4, 1.4.10 | Is this text cut off or overlapped? | Text items whose text ends in an ellipsis, or whose bounds overlap or reach their parent's edge, most useful at a large font size |
@@ -538,6 +538,22 @@ picture where images cover at least half of the section. Does not
 describe is a warning for a person to verify, medium impact; cannot
 tell, or two answers, a warning to check manually; describes no
 finding, counted.
+
+### Text not in the tree, as built
+
+Built on 2026-11-18, at the owner's request, "Build the check with
+rules 1 to 10, including rule 2c, at high impact". Step 25 of
+`android-checks.md` has the measurement and the rules: lines OCR read
+in no item's text, each once a visit, on pictures in step with the
+tree; TalkBack's caption, lines inside images, short lines, lines a
+visible item elsewhere holds, a small item's own text misread and lines
+an item in another snapshot of the visit holds are set aside. The rest
+are asked, with the whole screen, a close-up, the item the line is
+drawn in and what a screen reader says on the screen, whether the line
+is drawn text a screen reader cannot reach, covered, not text, or
+cannot tell. Drawn text is a warning for a person to verify, high
+impact; cannot tell, or two answers, a warning to check manually;
+covered and not text no finding, counted.
 
 ### Simple and complex questions, measured on 2026-11-17
 

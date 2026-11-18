@@ -114,6 +114,15 @@ public partial class MainWindow
     private (PhoneHeadingSectionRun Rules, IReadOnlyList<HeadingSectionRequest> Requests)? _headingSectionRequests;
     private int _sectionTextUnanswered;
     private int _sectionVisionUnanswered;
+
+    // The check of text on screen not in the tree, the same way as the
+    // decorative image check (android-checks.md, step 25); its kept
+    // answers are found by the line's pixels, its text and item and what a
+    // screen reader says on the screen.
+    private PhoneTextNotInTreeRun? _phoneTextNotInTree;
+    private PhoneTextNotInTreeRun? _phoneTextNotInTreeRules;
+    private (PhoneTextNotInTreeRun Rules, IReadOnlyList<(PhoneTextNotInTreeQuestion Question, DescribedImageRequest Request)> Requests)? _textNotInTreeRequests;
+    private int _textNotInTreeUnanswered;
     private PhoneLabelInNameRun? _phoneLabelInName;
     private PhoneCheckSettings? _checkSettings;
 
@@ -194,6 +203,10 @@ public partial class MainWindow
             _headingSectionRequests = null;
             _sectionTextUnanswered = 0;
             _sectionVisionUnanswered = 0;
+            _phoneTextNotInTree = null;
+            _phoneTextNotInTreeRules = null;
+            _textNotInTreeRequests = null;
+            _textNotInTreeUnanswered = 0;
             _phoneLabelInName = null;
             _shownFinding = null;
             if (_playbackArchive is { PhoneScreens.Recorded: true } opened)
@@ -343,6 +356,14 @@ public partial class MainWindow
         _phoneHeadingSections = _phoneHeadingSectionsRules;
         _sectionTextUnanswered = _phoneHeadingSectionsRules?.TextQuestions ?? 0;
         _sectionVisionUnanswered = _phoneHeadingSectionsRules?.PicturedQuestions ?? 0;
+
+        // The check of text not in the tree is level A, so the same at both
+        // audit levels; its kept answers are given with the images' below.
+        _phoneTextNotInTreeRules = run is null
+            ? null
+            : PhoneTextNotInTreeRun.Run(run, archive.PhoneScreens, archive.TalkBackSpeech, archive.PhoneAccessibility);
+        _phoneTextNotInTree = _phoneTextNotInTreeRules;
+        _textNotInTreeUnanswered = _phoneTextNotInTreeRules?.Questions.Count ?? 0;
         JudgeTextContrast();
 
         // Non-text contrast has one level, AA (WCAG 2.2's 1.4.11), so is
@@ -395,6 +416,7 @@ public partial class MainWindow
         await ApplyKeptScreenTitleAnswersAsync();
         await ApplyKeptDecorativeAnswersAsync();
         await ApplyKeptHeadingSectionAnswersAsync();
+        await ApplyKeptTextNotInTreeAnswersAsync();
     }
 
     private async Task ApplyKeptImageAnswersAsync()
@@ -816,6 +838,71 @@ public partial class MainWindow
         ShowPhoneScreenRows();
     }
 
+    private async Task ApplyKeptTextNotInTreeAnswersAsync()
+    {
+        if (_phoneTextNotInTreeRules is not { } rules)
+        {
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        if (rules.Questions.Count == 0)
+        {
+            _textNotInTreeUnanswered = 0;
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        var name = _openProjectModels?.VisionChecks;
+        var problem = name is null
+            ? $"the project's settings choose no model for {ModelUses.Name(ModelUses.VisionChecks)}"
+            : ProjectModels.Problem(ProjectChoices, ModelUses.VisionChecks, name);
+        var none = new Dictionary<PhoneTextNotInTreeQuestion, PhoneTextNotInTreeAnswer>();
+        PhoneTextNotInTreeRun shown;
+        if (problem is not null || AnalysisCatalogOrNull is not { } catalog || ProjectChoices.Profile(name!) is not { } profile)
+        {
+            shown = rules.Judged(none, AndroidTextNotInTree.NotAsked(rules.Questions.Count, problem ?? "the analysis catalog is not open"));
+        }
+        else
+        {
+            try
+            {
+                if (_textNotInTreeRequests is not { } made || !ReferenceEquals(made.Rules, rules))
+                {
+                    var requests = await Task.Run(() => AndroidTextNotInTree.Requests(rules, PhonePictures.Load));
+                    made = (rules, requests);
+                    _textNotInTreeRequests = made;
+                }
+
+                var signed = await catalog.SignedAnswersAsync(
+                    AndroidTextNotInTree.Template, AndroidTextNotInTree.TemplateVersion, name!, profile.Model, _openProjectId, _analysisRecordingId, CancellationToken.None);
+                var complex = ComplexVisionModel();
+                var complexSigned = complex is { } other
+                    ? await catalog.SignedAnswersAsync(
+                        AndroidTextNotInTree.Template, AndroidTextNotInTree.TemplateVersion, other.Name, other.Profile.Model, _openProjectId, _analysisRecordingId, CancellationToken.None)
+                    : null;
+                shown = AndroidTextNotInTree.FromKept(rules, made.Requests, signed, name!, complexSigned, complex?.Name);
+            }
+            catch (Exception exception) when (exception is NpgsqlException or InvalidOperationException or IOException or ObjectDisposedException)
+            {
+                shown = rules.Judged(none, $"the model's kept answers could not be read: {exception.Message}");
+            }
+        }
+
+        // The recording changed while the answers were read.
+        if (!ReferenceEquals(rules, _phoneTextNotInTreeRules))
+        {
+            return;
+        }
+
+        // A question the model for complex questions has not yet answered
+        // is not judged, so is counted with those not yet asked.
+        _phoneTextNotInTree = shown;
+        _textNotInTreeUnanswered = problem is not null ? 0 : shown.Unanswered;
+        UpdateAskChecksModelButton();
+        ShowPhoneScreenRows();
+    }
+
     private async Task ApplyKeptHeadingSectionAnswersAsync()
     {
         if (_phoneHeadingSectionsMeasured is not { } measured)
@@ -962,7 +1049,8 @@ public partial class MainWindow
         var waiting = _analysisTasks?.Any(task => task.Kind == AndroidModelChecksKind.Name &&
             task.State is AnalysisTaskStates.Queued or AnalysisTaskStates.Running) == true;
         var models = _openProjectModels;
-        var vision = _imagesOfTextUnanswered + _headingLookUnanswered + _imageAlternativeUnanswered + _describedImagesUnanswered + _titleVisionUnanswered + _decorativeUnanswered + _sectionVisionUnanswered > 0 &&
+        var vision = _imagesOfTextUnanswered + _headingLookUnanswered + _imageAlternativeUnanswered + _describedImagesUnanswered + _titleVisionUnanswered + _decorativeUnanswered + _sectionVisionUnanswered +
+            _textNotInTreeUnanswered > 0 &&
             models is { VisionChecks: not null } && models.ChecksProblem(ProjectChoices, ModelUses.VisionChecks) is null;
         var text = _titleTextUnanswered + _sectionTextUnanswered > 0 &&
             models is { TextChecks: not null } && models.ChecksProblem(ProjectChoices, ModelUses.TextChecks) is null;
@@ -1173,7 +1261,7 @@ public partial class MainWindow
             if (_phoneChecks is not null || _phoneTextContrast is not null || _phoneNonTextContrast is not null || _phoneImagesOfText is not null ||
                 _phoneLabelInName is not null || _phoneHeadingLook is not null || _phoneImageAlternative is not null ||
                 _phoneDescribedImages is not null || _phoneScreenTitles is not null || _phoneDecorativeImages is not null ||
-                _phoneHeadingSections is not null)
+                _phoneHeadingSections is not null || _phoneTextNotInTree is not null)
             {
                 // The status message check follows every snapshot, settled
                 // or not, so can find a message in a visit too brief to
@@ -1429,6 +1517,23 @@ public partial class MainWindow
             }
         }
 
+        if (_phoneTextNotInTree is { SnapshotsRead: > 0 } notInTree)
+        {
+            var title = PhoneCheckNames.Title(PhoneCheckNames.TextNotInTree);
+            var findings = notInTree.For(visit);
+            if (findings.Count > 0)
+            {
+                AddCheckRows(findings, $", from {Count(notInTree.Questions.Count(question => question.Visit == visit), "line")} asked about");
+            }
+            else
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{title}: {TextNotInTreeState(notInTree, visit)}", shownAt, null)
+                {
+                    IsCheck = true,
+                });
+            }
+        }
+
         if (_phoneLabelInName is { } labels)
         {
             var findings = labels.For(visit);
@@ -1540,6 +1645,58 @@ public partial class MainWindow
         }
 
         return $"no findings, from {Count(entries.Count, "heading")}: {string.Join("; ", parts)}.";
+    }
+
+    // What became of a visit's lines in the check of text not in the
+    // tree, where it made no finding: each line is checked once a visit,
+    // from the first picture in step with the tree it is seen on.
+    private static string TextNotInTreeState(PhoneTextNotInTreeRun notInTree, PhoneVisit visit)
+    {
+        if (!notInTree.Read(visit))
+        {
+            return "not checked, as OCR read no picture of this visit.";
+        }
+
+        var entries = notInTree.In(visit).ToList();
+        if (entries.Count == 0)
+        {
+            return "no findings: OCR read no text that no item holds on the pictures of this visit in step with the tree.";
+        }
+
+        int Of(PhoneTextNotInTreeState state) => entries.Count(entry => entry.State == state);
+        var asked = notInTree.Questions.Where(question => question.Visit == visit).ToList();
+        var answered = asked.Where(question => notInTree.Answers.ContainsKey(question)).Select(question => notInTree.Answers[question].Outcome).ToList();
+        var parts = new List<string>();
+        void Add(PhoneTextNotInTreeState state, string what)
+        {
+            if (Of(state) is > 0 and var count)
+            {
+                parts.Add($"{Count(count, "line")} {what}");
+            }
+        }
+
+        Add(PhoneTextNotInTreeState.Caption, "of TalkBack's caption");
+        Add(PhoneTextNotInTreeState.Image, "inside images, left to the image of text check");
+        Add(PhoneTextNotInTreeState.Short, "of fewer than 3 letters or digits");
+        Add(PhoneTextNotInTreeState.HeldElsewhere, "held by an item elsewhere on the screen");
+        Add(PhoneTextNotInTreeState.Misread, "taken as a small item's own text misread, left to the label in name check");
+        Add(PhoneTextNotInTreeState.OtherSnapshot, "held by an item in another snapshot of this visit");
+        if (answered.Count(outcome => outcome == PhoneTextNotInTreeOutcome.Covered) is > 0 and var covered)
+        {
+            parts.Add($"{Count(covered, "line")} judged covered, behind a dialog, sheet or dimmed layer, not confirmed");
+        }
+
+        if (answered.Count(outcome => outcome == PhoneTextNotInTreeOutcome.NotText) is > 0 and var notText)
+        {
+            parts.Add($"{Count(notText, "line")} judged not text, not confirmed");
+        }
+
+        if (asked.Count - answered.Count is > 0 and var waiting)
+        {
+            parts.Add($"{Count(waiting, "line")} for the model for vision-based checks, not yet judged");
+        }
+
+        return $"no findings, from {Count(entries.Count, "line")} OCR read in no item's text: {string.Join("; ", parts)}.";
     }
 
     // What became of a visit's described images in the decorative image
@@ -1961,6 +2118,24 @@ public partial class MainWindow
                     $"{Count(sections.NotJudgedHeadings, "piece")} of text shown as a heading not checked, as not judged a heading. " +
                     $"{sections.Described:N0} judged to describe {(sections.Described == 1 ? "its section" : "their sections")}, not confirmed, and {Count(sections.Unanswered, "heading")} not judged" +
                     (sections.ModelNote is { } sectionNote ? $": {sectionNote}." : ".");
+        }
+
+        if (_phoneTextNotInTree is { } notInTree)
+        {
+            var treeName = PhoneCheckNames.Title(PhoneCheckNames.TextNotInTree);
+            var treeFindings = notInTree.Findings.Count == 0
+                ? "no findings"
+                : $"{Count(notInTree.Findings.Count, "finding")} ({Levels(notInTree.Findings)})";
+            summary += notInTree.SnapshotsRead == 0
+                ? $" {treeName}: not checked, as it needs the text OCR read on the screens' pictures."
+                : $" {treeName}: {treeFindings}, from {Count(notInTree.Entries.Count, "line")} OCR read in no item's text, each once a visit, on {Count(notInTree.SnapshotsRead, "picture")}: " +
+                    $"{notInTree.Captions:N0} of TalkBack's caption, {notInTree.InImages:N0} inside images, left to the image of text check, {notInTree.ShortLines:N0} of fewer than 3 letters or digits, " +
+                    $"{notInTree.HeldElsewhere:N0} held by an item elsewhere on the screen, {notInTree.Misreads:N0} taken as a small item's own text misread, " +
+                    $"{notInTree.OtherSnapshots:N0} held by an item in another snapshot of the same visit, " +
+                    $"and {Count(notInTree.Questions.Count, "line")} for the model for vision-based checks. " +
+                    $"{Count(notInTree.OutOfStepSnapshots, "picture")} out of step with the tree, with {Count(notInTree.OutOfStepLines, "line")} in no item's text, {(notInTree.OutOfStepSnapshots == 1 ? "was" : "were")} not judged; " +
+                    $"{notInTree.Covered:N0} judged covered and {notInTree.NotText:N0} judged not text, not confirmed, and {Count(notInTree.Unanswered, "line")} not judged" +
+                    (notInTree.ModelNote is { } treeNote ? $": {treeNote}." : ".");
         }
 
         if (_phoneLabelInName is { } labels)

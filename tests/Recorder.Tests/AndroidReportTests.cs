@@ -47,7 +47,7 @@ public sealed class AndroidReportTests : IDisposable
             PhoneCheckNames.ImageOfText, PhoneCheckNames.ImageOfTextAaa, PhoneCheckNames.LabelNotInName, PhoneCheckNames.LabelNotAtStart,
             PhoneCheckNames.TextShownAsHeading, PhoneCheckNames.ImageNoTextAlternative, PhoneCheckNames.IconContradictsName,
             PhoneCheckNames.DescriptionNotMatchingImage, PhoneCheckNames.TitleNotDescriptive, PhoneCheckNames.DecorativeAnnounced,
-            PhoneCheckNames.HeadingNotDescriptive,
+            PhoneCheckNames.HeadingNotDescriptive, PhoneCheckNames.TextNotInTree,
         ];
         var checks = PhoneCheckNames.All.Concat(measured).ToList();
         Assert.Equal(checks.Order(StringComparer.Ordinal), guidance.Checks.Select(check => check.Check).Order(StringComparer.Ordinal));

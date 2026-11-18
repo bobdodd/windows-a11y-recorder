@@ -9,8 +9,9 @@ namespace Recorder.Analysis.Android;
 /// first answer, copied into this task; any other is asked, and asked
 /// again of the model for complex questions where it is not settled.
 /// The icon and description checks' (step 21), the screen title check's
-/// (step 22), the decorative image check's (step 23) and the check of a
-/// heading's section (step 24); "the same image" is the same signature,
+/// (step 22), the decorative image check's (step 23), the check of a
+/// heading's section (step 24) and the check of text not in the tree
+/// (step 25); "the same image" is the same signature,
 /// which for a question with no picture is the same texts.
 /// </summary>
 internal sealed class SignedAsker(

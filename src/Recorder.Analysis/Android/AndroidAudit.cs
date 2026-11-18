@@ -11,12 +11,12 @@ namespace Recorder.Analysis.Android;
 /// measurement. No model is used here; the questions of the images-of-text
 /// check, the check of text shown as a heading, the check of images with
 /// no text alternative, the icon and description checks, the screen
-/// title check, the decorative image check and the check of a heading
-/// that does not describe its section are asked after, where a model may
-/// be used (<see cref="AndroidImagesOfText"/>, <see cref="AndroidHeadingLook"/>,
+/// title check, the decorative image check, the check of a heading
+/// that does not describe its section and the check of text on screen not
+/// in the tree are asked after, where a model may be used (<see cref="AndroidImagesOfText"/>, <see cref="AndroidHeadingLook"/>,
 /// <see cref="AndroidImageAlternative"/>, <see cref="AndroidDescribedImages"/>,
 /// <see cref="AndroidScreenTitles"/>, <see cref="AndroidDecorativeImages"/>,
-/// <see cref="AndroidHeadingSections"/>;
+/// <see cref="AndroidHeadingSections"/>, <see cref="AndroidTextNotInTree"/>;
 /// android-report.md, "The audit").
 /// </summary>
 public sealed class AndroidAudit
@@ -44,6 +44,7 @@ public sealed class AndroidAudit
         ScreenTitles = other.ScreenTitles;
         DecorativeImages = other.DecorativeImages;
         HeadingSections = other.HeadingSections;
+        TextNotInTree = other.TextNotInTree;
     }
 
     public PhoneCheckRun Tree { get; }
@@ -89,6 +90,9 @@ public sealed class AndroidAudit
     /// </summary>
     public PhoneHeadingSectionRun? HeadingSections { get; private init; }
 
+    /// <summary>Text shown on screen that is not in the accessibility tree (android-checks.md, step 25).</summary>
+    public PhoneTextNotInTreeRun? TextNotInTree { get; private init; }
+
     /// <summary>The findings of the whole app, not of one visit, such as no live region in the app.</summary>
     public IReadOnlyList<PhoneFinding> AppFindings => Tree.AppFindings;
 
@@ -110,15 +114,16 @@ public sealed class AndroidAudit
         .. ScreenTitles?.For(visit) ?? [],
         .. DecorativeImages?.For(visit) ?? [],
         .. HeadingSections?.For(visit) ?? [],
+        .. TextNotInTree?.For(visit) ?? [],
     ];
 
     /// <summary>
     /// Whether any finding is a model's inference, so that a report says
     /// AI was used in the testing, and whether a cloud model was
     /// (android-vision-checks.md, decision 2). The icon and description
-    /// checks, the screen title check, the decorative image check and the
-    /// check of a heading's section give every answer, as most make no
-    /// finding.
+    /// checks, the screen title check, the decorative image check, the
+    /// check of a heading's section and the check of text not in the tree
+    /// give every answer, as most make no finding.
     /// </summary>
     public IReadOnlyList<PhoneInference> Inferences =>
     [
@@ -128,6 +133,7 @@ public sealed class AndroidAudit
             .Concat(ScreenTitles?.Inferences ?? [])
             .Concat(DecorativeImages?.Inferences ?? [])
             .Concat(HeadingSections?.Inferences ?? [])
+            .Concat(TextNotInTree?.Inferences ?? [])
             .Where(inference => inference.Inferred),
     ];
 
@@ -206,6 +212,17 @@ public sealed class AndroidAudit
         return new(this) { HeadingSections = run };
     }
 
+    /// <summary>
+    /// The audit with the check of text on screen not in the tree judged
+    /// by a model's answers (<see cref="AndroidTextNotInTree"/>), every
+    /// other check as it was.
+    /// </summary>
+    public AndroidAudit WithTextNotInTree(PhoneTextNotInTreeRun run)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        return new(this) { TextNotInTree = run };
+    }
+
     /// <summary>Every finding, the app's first.</summary>
     public IEnumerable<PhoneFinding> All(PhoneScreenTimeline screens)
     {
@@ -275,6 +292,7 @@ public sealed class AndroidAudit
             ScreenTitles = measured is null ? null : PhoneScreenTitleRun.Run(measured, screens),
             DecorativeImages = described is null ? null : PhoneDecorativeImageRun.Run(described),
             HeadingSections = measured is null ? null : PhoneHeadingSectionRun.Run(measured, screens, null),
+            TextNotInTree = measured is null ? null : PhoneTextNotInTreeRun.Run(measured, screens, speech, accessibility),
         };
     }
 }

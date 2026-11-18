@@ -4437,6 +4437,193 @@ answer and of two answers.
 - How well the check finds a real failure is not measured; the sample
   had none confirmed.
 
+## Step 25: text on screen not in the tree
+
+### The owner's decision (2026-11-18)
+
+Offered eight rules from the first probe below, with two versions of
+the rule for pictures out of step, the owner asked to test the second,
+then to add a rule for a tree not yet complete, and chose: "Build the
+check with rules 1 to 10, including rule 2c, at high impact".
+
+1. **Which lines.** The lines OCR read on a settled snapshot's picture
+   that no item's text holds, with at least 3 letters or digits, each
+   once a visit, from the first snapshot in step with the tree it is
+   seen on.
+2. **Pictures out of step.** (2b) A picture is out of step with the tree
+   where the tree has at least 3 text items, not images, and OCR found
+   fewer than half of them where the tree places them; its lines are
+   counted, not judged. (2c) After rule 7, a line that an item shown in
+   another snapshot of the same visit holds is set aside, as the tree
+   was not complete when this snapshot was taken.
+3. **TalkBack's caption** is left out, as for the image of text check.
+4. **Images.** A line inside an image, an ImageView or a web image
+   (`android.widget.Image`), is left to the image of text check.
+5. **Held elsewhere.** A line a visible item elsewhere on the screen
+   holds is in the tree, so is counted, not reported.
+6. **Held by an item not shown.** A line an item marked not shown holds
+   is still asked about, and the question says so.
+7. **Misreads.** A line inside an item, not a WebView, that covers at
+   most a quarter of the screen and has its own text, hint or
+   description is taken as that text misread. A wrong label there is the
+   label in name check's (2.5.3).
+8. **The question.** The rest are asked of the project's model for
+   vision-based checks, with the whole screen with the line outlined, a
+   close-up, the line as OCR read it, the item it is drawn in and what a
+   screen reader says on the screen. It answers drawn text a screen
+   reader cannot reach, text behind a dialog or scrim or covered, not
+   text (a shape or icon read as letters), or cannot tell, reason first.
+9. **Levels.** Drawn text is a warning for a person to verify, high
+   impact if confirmed (1.1.1, 4.1.2). Cannot tell, or two answers, is
+   a warning to check manually. The other answers are counted. With no
+   model, nothing is judged.
+10. **One finding a line.** Each line is one finding in each visit, its
+    answer kept and reused by signature as for the other checks.
+
+### What the standards say (checked in cited documents)
+
+- [WCAG 2.2's Understanding 1.1.1](https://www.w3.org/WAI/WCAG22/Understanding/non-text-content.html)
+  defines non-text content as "any content that is not a sequence of
+  characters that can be programmatically determined", and asks that it
+  have a text alternative. Text drawn as pixels, with no item a screen
+  reader can reach, cannot be programmatically determined, so is
+  non-text content with no alternative.
+- [WCAG 2.2's Understanding 4.1.2](https://www.w3.org/WAI/WCAG22/Understanding/name-role-value.html)
+  asks that the name of every user interface component can be
+  programmatically determined, and that custom controls take
+  "additional measures" to give assistive technologies that
+  information; a custom view that draws its text and gives no name does
+  not. [WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/) applies both to
+  software.
+
+### Measured first (2026-11-18)
+
+A probe, with no model, read the 20 recordings with phone screens on
+the development PC: 140 snapshots read with OCR held 734 lines in no
+item's text, 493 once a screen.
+
+- **Out of step, the first version (2a).** The image checks' rule, more
+  stray lines than tree text found, took 26 snapshots and 411 lines. Of
+  6 pictures opened, 5 showed another screen or a transition; the sixth
+  a dialog over a page. That rule would never check an app that draws
+  most of its text, as its pictures would look out of step.
+- **Set aside by the other rules.** 25 lines were TalkBack's caption,
+  11 inside an image, 1 short, and 15 held by a visible item elsewhere,
+  such as a scrolled mail list. None was held only by an item not
+  shown.
+- **Of the 30 left,** 19 were OCR misreads of a small item's own text,
+  mostly launcher labels and the date widget on video frames; 2 were in
+  a web image; 5 text behind a bottom sheet's scrim and 2 behind a web
+  dialog; and 2 page dots read as letters.
+- **Rule 2b.** At least 3 text items and fewer than half found where the
+  tree places them took 44 snapshots. They agreed with 2a on 25. The 19
+  only 2b took were Home screen frames, blurred or with labels OCR
+  could not read over the wallpaper. The 1 only 2a took was a snapshot
+  whose tree had 4 text items where the visit's other snapshots had 9:
+  2b sent its 10 lines on.
+- **Rule 2c.** After 2b and rules 3 to 7, an item shown in another
+  snapshot of the visit held 15 lines: the 10 above, and 5 behind the
+  bottom sheet, which the visit's other snapshots hold. Each was checked
+  against the item that held it.
+- **What each gives the model.**
+
+| Rule 2 | Lines for the model | Screens |
+|---|---|---|
+| 2a | 10 | 5 |
+| 2b | 19 | 5 |
+| 2b, then 2c | 4 | 3 |
+
+- **The 4 left:** 2 lines behind a web dialog that none of the visit's 6
+  snapshots holds, 1 garbled app bar title on a visit with one
+  snapshot, and 1 set of page dots.
+- **Limits of the measure.** 39 of the 65 visits had one snapshot, where
+  2c has nothing to compare. No recording had text truly drawn where a
+  screen reader cannot reach it, so how well the check finds it is not
+  measured.
+
+### As built
+
+- **The rules.** `PhoneTextNotInTreeRun` (`Recorder.Session`) reads each
+  settled snapshot with a tree that OCR read (`SnapshotsRead`). Its
+  lines found by OCR in no item's text are taken; a snapshot `OutOfStep`
+  (rule 2b) is counted (`OutOfStepSnapshots`, `OutOfStepLines`) and
+  skipped. Each line is taken once a visit by its letters and digits, as
+  `PhoneTextMatching.Spelling` gives them, and sorted in this order:
+  TalkBack's caption, as the image of text check finds it
+  (`PhoneImagesOfTextRun.CaptionSaid`, `Captions`); its centre inside a
+  visible ImageView or `android.widget.Image` (`InImages`); fewer than 3
+  letters or digits (`ShortLines`); held by the visible items
+  (`HeldElsewhere`); inside a small item with words of its own, not a
+  WebView (`Misreads`); held by the visible items of another snapshot of
+  the visit (`OtherSnapshots`); else asked (`Questions`). Held is as the
+  image checks match words: every word of two or more letters among the
+  items' words, a word of four or more within one letter of one, or the
+  line's spelling within the items' spellings run together.
+- **Rule 6.** Whether the items not shown hold the line, the same way,
+  is given to the question (`HeldByHidden`) and to what was measured.
+- **The question.** `AndroidTextNotInTree` (`Recorder.Analysis`) asks
+  `android-text-not-in-tree`, version 1, of the project's model for
+  vision-based checks, with picture A, the whole screen with the line
+  outlined, and picture B, a close-up, as the image checks give them,
+  and a step key made from the request's SHA-256. The question gives
+  the app's package, the screen's name, the line as OCR read it, noting
+  that OCR may misread, that no item a screen reader is given holds it,
+  the class of the item it is drawn in and that item's own words, where
+  an item not shown holds it, and what a screen reader says on the
+  screen, item by item, cut to 4,000 characters. It answers drawn-text,
+  covered, not-text (which includes a garbled reading of text a screen
+  reader says) or cannot-tell, reason first.
+- **Rule 10, the signature.** The line's pixels, the app, the line, the
+  item's class and words, whether an item not shown holds it, and what
+  a screen reader says on the screen. An answer kept on a task of the
+  project, by the same profile and model, is copied into the task
+  (`SignedAsker`), and a question not settled is asked again of the
+  model for complex questions.
+- **Rule 9, the levels.** Agreed drawn-text: a warning, the model's
+  inference, ending "a person should verify this". Agreed cannot-tell,
+  or two answers: a warning ending "check manually". Agreed covered or
+  not-text: no finding, counted (`Covered`, `NotText`). Every answer is
+  the model's inference, so the report says AI was used even where no
+  finding was made. Before any answer, and with no model for
+  vision-based checks, no finding is made; the note says how many lines
+  were not judged and why.
+- **Where it runs.** The Android report, the project report and the
+  model checks ask after the heading section check; the model checks'
+  Markdown has a section, "Text not in the tree", and the report's
+  limits give the check's note. The Checks tab gives a row under each
+  visit: the findings, or what became of the visit's lines; and the
+  summary gives the counts. "Ask the project's model" is enabled while
+  a line is not judged.
+- **Guidance.** `android-check-guidance.json` has the check,
+  `text-not-in-tree`, impact high, criteria 1.1.1 and 4.1.2, related
+  1.3.1, with remediation for Views, Compose, Flutter and React Native.
+
+### Checked
+
+The solution builds with no warnings, and the tests pass, 2,688 of
+them, with the 10 that need Windows failing as before. The new tests
+cover a made-up screen: a line held by a visible item elsewhere, two
+lines drawn in a custom view with no text of its own, one of them held
+by an item not shown, a line in another snapshot's tree, a short line,
+a line inside an image and a line inside a small button with its own
+text; each line once a visit; no OCR; a picture out of step and one in
+step; the request's key, use, pictures, answers and text; kept answers
+judging one line drawn text and one covered, and one not text; no
+model; and the levels of each answer and of two answers.
+
+### Limits
+
+- On a visit with one snapshot, rule 2c has nothing to compare, so a
+  tree not yet complete reaches the model.
+- Held is matched by words, not by one item, so a line whose words are
+  all said in different items is taken as held.
+- A line inside a small item with words of its own is taken as a
+  misread, even where the item also draws other text.
+- The image of text check looks only at ImageViews, so text in a web
+  image is left by this check to a check that does not read it.
+- How well the check finds drawn text is not measured; the sample had
+  none.
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A

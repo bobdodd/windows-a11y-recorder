@@ -25,7 +25,10 @@ namespace Recorder.Analysis.Android;
 /// leave (AndroidDecorativeImages); where it chooses a model for text-based
 /// checks, or for vision-based checks for a section images cover half of,
 /// the check of a heading's section asks it about the headings its rules
-/// leave (AndroidHeadingSections); and the report says AI was used. With no model
+/// leave (AndroidHeadingSections); where it chooses a model for
+/// vision-based checks, the check of text on screen not in the tree asks it
+/// about the lines its rules leave (AndroidTextNotInTree); and the report
+/// says AI was used. With no model
 /// it gives the same report for the same recording, settings and guidance.
 /// </summary>
 public sealed class AndroidReportKind : IAnalysisTaskKind
@@ -295,7 +298,7 @@ public sealed class AndroidModelChecksKind : IAnalysisTaskKind
             .Append(CultureInfo.InvariantCulture, $"# Model checks: {recording}\n\n");
         if (audit.ImagesOfText is not { } run)
         {
-            return text.Append("The colours could not be measured, so the images-of-text check, the check of text shown as a heading, the check of images with no text alternative, the icon and description checks, the screen title check, the decorative image check and the check of a heading's section did not run")
+            return text.Append("The colours could not be measured, so the images-of-text check, the check of text shown as a heading, the check of images with no text alternative, the icon and description checks, the screen title check, the decorative image check, the check of a heading's section and the check of text not in the tree did not run")
                 .Append(audit.MeasureProblem is { } problem ? ": " + problem : "").Append(".\n").ToString();
         }
 
@@ -409,6 +412,24 @@ public sealed class AndroidModelChecksKind : IAnalysisTaskKind
             }
         }
 
+        if (audit.TextNotInTree is { } notInTree)
+        {
+            text.Append("\n## Text not in the tree\n\n")
+                .Append(CultureInfo.InvariantCulture,
+                    $"Of the lines OCR read in no item's text, once a visit, on {notInTree.SnapshotsRead} pictures, {notInTree.OutOfStepSnapshots} pictures were out of step with the tree and not judged; {notInTree.Captions} were TalkBack's caption, {notInTree.InImages} were inside images, {notInTree.ShortLines} were too short, {notInTree.HeldElsewhere} were held by an item elsewhere on the screen, {notInTree.Misreads} were taken as a small item's own text misread and {notInTree.OtherSnapshots} were held by an item in another snapshot of the visit; the rules left {notInTree.Questions.Count} for the project's model for vision-based checks.");
+            if (notInTree.ModelNote is { } treeNote)
+            {
+                text.Append(' ').Append(char.ToUpperInvariant(treeNote[0])).Append(treeNote.AsSpan(1)).Append('.');
+            }
+
+            text.Append("\n\n");
+            foreach (var finding in notInTree.Findings)
+            {
+                text.Append(CultureInfo.InvariantCulture,
+                    $"- {finding.Screen.Package}, \"{finding.Screen.Name}\", visit {finding.Visit.Number}, {finding.Label}: {finding.Text}\n");
+            }
+        }
+
         return text.ToString();
     }
 
@@ -473,6 +494,7 @@ internal static class AndroidReportRun
             audit = await AndroidScreenTitles.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
             audit = await AndroidDecorativeImages.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
             audit = await AndroidHeadingSections.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
+            audit = await AndroidTextNotInTree.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
             if (modelChecksOnly)
             {
                 var named = await context.Catalog.RecordingAsync(task.Recording, cancellationToken).ConfigureAwait(false);
@@ -573,6 +595,7 @@ internal static class AndroidReportRun
                 audit = await AndroidScreenTitles.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
                 audit = await AndroidDecorativeImages.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
                 audit = await AndroidHeadingSections.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
+            audit = await AndroidTextNotInTree.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
                 parts.Add(Input(archive, audit, label, opened.Incomplete) with { StartedUtc = new DateTimeOffset(recording.StartedUtc, TimeSpan.Zero) });
                 keys.Add(key);
             }

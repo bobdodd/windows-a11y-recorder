@@ -133,6 +133,16 @@ public static class PhoneCheckNames
     public const string HeadingNotDescriptive = "heading-not-descriptive";
 
     /// <summary>
+    /// Text shown on screen that is not in the accessibility tree (step 25,
+    /// PhoneTextNotInTreeRun), WCAG 1.1.1 and 4.1.2, one discrete issue
+    /// (owner, 2026-11-18): a line OCR read that no item holds, judged by
+    /// the project's model for vision-based checks to be drawn text a
+    /// screen reader cannot reach, a warning for a person to verify, high
+    /// impact if confirmed; none without a model.
+    /// </summary>
+    public const string TextNotInTree = "text-not-in-tree";
+
+    /// <summary>
     /// Label in Name (step 9), from the tree's text and OCR's: the name
     /// does not contain the visible label, and the name contains it but
     /// does not start with it. Not one of the tree's checks.
@@ -259,6 +269,7 @@ public static class PhoneCheckNames
         TitleNotDescriptive => "Screen title does not describe its screen (WCAG2ICT 2.4.2)",
         DecorativeAnnounced => "Decorative image announced by a screen reader (WCAG 1.1.1)",
         HeadingNotDescriptive => "Heading does not describe its section (WCAG 2.4.6)",
+        TextNotInTree => "Text on screen not in the accessibility tree (WCAG 1.1.1, 4.1.2)",
         NoHeading => "No heading (WCAG 1.3.1)",
         FirstHeadingLow => "First heading far from the top",
         ManyHeadings => "Many headings",

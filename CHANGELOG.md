@@ -8,6 +8,29 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Text not in the tree
+
+- A new check, "Text on screen not in the accessibility tree" (WCAG
+  1.1.1, 4.1.2), for lines OCR read on the screen's picture that no
+  item's text holds, each once a visit.
+- A picture is out of step with the tree, and not judged, where the
+  tree has at least 3 text items and OCR found fewer than half of them
+  where the tree places them, so an app that draws most of its text is
+  still checked. A line an item in another snapshot of the same visit
+  holds is set aside, as the tree was not yet complete.
+- TalkBack's caption, lines inside images (left to the image of text
+  check), lines of fewer than 3 letters or digits, lines a visible item
+  elsewhere holds, and a small item's own text misread (left to the
+  label in name check) are counted, not asked.
+- The rest are asked of the project's model for vision-based checks,
+  with the screen, a close-up, the item the line is drawn in, whether
+  an item not shown holds it, and what a screen reader says on the
+  screen. Drawn text is a warning for a person to verify, high impact;
+  cannot tell, or two answers, a warning to check manually; covered and
+  not text are counted. With no model, no finding is made.
+- Answers are kept against the line's pixels and texts, and asked again
+  of the model for complex questions where the first do not settle them.
+
 ### Headings and sections
 
 - A new check, "Heading does not describe its section" (WCAG 2.4.6),

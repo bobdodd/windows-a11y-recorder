@@ -491,6 +491,14 @@ public sealed class PhoneImagesOfTextRun
         PhoneAccessibilityTimeline accessibility) =>
         Step(snapshot, images, CaptionAt(snapshot.Settled.MonotonicNanoseconds, talkBack, speech, accessibility));
 
+    /// <summary>
+    /// Rule 1, for the check of text on screen not in the tree
+    /// (android-checks.md, step 25, rule 3): whether a line OCR read is
+    /// TalkBack's caption, or what it was saying or reading, at a time.
+    /// </summary>
+    internal static Func<PhoneTextLine, bool> CaptionSaid(long at, bool talkBack, TalkBackSpeechTimeline speech, PhoneAccessibilityTimeline accessibility) =>
+        CaptionAt(at, talkBack, speech, accessibility).Said;
+
     /// <summary>What a finding not judged as its picture is out of step says (rule 2).</summary>
     internal static string OutOfStepText(int unexplained, int found) =>
         string.Create(CultureInfo.CurrentCulture,
