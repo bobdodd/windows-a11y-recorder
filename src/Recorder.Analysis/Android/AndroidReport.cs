@@ -1061,7 +1061,7 @@ public static class AndroidReport
                 var check = _several ? $"In recording {(index + 1).ToString(CultureInfo.InvariantCulture)}, a" : "A";
                 if (part.Audit.MeasureProblem is { } problem)
                 {
-                    Item($"{of} colours could not be measured, so the contrast, image of text, label in name, text shown as a heading, image text alternative, icon and description, screen title and decorative image checks did not run: " + problem);
+                    Item($"{of} colours could not be measured, so the contrast, image of text, label in name, text shown as a heading, image text alternative, icon and description, screen title, decorative image and heading section checks did not run: " + problem);
                 }
 
                 if (part.Audit.ImagesOfText?.ModelNote is { } note)
@@ -1092,6 +1092,11 @@ public static class AndroidReport
                 if (part.Audit.DecorativeImages?.ModelNote is { } decorativeNote)
                 {
                     Item($"{of} decorative image check's model: {decorativeNote}.");
+                }
+
+                if (part.Audit.HeadingSections?.ModelNote is { } sectionNote)
+                {
+                    Item($"{of} heading section check's model: {sectionNote}.");
                 }
 
                 foreach (var problem2 in part.Audit.Tree.Problems)

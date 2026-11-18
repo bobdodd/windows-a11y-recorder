@@ -4215,6 +4215,228 @@ and the levels of each answer and of two answers.
 - What a screen reader says is the tree's order, not the order a screen
   reader moved in on the recording.
 
+## Step 24: a heading that does not describe its section
+
+### The owner's decision (2026-11-17)
+
+Offered the heading check of WCAG 2.4.6 next, the owner chose it, and
+asked that it be tied to the check of text shown as a heading but not
+marked as one (step 19), so that such text is checked too. Asked about
+the sections' content not on screen: "Wouldn't the content be in the
+accessibility tree? You might warn that the result is only from the
+tree, but you should be able to make some answer". After two more
+probes, of items not on screen and of scrolling areas, the owner chose:
+"Build the heading check with rules 1 to 10 as revised, with the
+same-area and scrolling changes".
+
+1. **One issue.** "Heading does not describe its section"
+   (`heading-not-descriptive`), WCAG 2.4.6, beside "Text shown as a
+   heading, not marked as one" (1.3.1). Text can have both, as their
+   remedies differ.
+2. **Which headings.** Items marked as headings that are shown, with
+   text a screen reader says, and text not marked as a heading that the
+   model judged a heading in step 19. Text the model judged not a
+   heading, could not tell about, gave two answers for, or has not yet
+   judged is counted, not checked. Each heading once a screen, from its
+   first settled snapshot OCR read.
+3. **The screen's title.** A heading that is the screen's title,
+   letters and digits compared in lower case (in Chrome, the web page's
+   title too), is left to the screen title check, counted, with no
+   model asked.
+4. **A section not on screen.** A heading with nothing under it, on
+   screen, in the tree or in the text OCR read, within its scrolling
+   area, is counted as having its section not on screen, not judged.
+5. **The section.** The items after the heading in the tree's order up
+   to the next heading, the next heading being one marked, on screen or
+   not, or text shown as a heading not judged not to be one; only items
+   in the heading's scrolling area, the nearest item holding the heading
+   that is scrollable or can scroll, or in one inside it, or every item
+   where the heading is in none. On screen: the items a screen reader
+   stops on, not within the heading and not above it. Not on screen:
+   the outermost items a screen reader would read. The text OCR read:
+   the lines from the heading's bottom to the next heading below it, or
+   else the bottom of the scrolling area. Each part is marked with where
+   it came from, with the screen's title and the app's package.
+6. **The picture.** Where images cover at least half of the section,
+   the screen's picture is given, with the heading outlined, and the
+   question is for the model for vision-based checks.
+7. **Not on screen, and scrolling.** A finding whose section is partly
+   from items not on screen says it was judged from the accessibility
+   tree only. Where the section is the last on screen and its area can
+   scroll down, the question says that it may continue below the
+   screen.
+8. **Levels.** A heading judged not to describe its section is a
+   warning for a person to verify, medium impact if confirmed. Cannot
+   tell, or two answers, is a warning to check manually. Describes is no
+   finding, and is counted.
+9. **The models.** The project's model for text-based checks, or for
+   vision-based checks where pictured, asked twice, and asked again of
+   the model for complex questions where not settled. With no model, a
+   heading is not checked, and no finding is made.
+10. **One answer for one heading.** A saved answer is reused only where
+    the heading, all of its section's texts and, where given, the
+    picture are unchanged.
+
+### What the standards say (checked in cited documents)
+
+- [WCAG 2.2's Understanding 2.4.6](https://www.w3.org/WAI/WCAG22/Understanding/headings-and-labels.html)
+  asks that headings, where there are any, be descriptive, and says
+  that they need not be long: "A word, or even a single character, may
+  suffice if it provides an appropriate cue to finding and navigating
+  content." It does not require headings, so a screen with none is not
+  this issue. [WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/) applies it
+  to software.
+
+### Measured first (2026-11-17)
+
+Three probes, with no model, read the 20 recordings with phone screens
+on the development PC: 79 headings once a screen, 34 marked and 45 not
+marked but found by step 19's rules.
+
+- **Text shown as a heading.** All 45 unmarked headings were in one
+  Flutter app, on 6 recordings. Step 19's kept answers judged 37 a
+  heading and 5 not a heading (the word "OPEN"); 3 had two
+  answers. So unmarked text is taken only where judged a heading.
+- **The screen's title.** 13 headings were their screen's title, such
+  as the titles in Settings' and TalkBack's collapsing bars, so are left
+  to the screen title check.
+- **Nothing under the heading.** 8 headings had nothing under them on
+  screen.
+- **Not on screen.** The companion records the whole tree, with each
+  item's visibility. 6 sections had items not on screen, all with no
+  bounds: 5 were real, such as a menu's "Options" over "Send feedback"
+  and TalkBack's "Developer settings"; 1 was wrong, Chrome's toolbar
+  taken by the last card on a page. 40 of the 55 snapshots with
+  headings had speakable items not on screen somewhere.
+- **Scrolling areas.** 64 of the 79 headings were in a scrolling area,
+  51 of them in one that can scroll down; of 28 sections reaching the
+  bottom of the screen, 16 could scroll further and 12 could not. 18
+  sections took items outside their heading's area, such as Chrome's
+  toolbar and an app's tab bar, so items are taken only from the
+  heading's area. Keeping only the area's own items emptied 11, 10 of
+  them titles in Settings' and TalkBack's collapsing bar, whose content
+  is in a list inside the area; one heading with no area had a calendar
+  of 33 items in a scrolling area of its own. So items in an area
+  inside the heading's are kept, and a heading in no area keeps every
+  item.
+- **No measure without a model.** Generic headings, such as "Options"
+  four times and "Others", could not be told apart from good ones by
+  words shared with their sections, so every heading the rules leave is
+  asked.
+
+### As built
+
+- **The rules.** `PhoneHeadingSectionRun` (`Recorder.Session`) reads
+  each settled snapshot OCR read (`SnapshotsRead`). The headings shown
+  are items marked as headings, visible, with bounds and speakable
+  text, and items step 19 made a finding of on the visit, by their
+  identity, with `VerdictOf` its finding: no inference, not judged; an
+  error, a heading; information, not a heading; else unsettled. Each is
+  taken once a screen, by whether it is marked and its letters and
+  digits (`Entries`, with `Marked`, `Unmarked`, `NotJudgedHeadings`,
+  `ScreenTitles` and `EmptySections`). The title is
+  `PhoneScreenChecks.ScreenTitle`'s, and in Chrome also
+  `PhoneScreenTitleRun.PageTitle`'s.
+- **Rule 5.** `ScrollingArea` is the nearest item holding the heading
+  that is scrollable or has ACTION_SCROLL_FORWARD, ACTION_SCROLL_BACKWARD
+  or the scroll up or down actions. The section's items on screen are
+  those `PhoneTreeChecks.ShouldFocusView` stops on with speakable text
+  whose bottom is below the heading's top; those not on screen are
+  important for accessibility, focusable, clickable, long clickable,
+  focusable by a screen reader or with text or a description of their
+  own, with speakable text, and not within one already taken. The lines
+  OCR read start no more than 2 pixels above the heading's bottom. Each
+  text is joined, items by " | " and lines by " / ", and cut to 4,000
+  characters from its start.
+- **Rule 6.** The share of the section, from the heading's bottom to
+  the next heading below it or the area's bottom, across the screen,
+  that visible ImageViews cover, on a 60 by 60 grid
+  (`PhoneScreenTitleRun.ImageShare`); from 0.5 the question is pictured
+  (`PicturedQuestions`), else text only (`TextQuestions`).
+- **Rule 7.** `CanScrollDown` is ACTION_SCROLL_FORWARD or the scroll
+  down action on the heading's area, for the last section on screen.
+  What was measured, in the finding, gives the count of items on
+  screen and lines, that part of the section was judged from the
+  accessibility tree only, with how many items are not on screen, and
+  that it may continue below the screen.
+- **Linked to step 19.** Until step 19's answers are given, no unmarked
+  text is a heading. `WithHeadingLook` runs the rules again on the same
+  measurement; the Android report, the project report and the model
+  checks run it after step 19's questions are asked, and the Checks tab
+  after step 19's kept answers are given.
+- **The questions.** `AndroidHeadingSections` (`Recorder.Analysis`)
+  asks `android-heading-section`, with no picture, of the project's
+  model for text-based checks, and `android-heading-section-pictured`,
+  with picture A, the whole screen at half size with the heading
+  outlined, of its model for vision-based checks, each version 1, with
+  step keys made from the request's SHA-256. The question gives the
+  app's package, the screen's title, the heading and whether it is
+  marked or only shown as a heading, what a screen reader says in the
+  section on screen, the section's items not on screen, which a screen
+  reader reaches by scrolling, the text OCR read in it, noting that OCR
+  may misread, and where the section may continue below the screen. It
+  asks whether the heading describes its section: describes-the-section,
+  does-not-describe (such as a word that would fit any section, a
+  heading of a different topic than its section's, or text that names
+  nothing the section holds) or cannot-tell, reason first.
+- **Rule 10, the signature.** As the screen title check's: for a
+  pictured question, the whole screen's pixels; for a text question,
+  the texts only (`AndroidImageAlternative.TextSignature`). The text is
+  the app, the screen's title, whether the heading is marked, the
+  heading, the items not on screen, the OCR text and whether it may
+  continue, with what a screen reader says in the section. An answer
+  kept on a task of the project, by the same profile and model, is
+  copied into the task (`SignedAsker`).
+- **Rule 8, the levels.** Agreed does-not-describe: a warning, the
+  model's inference, ending "a person should verify this". Agreed
+  cannot-tell, or two answers: a warning ending "check manually".
+  Agreed describes-the-section: no finding, counted (`Described`).
+  Every answer is the model's inference, so the report says AI was used
+  even where no finding was made.
+- **Rule 9.** Before any answer, and with no model for a question's
+  kind, no finding is made; the note says how many were not judged and
+  why, for text-based and vision-based checks apart.
+- **Where it runs.** The Android report, the project report and the
+  model checks ask after the decorative image check; the model checks'
+  Markdown has a section, "Headings and sections", and the report's
+  limits give the check's note. The Checks tab gives a row under each
+  visit: the findings, or how many headings first seen on it were
+  judged to describe their sections, are not yet judged, are the
+  screen's title, have nothing under them, or are text not judged a
+  heading; and the summary gives the counts. "Ask the project's model"
+  is enabled while a heading is not judged and the project can use the
+  model for its kind.
+- **Guidance.** `android-check-guidance.json` has the check, impact
+  medium, criterion 2.4.6, related 1.3.1, with remediation for Views,
+  Compose, Flutter and React Native.
+
+### Checked
+
+The solution builds with no warnings, and the tests pass, 2,680 of
+them, with the 10 that need Windows failing as before. The new tests
+cover a made-up screen: a heading that is the window's title; a
+section in a scrolling list, leaving out a line drawn above its heading
+and a tab bar outside the list; an item not on screen, with the
+finding's words; a last section that may continue; with no list, the
+tab bar in the section; no OCR; the picture under and over half the
+section; text shown as a heading taken only once judged one, and text
+judged not a heading not ending a section; the requests' use, template,
+picture, text and signatures; kept answers judging a warning and a
+heading that describes its section; no model; and the levels of each
+answer and of two answers.
+
+### Limits
+
+- The tree's order is taken as the reading order, and the next heading
+  in it as the section's end; a layout drawn in another order may give
+  a section the wrong items.
+- Items not on screen have no bounds, so are taken by the tree's order
+  only; on one Chrome page the last card took Chrome's toolbar.
+- Each heading is judged on its first snapshot OCR read; a section that
+  changes later is not judged again.
+- How well the check finds a real failure is not measured; the sample
+  had none confirmed.
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A

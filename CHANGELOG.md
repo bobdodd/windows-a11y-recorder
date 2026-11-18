@@ -8,6 +8,29 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Headings and sections
+
+- A new check, "Heading does not describe its section" (WCAG 2.4.6),
+  for headings marked as headings and for text shown as a heading that
+  the project's model judged one. Both this and "Text shown as a
+  heading, not marked as one" are made where both apply.
+- A heading that is the screen's title is left to the screen title
+  check, and one with nothing under it is counted, not judged.
+- A section is what follows its heading up to the next heading, within
+  the heading's scrolling area: what a screen reader says on screen,
+  the items the tree holds that are not on screen, and the text OCR
+  read, each marked with where it came from. A finding says where a
+  section was judged partly from the tree only, and the question says
+  where a section may continue below the screen.
+- Asked of the project's model for text-based checks, or of its model
+  for vision-based checks with the screen's picture where images cover
+  at least half of the section. Does not describe is a warning for a
+  person to verify, medium impact; cannot tell, or two answers, a
+  warning to check manually. With no model, no finding is made.
+- Answers are kept against the heading, the section's texts and any
+  picture, and asked again of the model for complex questions where
+  the first do not settle them.
+
 ### Decorative images
 
 - A new check, "Decorative image announced by a screen reader" (WCAG

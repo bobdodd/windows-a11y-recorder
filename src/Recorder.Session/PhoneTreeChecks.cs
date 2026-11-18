@@ -123,6 +123,16 @@ public static class PhoneCheckNames
     public const string DecorativeAnnounced = "decorative-image-announced";
 
     /// <summary>
+    /// A heading that does not describe its section (step 24,
+    /// PhoneHeadingSectionRun), WCAG 2.4.6, one discrete issue beside "Text
+    /// shown as a heading, not marked as one" (owner, 2026-11-17): a
+    /// warning from the project's model for text-based checks, or for
+    /// vision-based checks where images cover half the section, for a
+    /// person to verify, medium impact if confirmed; none without a model.
+    /// </summary>
+    public const string HeadingNotDescriptive = "heading-not-descriptive";
+
+    /// <summary>
     /// Label in Name (step 9), from the tree's text and OCR's: the name
     /// does not contain the visible label, and the name contains it but
     /// does not start with it. Not one of the tree's checks.
@@ -248,6 +258,7 @@ public static class PhoneCheckNames
         TitleShared => "Screen title shared with other screens (WCAG2ICT 2.4.2)",
         TitleNotDescriptive => "Screen title does not describe its screen (WCAG2ICT 2.4.2)",
         DecorativeAnnounced => "Decorative image announced by a screen reader (WCAG 1.1.1)",
+        HeadingNotDescriptive => "Heading does not describe its section (WCAG 2.4.6)",
         NoHeading => "No heading (WCAG 1.3.1)",
         FirstHeadingLow => "First heading far from the top",
         ManyHeadings => "Many headings",

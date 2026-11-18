@@ -100,6 +100,20 @@ public partial class MainWindow
     private PhoneDecorativeImageRun? _phoneDecorativeImagesRules;
     private (PhoneDecorativeImageRun Rules, IReadOnlyList<(PhoneDescribedImageQuestion Question, DescribedImageRequest Request)> Requests)? _decorativeRequests;
     private int _decorativeUnanswered;
+
+    // The check of a heading that does not describe its section, the
+    // same way as the screen title check (android-checks.md, step 24).
+    // Its rules take the text the check of text shown as a heading judged
+    // headings, so are run again from the measurement once that check's
+    // kept answers are given; its own are found by the heading, the
+    // section's texts and, where given, the screen's picture.
+    private PhoneHeadingSectionRun? _phoneHeadingSectionsMeasured;
+    private PhoneHeadingSectionRun? _phoneHeadingSectionsRules;
+    private PhoneHeadingLookRun? _phoneHeadingSectionsLook;
+    private PhoneHeadingSectionRun? _phoneHeadingSections;
+    private (PhoneHeadingSectionRun Rules, IReadOnlyList<HeadingSectionRequest> Requests)? _headingSectionRequests;
+    private int _sectionTextUnanswered;
+    private int _sectionVisionUnanswered;
     private PhoneLabelInNameRun? _phoneLabelInName;
     private PhoneCheckSettings? _checkSettings;
 
@@ -173,6 +187,13 @@ public partial class MainWindow
             _phoneDecorativeImagesRules = null;
             _decorativeRequests = null;
             _decorativeUnanswered = 0;
+            _phoneHeadingSectionsMeasured = null;
+            _phoneHeadingSectionsRules = null;
+            _phoneHeadingSectionsLook = null;
+            _phoneHeadingSections = null;
+            _headingSectionRequests = null;
+            _sectionTextUnanswered = 0;
+            _sectionVisionUnanswered = 0;
             _phoneLabelInName = null;
             _shownFinding = null;
             if (_playbackArchive is { PhoneScreens.Recorded: true } opened)
@@ -311,6 +332,17 @@ public partial class MainWindow
         _phoneDecorativeImagesRules = _phoneDescribedImagesRules is null ? null : PhoneDecorativeImageRun.Run(_phoneDescribedImagesRules);
         _phoneDecorativeImages = _phoneDecorativeImagesRules;
         _decorativeUnanswered = _phoneDecorativeImagesRules?.Questions.Count ?? 0;
+
+        // The check of a heading's section is level AA but has no AAA
+        // counterpart, so is the same at both audit levels. Until the
+        // check of text shown as a heading is judged, only marked headings
+        // are among its headings; its kept answers are given below.
+        _phoneHeadingSectionsMeasured = run is null ? null : PhoneHeadingSectionRun.Run(run, archive.PhoneScreens, null);
+        _phoneHeadingSectionsRules = _phoneHeadingSectionsMeasured;
+        _phoneHeadingSectionsLook = null;
+        _phoneHeadingSections = _phoneHeadingSectionsRules;
+        _sectionTextUnanswered = _phoneHeadingSectionsRules?.TextQuestions ?? 0;
+        _sectionVisionUnanswered = _phoneHeadingSectionsRules?.PicturedQuestions ?? 0;
         JudgeTextContrast();
 
         // Non-text contrast has one level, AA (WCAG 2.2's 1.4.11), so is
@@ -362,6 +394,7 @@ public partial class MainWindow
         await ApplyKeptDescribedImageAnswersAsync();
         await ApplyKeptScreenTitleAnswersAsync();
         await ApplyKeptDecorativeAnswersAsync();
+        await ApplyKeptHeadingSectionAnswersAsync();
     }
 
     private async Task ApplyKeptImageAnswersAsync()
@@ -783,6 +816,103 @@ public partial class MainWindow
         ShowPhoneScreenRows();
     }
 
+    private async Task ApplyKeptHeadingSectionAnswersAsync()
+    {
+        if (_phoneHeadingSectionsMeasured is not { } measured)
+        {
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        // The rules again, with the text the check of text shown as a
+        // heading now judges headings (rule 2), where its answers changed.
+        if (!ReferenceEquals(_phoneHeadingSectionsLook, _phoneHeadingLook) || _phoneHeadingSectionsRules is null)
+        {
+            _phoneHeadingSectionsLook = _phoneHeadingLook;
+            _phoneHeadingSectionsRules = measured.WithHeadingLook(_phoneHeadingLook);
+        }
+
+        var rules = _phoneHeadingSectionsRules;
+        if (rules.Questions.Count == 0)
+        {
+            _phoneHeadingSections = rules;
+            _sectionTextUnanswered = 0;
+            _sectionVisionUnanswered = 0;
+            UpdateAskChecksModelButton();
+            ShowPhoneScreenRows();
+            return;
+        }
+
+        string? Problem(string use, string? name, int questions) =>
+            questions == 0
+                ? null
+                : name is null
+                    ? $"the project's settings choose no model for {ModelUses.Name(use)}"
+                    : ProjectModels.Problem(ProjectChoices, use, name);
+        var textName = _openProjectModels?.TextChecks;
+        var visionName = _openProjectModels?.VisionChecks;
+        var catalog = AnalysisCatalogOrNull;
+        var textProblem = Problem(ModelUses.TextChecks, textName, rules.TextQuestions) ?? (catalog is null && rules.TextQuestions > 0 ? "the analysis catalog is not open" : null);
+        var visionProblem = Problem(ModelUses.VisionChecks, visionName, rules.PicturedQuestions) ?? (catalog is null && rules.PicturedQuestions > 0 ? "the analysis catalog is not open" : null);
+        var none = new Dictionary<PhoneHeadingSectionQuestion, PhoneHeadingSectionAnswer>();
+        PhoneHeadingSectionRun shown;
+        if ((rules.TextQuestions == 0 || textProblem is not null) && (rules.PicturedQuestions == 0 || visionProblem is not null))
+        {
+            shown = rules.Judged(none, AndroidHeadingSections.NotAsked(rules, textProblem, visionProblem));
+        }
+        else
+        {
+            try
+            {
+                if (_headingSectionRequests is not { } made || !ReferenceEquals(made.Rules, rules))
+                {
+                    var requests = await Task.Run(() => AndroidHeadingSections.Requests(rules, PhonePictures.Load));
+                    made = (rules, requests);
+                    _headingSectionRequests = made;
+                }
+
+                async Task<ScreenTitleKept?> KeptAsync(string template, string? name, string? problem, (string Name, ModelProfile Profile)? complex)
+                {
+                    if (problem is not null || name is null || ProjectChoices.Profile(name) is not { } profile)
+                    {
+                        return null;
+                    }
+
+                    var signed = await catalog!.SignedAnswersAsync(
+                        template, AndroidHeadingSections.TemplateVersion, name, profile.Model, _openProjectId, _analysisRecordingId, CancellationToken.None);
+                    var complexSigned = complex is { } other
+                        ? await catalog.SignedAnswersAsync(
+                            template, AndroidHeadingSections.TemplateVersion, other.Name, other.Profile.Model, _openProjectId, _analysisRecordingId, CancellationToken.None)
+                        : null;
+                    return new ScreenTitleKept(signed, name, complexSigned, complex?.Name);
+                }
+
+                var text = await KeptAsync(AndroidHeadingSections.TextTemplate, textName, textProblem, ComplexTextModel());
+                var vision = await KeptAsync(AndroidHeadingSections.PicturedTemplate, visionName, visionProblem, ComplexVisionModel());
+                shown = AndroidHeadingSections.FromKept(rules, made.Requests, text, vision, textProblem, visionProblem);
+            }
+            catch (Exception exception) when (exception is NpgsqlException or InvalidOperationException or IOException or ObjectDisposedException)
+            {
+                shown = rules.Judged(none, $"the model's kept answers could not be read: {exception.Message}");
+            }
+        }
+
+        // The recording changed, or the rules were run again, while the
+        // answers were read.
+        if (!ReferenceEquals(rules, _phoneHeadingSectionsRules))
+        {
+            return;
+        }
+
+        // A question the model for complex questions has not yet answered
+        // is not judged, so is counted with those not yet asked.
+        _phoneHeadingSections = shown;
+        _sectionTextUnanswered = textProblem is not null ? 0 : shown.Questions.Count(question => !question.Pictured && !shown.Answers.ContainsKey(question));
+        _sectionVisionUnanswered = visionProblem is not null ? 0 : shown.Questions.Count(question => question.Pictured && !shown.Answers.ContainsKey(question));
+        UpdateAskChecksModelButton();
+        ShowPhoneScreenRows();
+    }
+
     // The project's model for complex questions of text-based checks, as
     // for vision-based checks below; null where there is none the project
     // can use.
@@ -832,9 +962,9 @@ public partial class MainWindow
         var waiting = _analysisTasks?.Any(task => task.Kind == AndroidModelChecksKind.Name &&
             task.State is AnalysisTaskStates.Queued or AnalysisTaskStates.Running) == true;
         var models = _openProjectModels;
-        var vision = _imagesOfTextUnanswered + _headingLookUnanswered + _imageAlternativeUnanswered + _describedImagesUnanswered + _titleVisionUnanswered + _decorativeUnanswered > 0 &&
+        var vision = _imagesOfTextUnanswered + _headingLookUnanswered + _imageAlternativeUnanswered + _describedImagesUnanswered + _titleVisionUnanswered + _decorativeUnanswered + _sectionVisionUnanswered > 0 &&
             models is { VisionChecks: not null } && models.ChecksProblem(ProjectChoices, ModelUses.VisionChecks) is null;
-        var text = _titleTextUnanswered > 0 &&
+        var text = _titleTextUnanswered + _sectionTextUnanswered > 0 &&
             models is { TextChecks: not null } && models.ChecksProblem(ProjectChoices, ModelUses.TextChecks) is null;
         AskChecksModelButton.IsEnabled = (vision || text) && !waiting && _analysisRecordingId is not null;
     }
@@ -1042,7 +1172,8 @@ public partial class MainWindow
         {
             if (_phoneChecks is not null || _phoneTextContrast is not null || _phoneNonTextContrast is not null || _phoneImagesOfText is not null ||
                 _phoneLabelInName is not null || _phoneHeadingLook is not null || _phoneImageAlternative is not null ||
-                _phoneDescribedImages is not null || _phoneScreenTitles is not null || _phoneDecorativeImages is not null)
+                _phoneDescribedImages is not null || _phoneScreenTitles is not null || _phoneDecorativeImages is not null ||
+                _phoneHeadingSections is not null)
             {
                 // The status message check follows every snapshot, settled
                 // or not, so can find a message in a visit too brief to
@@ -1281,6 +1412,23 @@ public partial class MainWindow
             }
         }
 
+        if (_phoneHeadingSections is { SnapshotsRead: > 0 } sections)
+        {
+            var title = PhoneCheckNames.Title(PhoneCheckNames.HeadingNotDescriptive);
+            var findings = sections.For(visit);
+            if (findings.Count > 0)
+            {
+                AddCheckRows(findings, $", from {Count(sections.Questions.Count(question => question.Visit == visit), "heading")} asked about");
+            }
+            else
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{title}: {HeadingSectionState(sections, visit)}", shownAt, null)
+                {
+                    IsCheck = true,
+                });
+            }
+        }
+
         if (_phoneLabelInName is { } labels)
         {
             var findings = labels.For(visit);
@@ -1344,6 +1492,54 @@ public partial class MainWindow
         }
 
         return $"the title \"{of.Title}\" is for the model for {(question?.Pictured == true ? "vision-based" : "text-based")} checks, and not yet judged.";
+    }
+
+    // What became of a visit's headings in the check of a heading's
+    // section, where it made no finding: each screen's headings are
+    // checked once, on the visit they were first seen on.
+    private static string HeadingSectionState(PhoneHeadingSectionRun sections, PhoneVisit visit)
+    {
+        if (!sections.Read(visit))
+        {
+            return "not checked, as OCR read no picture of this visit.";
+        }
+
+        var entries = sections.In(visit).ToList();
+        if (entries.Count == 0)
+        {
+            return "no headings first seen on this visit; a screen's headings are checked once, on the visit they are first seen on.";
+        }
+
+        int Of(PhoneHeadingSectionState state) => entries.Count(entry => entry.State == state);
+        var asked = sections.Questions.Where(question => question.Visit == visit).ToList();
+        var described = asked.Count(question => sections.Answers.ContainsKey(question));
+        var parts = new List<string>();
+        if (described > 0)
+        {
+            parts.Add($"{Count(described, "heading")} judged to describe {(described == 1 ? "its section" : "their sections")}, not confirmed");
+        }
+
+        if (asked.Count - described is > 0 and var waiting)
+        {
+            parts.Add($"{Count(waiting, "heading")} for the project's models, not yet judged");
+        }
+
+        if (Of(PhoneHeadingSectionState.ScreenTitle) is > 0 and var titles)
+        {
+            parts.Add($"{Count(titles, "heading")} that {(titles == 1 ? "is the screen's title" : "are the screen's title")}, left to the screen title check");
+        }
+
+        if (Of(PhoneHeadingSectionState.Empty) is > 0 and var empty)
+        {
+            parts.Add($"{Count(empty, "heading")} with nothing under {(empty == 1 ? "it" : "them")} on screen or in the tree");
+        }
+
+        if (Of(PhoneHeadingSectionState.NotJudgedHeading) is > 0 and var unjudged)
+        {
+            parts.Add($"{Count(unjudged, "piece")} of text shown as a heading not checked, as not judged a heading");
+        }
+
+        return $"no findings, from {Count(entries.Count, "heading")}: {string.Join("; ", parts)}.";
     }
 
     // What became of a visit's described images in the decorative image
@@ -1747,6 +1943,24 @@ public partial class MainWindow
                     $"{Count(decorative.OutOfStep, "image")} on a picture out of step with the tree {(decorative.OutOfStep == 1 ? "was" : "were")} not judged; " +
                     $"{decorative.Informative:N0} judged informative, not confirmed, and {Count(decorative.Unanswered, "image")} not judged" +
                     (decorative.ModelNote is { } decorativeNote ? $": {decorativeNote}." : ".");
+        }
+
+        if (_phoneHeadingSections is { } sections)
+        {
+            var sectionName = PhoneCheckNames.Title(PhoneCheckNames.HeadingNotDescriptive);
+            var sectionFindings = sections.Findings.Count == 0
+                ? "no findings"
+                : $"{Count(sections.Findings.Count, "finding")} ({Levels(sections.Findings)})";
+            summary += sections.SnapshotsRead == 0
+                ? $" {sectionName}: not checked, as it needs the text OCR read on the screens' pictures."
+                : $" {sectionName}: {sectionFindings}, from {Count(sections.Marked, "marked heading")} and {Count(sections.Unmarked, "piece")} of text shown as a heading and judged one, each once a screen: " +
+                    $"{sections.ScreenTitles:N0} that are their screen's title, left to the screen title check, " +
+                    $"{sections.EmptySections:N0} with nothing under them on screen or in the tree, " +
+                    $"and {sections.Questions.Count:N0} for the project's models, {sections.TextQuestions:N0} with only text, for the model for text-based checks, and " +
+                    $"{sections.PicturedQuestions:N0} with the screen's picture, as images cover at least half of the section, for the model for vision-based checks; " +
+                    $"{Count(sections.NotJudgedHeadings, "piece")} of text shown as a heading not checked, as not judged a heading. " +
+                    $"{sections.Described:N0} judged to describe {(sections.Described == 1 ? "its section" : "their sections")}, not confirmed, and {Count(sections.Unanswered, "heading")} not judged" +
+                    (sections.ModelNote is { } sectionNote ? $": {sectionNote}." : ".");
         }
 
         if (_phoneLabelInName is { } labels)

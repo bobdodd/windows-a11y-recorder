@@ -583,6 +583,21 @@
       "sources": ["wcag-2.4.2", "wcag2ict", "android-views", "android-activity", "compose-semantics", "flutter-semantics", "flutter-bridge"]
     },
     {
+      "check": "heading-not-descriptive",
+      "title": "Heading does not describe its section",
+      "issue": "A heading does not say what its section is about or for, such as a word that would fit any section, a heading of a different topic than its section's, or text that names nothing the section holds.",
+      "why": "People who move by headings choose where to go from the headings alone; one that does not describe its section leaves them to read the section to find out what it holds, or to miss it.",
+      "affects": ["People who use a screen reader", "People with cognitive disabilities or limited short-term memory", "People with low vision who scan a screen"],
+      "impact": "medium",
+      "criteria": ["2.4.6"],
+      "related": ["1.3.1"],
+      "basis": "WCAG 2.4.6 as WCAG2ICT applies it to software, from the tree and the recorded picture: each heading marked as one, and text shown as a heading that the project's model judged a heading, that is not the screen's title, judged by the project's model for text-based checks from what a screen reader says in its section, the section's items the tree holds that are not on screen and the text OCR read in it, or by its model for vision-based checks with the screen's picture where images cover at least half of the section. Every finding is a warning, the model's inference, for a person to verify; with no model there is no finding.",
+      "android": "Make each heading say what its section holds, such as \"Notification settings\" rather than \"Options\" or \"More\", and keep a heading in the same container as its section so that both scroll together. Change the heading's text (android:text or setText); in Compose, the Text marked with Modifier.semantics { heading() }.",
+      "flutter": "Make the text wrapped in Semantics(header: true) say what its section holds, and keep it in the same scrolling view as the section.",
+      "reactNative": "Make the Text with accessibilityRole=\"header\" (or role=\"heading\") say what its section holds, and keep it in the same ScrollView as the section.",
+      "sources": ["wcag-2.4.6", "wcag2ict", "android-views", "compose-semantics", "flutter-semantics", "rn-accessibility"]
+    },
+    {
       "check": "no-heading",
       "title": "Screen with no heading",
       "issue": "No item shown on the screen is marked as a heading.",

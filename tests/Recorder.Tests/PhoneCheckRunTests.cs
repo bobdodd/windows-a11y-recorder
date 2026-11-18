@@ -1810,6 +1810,260 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.EndsWith("; check manually", split.Text, StringComparison.Ordinal);
     }
 
+    // Step 24: a heading that does not describe its section. A window of
+    // made-up items: a marked heading that is the window's title, a list
+    // that scrolls down, holding two marked headings, "Recent notes" and
+    // "Options", with what is under each, a line drawn above "Recent
+    // notes" though after it in the tree, an image and an item not on
+    // screen; and a tab bar below the list. With no list, every item is
+    // in the root.
+    private static PhoneCheckWindow SectionsScreen(bool scrolling = true, int imageBottom = 420)
+    {
+        AndroidTreeNode Node(int index, int? parent, (int Left, int Top, int Right, int Bottom) bounds, string className,
+            string? text = null, bool clickable = false, bool heading = false, bool visible = true) =>
+            ImageNode(index, parent, bounds, className, null, text) with { Clickable = clickable, Heading = heading, VisibleToUser = visible };
+        var list = scrolling ? 2 : 0;
+        var listNode = Node(2, 0, (0, 300, 1080, 2000), "androidx.recyclerview.widget.RecyclerView");
+        if (scrolling)
+        {
+            listNode = listNode with { Scrollable = true, Actions = [new AndroidNodeAction(0x1000, null)] };
+        }
+
+        return new PhoneCheckWindow(512, 1,
+        [
+            Node(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout"),
+            Node(1, 0, (40, 100, 1040, 200), "android.widget.TextView", "Acme Notes", heading: true),
+            listNode,
+            Node(3, list, (40, 320, 1040, 400), "android.widget.TextView", "Recent notes", heading: true),
+            Node(4, list, (40, 300, 1040, 315), "android.widget.TextView", "Pinned"),
+            Node(5, list, (0, 400, 1080, imageBottom), "android.widget.ImageView"),
+            Node(6, list, (40, 420, 1040, 500), "android.widget.TextView", "Shopping list"),
+            Node(7, list, (40, 520, 1040, 600), "android.widget.TextView", "Gift ideas"),
+            Node(8, list, (40, 700, 1040, 780), "android.widget.TextView", "Options", heading: true),
+            Node(9, list, (40, 800, 1040, 880), "android.widget.TextView", "Send feedback"),
+            Node(10, list, (0, 0, 0, 0), "android.widget.TextView", "Archive", clickable: true, visible: false),
+            Node(11, 0, (0, 2100, 540, 2400), "android.widget.Button", "Notes", clickable: true),
+        ], "Acme Notes");
+    }
+
+    private static PhoneTextLine[] SectionLines(PhoneCheckWindow window) =>
+    [
+        .. new (string Text, int Top)[]
+        {
+            ("Acme Notes", 110), ("Recent notes", 330), ("Shopping list", 430), ("Gift ideas", 530), ("Options", 710), ("Send feedback", 810), ("Notes", 2200),
+        }.Select(line => new PhoneTextLine(null, window.Items[0], PhoneTextPlace.FoundByOcr, null, line.Text, new PhoneBounds(60, line.Top, 900, line.Top + 50), null, 40)),
+    ];
+
+    private (PhoneContrastRun Measured, SessionPlaybackArchive Archive, PhoneVisit Visit) SectionsMeasured(
+        PhoneCheckWindow window, PhoneTextLine[] lines, string? engine = "Windows OCR, en-US")
+    {
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var measured = PhoneContrastRun.Of([.. visit.SettledSnapshots.Take(2).Select(at =>
+            new PhoneContrastSnapshot(
+                visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                new PhoneContrastPicture(PhonePictureKind.Screenshot, at.MonotonicNanoseconds, "p.png", "p.png"),
+                engine, lines, null, window))]);
+        return (measured, archive, visit);
+    }
+
+    private PhoneHeadingSectionRun SectionsRun(bool scrolling = true, int imageBottom = 420, string? engine = "Windows OCR, en-US")
+    {
+        var window = SectionsScreen(scrolling, imageBottom);
+        var (measured, archive, _) = SectionsMeasured(window, SectionLines(window), engine);
+        return PhoneHeadingSectionRun.Run(measured, archive.PhoneScreens, null);
+    }
+
+    // Rules 2 to 5 and 7: each heading once a screen; the window's title is
+    // left to the screen title check; a section is what a screen reader
+    // says after its heading in the heading's scrolling area, not above the
+    // heading, the items not on screen, and the lines OCR read down to the
+    // next heading or the area's bottom; the last section of an area that
+    // can scroll down may continue.
+    [Fact]
+    public void HeadingSections_TakeEachSectionInItsHeadingsScrollingArea()
+    {
+        var run = SectionsRun();
+
+        Assert.Equal((2, 3, 0), (run.SnapshotsRead, run.Marked, run.Unmarked));
+        Assert.Equal((1, 0, 0), (run.ScreenTitles, run.EmptySections, run.NotJudgedHeadings));
+        Assert.Equal(["Recent notes", "Options"], run.Questions.Select(question => question.Heading));
+        var (recent, options) = (run.Questions[0], run.Questions[1]);
+
+        Assert.Equal(("Shopping list | Gift ideas", "", "Shopping list / Gift ideas"), (recent.Spoken, recent.OffScreen, recent.Ocr));
+        Assert.Equal((true, "Acme Notes", false, false), (recent.Marked, recent.ScreenTitle, recent.MayContinue, recent.PartlyFromTree));
+        Assert.Equal(("Send feedback", "Archive", "Send feedback"), (options.Spoken, options.OffScreen, options.Ocr));
+        Assert.True(options.MayContinue);
+        Assert.True(options.PartlyFromTree);
+        Assert.Equal(
+            "a heading over a section of 1 item a screen reader says on screen and 1 line OCR read; part of the section was judged from the accessibility tree only, as 1 item in it is not on screen; the section may continue below the screen",
+            options.Time.Measured);
+        Assert.Equal((2, 0), (run.TextQuestions, run.PicturedQuestions));
+        Assert.Empty(run.Findings);
+        Assert.Equal("Heading does not describe its section (WCAG 2.4.6)", PhoneCheckNames.Title(PhoneCheckNames.HeadingNotDescriptive));
+
+        // With no scrolling area, the tab bar is in the last section, and
+        // it cannot continue.
+        var flat = SectionsRun(scrolling: false);
+        var last = flat.Questions[^1];
+
+        Assert.Equal(("Send feedback | Notes", "Send feedback / Notes", false), (last.Spoken, last.Ocr, last.MayContinue));
+
+        // With no OCR, nothing is checked.
+        var unread = SectionsRun(engine: null);
+
+        Assert.Equal((0, 0), (unread.SnapshotsRead, unread.Entries.Count));
+    }
+
+    // Rule 6: the screen's picture is given where images cover at least
+    // half of the section.
+    [Fact]
+    public void HeadingSections_AreGivenThePictureWhereImagesCoverHalfOfTheSection()
+    {
+        var run = SectionsRun(imageBottom: 600);
+
+        Assert.True(run.Questions[0].Pictured);
+        Assert.False(run.Questions[1].Pictured);
+        Assert.Equal((1, 1), (run.TextQuestions, run.PicturedQuestions));
+    }
+
+    // Rule 2: text shown as a heading is a heading only once the model
+    // judged it one; until then, and where judged not one, it is not
+    // checked. Text judged not a heading does not end a section.
+    [Fact]
+    public void HeadingSections_TakeTextShownAsAHeadingOnlyWhereJudgedOne()
+    {
+        var (window, lines) = HeadingLooks();
+        var (measured, archive, _) = SectionsMeasured(window, lines);
+        var look = PhoneHeadingLookRun.Run(measured, archive.PhoneScreens);
+        var unjudged = PhoneHeadingSectionRun.Run(measured, archive.PhoneScreens, look);
+
+        Assert.Equal((1, 0, 2), (unjudged.Marked, unjudged.Unmarked, unjudged.NotJudgedHeadings));
+        Assert.Equal(["Marked title"], unjudged.Questions.Select(question => question.Heading));
+
+        var heading = new PhoneInference(PhoneCheckLevel.Error, "a heading", Inferred: true, "Model", Cloud: false);
+        var notHeading = new PhoneInference(PhoneCheckLevel.Info, "not a heading", Inferred: true, "Model", Cloud: false);
+        var judged = look.Judged(new Dictionary<PhoneHeadingQuestion, PhoneInference>
+        {
+            [look.Questions[0]] = heading,
+        }, null);
+        var one = unjudged.WithHeadingLook(judged);
+
+        Assert.Equal(["Your week", "Marked title"], one.Questions.Select(question => question.Heading));
+        Assert.False(one.Questions[0].Marked);
+        Assert.Equal(PhoneHeadingVerdict.NotJudged, Assert.Single(one.Entries, entry => entry.State == PhoneHeadingSectionState.NotJudgedHeading).Verdict);
+        Assert.DoesNotContain("Start now", one.Questions[0].Spoken, StringComparison.Ordinal);
+        Assert.StartsWith("text shown as a heading, not marked as one, over a section", one.Questions[0].Time.Measured, StringComparison.Ordinal);
+
+        var both = unjudged.WithHeadingLook(look.Judged(new Dictionary<PhoneHeadingQuestion, PhoneInference>
+        {
+            [look.Questions[0]] = heading,
+            [look.Questions[1]] = notHeading,
+        }, null));
+
+        Assert.Equal(PhoneHeadingVerdict.NotHeading, Assert.Single(both.Entries, entry => entry.State == PhoneHeadingSectionState.NotJudgedHeading).Verdict);
+        Assert.Contains("Settings", both.Questions[0].Spoken, StringComparison.Ordinal);
+        Assert.Contains("Start now", both.Questions[0].Spoken, StringComparison.Ordinal);
+    }
+
+    // Rules 8 to 10: requests for the model for text-based checks, or
+    // vision-based where pictured; kept answers judge them by signature.
+    [Fact]
+    public void HeadingSections_RequestsAndKeptAnswersJudgeEachHeading()
+    {
+        var run = SectionsRun();
+        var pictured = SectionsRun(imageBottom: 600);
+        var rgb = new uint[1080 * 2400];
+        Array.Fill(rgb, 0x203040u);
+        var pixels = new PhonePixels(1080, 2400, rgb);
+        var text = Recorder.Analysis.Android.AndroidHeadingSections.RequestOf(run.Questions[1], null);
+        var picture = Recorder.Analysis.Android.AndroidHeadingSections.RequestOf(pictured.Questions[0], pixels);
+
+        Assert.Matches("^heading-section-[0-9a-f]{16}$", text.Request.Key);
+        Assert.Equal((Recorder.Analysis.ModelUses.TextChecks, Recorder.Analysis.Android.AndroidHeadingSections.TextTemplate, 0),
+            (text.Request.Request.Use, text.Request.Request.PromptTemplate, text.Request.Request.Images.Count));
+        Assert.Equal((Recorder.Analysis.ModelUses.VisionChecks, Recorder.Analysis.Android.AndroidHeadingSections.PicturedTemplate, 1),
+            (picture.Request.Request.Use, picture.Request.Request.PromptTemplate, picture.Request.Request.Images.Count));
+        Assert.Equal((text.Use, picture.Use), (Recorder.Analysis.ModelUses.TextChecks, Recorder.Analysis.ModelUses.VisionChecks));
+        Assert.Equal(Recorder.Analysis.Android.AndroidHeadingSections.Answers, text.Request.Request.Answers);
+        Assert.True(text.Request.Request.ReusedAcrossTasks);
+        var input = text.Request.Request.Input;
+        Assert.Contains("has the title \"Acme Notes\".", input, StringComparison.Ordinal);
+        Assert.Contains("\"Options\" is marked as a heading for a screen reader.", input, StringComparison.Ordinal);
+        Assert.Contains("item by item in the app's order: \"Send feedback\"", input, StringComparison.Ordinal);
+        Assert.Contains("not on screen, which a screen reader reaches by scrolling, in the app's order: \"Archive\"", input, StringComparison.Ordinal);
+        Assert.Contains("so it may continue below the screen.", input, StringComparison.Ordinal);
+        Assert.DoesNotContain("Picture A", input, StringComparison.Ordinal);
+        Assert.Contains("Picture A is the whole screen, with the heading outlined.", picture.Request.Request.Input, StringComparison.Ordinal);
+        Assert.EndsWith("then give the answer.", input, StringComparison.Ordinal);
+
+        // The same texts are the same heading; another section's are not.
+        var again = Recorder.Analysis.Android.AndroidHeadingSections.RequestOf(run.Questions[1], null);
+        var other = Recorder.Analysis.Android.AndroidHeadingSections.RequestOf(run.Questions[0], null);
+
+        Assert.True(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(text.Request.Signature, again.Request.Signature));
+        Assert.False(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(text.Request.Signature, other.Request.Signature));
+        Assert.False(Recorder.Analysis.Android.AndroidImageAlternative.SameImage(text.Request.Signature, picture.Request.Signature));
+
+        static JsonElement Output(string answer) =>
+            JsonSerializer.SerializeToElement(new { answer, reason = "It would fit any section." });
+        var elsewhere = Guid.NewGuid();
+        Recorder.Analysis.SignedAnswer Answer(int step, byte[] signature, string answer) =>
+            new(Guid.NewGuid(), elsewhere, $"heading-section-0123456789abcdef-{step}", signature,
+                new(Output(answer), "service", """{"temperature": null}"""));
+        Recorder.Analysis.Android.ScreenTitleKept Kept(string answer) =>
+            new([Answer(1, text.Request.Signature, answer), Answer(2, text.Request.Signature, answer)], "Haiku");
+
+        var findings = Recorder.Analysis.Android.AndroidHeadingSections.FromKept(run, [text], Kept("does-not-describe"), null);
+
+        var finding = Assert.Single(findings.Findings);
+        Assert.Equal((PhoneCheckNames.HeadingNotDescriptive, PhoneCheckLevel.Warning, "Options"), (finding.Check, finding.Level, finding.Label));
+        Assert.StartsWith(
+            "Haiku, a cloud model, inferred from what a screen reader and OCR give of the section twice for the same heading, by the heading and its section's text, that the heading \"Options\" does not describe its section",
+            finding.Inference!.Text, StringComparison.Ordinal);
+        Assert.EndsWith("; a person should verify this", finding.Inference.Text, StringComparison.Ordinal);
+        Assert.Contains("judged from the accessibility tree only", finding.Text, StringComparison.Ordinal);
+        Assert.Same(finding, Assert.Single(findings.For(finding.Visit)));
+        Assert.Equal(
+            "2 headings left by the rules are for Haiku; 1 heading answered: 0 judged to describe their sections, not confirmed, and 1 warning, 1 heading not yet asked",
+            findings.ModelNote);
+
+        var describes = Recorder.Analysis.Android.AndroidHeadingSections.FromKept(run, [text], Kept("describes-the-section"), null);
+
+        Assert.Empty(describes.Findings);
+        Assert.Equal(1, describes.Described);
+        Assert.Single(describes.Inferences);
+
+        // With no model, nothing is judged (rule 9).
+        var noModel = Recorder.Analysis.Android.AndroidHeadingSections.FromKept(run, [text], null, null, textNone: "the project's settings choose no model for text-based checks");
+
+        Assert.Empty(noModel.Findings);
+        Assert.EndsWith(
+            "; 2 headings left by the rules were not judged, as no model may be used for text-based checks: the project's settings choose no model for text-based checks",
+            noModel.ModelNote, StringComparison.Ordinal);
+    }
+
+    // Rule 8's levels.
+    [Theory]
+    [InlineData("describes-the-section", PhoneCheckLevel.Info, "that the heading \"Options\" describes its section, not confirmed")]
+    [InlineData("does-not-describe", PhoneCheckLevel.Warning, "; a person should verify this")]
+    [InlineData("cannot-tell", PhoneCheckLevel.Warning, "could not tell from what a screen reader and OCR give of the section twice whether the heading \"Options\" describes its section")]
+    public void HeadingSections_Interpret_GivesEachAgreedAnswersLevel(string answer, PhoneCheckLevel level, string says)
+    {
+        var asked = SectionsRun().Questions[1];
+
+        var inference = Recorder.Analysis.Android.AndroidHeadingSections.Interpret(new(answer, "First."), new(answer, "Second."), "Haiku", cloud: false, asked);
+
+        Assert.Equal((level, true, false), (inference.Level, inference.Inferred, inference.Cloud));
+        Assert.StartsWith("Haiku, a local model,", inference.Text, StringComparison.Ordinal);
+        Assert.Contains(says, inference.Text, StringComparison.Ordinal);
+
+        var split = Recorder.Analysis.Android.AndroidHeadingSections.Interpret(new(answer, "First."), new(answer == "cannot-tell" ? "does-not-describe" : "cannot-tell", "Second."), "Haiku", cloud: false, asked);
+
+        Assert.Equal(PhoneCheckLevel.Warning, split.Level);
+        Assert.Contains("gave two answers", split.Text, StringComparison.Ordinal);
+    }
+
     // The body text is the height most of the characters have.
     [Fact]
     public void HeadingLook_BodyHeight_IsTheMedianInkHeightByCharacters()

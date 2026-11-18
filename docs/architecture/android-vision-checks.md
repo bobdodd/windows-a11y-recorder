@@ -176,7 +176,7 @@ Each row is one issue, so that its remediation can be specific.
 | Text that looks like a heading but is not one | 1.3.1 | Is this text shown as a heading? | Text items larger or bolder than the screen's body text, not marked as headings |
 | A heading that does not look like one | 1.3.1 | Is this text shown as a heading? | Items marked as headings |
 | A title that does not describe its screen | 2.4.2 | Does this title describe the screen shown? | Each titled screen once, unless its title is exactly its own heading, OCR line or spoken item, with what a screen reader says, the screen's OCR text, and the picture for a screen at least half images (requirement 5); built, see "Screen titles, as built" |
-| A heading that does not describe its section | 2.4.6 | Does this heading describe what follows it? | Each heading and the items under it, with the OCR text below it and the picture for a screen mostly of images (requirement 5) |
+| A heading that does not describe its section | 2.4.6 | Does this heading describe what follows it? | Marked headings, and text shown as a heading that the model judged one, that are not the screen's title, with their sections' items and OCR text, and the picture for a section mostly of images; built, see "Headings and sections, as built" |
 | Content in an order that does not make sense | 1.3.2 | Does the content read in a sensible order? | Screens with several blocks of text, in the order a screen reader moves |
 
 ### What the tree does not show
@@ -520,6 +520,24 @@ a close-up and what a screen reader says on the screen, the image's
 own description marked as the image's. Decorative is a warning for a
 person to verify, low impact; cannot tell, or two answers, a warning
 to check manually; informative no finding, counted.
+
+### Headings and sections, as built
+
+Built on 2026-11-17, at the owner's request, "Build the heading check
+with rules 1 to 10 as revised, with the same-area and scrolling
+changes". Step 24 of `android-checks.md` has the measurement and the
+rules: marked headings, and text shown as a heading that the model
+judged one, each once a screen; a heading that is the screen's title is
+left to the screen title check, and one with nothing under it is
+counted. The rest are asked whether they describe their sections, from
+what a screen reader says in the section on screen, the section's items
+the tree holds that are not on screen and the text OCR read in it,
+within the heading's scrolling area, of the model for text-based
+checks, or of the model for vision-based checks with the screen's
+picture where images cover at least half of the section. Does not
+describe is a warning for a person to verify, medium impact; cannot
+tell, or two answers, a warning to check manually; describes no
+finding, counted.
 
 ### Simple and complex questions, measured on 2026-11-17
 
