@@ -520,6 +520,10 @@ window's status line, and screen readers were told them. Built
   it opens; screen readers are told it either way. The player's own
   window shows no toast.
 
+Pushed at 0f91810. On 2026-11-18 the owner ran it on the target machine:
+"I see the toasts." Which toasts were seen, and what screen readers
+said, were not reported.
+
 The checks run when the recording is opened, from its stored snapshots
 and frames. Keeping their results beside the recording was proposed in
 case they were slow; step 3 measured them at 0.1 to 0.2 seconds for the
