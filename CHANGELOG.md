@@ -15,6 +15,9 @@ Changes on `main` since 1.1.0, not yet released.
   had to announce, Accessibility tree, Checks and Analysis. A button
   opens its panel in a window of its own, and closes it when pressed
   again; closing the window from the window releases the button.
+- A pressed button shows a check mark and a bar under its name, as well
+  as its colour and bold text, so its state is not shown by colour
+  alone.
 - The buttons wrap when the region is narrow. A window first opens over
   the player and keeps its place and size for the session.
 - Dragging a tab out, and the tab strip, are removed.

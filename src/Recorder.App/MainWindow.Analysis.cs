@@ -211,7 +211,7 @@ public partial class MainWindow
     {
         var unread = AnalysisPlayer.Unread(tasks);
         var header = unread == 0 ? "Analysis" : $"Analysis ({unread.ToString(CultureInfo.CurrentCulture)} unread)";
-        AnalysisButtonText.Text = header;
+        AnalysisWindowToggle.Content = header;
         AutomationProperties.SetName(AnalysisWindowToggle, header);
         // A task's usage is part of what is shown, so that its tokens and
         // cost are kept up to date while it runs.

@@ -77,6 +77,45 @@
       <Setter Property="Margin" Value="0,0,8,8" />
       <Setter Property="Padding" Value="12,4" />
       <Setter Property="ToolTip" Value="{Binding (AutomationProperties.HelpText), RelativeSource={RelativeSource Self}}" />
+      <!-- A pressed toggle, whose window is open, is not shown by colour
+           alone (WCAG 1.4.1; owner, 2026-11-18: "they use only colour to
+           indicate pushed"): it has a check mark, drawn rather than a
+           font's symbol so it is not read out, before its name and a bar
+           under it, both in the text's colour, and its name is bold.
+           The check mark's space is kept while released, so the name does
+           not move. -->
+      <Setter Property="ContentTemplate">
+        <Setter.Value>
+          <DataTemplate>
+            <Border x:Name="PressedBar"
+                    BorderThickness="0,0,0,3"
+                    BorderBrush="Transparent"
+                    Padding="0,0,0,2">
+              <StackPanel Orientation="Horizontal">
+                <Path x:Name="PressedMark"
+                      Width="16"
+                      Height="16"
+                      Margin="0,0,8,0"
+                      VerticalAlignment="Center"
+                      Data="M 1,8.5 L 6,13.5 L 15,2.5"
+                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
+                      StrokeThickness="2.5"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round"
+                      StrokeLineJoin="Round"
+                      Visibility="Hidden" />
+                <TextBlock Text="{Binding}" VerticalAlignment="Center" />
+              </StackPanel>
+            </Border>
+            <DataTemplate.Triggers>
+              <DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Value="True">
+                <Setter TargetName="PressedMark" Property="Visibility" Value="Visible" />
+                <Setter TargetName="PressedBar" Property="BorderBrush" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" />
+              </DataTrigger>
+            </DataTemplate.Triggers>
+          </DataTemplate>
+        </Setter.Value>
+      </Setter>
       <Style.Triggers>
         <Trigger Property="IsChecked" Value="True">
           <Setter Property="FontWeight" Value="SemiBold" />
@@ -1124,49 +1163,43 @@
                             Tag="{Binding ElementName=BrowserNavigationPanel}"
                             Click="PanelWindowToggle_Click"
                             AutomationProperties.Name="Browser navigation correlation"
-                            AutomationProperties.HelpText="Opens or closes the Browser navigation correlation window.">
-                <TextBlock Text="Browser navigation correlation" />
-              </ToggleButton>
+                            AutomationProperties.HelpText="Opens or closes the Browser navigation correlation window."
+                            Content="Browser navigation correlation" />
               <ToggleButton x:Name="ReadingStepsWindowToggle"
                             Style="{StaticResource PanelWindowToggle}"
                             Tag="{Binding ElementName=ReadingStepsPanel}"
                             Click="PanelWindowToggle_Click"
                             AutomationProperties.Name="Reading position steps"
-                            AutomationProperties.HelpText="Opens or closes the Reading position steps window.">
-                <TextBlock Text="Reading position steps" />
-              </ToggleButton>
+                            AutomationProperties.HelpText="Opens or closes the Reading position steps window."
+                            Content="Reading position steps" />
               <ToggleButton x:Name="AnnouncementsWindowToggle"
                             Style="{StaticResource PanelWindowToggle}"
                             Tag="{Binding ElementName=AnnouncementsPanel}"
                             Click="PanelWindowToggle_Click"
                             AutomationProperties.Name="NVDA had to announce"
-                            AutomationProperties.HelpText="Opens or closes the NVDA had to announce window.">
-                <TextBlock Text="NVDA had to announce" />
-              </ToggleButton>
+                            AutomationProperties.HelpText="Opens or closes the NVDA had to announce window."
+                            Content="NVDA had to announce" />
               <ToggleButton x:Name="AccessibilityTreeWindowToggle"
                             Style="{StaticResource PanelWindowToggle}"
                             Tag="{Binding ElementName=AccessibilityTreePanel}"
                             Click="PanelWindowToggle_Click"
                             AutomationProperties.Name="Accessibility tree"
-                            AutomationProperties.HelpText="Opens or closes the Accessibility tree window.">
-                <TextBlock Text="Accessibility tree" />
-              </ToggleButton>
+                            AutomationProperties.HelpText="Opens or closes the Accessibility tree window."
+                            Content="Accessibility tree" />
               <ToggleButton x:Name="ChecksWindowToggle"
                             Style="{StaticResource PanelWindowToggle}"
                             Tag="{Binding ElementName=ChecksPanel}"
                             Click="PanelWindowToggle_Click"
                             AutomationProperties.Name="Checks"
-                            AutomationProperties.HelpText="Opens or closes the Checks window.">
-                <TextBlock Text="Checks" />
-              </ToggleButton>
+                            AutomationProperties.HelpText="Opens or closes the Checks window."
+                            Content="Checks" />
               <ToggleButton x:Name="AnalysisWindowToggle"
                             Style="{StaticResource PanelWindowToggle}"
                             Tag="{Binding ElementName=AnalysisPanel}"
                             Click="PanelWindowToggle_Click"
                             AutomationProperties.Name="Analysis"
-                            AutomationProperties.HelpText="Opens or closes the Analysis window.">
-                <TextBlock x:Name="AnalysisButtonText" Text="Analysis" />
-              </ToggleButton>
+                            AutomationProperties.HelpText="Opens or closes the Analysis window."
+                            Content="Analysis" />
             </WrapPanel>
           </ScrollViewer>
         </GroupBox>

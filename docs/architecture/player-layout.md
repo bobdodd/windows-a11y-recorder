@@ -124,10 +124,21 @@ the tabs that tear out, below, built 2026-11-18
   opens the window, or closes it if it is open. Closing the window from
   the window itself releases the button, returns to the player and puts
   the keyboard focus on that button, so it can be opened again at once.
-- A pressed button is shown in bold as well as in its pressed colour, so
-  its state is not shown by colour alone. To UI Automation it is a toggle
-  button named by its panel, and its state is on or off; its help text,
-  also its tip, says "Opens or closes the" panel's window.
+- A pressed button is not shown by colour alone, as WCAG 1.4.1, Use of
+  Color, asks: "Color is not used as the only visual means of conveying
+  information, indicating an action, prompting a response, or
+  distinguishing a visual element"
+  ([W3C](https://www.w3.org/WAI/WCAG22/Understanding/use-of-color.html)).
+  As first built, a pressed button was in bold as well as its pressed
+  colour; the owner, 2026-11-18: "The push buttons are not accessible -
+  they use only colour to indicate pushed". A pressed button now has a
+  check mark before its name and a 3 pixel bar under it, both in the
+  button's text colour, and its name in bold. The check mark is drawn,
+  not a font's symbol, so a screen reader does not read it out, and its
+  space is kept while the button is released, so the name does not move.
+- To UI Automation each button is a toggle button named by its panel, and
+  its state is on or off; its help text, also its tip, says "Opens or
+  closes the" panel's window.
 - The buttons are at least 44 by 44 pixels, like the Properties change
   buttons.
 - A window first opens over the player, 640 by 520 pixels where the
