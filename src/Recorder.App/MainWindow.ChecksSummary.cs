@@ -61,6 +61,7 @@ public partial class MainWindow
                 DecorativeImages = _phoneDecorativeImages,
                 HeadingSections = _phoneHeadingSections,
                 TextNotInTree = _phoneTextNotInTree,
+                HeadingNotShown = _phoneHeadingNotShown,
                 LabelInName = _phoneLabelInName,
             });
 

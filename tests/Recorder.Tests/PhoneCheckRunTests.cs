@@ -2255,6 +2255,239 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.EndsWith("; check manually", split.Text, StringComparison.Ordinal);
     }
 
+    // Step 27: a marked heading not shown as one. A window of made-up
+    // items: a title marked as a heading, a row marked as a heading with
+    // its text inside, a value marked as a heading, a heading OCR misread,
+    // a heading under a longer line, a heading OCR's line goes on past, a
+    // heading OCR did not place, and plain text.
+    private static (PhoneCheckWindow Window, PhoneTextLine[] Lines) MarkedHeadings(string misread = "Orders")
+    {
+        AndroidTreeNode Node(int index, int? parent, (int Left, int Top, int Right, int Bottom) bounds, string className,
+            string? text = null, bool heading = false) =>
+            ImageNode(index, parent, bounds, className, null, text) with { Heading = heading };
+        var window = new PhoneCheckWindow(512, 1,
+        [
+            Node(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout"),
+            Node(1, 0, (40, 100, 1040, 200), "android.widget.TextView", "Account", heading: true),
+            Node(2, 0, (40, 300, 1040, 380), "android.widget.LinearLayout", heading: true),
+            Node(3, 2, (40, 300, 1040, 380), "android.widget.TextView", "Recent orders"),
+            Node(4, 0, (40, 400, 1040, 480), "android.widget.TextView", "$0.00", heading: true),
+            Node(5, 0, (40, 500, 1040, 580), "android.widget.TextView", "Status", heading: true),
+            Node(6, 0, (40, 600, 320, 680), "android.widget.TextView", "Plans", heading: true),
+            Node(7, 0, (40, 600, 1040, 680), "android.widget.TextView", "Plans and pricing"),
+            Node(8, 0, (40, 700, 280, 780), "android.widget.TextView", "Display", heading: true),
+            Node(9, 0, (280, 700, 1040, 780), "android.widget.TextView", "size and text"),
+            Node(10, 0, (40, 2100, 1040, 2200), "android.widget.TextView", "Help", heading: true),
+        ]);
+        var items = window.Items;
+        PhoneTextLine Line(int item, string ocr, (int Left, int Top, int Right, int Bottom) box) =>
+            new(items[item], items[item], PhoneTextPlace.AppTextPlacedByOcr, items[item].Text, ocr,
+                new PhoneBounds(box.Left, box.Top, box.Right, box.Bottom), new PhoneSwatch(0xFFFFFF, 0x000000, 21, 2, 2), 46, 40);
+        return (window,
+        [
+            Line(1, "Account", (60, 110, 400, 170)),
+            Line(3, "Recent orders", (60, 310, 600, 370)),
+            Line(4, "$0.00", (60, 410, 300, 470)),
+            Line(5, misread, (60, 510, 400, 570)),
+            Line(6, "Plans", (60, 610, 300, 670)),
+            Line(7, "Plans and pricing", (40, 600, 900, 680)),
+            Line(8, "Display", (60, 710, 260, 770)),
+            Line(9, "size and text", (270, 710, 600, 770)),
+        ]);
+    }
+
+    private PhoneHeadingNotShownRun HeadingNotShownRun(string? engine = "Windows OCR, en-US", string secondMisread = "Orders")
+    {
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var settled = visit.SettledSnapshots.Take(2).ToList();
+        PhoneContrastSnapshot Snapshot(int at, (PhoneCheckWindow Window, PhoneTextLine[] Lines) screen) =>
+            new(visit, settled[at], archive.PhoneAccessibility.TakenBy(settled[at], visit.WindowId)!,
+                new PhoneContrastPicture(PhonePictureKind.Screenshot, settled[at].MonotonicNanoseconds, $"p{at}.png", $"p{at}.png"),
+                engine, screen.Lines, null, screen.Window);
+        var measured = PhoneContrastRun.Of([Snapshot(0, MarkedHeadings()), Snapshot(1, MarkedHeadings(secondMisread))]);
+        return PhoneHeadingNotShownRun.Run(measured, archive.PhoneScreens);
+    }
+
+    // Rules 2 and 3: each marked heading, or text inside one, once a
+    // visit, decided on the first snapshot it is placed on; left out where
+    // OCR's text differs, another line covers it, or OCR's line goes on
+    // past it; a marked heading never placed is counted.
+    [Fact]
+    public void HeadingNotShown_TakesEachMarkedHeadingOnceAVisit_AndLeavesOutWhatOcrDoesNotShowAlone()
+    {
+        var run = HeadingNotShownRun(secondMisread: "Status");
+        var (window, _) = MarkedHeadings();
+        var visit = run.Questions[0].Visit;
+
+        Assert.Equal((2, 1), (run.SnapshotsRead, run.NotPlaced));
+        Assert.Equal(["Account", "Recent orders", "$0.00", "Status", "Plans", "Display"], run.Entries.Select(entry => entry.Text));
+        Assert.Equal((1, 1, 1), (run.OcrDiffers, run.Covered, run.LineGoesOn));
+        Assert.Equal(
+            [PhoneHeadingNotShownState.Asked, PhoneHeadingNotShownState.Asked, PhoneHeadingNotShownState.Asked,
+                PhoneHeadingNotShownState.OcrDiffers, PhoneHeadingNotShownState.Covered, PhoneHeadingNotShownState.LineGoesOn],
+            run.Entries.Select(entry => entry.State));
+        Assert.Equal("OCR read \"Orders\" for \"Status\"", run.Entries[3].Why);
+        Assert.Equal("OCR's line goes on past it, \"size and text\"", run.Entries[5].Why);
+
+        // The text inside a marked row is asked about as the row's.
+        Assert.Equal(["Account", "Recent orders", "$0.00"], run.Questions.Select(question => question.Text));
+        Assert.Equal([window.Items[1].Identity, window.Items[2].Identity, window.Items[4].Identity], run.Questions.Select(question => question.Identity));
+        Assert.Equal(new PhoneBounds(60, 110, 400, 170), run.Questions[0].Lines);
+        Assert.StartsWith("marked as a heading for a screen reader, its text read by OCR as \"Account\"", run.Questions[0].Time.Measured, StringComparison.Ordinal);
+        Assert.True(run.Read(visit));
+        Assert.Equal(6, run.In(visit).Count());
+        Assert.Empty(run.Findings);
+        Assert.Equal("Marked as a heading but not shown as one (WCAG 1.3.1)", PhoneCheckNames.Title(PhoneCheckNames.HeadingNotShown));
+
+        // With no OCR, nothing is checked.
+        var unread = HeadingNotShownRun(engine: null);
+
+        Assert.Equal((0, 0, 0), (unread.SnapshotsRead, unread.Entries.Count, unread.NotPlaced));
+        Assert.False(unread.Read(visit));
+    }
+
+    [Theory]
+    [InlineData("Status", "Status", true)]
+    [InlineData("Statue", "Status", true)]
+    [InlineData("C0ntacts", "Contacts", true)]
+    [InlineData("settings", "Developer settings", false)]
+    [InlineData("Payments", "Date", false)]
+    [InlineData("", "Date", false)]
+    public void HeadingNotShown_SameText_AllowsAFifthOfTheLettersToDiffer(string ocr, string app, bool same) =>
+        Assert.Equal(same, PhoneHeadingNotShownRun.SameText(ocr, app));
+
+    // Rule 6: the question of the check of text shown as a heading, saying
+    // the text is marked as one, under this check's template.
+    [Fact]
+    public void HeadingNotShown_RequestSaysTheTextIsMarkedAsAHeading()
+    {
+        var run = HeadingNotShownRun();
+        var rgb = new uint[1080 * 2400];
+        Array.Fill(rgb, 0x203040u);
+        var pixels = new PhonePixels(1080, 2400, rgb);
+
+        var request = Recorder.Analysis.Android.AndroidHeadingNotShown.RequestOf(run.Questions[0], pixels);
+        var look = Recorder.Analysis.Android.AndroidHeadingLook.RequestOf(run.Questions[0], pixels);
+
+        Assert.Matches("^heading-not-shown-[0-9a-f]{16}$", request.Key);
+        Assert.NotEqual(look.Key[^16..], request.Key[^16..]);
+        Assert.Equal(request.Key, Recorder.Analysis.Android.AndroidHeadingNotShown.RequestOf(run.Questions[0], new PhonePixels(1080, 2400, [.. rgb])).Key);
+        Assert.Equal(("android-heading-not-shown", 1, Recorder.Analysis.ModelUses.VisionChecks, true),
+            (request.Request.PromptTemplate, request.Request.PromptTemplateVersion, request.Request.Use, request.Request.ReusedAcrossTasks));
+        Assert.Equal(Recorder.Analysis.Android.AndroidHeadingLook.Answers, request.Request.Answers);
+        Assert.Equal(Recorder.Analysis.Android.AndroidHeadingLook.Instructions, request.Request.Instructions);
+        Assert.Equal(2, request.Request.Images.Count);
+        Assert.Contains("The outlined text, as the app gives it: \"Account\". It is marked as a heading for a screen reader.", request.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("It is not marked as a heading for a screen reader.", look.Request.Input, StringComparison.Ordinal);
+        Assert.Equal(
+            look.Request.Input.Replace("It is not marked", "It is marked", StringComparison.Ordinal),
+            request.Request.Input);
+    }
+
+    // Rule 7: agreed not a heading is put to the model for complex
+    // questions to confirm, whose answers decide; agreed a heading is no
+    // finding; with no model for complex questions the first answers
+    // stand.
+    [Fact]
+    public void HeadingNotShown_KeptAnswers_ConfirmNotAHeadingWithTheModelForComplexQuestions()
+    {
+        var run = HeadingNotShownRun();
+        var rgb = new uint[1080 * 2400];
+        Array.Fill(rgb, 0x203040u);
+        var pixels = new PhonePixels(1080, 2400, rgb);
+        var requests = run.Questions.Select(question => Recorder.Analysis.Android.AndroidHeadingNotShown.RequestOf(question, pixels)).ToList();
+        static Recorder.Analysis.KeptAnswer Answer(string answer) =>
+            new(JsonSerializer.SerializeToElement(new { answer, reason = "The pictures show it." }), "service", """{"temperature": null}""");
+        var kept = new Dictionary<string, Recorder.Analysis.KeptAnswer>
+        {
+            [requests[0].StepKey(1)] = Answer("heading"), [requests[0].StepKey(2)] = Answer("heading"),
+            [requests[1].StepKey(1)] = Answer("heading"), [requests[1].StepKey(2)] = Answer("not-heading"),
+            [requests[2].StepKey(1)] = Answer("not-heading"), [requests[2].StepKey(2)] = Answer("not-heading"),
+        };
+        Dictionary<string, Recorder.Analysis.KeptAnswer> Complex(string unsettled, string confirmed, string? confirmedAgain = null) => new()
+        {
+            [requests[1].StepKey(3)] = Answer(unsettled), [requests[1].StepKey(4)] = Answer(unsettled),
+            [requests[2].StepKey(3)] = Answer(confirmed), [requests[2].StepKey(4)] = Answer(confirmedAgain ?? confirmed),
+        };
+
+        // Confirmed: a warning for a person to verify.
+        var confirmed = Recorder.Analysis.Android.AndroidHeadingNotShown.FromKept(run, requests, kept, "Haiku", Complex("heading", "not-heading"), "Sonnet");
+
+        var finding = Assert.Single(confirmed.Findings);
+        Assert.Equal((PhoneCheckNames.HeadingNotShown, PhoneCheckLevel.Warning, "heading '$0.00'"), (finding.Check, finding.Level, finding.Label));
+        Assert.Equal(
+            "Haiku, a cloud model, the project's model for simple questions, answered not-heading twice, so the question was put to the project's model for complex questions to confirm; " +
+            "Sonnet, a cloud model, inferred from the pictures twice that the text marked as a heading is not shown as one: \"The pictures show it.\"; a person should verify this",
+            finding.Inference!.Text);
+        Assert.Equal("Sonnet", finding.Inference.Model);
+        Assert.Same(finding, Assert.Single(confirmed.For(finding.Visit)));
+        Assert.Equal((2, 0, 3), (confirmed.Shown, confirmed.Unanswered, confirmed.Inferences.Count()));
+        Assert.Equal(
+            "3 marked headings left by the rules are for Haiku; 3 marked headings answered: 2 judged shown as headings, not confirmed, and 1 warning; " +
+            "2 asked again of the model for complex questions, to settle or to confirm the first answers",
+            confirmed.ModelNote);
+
+        // Overturned: no finding.
+        var overturned = Recorder.Analysis.Android.AndroidHeadingNotShown.FromKept(run, requests, kept, "Haiku", Complex("heading", "heading"), "Sonnet");
+
+        Assert.Empty(overturned.Findings);
+        Assert.Equal(3, overturned.Shown);
+
+        // Two answers from the model for complex questions: check manually.
+        var split = Recorder.Analysis.Android.AndroidHeadingNotShown.FromKept(run, requests, kept, "Haiku", Complex("heading", "not-heading", "cannot-tell"), "Sonnet");
+
+        var unsure = Assert.Single(split.Findings);
+        Assert.StartsWith("Haiku, a cloud model, the project's model for simple questions, answered not-heading twice, so the question was put", unsure.Inference!.Text, StringComparison.Ordinal);
+        Assert.Contains("gave two answers, not-heading and cannot-tell", unsure.Inference.Text, StringComparison.Ordinal);
+        Assert.EndsWith("; check manually", unsure.Inference.Text, StringComparison.Ordinal);
+
+        // Not confirmed yet: waiting for the model for complex questions.
+        var waiting = Recorder.Analysis.Android.AndroidHeadingNotShown.FromKept(run, requests, kept, "Haiku", new Dictionary<string, Recorder.Analysis.KeptAnswer>(), "Sonnet");
+
+        Assert.Empty(waiting.Findings);
+        Assert.Equal((1, 2), (waiting.Shown, waiting.Unanswered));
+        Assert.Contains(", 2 marked headings waiting for the model for complex questions", waiting.ModelNote, StringComparison.Ordinal);
+
+        // No model for complex questions: the first answers stand.
+        var simple = Recorder.Analysis.Android.AndroidHeadingNotShown.FromKept(run, requests, kept, "Haiku");
+
+        Assert.Equal([PhoneCheckLevel.Warning, PhoneCheckLevel.Warning], simple.Findings.Select(each => each.Level));
+        Assert.Contains("gave two answers, heading and not-heading", simple.Findings[0].Inference!.Text, StringComparison.Ordinal);
+        Assert.StartsWith("Haiku, a cloud model, inferred from the pictures twice that the text marked as a heading is not shown as one", simple.Findings[1].Inference!.Text, StringComparison.Ordinal);
+        Assert.Equal(1, simple.Shown);
+
+        // No answers, and no model: nothing is judged.
+        var unanswered = Recorder.Analysis.Android.AndroidHeadingNotShown.FromKept(run, requests, new Dictionary<string, Recorder.Analysis.KeptAnswer>(), "Haiku");
+
+        Assert.Empty(unanswered.Findings);
+        Assert.Equal(3, unanswered.Unanswered);
+        Assert.EndsWith(", 3 marked headings not yet asked", unanswered.ModelNote, StringComparison.Ordinal);
+        Assert.Equal(
+            "3 marked headings left by the rules were not judged, as no model may be used for vision-based checks: no model",
+            Recorder.Analysis.Android.AndroidHeadingNotShown.NotAsked(3, "no model"));
+        Assert.Empty(run.Judged(new Dictionary<PhoneHeadingQuestion, PhoneHeadingNotShownAnswer>(), "none").Findings);
+    }
+
+    // Rule 7's levels.
+    [Theory]
+    [InlineData("not-heading", PhoneCheckLevel.Warning, "that the text marked as a heading is not shown as one: \"First.\"; a person should verify this")]
+    [InlineData("heading", PhoneCheckLevel.Info, "that the text marked as a heading is shown as one, not confirmed")]
+    [InlineData("cannot-tell", PhoneCheckLevel.Warning, "could not tell from the pictures twice whether the text marked as a heading is shown as one")]
+    public void HeadingNotShown_Interpret_GivesEachAgreedAnswersLevel(string answer, PhoneCheckLevel level, string says)
+    {
+        var inference = Recorder.Analysis.Android.AndroidHeadingNotShown.Interpret(new(answer, "First."), new(answer, "Second."), "Haiku", cloud: false);
+
+        Assert.Equal((level, true, false), (inference.Level, inference.Inferred, inference.Cloud));
+        Assert.StartsWith("Haiku, a local model,", inference.Text, StringComparison.Ordinal);
+        Assert.Contains(says, inference.Text, StringComparison.Ordinal);
+
+        var split = Recorder.Analysis.Android.AndroidHeadingNotShown.Interpret(new(answer, "First."), new(answer == "heading" ? "not-heading" : "heading", "Second."), "Haiku", cloud: false);
+
+        Assert.Equal(PhoneCheckLevel.Warning, split.Level);
+        Assert.EndsWith("; check manually", split.Text, StringComparison.Ordinal);
+    }
+
     // The body text is the height most of the characters have.
     [Fact]
     public void HeadingLook_BodyHeight_IsTheMedianInkHeightByCharacters()

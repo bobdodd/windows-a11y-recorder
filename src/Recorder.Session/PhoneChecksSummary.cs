@@ -45,6 +45,8 @@ public sealed record PhoneChecksSummaryInput
 
     public PhoneTextNotInTreeRun? TextNotInTree { get; init; }
 
+    public PhoneHeadingNotShownRun? HeadingNotShown { get; init; }
+
     public PhoneLabelInNameRun? LabelInName { get; init; }
 }
 
@@ -151,6 +153,7 @@ public static class PhoneChecksSummary
             .Concat(input.DecorativeImages?.Findings ?? [])
             .Concat(input.HeadingSections?.Findings ?? [])
             .Concat(input.TextNotInTree?.Findings ?? [])
+            .Concat(input.HeadingNotShown?.Findings ?? [])
             .Concat(input.LabelInName?.Findings ?? []);
     }
 
@@ -508,6 +511,26 @@ public static class PhoneChecksSummary
                             $"{Count(notInTree.Unanswered, "line")} not judged.",
                         ],
                         notInTree.ModelNote)));
+        }
+
+        if (input.HeadingNotShown is { } notShown)
+        {
+            var title = PhoneCheckNames.Title(PhoneCheckNames.HeadingNotShown);
+            sections.Add(notShown.SnapshotsRead == 0
+                ? NotChecked(title, "it needs the text OCR read on the screens' pictures")
+                : new PhoneSummarySection(
+                    title,
+                    Result(notShown.Findings),
+                    WithNote(
+                        [
+                            $"{Count(notShown.Entries.Count, "marked heading")} placed by OCR, each once a visit, on {Count(notShown.SnapshotsRead, "picture")}.",
+                            F($"Left out: {notShown.OcrDiffers:N0} where OCR's text differs from the app's; {notShown.Covered:N0} covered by another line; {notShown.LineGoesOn:N0} where OCR's line goes on past the heading."),
+                            $"{Count(notShown.NotPlaced, "marked heading")} not placed by OCR, not checked.",
+                            $"{Count(notShown.Questions.Count, "marked heading")} for the model for vision-based checks.",
+                            F($"{notShown.Shown:N0} judged shown as {(notShown.Shown == 1 ? "a heading" : "headings")}, not confirmed."),
+                            $"{Count(notShown.Unanswered, "marked heading")} not judged.",
+                        ],
+                        notShown.ModelNote)));
         }
 
         if (input.LabelInName is { } labels)

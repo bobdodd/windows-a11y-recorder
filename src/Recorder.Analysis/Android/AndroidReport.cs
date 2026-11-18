@@ -1085,7 +1085,7 @@ public static class AndroidReport
                 var check = _several ? $"In recording {(index + 1).ToString(CultureInfo.InvariantCulture)}, a" : "A";
                 if (part.Audit.MeasureProblem is { } problem)
                 {
-                    Item($"{of} colours could not be measured, so the contrast, image of text, label in name, text shown as a heading, image text alternative, icon and description, screen title, decorative image, heading section and text not in the tree checks did not run: " + problem);
+                    Item($"{of} colours could not be measured, so the contrast, image of text, label in name, text shown as a heading, image text alternative, icon and description, screen title, decorative image, heading section, text not in the tree and marked heading not shown checks did not run: " + problem);
                 }
 
                 if (part.Audit.ImagesOfText?.ModelNote is { } note)
@@ -1126,6 +1126,11 @@ public static class AndroidReport
                 if (part.Audit.TextNotInTree?.ModelNote is { } treeNote)
                 {
                     Item($"{of} text not in the tree check's model: {treeNote}.");
+                }
+
+                if (part.Audit.HeadingNotShown?.ModelNote is { } notShownNote)
+                {
+                    Item($"{of} marked heading not shown check's model: {notShownNote}.");
                 }
 
                 foreach (var problem2 in part.Audit.Tree.Problems)

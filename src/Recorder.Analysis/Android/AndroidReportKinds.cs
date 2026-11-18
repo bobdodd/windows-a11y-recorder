@@ -27,7 +27,10 @@ namespace Recorder.Analysis.Android;
 /// the check of a heading's section asks it about the headings its rules
 /// leave (AndroidHeadingSections); where it chooses a model for
 /// vision-based checks, the check of text on screen not in the tree asks it
-/// about the lines its rules leave (AndroidTextNotInTree); and the report
+/// about the lines its rules leave (AndroidTextNotInTree); where it chooses
+/// a model for vision-based checks, the check of a marked heading not shown
+/// as one asks it about the headings its rules leave
+/// (AndroidHeadingNotShown); and the report
 /// says AI was used. With no model
 /// it gives the same report for the same recording, settings and guidance.
 /// </summary>
@@ -298,7 +301,7 @@ public sealed class AndroidModelChecksKind : IAnalysisTaskKind
             .Append(CultureInfo.InvariantCulture, $"# Model checks: {recording}\n\n");
         if (audit.ImagesOfText is not { } run)
         {
-            return text.Append("The colours could not be measured, so the images-of-text check, the check of text shown as a heading, the check of images with no text alternative, the icon and description checks, the screen title check, the decorative image check, the check of a heading's section and the check of text not in the tree did not run")
+            return text.Append("The colours could not be measured, so the images-of-text check, the check of text shown as a heading, the check of images with no text alternative, the icon and description checks, the screen title check, the decorative image check, the check of a heading's section, the check of text not in the tree and the check of a marked heading not shown as one did not run")
                 .Append(audit.MeasureProblem is { } problem ? ": " + problem : "").Append(".\n").ToString();
         }
 
@@ -430,6 +433,24 @@ public sealed class AndroidModelChecksKind : IAnalysisTaskKind
             }
         }
 
+        if (audit.HeadingNotShown is { } notShown)
+        {
+            text.Append("\n## Marked headings not shown as headings\n\n")
+                .Append(CultureInfo.InvariantCulture,
+                    $"Of the marked headings OCR placed on {notShown.SnapshotsRead} pictures, once a visit, {notShown.OcrDiffers} were left out as OCR's text differed from the app's, {notShown.Covered} as another line covered them and {notShown.LineGoesOn} as OCR's line went on past them, and {notShown.NotPlaced} were not placed; the rules left {notShown.Questions.Count} for the project's model for vision-based checks.");
+            if (notShown.ModelNote is { } notShownNote)
+            {
+                text.Append(' ').Append(char.ToUpperInvariant(notShownNote[0])).Append(notShownNote.AsSpan(1)).Append('.');
+            }
+
+            text.Append("\n\n");
+            foreach (var finding in notShown.Findings)
+            {
+                text.Append(CultureInfo.InvariantCulture,
+                    $"- {finding.Screen.Package}, \"{finding.Screen.Name}\", visit {finding.Visit.Number}, {finding.Label}: {finding.Text}\n");
+            }
+        }
+
         return text.ToString();
     }
 
@@ -495,6 +516,7 @@ internal static class AndroidReportRun
             audit = await AndroidDecorativeImages.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
             audit = await AndroidHeadingSections.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
             audit = await AndroidTextNotInTree.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
+            audit = await AndroidHeadingNotShown.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
             if (modelChecksOnly)
             {
                 var named = await context.Catalog.RecordingAsync(task.Recording, cancellationToken).ConfigureAwait(false);
@@ -595,7 +617,8 @@ internal static class AndroidReportRun
                 audit = await AndroidScreenTitles.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
                 audit = await AndroidDecorativeImages.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
                 audit = await AndroidHeadingSections.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
-            audit = await AndroidTextNotInTree.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
+                audit = await AndroidTextNotInTree.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
+                audit = await AndroidHeadingNotShown.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
                 parts.Add(Input(archive, audit, label, opened.Incomplete) with { StartedUtc = new DateTimeOffset(recording.StartedUtc, TimeSpan.Zero) });
                 keys.Add(key);
             }

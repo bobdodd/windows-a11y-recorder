@@ -17,6 +17,7 @@ public partial class MainWindow
     private int ModelQuestionsUnanswered =>
         _imagesOfTextUnanswered + _headingLookUnanswered + _imageAlternativeUnanswered + _describedImagesUnanswered +
         _titleVisionUnanswered + _decorativeUnanswered + _sectionVisionUnanswered + _textNotInTreeUnanswered +
+        _headingNotShownUnanswered +
         _titleTextUnanswered + _sectionTextUnanswered;
 
     // A toast for each change of the model checks' tasks, in order, so the

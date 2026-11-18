@@ -8,6 +8,29 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Headings not shown as headings
+
+- A new check, "Marked as a heading but not shown as one" (WCAG 1.3.1,
+  failure F43), for each item marked as a heading, or text inside one,
+  that OCR placed on the screen's picture, once a visit. It is its own
+  issue, apart from text shown as a heading but not marked.
+- A heading is left out, and counted, where OCR's text differs from the
+  app's, another line covers at least half of it, or another line in
+  the same row sits within half its height, as OCR's line goes on past
+  it. A heading OCR never placed is counted, not judged.
+- Every other heading is asked of the project's model for vision-based
+  checks, with the pictures and answers of the check of text shown as a
+  heading, the question saying the text is marked as a heading. Where
+  the answers agree that it is not a heading, the project's model for
+  complex questions is asked to confirm, and its answers decide.
+- Agreed not a heading is a warning for a person to verify, medium
+  impact (an assumption, as for text shown as a heading); cannot tell,
+  or two answers, a warning to check manually; agreed a heading, no
+  finding. With no model, nothing is judged.
+- The check is in the Android report, the project report, the model
+  checks, the Checks tab and its Summary tab, and the toasts' count of
+  questions not judged.
+
 ### Toasts for the model checks
 
 - "Ask the project's model" in the Checks window is followed by toasts

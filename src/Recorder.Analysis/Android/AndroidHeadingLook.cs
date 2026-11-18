@@ -56,11 +56,15 @@ public static class AndroidHeadingLook
     // screen's height below it, across the whole screen, at full size.
     private const double Below = 0.3;
 
-    /// <summary>The question's text.</summary>
-    public static string Question(string app, string screenName, string text) =>
+    /// <summary>
+    /// The question's text; where the text is marked as a heading, as in
+    /// the check of a heading not shown as one (step 27, rule 6), it says
+    /// so, and the question is otherwise the same.
+    /// </summary>
+    public static string Question(string app, string screenName, string text, bool marked = false) =>
         $"Picture A is the whole screen of the Android app {app}, on its screen \"{screenName}\", with one piece of text outlined in cyan. " +
         "Picture B is the part of the screen from the outlined text down, at full size.\n" +
-        $"The outlined text, as the app gives it: \"{text}\". It is not marked as a heading for a screen reader.\n" +
+        $"The outlined text, as the app gives it: \"{text}\". It is {(marked ? "" : "not ")}marked as a heading for a screen reader.\n" +
         "Which one is true of the outlined text?\n" +
         "- heading: it is shown as a heading or title, of the screen or of the content after it, by its size, weight, colour, case or place.\n" +
         "- not-heading: it is not a heading, such as a message, a value, the label of a single field or value, a button, a caption or ordinary text.\n" +
@@ -282,8 +286,9 @@ public static class AndroidHeadingLook
         string.Create(CultureInfo.CurrentCulture, $"{count:N0} {(count == 1 ? "piece" : "pieces")} of text");
 
     // The screen across, from a line's height above the text to 30% of the
-    // screen's height below it, at full size, with the text outlined.
-    private static AndroidImagesOfText.Rgb Band(PhonePixels pixels, PhoneBounds lines)
+    // screen's height below it, at full size, with the text outlined; also
+    // picture B of the check of a heading not shown as one (step 27).
+    internal static AndroidImagesOfText.Rgb Band(PhonePixels pixels, PhoneBounds lines)
     {
         var top = Math.Clamp(lines.Top - lines.Height, 0, pixels.Height - 1);
         var bottom = Math.Clamp(lines.Bottom + (int)(pixels.Height * Below), top + 1, pixels.Height);

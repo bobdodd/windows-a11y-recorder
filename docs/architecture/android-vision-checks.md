@@ -174,7 +174,7 @@ Each row is one issue, so that its remediation can be specific.
 | Check | WCAG | What the model is asked | Chosen without a model |
 | --- | --- | --- | --- |
 | Text that looks like a heading but is not one | 1.3.1 | Is this text shown as a heading? | Text items larger or bolder than the screen's body text, not marked as headings |
-| A heading that does not look like one | 1.3.1 | Is this text shown as a heading? | Items marked as headings |
+| A heading that does not look like one | 1.3.1 | Is this text, marked as a heading, shown as a heading? | Marked headings OCR placed, once a visit, leaving out those where OCR's text differs, another line covers it, or OCR's line goes on past it; agreed not a heading confirmed by the model for complex questions; built, see "Headings not shown as headings, as built" |
 | A title that does not describe its screen | 2.4.2 | Does this title describe the screen shown? | Each titled screen once, unless its title is exactly its own heading, OCR line or spoken item, with what a screen reader says, the screen's OCR text, and the picture for a screen at least half images (requirement 5); built, see "Screen titles, as built" |
 | A heading that does not describe its section | 2.4.6 | Does this heading describe what follows it? | Marked headings, and text shown as a heading that the model judged one, that are not the screen's title, with their sections' items and OCR text, and the picture for a section mostly of images; built, see "Headings and sections, as built" |
 | Content in an order that does not make sense | 1.3.2 | Does the content read in a sensible order? | Screens with several blocks of text, in the order a screen reader moves |
@@ -564,6 +564,23 @@ is drawn text a screen reader cannot reach, covered, not text, or
 cannot tell. Drawn text is a warning for a person to verify, high
 impact; cannot tell, or two answers, a warning to check manually;
 covered and not text no finding, counted.
+
+### Headings not shown as headings, as built
+
+Built on 2026-11-18, at the owner's request, "Build the check with
+these two rules and the Android checks document updates". Step 27 of
+`android-checks.md` has the measurement and the rules: each item
+marked as a heading, or text inside one, that OCR placed on a settled
+snapshot, once a visit; where OCR's text differs from the app's,
+another line covers at least half of it, or another line in the same
+row is within half its height, as OCR's line goes on past it, it is
+left out and counted. Every other heading is asked, with step 19's
+pictures, instructions and answers, the question saying the text is
+marked as a heading. Agreed not a heading is put to the model for
+complex questions to confirm, as are unsettled answers, and its
+answers decide. Agreed not a heading is a warning for a person to
+verify, medium impact, an assumption; cannot tell, or two answers, a
+warning to check manually; agreed a heading, counted, no finding.
 
 ### Simple and complex questions, measured on 2026-11-17
 

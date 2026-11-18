@@ -119,6 +119,33 @@ internal sealed class EscalatingKind : IAnalysisTaskKind
     }
 }
 
+/// <summary>
+/// A task kind for the tests: one question of the check of a marked heading
+/// not shown as one (android-checks.md, step 27, rule 7).
+/// </summary>
+internal sealed class ConfirmingKind : IAnalysisTaskKind
+{
+    public const string Name = "confirming";
+
+    public string Kind => Name;
+
+    public int Version => 1;
+
+    public QuestionAnswers? Answers { get; private set; }
+
+    public List<string> Failures { get; } = [];
+
+    public async Task RunAsync(AnalysisTaskContext context, CancellationToken cancellationToken)
+    {
+        var request = new ModelRequest("confirming-check", 1, "Ask.", "E1: fact", [new ModelImage("E2", "image/png", [1])], ["answer"], new HashSet<string> { "E1", "E2" }) with
+        {
+            Use = ModelUses.VisionChecks,
+            Answers = AndroidHeadingLook.Answers,
+        };
+        Answers = await AndroidHeadingNotShown.AskQuestionAsync(context, run => $"question-{run}", request, Failures, cancellationToken);
+    }
+}
+
 /// <summary>A task kind for the tests: one model step for each step key.</summary>
 internal sealed class StandInKind(params string[] steps) : IAnalysisTaskKind
 {
@@ -1945,6 +1972,52 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Assert.Equal(PhoneCheckLevel.Info, inference.Level);
         Assert.Equal("Big", inference.Model);
         Assert.StartsWith("This PC, a local model, the project's model for simple questions, could not tell, so the question was asked again of the project's model for complex questions; Big, a local model, inferred", inference.Text, StringComparison.Ordinal);
+    }
+
+    // android-checks.md, step 27, rule 7: a marked heading the model for
+    // simple questions agrees is not shown as a heading is put to the model
+    // for complex questions to confirm, whose answers decide; one agreed a
+    // heading is not; with no model for complex questions, the first
+    // answers stand.
+    [Fact]
+    public async Task A_marked_heading_judged_not_a_heading_is_confirmed_by_the_model_for_complex_questions()
+    {
+        var catalog = await CatalogAsync();
+        var settings = SettingsWith(3,
+            Profile("This PC", "qwen", ModelCapabilities.Text, ModelCapabilities.Image),
+            Profile("Big", "big", ModelCapabilities.Text, ModelCapabilities.Image));
+        var both = new Dictionary<string, string> { [ModelUses.VisionChecks] = "This PC", [ModelUses.ComplexVisionChecks] = "Big" };
+
+        var overturned = new StandInEndpoint { Answer = (profile, _, _) => Task.FromResult(CheckAnswer(profile.Name == "Big" ? "heading" : "not-heading")) };
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), ConfirmingKind.Name, 1, both, cancellationToken: Token);
+        var kind = new ConfirmingKind();
+        await new AnalysisWorker(catalog, settings, [kind], overturned, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
+        Assert.Empty(kind.Failures);
+        var answers = Assert.IsType<QuestionAnswers>(kind.Answers);
+        Assert.Equal(("not-heading", "heading", "Big"), (answers.First.One.Answer, answers.Escalated!.One.Answer, answers.Escalated.Model));
+        Assert.Equal(["complete This PC", "complete Big"], overturned.Calls.Where(call => call.StartsWith("complete", StringComparison.Ordinal)));
+        Assert.Equal(["question-1", "question-3"], (await RowsAsync("SELECT step_key FROM analysis_attempts WHERE task_id = $1 ORDER BY step_key", task)).Select(row => (string)row["step_key"]!));
+        Assert.Equal(PhoneHeadingNotShownOutcome.Shown, AndroidHeadingNotShown.Judge(answers).Outcome);
+
+        // Agreed a heading: not asked again.
+        var settled = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(CheckAnswer("heading")) };
+        await catalog.QueueTaskAsync(await RecordingAsync(), ConfirmingKind.Name, 1, both, cancellationToken: Token);
+        var heading = new ConfirmingKind();
+        await new AnalysisWorker(catalog, settings, [heading], settled, options: Fast).RunUntilEmptyAsync(Token);
+        Assert.Null(heading.Answers!.Escalated);
+        Assert.Equal(["complete This PC"], settled.Calls.Where(call => call.StartsWith("complete", StringComparison.Ordinal)));
+
+        // No model for complex questions: the first answers stand, a warning.
+        var alone = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(CheckAnswer("not-heading")) };
+        await catalog.QueueTaskAsync(await RecordingAsync(), ConfirmingKind.Name, 1, Vision(), cancellationToken: Token);
+        var simple = new ConfirmingKind();
+        await new AnalysisWorker(catalog, settings, [simple], alone, options: Fast).RunUntilEmptyAsync(Token);
+        Assert.Null(simple.Answers!.Escalated);
+        var judged = AndroidHeadingNotShown.Judge(simple.Answers);
+        Assert.Equal((PhoneHeadingNotShownOutcome.Finding, PhoneCheckLevel.Warning), (judged.Outcome, judged.Inference.Level));
+        Assert.EndsWith("; a person should verify this", judged.Inference.Text, StringComparison.Ordinal);
     }
 
     [Fact]

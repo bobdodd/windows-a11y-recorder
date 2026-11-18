@@ -10,6 +10,7 @@
     "wcag-1.1.1": { "title": "Understanding SC 1.1.1 Non-text Content", "url": "https://www.w3.org/WAI/WCAG22/Understanding/non-text-content.html" },
     "wcag-1.3.1": { "title": "Understanding SC 1.3.1 Info and Relationships", "url": "https://www.w3.org/WAI/WCAG22/Understanding/info-and-relationships.html" },
     "wcag-f2": { "title": "Technique F2: Failure of Success Criterion 1.3.1 due to using changes in text presentation to convey information without using the appropriate markup or text", "url": "https://www.w3.org/WAI/WCAG22/Techniques/failures/F2" },
+    "wcag-f43": { "title": "Technique F43: Failure of Success Criterion 1.3.1 due to using structural markup in a way that does not represent relationships in the content", "url": "https://www.w3.org/WAI/WCAG22/Techniques/failures/F43" },
     "wcag-1.3.2": { "title": "Understanding SC 1.3.2 Meaningful Sequence", "url": "https://www.w3.org/WAI/WCAG22/Understanding/meaningful-sequence.html" },
     "wcag-1.3.4": { "title": "Understanding SC 1.3.4 Orientation", "url": "https://www.w3.org/WAI/WCAG22/Understanding/orientation.html" },
     "wcag-1.4.3": { "title": "Understanding SC 1.4.3 Contrast (Minimum)", "url": "https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html" },
@@ -615,6 +616,22 @@
       "flutter": "Show text with a Text widget rather than painting it; for a CustomPaint, give the painter a semanticsBuilder, or wrap it in Semantics(label: ...). Do not wrap text a person needs in ExcludeSemantics.",
       "reactNative": "Show text with a Text element; for text drawn in an SVG or canvas view, set accessible and accessibilityLabel to the same words. Do not hide text a person needs with importantForAccessibility=\"no-hide-descendants\" or accessibilityElementsHidden.",
       "sources": ["wcag-1.1.1", "wcag-4.1.2", "wcag2ict", "android-views", "compose-semantics", "flutter-semantics", "rn-accessibility"]
+    },
+    {
+      "check": "heading-not-shown",
+      "title": "Text marked as a heading but not shown as one",
+      "issue": "Text is marked as a heading for assistive technology but is not shown as a heading on the screen, such as a value, a field's label or a column header marked as a heading.",
+      "why": "Screen reader users move by headings to find their way around a screen and to skip to a section. A heading that is not one adds a stop that leads nowhere and gives a structure the screen does not have, which is disorienting.",
+      "affects": ["People who are blind and use a screen reader", "People who are deaf-blind and use a braille display"],
+      "impact": "medium",
+      "criteria": ["1.3.1"],
+      "related": [],
+      "basis": "WCAG 1.3.1 as WCAG2ICT applies it to software, and failure F43: structural markup used in a way that does not represent relationships in the content, such as a heading used only for its look. Found from the recorded picture and the tree: each item marked as a heading, or text inside one, that the PC's OCR placed on the picture, once a visit, leaving out those where OCR's text differs from the app's, another line covers it, or OCR's line goes on past it, judged by the project's model for vision-based checks from the screen's picture with the text outlined; where it answers that the text is not shown as a heading, the project's model for complex questions is asked to confirm. Every finding is a warning, the model's inference, for a person to verify; with no model there is no finding.",
+      "android": "Where the text is not a heading, remove the heading mark: android:accessibilityHeading=\"false\" or ViewCompat.setAccessibilityHeading(view, false); in Compose, remove heading() from Modifier.semantics. Where it is a heading, show it as one, set apart from the text around it by size, weight or colour, so that its look matches its role.",
+      "flutter": "Where the text is not a heading, remove header: true from its Semantics; where it is, show it as a heading, set apart from the text around it.",
+      "reactNative": "Where the text is not a heading, remove accessibilityRole=\"header\" (or role=\"heading\"); where it is, show it as a heading, set apart from the text around it.",
+      "web": "Use h1 to h6, or role=\"heading\", only for text that heads a section; show other text, such as a value or a label, with p, span or label and style it with CSS.",
+      "sources": ["wcag-1.3.1", "wcag2ict", "wcag-f43", "android-views", "compose-semantics", "flutter-semantics", "rn-accessibility"]
     },
     {
       "check": "no-heading",

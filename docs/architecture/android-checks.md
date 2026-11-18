@@ -4825,6 +4825,201 @@ Android's for an ImageView.
   remediation; the other image checks (steps 20, 21 and 23) still look
   only at ImageViews.
 
+## Step 27: a heading that does not look like one
+
+### The owner's decision (2026-11-18)
+
+Offered nine rules from the first probe below, with two options for
+rules 4 and 5, the owner chose "Option A for rules 4 and 5, and measure
+the model's answers on the 59 headings first". After the first run with
+the model, two changes were proposed, to rules 3 and 7; the owner asked
+to "Run the probe once more to measure both rule changes on these
+headings", then chose: "Build the check with these two rules and the
+Android checks document updates".
+
+1. **The issue.** "Marked as a heading but not shown as one (WCAG
+   1.3.1)", its own issue, apart from text shown as a heading but not
+   marked (step 19), as the fix is the opposite.
+2. **Which headings.** Each item marked as a heading, or text inside
+   one, that OCR placed on a settled snapshot's picture, once a visit,
+   from the first such snapshot. A heading OCR placed on no picture of
+   its visit is counted, with no finding.
+3. **Placement.** A heading is left out, and counted, where (3a) OCR's
+   text differs from the app's, (3b) another line covers at least half
+   of its box, or (3c) another line in the same row is within half the
+   heading's height of its box, as OCR's line goes on past it. 3c is
+   the first of the two changes.
+4. **No pass without a model** (option A). Every heading left goes to
+   the model, as large text, such as an amount, can still be a value.
+5. **Text in something that can be tapped** (option A) is included, as
+   a heading can also be a link.
+6. **The question.** Step 19's question, pictures and three answers,
+   heading, not-heading or cannot-tell, reason first, with the question
+   saying that the text is marked as a heading for a screen reader.
+7. **Levels.** Asked twice of the project's model for vision-based
+   checks. Answers that do not settle the question are put to the
+   model for complex questions, as for the other checks. Answers that
+   agree the text is not a heading are put to it too, to confirm (the
+   second change); its answers decide. Agreed not a heading: a warning
+   for a person to verify, with the model's reason. Agreed a heading:
+   no finding, counted. Cannot tell, or two answers: a warning to check
+   manually. Where the project has no model for complex questions, or
+   the same model for both, the first answers stand.
+8. **No model.** With no model for vision-based checks, the headings
+   are counted as not judged, with no finding.
+9. **Kept answers.** An answer is kept by its request, so it is given
+   again only where the text and the pictures are unchanged.
+
+### What the standards say (checked in cited documents)
+
+- [WCAG 2.2's failure F43](https://www.w3.org/WAI/WCAG22/Techniques/failures/F43),
+  "Failure of Success Criterion 1.3.1 due to using structural markup in
+  a way that does not represent relationships in the content", gives as
+  its first example a heading used only for visual effect: an address
+  marked as a heading to show it in a large bold font. Text marked as a
+  heading that heads no section, such as a value or a field's label,
+  is that failure.
+- [WCAG 2.2's Understanding 1.3.1](https://www.w3.org/WAI/WCAG22/Understanding/info-and-relationships.html)
+  asks that information and relationships conveyed through presentation
+  can be programmatically determined; a heading mark tells a screen
+  reader of a relationship, a section, that the screen does not show.
+  [WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/) applies it to software.
+- **Impact.** Medium is an assumption, not taken from a source, chosen
+  to match the check of text shown as a heading but not marked.
+
+### Measured first (2026-11-18)
+
+**With no model.** A probe read the 20 recordings with phone screens on
+the development PC. OCR placed 59 marked headings, once a visit, on 9
+of them, 31 different texts; 68 more were never placed, mostly items
+scrolled off the screen. By app: Settings 41, Chrome 9, TalkBack 6,
+Gmail 2 and the launcher 1. 57 were measured on video frames, so their
+colours are approximate.
+
+| Group | Count | What was measured |
+|---|---|---|
+| Screen titles at the top | 21 | Letters 1.18 to 2.03 times the body text's height |
+| Section labels in Settings and TalkBack lists | 27 | Letters 0.72 to 1.16 times the body text's height, 22 the body text's grey |
+| Chrome web pages | 9 | All inside an item that can be tapped |
+| Gmail | 2 | Column headers in capitals, 0.59 times the body text's height |
+
+16 had letters at least 1.35 times the body text's height, 2 were in
+capitals, 28 differed in colour from the body text, and 25 had none of
+these, so size, case and colour cannot tell whether a marked heading is
+shown as one; hence option A, no pass without a model.
+
+**Run 1, with the model (old rule 3, unsettled answers to the model for
+complex questions).** Claude Haiku as the model for vision-based checks
+and Claude Sonnet as the model for complex questions. 55 headings were
+asked; 4 were left out: "Date", where OCR read "Payments"; "Developer
+settings" and "Advanced settings", where OCR read "settings"; and "All
+apps", covered by "Home". Haiku settled 39 of the 55; 16 went to
+Sonnet, which agreed with itself on all 16. The final answers were
+heading 49 and not-heading 6. 4 of the 6 were real problems: a balance
+amount on a web page, a value (F43); a field's label on the same page;
+and two column headers of a table in an email. 2 were wrong: "Display",
+placed by OCR on the first word of "Display size & text", and
+"Braille", a section label. The run cost US$0.22.
+
+**Run 2, with both changes.** Rule 3c left out only "Display", and no
+heading placed correctly; 5 were left out and 54 asked. Haiku agreed
+not a heading on 6, all put to Sonnet: it confirmed 2 (the amount and the
+field's label), overturned 3 ("Tutorial & help", "Screen reader"
+and "Options", all section labels) and split on 1 (one of the column
+headers, cannot tell). 12 questions Haiku did not settle went to Sonnet too; its
+two answers agreed on 17 of its 18 questions. The final answers were
+not-heading 3 (the amount, the field's label and the other column
+header), cannot tell 1 and heading 50, with no wrong not-heading answer. The run cost
+US$0.24, Haiku US$0.033 and Sonnet US$0.208, about US$0.0045 a heading.
+Between the runs, the final answers differed on 3 headings: "Braille",
+as Haiku's answer changed; "Display", left out by rule 3c; and
+the first column header, as Sonnet split.
+
+### As built
+
+- **The rules.** `PhoneHeadingNotShownRun` (`Recorder.Session`) reads
+  each settled snapshot whose picture OCR read (`SnapshotsRead`). Each
+  item marked as a heading, or text inside one (`HeadingOf`), placed by
+  OCR, is taken once a visit by its text, from the first snapshot it is
+  placed on (`Entries`); one placed on no picture of its visit is
+  counted (`NotPlaced`). Rule 3 sets aside, in this order: OCR's text
+  not the app's (`OcrDiffers`), compared by letters and digits, lower
+  case, "o" as "0" and "l" and "i" as "1", within a fifth of the app's
+  length in edits (`SameText`); another line covering at least half the
+  box (`Covered`, `MostCovered` 0.5); and another line in the same row,
+  overlapping by at least half the shorter height, within half the
+  heading's height of its box (`LineGoesOn`, `LineGap` 0.5). The rest
+  are asked (`Questions`), as step 19's `PhoneHeadingQuestion`.
+- **The question.** `AndroidHeadingNotShown` (`Recorder.Analysis`) asks
+  `android-heading-not-shown`, version 1, of the project's model for
+  vision-based checks, with step 19's instructions, answers and
+  pictures: picture A, the whole screen with the text outlined, and
+  picture B, the screen from the text down at full size. The question
+  is `AndroidHeadingLook.Question` with the text "marked as a heading
+  for a screen reader". The step key is `heading-not-shown-` and 16 hex
+  digits of the SHA-256 of the template, its version, the instructions,
+  the question and both pictures, so an answer is reused only for the
+  same text and pictures (rule 9).
+- **Rule 7.** `AskQuestionAsync` asks runs 1 and 2 of the model for
+  vision-based checks, then runs 3 and 4 of the model for complex
+  questions, where there is another, when `AskAgain` holds: the first
+  answers do not settle the question, or agree it is not a heading.
+  Where the question put to the model for complex questions fails, the
+  first answers stand. `Judge` takes the deciding answers: agreed a
+  heading is counted (`Shown`), information, not a finding; any other
+  is a warning on the heading's visit, labelled `heading '…'`, at the
+  heading item's bounds. Agreed not a heading ends "a person should
+  verify this"; cannot tell, or two answers, ends "check manually". The
+  confirmed answers say that the model for simple questions answered
+  not-heading and the model for complex questions was asked to
+  confirm; the note counts the headings asked again "to settle or to
+  confirm the first answers".
+- **Rule 8.** With no model for vision-based checks, or before any
+  answer, no finding is made; the note says how many headings were not
+  judged and why. Every answer is the model's inference, so the report
+  says AI was used even where every heading was judged shown.
+- **Where it runs.** The Android report, the project report and the
+  model checks ask after the check of text not in the tree; the model
+  checks' Markdown has a section, "Marked headings not shown as
+  headings", and the report's limits give the check's note. The Checks
+  tab gives a row under each visit, the findings or what became of the
+  visit's headings, from the kept answers (`FromKept`); the summary has
+  a section with the counts placed, left out, not placed, for the
+  model, judged shown and not judged. The toast and "Ask the project's
+  model" count the headings not judged.
+- **Guidance.** `android-check-guidance.json` has the check,
+  `heading-not-shown`, impact medium, criteria 1.3.1, citing F43, with
+  remediation for Views and Compose, Flutter, React Native and the web.
+
+### Checked
+
+The solution builds with no warnings, and the tests pass, 2,722 of
+them, with the 10 that need Windows failing as before. The new tests
+cover a made-up screen: a heading taken once a visit, text inside a
+marked layout, a heading OCR read as other text, one covered by another
+line, one whose line goes on past it, and one never placed; what OCR
+may misread and still be the app's text; the request's key, use,
+pictures and question; kept answers confirmed not a heading, overturned
+as a heading, split, waiting for the model for complex questions, with
+no model for complex questions, and with no answers; the level of each
+agreed answer; and, in the analysis worker, the model for complex
+questions asked to confirm agreed not a heading, not asked where the
+first answers agree a heading, and the first answers standing with no
+model for complex questions.
+
+### Limits
+
+- Misses, where the model says heading for text that is not shown as
+  one, are not measured; the sample had only 4 real problems.
+- Rule 3c is an approximation: OCR's lines are not kept as lines, so
+  another line in the same row is taken as OCR's line going on. It was
+  measured on these 59 headings only.
+- The question's saying the text is marked showed in Haiku's reasons,
+  but did not decide its answers on this sample.
+- A heading OCR never placed, such as one scrolled off the screen, is
+  not judged.
+- The impact, medium, is an assumption (see above).
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A
