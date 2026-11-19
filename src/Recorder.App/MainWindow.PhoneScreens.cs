@@ -133,6 +133,16 @@ public partial class MainWindow
     private PhoneHeadingNotShownRun? _phoneHeadingNotShownRules;
     private (PhoneHeadingNotShownRun Rules, IReadOnlyList<HeadingLookRequest> Requests)? _headingNotShownRequests;
     private int _headingNotShownUnanswered;
+
+    // The check of a control name that does not say what the control does,
+    // the same way (android-checks.md, step 28); its kept answers are found
+    // by its requests, and a name judged not to say what the control does
+    // by the model for simple questions waits for the model for complex
+    // questions to confirm it, where there is one.
+    private PhoneControlNameRun? _phoneControlNames;
+    private PhoneControlNameRun? _phoneControlNamesRules;
+    private (PhoneControlNameRun Rules, IReadOnlyList<ControlNameRequest> Requests)? _controlNamesRequests;
+    private int _controlNamesUnanswered;
     private PhoneLabelInNameRun? _phoneLabelInName;
     private PhoneCheckSettings? _checkSettings;
 
@@ -221,6 +231,10 @@ public partial class MainWindow
             _phoneHeadingNotShownRules = null;
             _headingNotShownRequests = null;
             _headingNotShownUnanswered = 0;
+            _phoneControlNames = null;
+            _phoneControlNamesRules = null;
+            _controlNamesRequests = null;
+            _controlNamesUnanswered = 0;
             _phoneLabelInName = null;
             _shownFinding = null;
             if (_playbackArchive is { PhoneScreens.Recorded: true } opened)
@@ -384,6 +398,13 @@ public partial class MainWindow
         _phoneHeadingNotShownRules = run is null ? null : PhoneHeadingNotShownRun.Run(run, archive.PhoneScreens);
         _phoneHeadingNotShown = _phoneHeadingNotShownRules;
         _headingNotShownUnanswered = _phoneHeadingNotShownRules?.Questions.Count ?? 0;
+
+        // The check of a control's name runs at both audit levels, as one
+        // of its criteria, 1.1.1, is level A; its kept answers are given
+        // below.
+        _phoneControlNamesRules = run is null ? null : PhoneControlNameRun.Run(run, archive.PhoneScreens);
+        _phoneControlNames = _phoneControlNamesRules;
+        _controlNamesUnanswered = _phoneControlNamesRules?.Questions.Count ?? 0;
         JudgeTextContrast();
 
         // Non-text contrast has one level, AA (WCAG 2.2's 1.4.11), so is
@@ -450,6 +471,7 @@ public partial class MainWindow
         await ApplyKeptHeadingSectionAnswersAsync();
         await ApplyKeptTextNotInTreeAnswersAsync();
         await ApplyKeptHeadingNotShownAnswersAsync();
+        await ApplyKeptControlNameAnswersAsync();
     }
 
     private async Task ApplyKeptImageAnswersAsync()
@@ -998,6 +1020,68 @@ public partial class MainWindow
         ShowPhoneScreenRows();
     }
 
+    private async Task ApplyKeptControlNameAnswersAsync()
+    {
+        if (_phoneControlNamesRules is not { } rules)
+        {
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        if (rules.Questions.Count == 0)
+        {
+            _controlNamesUnanswered = 0;
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        var name = _openProjectModels?.VisionChecks;
+        var problem = name is null
+            ? $"the project's settings choose no model for {ModelUses.Name(ModelUses.VisionChecks)}"
+            : ProjectModels.Problem(ProjectChoices, ModelUses.VisionChecks, name);
+        var none = new Dictionary<PhoneControlNameQuestion, PhoneControlNameAnswer>();
+        PhoneControlNameRun shown;
+        if (problem is not null || AnalysisCatalogOrNull is not { } catalog || ProjectChoices.Profile(name!) is not { } profile)
+        {
+            shown = rules.Judged(none, AndroidControlNames.NotAsked(rules.Questions.Count, problem ?? "the analysis catalog is not open"));
+        }
+        else
+        {
+            try
+            {
+                if (_controlNamesRequests is not { } made || !ReferenceEquals(made.Rules, rules))
+                {
+                    var requests = await Task.Run(() => AndroidControlNames.Requests(rules, PhonePictures.Load));
+                    made = (rules, requests);
+                    _controlNamesRequests = made;
+                }
+
+                var keys = made.Requests.SelectMany(request => new[] { request.StepKey(1), request.StepKey(2) }).ToList();
+                var kept = await catalog.AcceptedAnswersAsync(keys, name!, profile.Model, CancellationToken.None);
+                var (complexKept, complexName) = await KeptComplexAnswersAsync(catalog, made.Requests.Select(request => (Func<int, string>)request.StepKey));
+                shown = AndroidControlNames.FromKept(rules, made.Requests, kept, name!, complexKept, complexName);
+            }
+            catch (Exception exception) when (exception is NpgsqlException or InvalidOperationException or IOException or ObjectDisposedException)
+            {
+                shown = rules.Judged(none, $"the model's kept answers could not be read: {exception.Message}");
+            }
+        }
+
+        // The recording changed while the answers were read.
+        if (!ReferenceEquals(rules, _phoneControlNamesRules))
+        {
+            return;
+        }
+
+        // A question waiting for the model for complex questions, to settle
+        // or to confirm its answer, is not judged, so is counted with those
+        // not yet asked.
+        _phoneControlNames = shown;
+        _controlNamesUnanswered = problem is not null ? 0 : shown.Unanswered;
+        UpdateAskChecksModelButton();
+        ShowPhoneScreenRows();
+    }
+
     private async Task ApplyKeptHeadingSectionAnswersAsync()
     {
         if (_phoneHeadingSectionsMeasured is not { } measured)
@@ -1145,7 +1229,7 @@ public partial class MainWindow
             task.State is AnalysisTaskStates.Queued or AnalysisTaskStates.Running) == true;
         var models = _openProjectModels;
         var vision = _imagesOfTextUnanswered + _headingLookUnanswered + _imageAlternativeUnanswered + _describedImagesUnanswered + _titleVisionUnanswered + _decorativeUnanswered + _sectionVisionUnanswered +
-            _textNotInTreeUnanswered + _headingNotShownUnanswered > 0 &&
+            _textNotInTreeUnanswered + _headingNotShownUnanswered + _controlNamesUnanswered > 0 &&
             models is { VisionChecks: not null } && models.ChecksProblem(ProjectChoices, ModelUses.VisionChecks) is null;
         var text = _titleTextUnanswered + _sectionTextUnanswered > 0 &&
             models is { TextChecks: not null } && models.ChecksProblem(ProjectChoices, ModelUses.TextChecks) is null;
@@ -1363,7 +1447,8 @@ public partial class MainWindow
             if (_phoneChecks is not null || _phoneTextContrast is not null || _phoneNonTextContrast is not null || _phoneImagesOfText is not null ||
                 _phoneLabelInName is not null || _phoneHeadingLook is not null || _phoneImageAlternative is not null ||
                 _phoneDescribedImages is not null || _phoneScreenTitles is not null || _phoneDecorativeImages is not null ||
-                _phoneHeadingSections is not null || _phoneTextNotInTree is not null || _phoneHeadingNotShown is not null)
+                _phoneHeadingSections is not null || _phoneTextNotInTree is not null || _phoneHeadingNotShown is not null ||
+                _phoneControlNames is not null)
             {
                 // The status message check follows every snapshot, settled
                 // or not, so can find a message in a visit too brief to
@@ -1653,6 +1738,23 @@ public partial class MainWindow
             }
         }
 
+        if (_phoneControlNames is { SnapshotsRead: > 0 } names)
+        {
+            var title = PhoneCheckNames.Title(PhoneCheckNames.ControlNameNotDescriptive);
+            var findings = names.For(visit);
+            if (findings.Count > 0)
+            {
+                AddCheckRows(findings, $", from {Count(names.In(visit).Count(), "control name")} in this visit");
+            }
+            else
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{title}: {ControlNamesState(names, visit)}", shownAt, null)
+                {
+                    IsCheck = true,
+                });
+            }
+        }
+
         if (_phoneLabelInName is { } labels)
         {
             var findings = labels.For(visit);
@@ -1860,6 +1962,42 @@ public partial class MainWindow
         }
 
         return $"no findings, from {Count(entries.Count, "marked heading")} placed by OCR: {string.Join("; ", parts)}.";
+    }
+
+    // What became of a visit's control names in the check of a control
+    // name that does not say what the control does, where it made no
+    // finding: how many were judged to say what their controls do, or not
+    // yet judged.
+    private static string ControlNamesState(PhoneControlNameRun names, PhoneVisit visit)
+    {
+        if (!names.Read(visit))
+        {
+            return "not checked, as OCR read no picture of this visit.";
+        }
+
+        var entries = names.In(visit).ToList();
+        if (entries.Count == 0)
+        {
+            return "no findings: a screen reader stops on no named control on the pictures of this visit.";
+        }
+
+        var described = entries.Count(entry => entry.Question is { } question && names.Answers.TryGetValue(question, out var answer) &&
+            answer.Outcome == PhoneControlNameOutcome.Describes);
+        var waiting = entries.Count(entry => entry.Question is { } question && !names.Answers.ContainsKey(question));
+        var parts = new List<string>();
+        if (described > 0)
+        {
+            parts.Add($"{Count(described, "control name")} judged to say what the control does, not confirmed");
+        }
+
+        if (waiting > 0)
+        {
+            parts.Add($"{Count(waiting, "control name")} for the model for vision-based checks, not yet judged");
+        }
+
+        return parts.Count == 0
+            ? $"no findings, from {Count(entries.Count, "control name")}."
+            : $"no findings, from {Count(entries.Count, "control name")}: {string.Join("; ", parts)}.";
     }
 
     // What became of a visit's described images in the decorative image

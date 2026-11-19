@@ -5020,6 +5020,183 @@ model for complex questions.
   not judged.
 - The impact, medium, is an assumption (see above).
 
+## Step 28: a control name that does not say what the control does
+
+### The owner's decision (2026-11-18)
+
+The owner asked for this check as the one left that the recordings to
+hand can test: "okay, let's do that: A control name that doesn't say
+what the control does". After the probe below, seven rules were
+offered, with options for rules 2 to 5 and 7, and the owner chose:
+"Build rules 1, 2A, 3A, 4A, 5A, 6 and 7A as proposed".
+
+1. **Which controls.** Named controls a screen reader stops on only:
+   visible, not a field, with bounds, that can be tapped, long pressed
+   or checked. Unnamed controls stay with the existing missing-name
+   check.
+2. **The criterion (2A).** WCAG 1.1.1 for a control that shows no text,
+   whose name is its text alternative; WCAG 2.4.6 for a control that
+   shows text, whose name is its label. One check, "Control name that
+   does not say what the control does (WCAG 1.1.1, 2.4.6)", with the
+   criterion that applies given in each finding's measured text.
+3. **Placeholders (3A).** A name that is a generic word, a resource
+   name, a numbered name or the control's class name is a warning with
+   no model.
+4. **How often (4A).** Each other name is asked once for each screen,
+   and the answer is given to every visit of the screen with the name.
+5. **Overlap with the icon check (5A).** Controls the icon check also
+   asks about are kept, as that check asks whether the icon fits the
+   name, not whether the name says what the control does.
+6. **The question.** Picture A, the whole screen with the control
+   outlined; picture B, a close-up. The question gives the name, class
+   and state, the text OCR read inside the control, and what a screen
+   reader says on the screen, with three answers, reason first:
+   describes, does-not-describe or cannot-tell.
+7. **Levels (7A).** Asked twice of the project's model for vision-based
+   checks. Agreed does-not-describe is put to the model for complex
+   questions to confirm, as are answers that do not settle the
+   question; its answers decide. Agreed does-not-describe: a warning
+   for a person to verify. Cannot tell, or two answers: a warning to
+   check manually. Agreed describes: counted, no finding. With no
+   model, only the placeholder warnings are made.
+
+### What the standards say (checked in cited documents)
+
+- [WCAG 2.2's Understanding 1.1.1](https://www.w3.org/WAI/WCAG22/Understanding/non-text-content.html)
+  says that a control's text alternative is to have "a name that
+  describes its purpose". An icon-only control's name is its text
+  alternative.
+- [WCAG 2.2's Understanding 2.4.6](https://www.w3.org/WAI/WCAG22/Understanding/headings-and-labels.html)
+  says that "if labels are present, they must be accurate and
+  sufficiently clear or descriptive". A control that shows text has a
+  visible label. [WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/) applies
+  both to software.
+- **Impact.** Medium is an assumption, not taken from a source, chosen
+  to match the other checks of names and headings judged by a model.
+
+### Measured first (2026-11-18)
+
+A probe with no model read the 20 recordings with phone screens on the
+development PC; the probe and its copies were deleted afterwards.
+
+- **Controls.** 985 named controls, once a visit, of which 945 are
+  stops for a screen reader, with 406 different names for each screen
+  and 350 for each app. 40 are not stops, mostly switches read by
+  their row; 81 more controls had no name.
+- **By app, of the stops.** The launcher 405, the client's app 225,
+  Settings 197, Gmail 59, Chrome 31 and TalkBack 28. No web content
+  was found as controls. 895 were measured on video frames and 50 on
+  screenshots.
+- **Rule 3's lists.** No name was a generic word, a resource name, a
+  numbered name or a class name, so rule 3 is tested only by unit
+  tests. 67 names had no letters.
+- **The icon check.** 89 of the stops are also asked about by the icon
+  check (rule 5).
+- **OCR.** Matching a control's name to the text OCR read inside it was
+  unreliable on video frames, so the text is given to the model, not
+  used to decide.
+- **Looked at in the pictures (inferred, the assistant's own
+  judgement).** Three kinds of name looked as if they did not say what
+  the control does: an icon button named only by a count on its badge,
+  day cells of a calendar named only by their number, and a barrier
+  behind a dialog named with a developer's word. The others looked
+  descriptive.
+
+The model's answers were not measured before building, as the owner
+asked for the build.
+
+### As built
+
+- **The rules.** `PhoneControlNameRun` (`Recorder.Session`) reads each
+  settled snapshot whose picture OCR read (`SnapshotsRead`). Each item
+  that `IsControl` holds for (visible, not editable, with bounds, and
+  clickable, long clickable or checkable), that a screen reader stops
+  on (`ShouldFocusView`), with a name (`SpeakableText`), is taken once a
+  visit (`Controls`). Names are kept once a visit, in lower case
+  (`Entries`), with every time a control with the name was seen.
+- **Rule 2.** A control shows text where the tree gives text for it or
+  a visible item inside it, or OCR read a line whose middle is inside
+  its bounds (`ShownText`, at most 300 characters). Its measured text
+  says "it shows text, so WCAG 2.4.6 applies to its label" or "neither
+  the tree nor OCR gives it text, so WCAG 1.1.1 applies if it shows
+  none".
+- **Rule 3.** `Placeholder` gives "a generic word" for a whole name in
+  the generic list, such as "button", "icon" or "click here", compared
+  in lower case with punctuation as spaces; "its class name"; "a
+  numbered name", such as "Button 2"; or "a resource name": one with
+  ":id/", one in snake case, or one in camel case with a word that
+  names a view, such as "btn", "icon" or "menu", so that a product
+  name in camel case is not taken as one. These are warnings, with no
+  model (`PlaceholderFindings`).
+- **Rule 4.** Every other name is asked once for each screen
+  (`Questions`), from the first time it was seen; `Judged` gives each
+  answer to every visit of the screen with the name.
+- **The question.** `AndroidControlNames` (`Recorder.Analysis`) asks
+  `android-control-name`, version 1, of the project's model for
+  vision-based checks: picture A, the whole screen with the control
+  outlined in cyan, and picture B, the icon check's close-up; the name,
+  class and state; OCR's text inside it, or that OCR read none; and
+  what a screen reader says on the screen, with the control's place
+  marked. The step key is `control-name-` and 16 hex digits of the
+  SHA-256 of the template, its version, the instructions, the question
+  and both pictures, so an answer is reused only for the same name,
+  text and pictures. A question whose picture cannot be read, or whose
+  control is not on it, is not asked.
+- **Rule 7.** As for step 27: `AskQuestionAsync` asks runs 1 and 2,
+  then runs 3 and 4 of the model for complex questions, where there is
+  another, when `AskAgain` holds: the first answers do not settle the
+  question, or agree does-not-describe. `Judge` takes the deciding
+  answers: agreed describes is counted (`Described`), information, not
+  a finding; any other is a warning on every visit with the name.
+  Agreed does-not-describe ends "a person should verify this"; cannot
+  tell, or two answers, ends "check manually".
+- **Where it runs.** The Android report, the project report and the
+  model checks ask after the check of a marked heading not shown as
+  one; the model checks' Markdown has a section, "Control names that do
+  not say what the control does", and the report's limits give the
+  check's note. The Checks tab gives a row under each visit, from the
+  kept answers (`FromKept`); the summary has a section with the counts;
+  the toast and "Ask the project's model" count the names not judged.
+  The check runs at both audit levels, as 1.1.1 is level A.
+- **Guidance.** `android-check-guidance.json` has the check,
+  `control-name-not-descriptive`, impact medium, criteria 1.1.1 and
+  2.4.6, related 4.1.2 and 2.5.3, with remediation for Views and
+  Compose, Flutter, React Native and the web.
+
+### Checked
+
+The solution builds with no warnings, and the tests pass, 2,745 of
+them, with the tests that need Windows failing as before. The new
+tests use a made-up screen: an icon button, a button with text OCR
+read, a resource name and a generic word, which are warnings with no
+model, an image that cannot be tapped, a field, an unnamed button, a
+hidden button and a row with text inside; each name asked once for
+each screen and its answer given to every visit; the placeholder
+lists, with product names in camel case not taken as resource names;
+the request's key, use, pictures and question; kept answers confirmed,
+overturned, split, waiting for the model for complex questions, with
+no model for complex questions, and with no answers; the level of each
+agreed answer; and, in the analysis worker, the model for complex
+questions asked to confirm agreed does-not-describe and not asked
+where the first answers agree describes.
+
+### Limits
+
+- The model's answers were not measured on the recordings before
+  building, so how often it is right, and what the check costs, are
+  not known.
+- Rule 2 depends on the tree's text and OCR: Flutter gives no text in
+  the tree, and OCR misses short text such as a single digit, so a
+  Flutter control that shows only a digit may be given 1.1.1 when 2.4.6
+  applies. The finding still stands; only the criterion named may be
+  wrong.
+- Rule 3's lists matched nothing on these recordings, so they are
+  tested only by unit tests.
+- A name is judged once for each screen, from its first picture; where
+  the same name means something else later on the same screen, the
+  first answer is given.
+- The impact, medium, is an assumption (see above).
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A

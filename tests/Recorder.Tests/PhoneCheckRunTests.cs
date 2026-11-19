@@ -2488,6 +2488,285 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.EndsWith("; check manually", split.Text, StringComparison.Ordinal);
     }
 
+    // Step 28: a control name that does not say what the control does. A
+    // window of made-up items: an icon button, a button with text OCR read,
+    // a button with a resource name, one with a generic word, an image
+    // that cannot be tapped, a field, an unnamed button, a hidden button,
+    // a switch and a row whose text is inside it.
+    private static (PhoneCheckWindow Window, PhoneTextLine[] Lines) NamedControls()
+    {
+        AndroidTreeNode Node(int index, int? parent, (int Left, int Top, int Right, int Bottom) bounds, string className,
+            string? description = null, string? text = null, bool clickable = true) =>
+            ImageNode(index, parent, bounds, className, description, text) with { Clickable = clickable, Focusable = clickable };
+        var window = new PhoneCheckWindow(512, 1,
+        [
+            Node(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout", clickable: false),
+            Node(1, 0, (40, 100, 160, 220), "android.widget.ImageButton", "Navigate up"),
+            Node(2, 0, (600, 100, 1040, 220), "android.widget.Button", text: "Save"),
+            Node(3, 0, (40, 300, 160, 420), "android.widget.ImageButton", "btn_close"),
+            Node(4, 0, (200, 300, 320, 420), "android.widget.Button", "Button"),
+            Node(5, 0, (40, 500, 400, 700), "android.widget.ImageView", "Mountains at dawn", clickable: false),
+            Node(6, 0, (40, 800, 1040, 900), "android.widget.EditText", text: "Email") with { Editable = true },
+            Node(7, 0, (40, 1000, 160, 1120), "android.widget.ImageButton"),
+            Node(8, 0, (200, 1000, 320, 1120), "android.widget.ImageButton", "Share") with { VisibleToUser = false },
+            Node(9, 0, (40, 1200, 1040, 1300), "android.widget.LinearLayout"),
+            Node(10, 9, (60, 1210, 600, 1290), "android.widget.TextView", text: "Notifications", clickable: false),
+            Node(11, 0, (40, 1400, 160, 1520), "android.widget.ImageButton", "\u2715"),
+        ]);
+        var items = window.Items;
+        PhoneTextLine Line(int item, string ocr, (int Left, int Top, int Right, int Bottom) box) =>
+            new(items[item], items[item], PhoneTextPlace.AppTextPlacedByOcr, items[item].Text, ocr,
+                new PhoneBounds(box.Left, box.Top, box.Right, box.Bottom), new PhoneSwatch(0xFFFFFF, 0x000000, 21, 2, 2), 46, 40);
+        return (window,
+        [
+            Line(2, "Save", (640, 130, 800, 190)),
+            Line(10, "Notifications", (70, 1220, 500, 1280)),
+        ]);
+    }
+
+    // Every settled snapshot of every visit of the recording, each with the
+    // window of made-up controls.
+    private PhoneControlNameRun ControlNameRun(bool returning = false, string? engine = "Windows OCR, en-US")
+    {
+        var archive = Archive(out _, returning);
+        var snapshots = new List<PhoneContrastSnapshot>();
+        foreach (var visit in archive.PhoneScreens.Visits)
+        {
+            foreach (var settled in visit.SettledSnapshots)
+            {
+                if (archive.PhoneAccessibility.TakenBy(settled, visit.WindowId) is not { } taken)
+                {
+                    continue;
+                }
+
+                var (window, lines) = NamedControls();
+                var name = $"p{snapshots.Count}.png";
+                snapshots.Add(new(visit, settled, taken,
+                    new PhoneContrastPicture(PhonePictureKind.Screenshot, settled.MonotonicNanoseconds, name, name),
+                    engine, lines, null, window));
+            }
+        }
+
+        return PhoneControlNameRun.Run(PhoneContrastRun.Of(snapshots), archive.PhoneScreens);
+    }
+
+    // Rules 1 to 3: each named control a screen reader stops on, once a
+    // visit; placeholders are warnings with no model; the others are
+    // asked about once for the screen.
+    [Fact]
+    public void ControlNames_TakesEachNamedControlOnceAVisit_AndWarnsOfPlaceholdersWithNoModel()
+    {
+        var run = ControlNameRun();
+        var visit = run.Questions[0].Visit;
+
+        Assert.Equal(6, run.Controls);
+        Assert.Equal(["Navigate up", "Save", "btn_close", "Button", "Notifications", "\u2715"], run.Entries.Select(entry => entry.Name));
+        Assert.Equal(
+            [null, null, "a resource name", "a generic word", null, null],
+            run.Entries.Select(entry => entry.Placeholder));
+        Assert.Equal(2, run.Placeholders);
+        Assert.Equal(["Navigate up", "Save", "Notifications", "\u2715"], run.Questions.Select(question => question.Name));
+
+        // Rule 2: the criterion, from the tree's text or OCR's.
+        Assert.Equal([false, true, true, false], run.Questions.Select(question => question.ShowsText));
+        Assert.Equal(["", "Save", "Notifications", ""], run.Questions.Select(question => question.ShownText));
+        Assert.Contains("neither the tree nor OCR gives it text, so WCAG 1.1.1 applies if it shows none", run.Questions[0].Time.Measured, StringComparison.Ordinal);
+        Assert.Contains("it shows text, so WCAG 2.4.6 applies to its label", run.Questions[1].Time.Measured, StringComparison.Ordinal);
+        Assert.Equal(("ImageButton", (string?)null), (run.Questions[0].Role, run.Questions[0].State));
+        Assert.Contains(PhoneControlNameRun.ControlMark, run.Questions[0].ScreenText, StringComparison.Ordinal);
+
+        // Rule 3: the placeholders' warnings, made with no model.
+        Assert.Equal(2, run.Findings.Count);
+        Assert.Same(run.Findings[0], run.PlaceholderFindings[0]);
+        Assert.All(run.Findings, finding => Assert.Equal((PhoneCheckNames.ControlNameNotDescriptive, PhoneCheckLevel.Warning), (finding.Check, finding.Level)));
+        Assert.All(run.Findings, finding => Assert.Null(finding.Inference));
+        Assert.Contains("the name is a resource name, a placeholder that does not say what the control does", run.Findings[0].Text, StringComparison.Ordinal);
+        Assert.Equal(run.Findings, run.For(visit));
+        Assert.True(run.Read(visit));
+        Assert.Equal(6, run.In(visit).Count());
+        Assert.Equal("Control name that does not say what the control does (WCAG 1.1.1, 2.4.6)", PhoneCheckNames.Title(PhoneCheckNames.ControlNameNotDescriptive));
+
+        // With no OCR, nothing is checked.
+        var unread = ControlNameRun(engine: null);
+
+        Assert.Equal((0, 0, 0), (unread.SnapshotsRead, unread.Controls, unread.Findings.Count));
+        Assert.False(unread.Read(visit));
+    }
+
+    // Rule 4: once for each screen and name, the answer given to every
+    // visit with the name.
+    [Fact]
+    public void ControlNames_AsksOnceForEachScreenAndName_AndGivesTheAnswerToEveryVisit()
+    {
+        var run = ControlNameRun(returning: true);
+        var settings = run.Entries.Select(entry => entry.Visit).Distinct().Where(visit => visit.Screen == run.Questions[0].Visit.Screen).ToList();
+
+        Assert.True(settings.Count >= 2);
+        var screens = run.Questions.Select(question => question.Visit.Screen).Distinct().Count();
+        Assert.Equal(4 * screens, run.Questions.Count);
+        Assert.Equal(run.Questions.Count, run.Questions.Select(question => (question.Visit.Screen, question.Name)).Distinct().Count());
+
+        var navigate = run.Questions.First(question => question.Name == "Navigate up" && question.Visit.Screen == settings[0].Screen);
+        var answer = new PhoneControlNameAnswer(PhoneControlNameOutcome.Finding,
+            new PhoneInference(PhoneCheckLevel.Warning, "made up", Inferred: true, "Haiku", Cloud: false));
+        var judged = run.Judged(new Dictionary<PhoneControlNameQuestion, PhoneControlNameAnswer> { [navigate] = answer }, "note");
+
+        Assert.All(settings, visit => Assert.Single(judged.For(visit), finding => finding.Inference is not null));
+        Assert.Equal(run.PlaceholderFindings.Count + settings.Count, judged.Findings.Count);
+        Assert.Equal((0, run.Questions.Count - 1, "note"), (judged.Described, judged.Unanswered, judged.ModelNote));
+    }
+
+    [Theory]
+    [InlineData("Button", null, "a generic word")]
+    [InlineData("Click here", null, "a generic word")]
+    [InlineData("ImageView", "android.widget.ImageView", "a generic word")]
+    [InlineData("AppCompatImageButton", "androidx.appcompat.widget.AppCompatImageButton", "its class name")]
+    [InlineData("Button 2", null, "a numbered name")]
+    [InlineData("btn_close", null, "a resource name")]
+    [InlineData("com.example:id/close", null, "a resource name")]
+    [InlineData("menuItem", null, "a resource name")]
+    [InlineData("closeBtn", null, "a resource name")]
+    [InlineData("iPhone", null, null)]
+    [InlineData("eBay", null, null)]
+    [InlineData("Navigate up", null, null)]
+    [InlineData("Wi-Fi", null, null)]
+    public void ControlNames_Placeholder_FindsGenericClassNumberedAndResourceNames(string name, string? className, string? placeholder) =>
+        Assert.Equal(placeholder, PhoneControlNameRun.Placeholder(name, className));
+
+    // Rule 6: the whole screen and a close-up, the name, class and state,
+    // OCR's text and what a screen reader says, three answers.
+    [Fact]
+    public void ControlNames_RequestGivesBothPicturesAndWhatAScreenReaderSays()
+    {
+        var run = ControlNameRun();
+        var rgb = new uint[1080 * 2400];
+        Array.Fill(rgb, 0x203040u);
+        var pixels = new PhonePixels(1080, 2400, rgb);
+
+        var request = Recorder.Analysis.Android.AndroidControlNames.RequestOf(run.Questions[1], pixels);
+        var other = Recorder.Analysis.Android.AndroidControlNames.RequestOf(run.Questions[0], pixels);
+
+        Assert.Matches("^control-name-[0-9a-f]{16}$", request.Key);
+        Assert.NotEqual(other.Key, request.Key);
+        Assert.Equal(request.Key, Recorder.Analysis.Android.AndroidControlNames.RequestOf(run.Questions[1], new PhonePixels(1080, 2400, [.. rgb])).Key);
+        Assert.Equal(request.Key + "-3", request.StepKey(3));
+        Assert.Equal(("android-control-name", 1, Recorder.Analysis.ModelUses.VisionChecks, true),
+            (request.Request.PromptTemplate, request.Request.PromptTemplateVersion, request.Request.Use, request.Request.ReusedAcrossTasks));
+        Assert.Equal(["describes", "does-not-describe", "cannot-tell"], request.Request.Answers);
+        Assert.Equal(2, request.Request.Images.Count);
+        Assert.Contains("The outlined control's name, which a screen reader says for it, is \"Save\". Its class is Button.", request.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("The text OCR read inside the outlined control: \"Save\".", request.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("OCR read no text inside the outlined control.", other.Request.Input, StringComparison.Ordinal);
+        Assert.Contains(PhoneControlNameRun.ControlMark, request.Request.Input, StringComparison.Ordinal);
+        Assert.EndsWith("First write one sentence saying what in the pictures shows the answer, then give the answer.", request.Request.Input, StringComparison.Ordinal);
+        Assert.Equal(4, Recorder.Analysis.Android.AndroidControlNames.Requests(run, _ => pixels).Count);
+        Assert.Empty(Recorder.Analysis.Android.AndroidControlNames.Requests(run, _ => null));
+    }
+
+    // Rule 7: agreed does-not-describe is put to the model for complex
+    // questions to confirm, whose answers decide; agreed describes is no
+    // finding; with no model for complex questions the first answers
+    // stand; the placeholder warnings always stand.
+    [Fact]
+    public void ControlNames_KeptAnswers_ConfirmDoesNotDescribeWithTheModelForComplexQuestions()
+    {
+        var run = ControlNameRun();
+        var rgb = new uint[1080 * 2400];
+        Array.Fill(rgb, 0x203040u);
+        var pixels = new PhonePixels(1080, 2400, rgb);
+        var requests = run.Questions.Select(question => Recorder.Analysis.Android.AndroidControlNames.RequestOf(question, pixels)).ToList();
+        static Recorder.Analysis.KeptAnswer Answer(string answer) =>
+            new(JsonSerializer.SerializeToElement(new { answer, reason = "The pictures show it." }), "service", """{"temperature": null}""");
+        var kept = new Dictionary<string, Recorder.Analysis.KeptAnswer>
+        {
+            [requests[0].StepKey(1)] = Answer("describes"), [requests[0].StepKey(2)] = Answer("describes"),
+            [requests[1].StepKey(1)] = Answer("describes"), [requests[1].StepKey(2)] = Answer("describes"),
+            [requests[2].StepKey(1)] = Answer("describes"), [requests[2].StepKey(2)] = Answer("cannot-tell"),
+            [requests[3].StepKey(1)] = Answer("does-not-describe"), [requests[3].StepKey(2)] = Answer("does-not-describe"),
+        };
+        Dictionary<string, Recorder.Analysis.KeptAnswer> Complex(string unsettled, string confirmed, string? confirmedAgain = null) => new()
+        {
+            [requests[2].StepKey(3)] = Answer(unsettled), [requests[2].StepKey(4)] = Answer(unsettled),
+            [requests[3].StepKey(3)] = Answer(confirmed), [requests[3].StepKey(4)] = Answer(confirmedAgain ?? confirmed),
+        };
+
+        // Confirmed: a warning for a person to verify.
+        var confirmed = Recorder.Analysis.Android.AndroidControlNames.FromKept(run, requests, kept, "Haiku", Complex("describes", "does-not-describe"), "Sonnet");
+
+        var finding = Assert.Single(confirmed.Findings, each => each.Inference is not null);
+        Assert.Equal((PhoneCheckNames.ControlNameNotDescriptive, PhoneCheckLevel.Warning), (finding.Check, finding.Level));
+        Assert.Equal(
+            "Haiku, a cloud model, the project's model for simple questions, answered does-not-describe twice, so the question was put to the project's model for complex questions to confirm; " +
+            "Sonnet, a cloud model, inferred from the pictures twice that the control's name, \"\u2715\", does not say what the control does: \"The pictures show it.\"; a person should verify this",
+            finding.Inference!.Text);
+        Assert.Equal("Sonnet", finding.Inference.Model);
+        Assert.Equal((3, 0, 4, 3), (confirmed.Described, confirmed.Unanswered, confirmed.Inferences.Count(), confirmed.Findings.Count));
+        Assert.Equal(
+            "4 control names left by the rules are for Haiku; 4 control names answered: 3 judged to say what the control does, not confirmed, and 1 warning on the visits with the name; " +
+            "2 asked again of the model for complex questions, to settle or to confirm the first answers",
+            confirmed.ModelNote);
+
+        // Overturned: only the placeholder warnings.
+        var overturned = Recorder.Analysis.Android.AndroidControlNames.FromKept(run, requests, kept, "Haiku", Complex("describes", "describes"), "Sonnet");
+
+        Assert.Equal(run.PlaceholderFindings, overturned.Findings);
+        Assert.Equal(4, overturned.Described);
+
+        // Two answers from the model for complex questions: check manually.
+        var split = Recorder.Analysis.Android.AndroidControlNames.FromKept(run, requests, kept, "Haiku", Complex("describes", "does-not-describe", "cannot-tell"), "Sonnet");
+
+        var unsure = Assert.Single(split.Findings, each => each.Inference is not null);
+        Assert.StartsWith("Haiku, a cloud model, the project's model for simple questions, answered does-not-describe twice, so the question was put", unsure.Inference!.Text, StringComparison.Ordinal);
+        Assert.Contains("gave two answers, does-not-describe and cannot-tell", unsure.Inference.Text, StringComparison.Ordinal);
+        Assert.EndsWith("; check manually", unsure.Inference.Text, StringComparison.Ordinal);
+
+        // Not confirmed yet: waiting for the model for complex questions.
+        var waiting = Recorder.Analysis.Android.AndroidControlNames.FromKept(run, requests, kept, "Haiku", new Dictionary<string, Recorder.Analysis.KeptAnswer>(), "Sonnet");
+
+        Assert.Equal(run.PlaceholderFindings, waiting.Findings);
+        Assert.Equal((2, 2), (waiting.Described, waiting.Unanswered));
+        Assert.Contains(", 2 control names waiting for the model for complex questions", waiting.ModelNote, StringComparison.Ordinal);
+
+        // No model for complex questions: the first answers stand.
+        var simple = Recorder.Analysis.Android.AndroidControlNames.FromKept(run, requests, kept, "Haiku");
+        var inferred = simple.Findings.Where(each => each.Inference is not null).ToList();
+
+        Assert.Equal([PhoneCheckLevel.Warning, PhoneCheckLevel.Warning], inferred.Select(each => each.Level));
+        Assert.Contains("gave two answers, describes and cannot-tell", inferred[0].Inference!.Text, StringComparison.Ordinal);
+        Assert.StartsWith("Haiku, a cloud model, inferred from the pictures twice that the control's name, \"\u2715\", does not say", inferred[1].Inference!.Text, StringComparison.Ordinal);
+        Assert.Equal(2, simple.Described);
+
+        // No answers, and no model: only the placeholder warnings.
+        var unanswered = Recorder.Analysis.Android.AndroidControlNames.FromKept(run, requests, new Dictionary<string, Recorder.Analysis.KeptAnswer>(), "Haiku");
+
+        Assert.Equal(run.PlaceholderFindings, unanswered.Findings);
+        Assert.Equal(4, unanswered.Unanswered);
+        Assert.EndsWith(", 4 control names not yet asked", unanswered.ModelNote, StringComparison.Ordinal);
+        Assert.Equal(
+            "4 control names left by the rules were not judged, as no model may be used for vision-based checks: no model",
+            Recorder.Analysis.Android.AndroidControlNames.NotAsked(4, "no model"));
+        Assert.Equal(2, run.Judged(new Dictionary<PhoneControlNameQuestion, PhoneControlNameAnswer>(), "none").Findings.Count);
+    }
+
+    // Rule 7's levels.
+    [Theory]
+    [InlineData("does-not-describe", PhoneCheckLevel.Warning, "that the control's name, \"Save\", does not say what the control does: \"First.\"; a person should verify this")]
+    [InlineData("describes", PhoneCheckLevel.Info, "that the control's name, \"Save\", says what the control does, not confirmed")]
+    [InlineData("cannot-tell", PhoneCheckLevel.Warning, "could not tell from the pictures twice whether the control's name, \"Save\", says what the control does")]
+    public void ControlNames_Interpret_GivesEachAgreedAnswersLevel(string answer, PhoneCheckLevel level, string says)
+    {
+        var inference = Recorder.Analysis.Android.AndroidControlNames.Interpret(new(answer, "First."), new(answer, "Second."), "Haiku", cloud: false, "Save");
+
+        Assert.Equal((level, true, false), (inference.Level, inference.Inferred, inference.Cloud));
+        Assert.StartsWith("Haiku, a local model,", inference.Text, StringComparison.Ordinal);
+        Assert.Contains(says, inference.Text, StringComparison.Ordinal);
+
+        var split = Recorder.Analysis.Android.AndroidControlNames.Interpret(new(answer, "First."), new(answer == "describes" ? "cannot-tell" : "describes", "Second."), "Haiku", cloud: false, "Save");
+
+        Assert.Equal(PhoneCheckLevel.Warning, split.Level);
+        Assert.EndsWith("; check manually", split.Text, StringComparison.Ordinal);
+    }
+
     // The body text is the height most of the characters have.
     [Fact]
     public void HeadingLook_BodyHeight_IsTheMedianInkHeightByCharacters()

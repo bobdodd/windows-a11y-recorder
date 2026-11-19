@@ -146,6 +146,34 @@ internal sealed class ConfirmingKind : IAnalysisTaskKind
     }
 }
 
+/// <summary>
+/// A task kind for the tests: one question of the check of a control name
+/// that does not say what the control does (android-checks.md, step 28,
+/// rule 7).
+/// </summary>
+internal sealed class ConfirmingNameKind : IAnalysisTaskKind
+{
+    public const string Name = "confirming-name";
+
+    public string Kind => Name;
+
+    public int Version => 1;
+
+    public QuestionAnswers? Answers { get; private set; }
+
+    public List<string> Failures { get; } = [];
+
+    public async Task RunAsync(AnalysisTaskContext context, CancellationToken cancellationToken)
+    {
+        var request = new ModelRequest("confirming-name-check", 1, "Ask.", "E1: fact", [new ModelImage("E2", "image/png", [1])], ["answer"], new HashSet<string> { "E1", "E2" }) with
+        {
+            Use = ModelUses.VisionChecks,
+            Answers = AndroidControlNames.Answers,
+        };
+        Answers = await AndroidControlNames.AskQuestionAsync(context, run => $"name-{run}", request, Failures, cancellationToken);
+    }
+}
+
 /// <summary>A task kind for the tests: one model step for each step key.</summary>
 internal sealed class StandInKind(params string[] steps) : IAnalysisTaskKind
 {
@@ -2017,6 +2045,52 @@ public sealed class AnalysisWorkerTests(EmbeddedPostgresFixture fixture) : IClas
         Assert.Null(simple.Answers!.Escalated);
         var judged = AndroidHeadingNotShown.Judge(simple.Answers);
         Assert.Equal((PhoneHeadingNotShownOutcome.Finding, PhoneCheckLevel.Warning), (judged.Outcome, judged.Inference.Level));
+        Assert.EndsWith("; a person should verify this", judged.Inference.Text, StringComparison.Ordinal);
+    }
+
+    // android-checks.md, step 28, rule 7: a control name the model for
+    // simple questions agrees does not say what the control does is put to
+    // the model for complex questions to confirm, whose answers decide; one
+    // agreed to say it is not; with no model for complex questions, the
+    // first answers stand.
+    [Fact]
+    public async Task A_control_name_judged_not_to_describe_is_confirmed_by_the_model_for_complex_questions()
+    {
+        var catalog = await CatalogAsync();
+        var settings = SettingsWith(3,
+            Profile("This PC", "qwen", ModelCapabilities.Text, ModelCapabilities.Image),
+            Profile("Big", "big", ModelCapabilities.Text, ModelCapabilities.Image));
+        var both = new Dictionary<string, string> { [ModelUses.VisionChecks] = "This PC", [ModelUses.ComplexVisionChecks] = "Big" };
+
+        var overturned = new StandInEndpoint { Answer = (profile, _, _) => Task.FromResult(CheckAnswer(profile.Name == "Big" ? "describes" : "does-not-describe")) };
+        var task = await catalog.QueueTaskAsync(await RecordingAsync(), ConfirmingNameKind.Name, 1, both, cancellationToken: Token);
+        var kind = new ConfirmingNameKind();
+        await new AnalysisWorker(catalog, settings, [kind], overturned, options: Fast).RunUntilEmptyAsync(Token);
+
+        Assert.Equal(AnalysisTaskStates.Done, await StateAsync(task));
+        Assert.Empty(kind.Failures);
+        var answers = Assert.IsType<QuestionAnswers>(kind.Answers);
+        Assert.Equal(("does-not-describe", "describes", "Big"), (answers.First.One.Answer, answers.Escalated!.One.Answer, answers.Escalated.Model));
+        Assert.Equal(["complete This PC", "complete Big"], overturned.Calls.Where(call => call.StartsWith("complete", StringComparison.Ordinal)));
+        Assert.Equal(["name-1", "name-3"], (await RowsAsync("SELECT step_key FROM analysis_attempts WHERE task_id = $1 ORDER BY step_key", task)).Select(row => (string)row["step_key"]!));
+        Assert.Equal(PhoneControlNameOutcome.Describes, AndroidControlNames.Judge(answers, "Close").Outcome);
+
+        // Agreed to describe: not asked again.
+        var settled = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(CheckAnswer("describes")) };
+        await catalog.QueueTaskAsync(await RecordingAsync(), ConfirmingNameKind.Name, 1, both, cancellationToken: Token);
+        var described = new ConfirmingNameKind();
+        await new AnalysisWorker(catalog, settings, [described], settled, options: Fast).RunUntilEmptyAsync(Token);
+        Assert.Null(described.Answers!.Escalated);
+        Assert.Equal(["complete This PC"], settled.Calls.Where(call => call.StartsWith("complete", StringComparison.Ordinal)));
+
+        // No model for complex questions: the first answers stand, a warning.
+        var alone = new StandInEndpoint { Answer = (_, _, _) => Task.FromResult(CheckAnswer("does-not-describe")) };
+        await catalog.QueueTaskAsync(await RecordingAsync(), ConfirmingNameKind.Name, 1, Vision(), cancellationToken: Token);
+        var simple = new ConfirmingNameKind();
+        await new AnalysisWorker(catalog, settings, [simple], alone, options: Fast).RunUntilEmptyAsync(Token);
+        Assert.Null(simple.Answers!.Escalated);
+        var judged = AndroidControlNames.Judge(simple.Answers, "Close");
+        Assert.Equal((PhoneControlNameOutcome.Finding, PhoneCheckLevel.Warning), (judged.Outcome, judged.Inference.Level));
         Assert.EndsWith("; a person should verify this", judged.Inference.Text, StringComparison.Ordinal);
     }
 

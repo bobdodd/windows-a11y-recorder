@@ -162,7 +162,7 @@ Each row is one issue, so that its remediation can be specific.
 
 | Check | WCAG | What the model is asked | Chosen without a model |
 | --- | --- | --- | --- |
-| A name that does not describe the control | 4.1.2, 2.4.6 | Does this name say what the control does? | Controls with a name, such as "Button", "icon_3" or "image", or any name, by sample |
+| A name that does not describe the control | 1.1.1, 2.4.6 | Does this name say what the control does? | Named controls a screen reader stops on, once for each screen; placeholders such as "Button" or "icon_3" without a model; built, see "Control names, as built" |
 | A name that contradicts its icon | 1.1.1 | Does the icon in this outline fit the control's name? | Controls with an image and a description or text of their own; built, see "Icons and descriptions, as built" |
 | A description that does not match its image | 1.1.1 | Does the description fit what the outlined image shows? | Images that are not controls, with a description or text of their own; built, see "Icons and descriptions, as built" |
 | An informative image with no description | 1.1.1 | Is this image informative or decorative? | Image items with no name |
@@ -581,6 +581,23 @@ complex questions to confirm, as are unsettled answers, and its
 answers decide. Agreed not a heading is a warning for a person to
 verify, medium impact, an assumption; cannot tell, or two answers, a
 warning to check manually; agreed a heading, counted, no finding.
+
+### Control names, as built
+
+Built on 2026-11-18, at the owner's request, "Build rules 1, 2A, 3A,
+4A, 5A, 6 and 7A as proposed". Step 28 of `android-checks.md` has the
+measurement and the rules: each named control a screen reader stops
+on, once a visit; WCAG 1.1.1 where it shows no text and 2.4.6 where it
+does; a placeholder name, a generic word, a resource name, a numbered
+name or the class name, a warning with no model; every other name
+asked once for each screen, with the whole screen, a close-up, the
+name, class and state, OCR's text inside the control and what a screen
+reader says on the screen. Agreed does-not-describe is put to the model
+for complex questions to confirm, as are unsettled answers, and its
+answers decide. Agreed does-not-describe is a warning for a person to
+verify, medium impact, an assumption; cannot tell, or two answers, a
+warning to check manually; agreed describes, counted, no finding. The
+model's answers were not measured before building.
 
 ### Simple and complex questions, measured on 2026-11-17
 

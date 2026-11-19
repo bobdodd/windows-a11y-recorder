@@ -154,6 +154,18 @@ public static class PhoneCheckNames
     public const string HeadingNotShown = "heading-not-shown";
 
     /// <summary>
+    /// A control name that does not say what the control does (step 28,
+    /// PhoneControlNameRun), WCAG 1.1.1 for a control that shows no text
+    /// and 2.4.6 for a visible label, one discrete issue beside an icon
+    /// that contradicts its control's name (owner, 2026-11-18): a name
+    /// that is a placeholder, a warning with no model; or one the
+    /// project's model for vision-based checks, and its model for complex
+    /// questions where there is one, judges from the pictures does not say
+    /// what the control does, a warning for a person to verify.
+    /// </summary>
+    public const string ControlNameNotDescriptive = "control-name-not-descriptive";
+
+    /// <summary>
     /// Label in Name (step 9), from the tree's text and OCR's: the name
     /// does not contain the visible label, and the name contains it but
     /// does not start with it. Not one of the tree's checks.
@@ -282,6 +294,7 @@ public static class PhoneCheckNames
         HeadingNotDescriptive => "Heading does not describe its section (WCAG 2.4.6)",
         TextNotInTree => "Text on screen not in the accessibility tree (WCAG 1.1.1, 4.1.2)",
         HeadingNotShown => "Marked as a heading but not shown as one (WCAG 1.3.1)",
+        ControlNameNotDescriptive => "Control name that does not say what the control does (WCAG 1.1.1, 2.4.6)",
         NoHeading => "No heading (WCAG 1.3.1)",
         FirstHeadingLow => "First heading far from the top",
         ManyHeadings => "Many headings",

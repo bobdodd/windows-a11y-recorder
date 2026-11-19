@@ -47,6 +47,8 @@ public sealed record PhoneChecksSummaryInput
 
     public PhoneHeadingNotShownRun? HeadingNotShown { get; init; }
 
+    public PhoneControlNameRun? ControlNames { get; init; }
+
     public PhoneLabelInNameRun? LabelInName { get; init; }
 }
 
@@ -154,6 +156,7 @@ public static class PhoneChecksSummary
             .Concat(input.HeadingSections?.Findings ?? [])
             .Concat(input.TextNotInTree?.Findings ?? [])
             .Concat(input.HeadingNotShown?.Findings ?? [])
+            .Concat(input.ControlNames?.Findings ?? [])
             .Concat(input.LabelInName?.Findings ?? []);
     }
 
@@ -531,6 +534,25 @@ public static class PhoneChecksSummary
                             $"{Count(notShown.Unanswered, "marked heading")} not judged.",
                         ],
                         notShown.ModelNote)));
+        }
+
+        if (input.ControlNames is { } names)
+        {
+            var title = PhoneCheckNames.Title(PhoneCheckNames.ControlNameNotDescriptive);
+            sections.Add(names.SnapshotsRead == 0
+                ? NotChecked(title, "it needs the text OCR read on the screens' pictures")
+                : new PhoneSummarySection(
+                    title,
+                    Result(names.Findings),
+                    WithNote(
+                        [
+                            $"{Count(names.Controls, "named control")} a screen reader stops on, each once a visit, on {Count(names.SnapshotsRead, "picture")}.",
+                            $"{Count(names.Placeholders, "name")} once a visit that {(names.Placeholders == 1 ? "is a placeholder" : "are placeholders")}, warnings with no model.",
+                            $"{Count(names.Questions.Count, "name")} once for each screen for the model for vision-based checks.",
+                            F($"{names.Described:N0} judged to say what the control does, not confirmed."),
+                            $"{Count(names.Unanswered, "name")} not judged.",
+                        ],
+                        names.ModelNote)));
         }
 
         if (input.LabelInName is { } labels)

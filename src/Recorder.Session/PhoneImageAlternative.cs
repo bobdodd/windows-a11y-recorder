@@ -464,15 +464,23 @@ public sealed class PhoneImageAlternativeRun
     /// Longer than <see cref="MostScreenCharacters"/>, the items nearest
     /// the image's place are kept, and "..." marks what is left out.
     /// </summary>
-    internal static string ScreenText(PhoneCheckWindow window, PhoneCheckItem image)
+    internal static string ScreenText(PhoneCheckWindow window, PhoneCheckItem image) => ScreenText(window, image, ImageMark);
+
+    /// <summary>
+    /// What a screen reader says on the screen, as <see cref="ScreenText(PhoneCheckWindow, PhoneCheckItem)"/>,
+    /// with another mark at the item's place, such as the check of a
+    /// control's name's (step 28).
+    /// </summary>
+    internal static string ScreenText(PhoneCheckWindow window, PhoneCheckItem image, string markText)
     {
         ArgumentNullException.ThrowIfNull(window);
         ArgumentNullException.ThrowIfNull(image);
-        var stops = Stops(window, image, out var mark);
+        ArgumentNullException.ThrowIfNull(markText);
+        var stops = Stops(window, image, out var mark, markText);
         if (mark < 0)
         {
             mark = stops.Count;
-            stops.Add(ImageMark);
+            stops.Add(markText);
         }
 
         const string Separator = " | ";
@@ -483,7 +491,7 @@ public sealed class PhoneImageAlternativeRun
         }
 
         // Widen from the image's place, one item either side in turn.
-        int first = mark, last = mark, length = ImageMark.Length;
+        int first = mark, last = mark, length = markText.Length;
         var widened = true;
         while (widened)
         {
@@ -512,7 +520,7 @@ public sealed class PhoneImageAlternativeRun
     /// in the place of the image where one is given; its place, or -1.
     /// Also the screen title check's (<see cref="PhoneScreenTitleRun"/>).
     /// </summary>
-    internal static List<string> Stops(PhoneCheckWindow window, PhoneCheckItem? image, out int mark)
+    internal static List<string> Stops(PhoneCheckWindow window, PhoneCheckItem? image, out int mark, string markText = ImageMark)
     {
         ArgumentNullException.ThrowIfNull(window);
         var stops = new List<string>();
@@ -528,7 +536,7 @@ public sealed class PhoneImageAlternativeRun
             if (image is not null && item == image)
             {
                 at = stops.Count;
-                stops.Add(ImageMark);
+                stops.Add(markText);
             }
             else if (PhoneTreeChecks.ShouldFocusView(item) && PhoneTreeChecks.SpeakableText(item).Trim() is { Length: > 0 } said)
             {

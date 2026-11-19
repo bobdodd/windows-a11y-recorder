@@ -30,7 +30,9 @@ namespace Recorder.Analysis.Android;
 /// about the lines its rules leave (AndroidTextNotInTree); where it chooses
 /// a model for vision-based checks, the check of a marked heading not shown
 /// as one asks it about the headings its rules leave
-/// (AndroidHeadingNotShown); and the report
+/// (AndroidHeadingNotShown); where it chooses a model for vision-based
+/// checks, the check of a control's name asks it about the names its rules
+/// leave (AndroidControlNames); and the report
 /// says AI was used. With no model
 /// it gives the same report for the same recording, settings and guidance.
 /// </summary>
@@ -301,7 +303,7 @@ public sealed class AndroidModelChecksKind : IAnalysisTaskKind
             .Append(CultureInfo.InvariantCulture, $"# Model checks: {recording}\n\n");
         if (audit.ImagesOfText is not { } run)
         {
-            return text.Append("The colours could not be measured, so the images-of-text check, the check of text shown as a heading, the check of images with no text alternative, the icon and description checks, the screen title check, the decorative image check, the check of a heading's section, the check of text not in the tree and the check of a marked heading not shown as one did not run")
+            return text.Append("The colours could not be measured, so the images-of-text check, the check of text shown as a heading, the check of images with no text alternative, the icon and description checks, the screen title check, the decorative image check, the check of a heading's section, the check of text not in the tree, the check of a marked heading not shown as one and the check of a control's name did not run")
                 .Append(audit.MeasureProblem is { } problem ? ": " + problem : "").Append(".\n").ToString();
         }
 
@@ -451,6 +453,24 @@ public sealed class AndroidModelChecksKind : IAnalysisTaskKind
             }
         }
 
+        if (audit.ControlNames is { } names)
+        {
+            text.Append("\n## Control names that do not say what the control does\n\n")
+                .Append(CultureInfo.InvariantCulture,
+                    $"Of the {names.Controls} named controls a screen reader stops on, once a visit, on {names.SnapshotsRead} pictures, {names.Placeholders} names were placeholders, warnings with no model; the rules left {names.Questions.Count} names, once for each screen, for the project's model for vision-based checks.");
+            if (names.ModelNote is { } namesNote)
+            {
+                text.Append(' ').Append(char.ToUpperInvariant(namesNote[0])).Append(namesNote.AsSpan(1)).Append('.');
+            }
+
+            text.Append("\n\n");
+            foreach (var finding in names.Findings)
+            {
+                text.Append(CultureInfo.InvariantCulture,
+                    $"- {finding.Screen.Package}, \"{finding.Screen.Name}\", visit {finding.Visit.Number}, {finding.Label}: {finding.Text}\n");
+            }
+        }
+
         return text.ToString();
     }
 
@@ -517,6 +537,7 @@ internal static class AndroidReportRun
             audit = await AndroidHeadingSections.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
             audit = await AndroidTextNotInTree.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
             audit = await AndroidHeadingNotShown.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
+            audit = await AndroidControlNames.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
             if (modelChecksOnly)
             {
                 var named = await context.Catalog.RecordingAsync(task.Recording, cancellationToken).ConfigureAwait(false);
@@ -619,6 +640,7 @@ internal static class AndroidReportRun
                 audit = await AndroidHeadingSections.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
                 audit = await AndroidTextNotInTree.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
                 audit = await AndroidHeadingNotShown.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
+                audit = await AndroidControlNames.AskAsync(context, audit, PhonePictures.Load, cancellationToken).ConfigureAwait(false);
                 parts.Add(Input(archive, audit, label, opened.Incomplete) with { StartedUtc = new DateTimeOffset(recording.StartedUtc, TimeSpan.Zero) });
                 keys.Add(key);
             }

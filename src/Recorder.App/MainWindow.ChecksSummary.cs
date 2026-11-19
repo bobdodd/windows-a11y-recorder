@@ -62,6 +62,7 @@ public partial class MainWindow
                 HeadingSections = _phoneHeadingSections,
                 TextNotInTree = _phoneTextNotInTree,
                 HeadingNotShown = _phoneHeadingNotShown,
+                ControlNames = _phoneControlNames,
                 LabelInName = _phoneLabelInName,
             });
 

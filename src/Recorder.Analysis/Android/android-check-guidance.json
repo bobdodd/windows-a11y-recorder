@@ -634,6 +634,22 @@
       "sources": ["wcag-1.3.1", "wcag2ict", "wcag-f43", "android-views", "compose-semantics", "flutter-semantics", "rn-accessibility"]
     },
     {
+      "check": "control-name-not-descriptive",
+      "title": "Control name that does not say what the control does",
+      "issue": "A control a screen reader stops on has a name, but the name does not say what the control does, such as a placeholder like \"button\" or a resource name, a name that is only a number or a count, a symbol, a developer's word, or a word that could mean several things on the screen.",
+      "why": "A screen reader says a control's name when it reaches it. A name that does not say what the control does leaves people who cannot see the screen guessing, or trying the control to find out, and voice access users may not know what to say to use it.",
+      "affects": ["People who are blind and use a screen reader", "People who are deaf-blind and use a braille display", "People who use voice access"],
+      "impact": "medium",
+      "criteria": ["1.1.1", "2.4.6"],
+      "related": ["4.1.2", "2.5.3"],
+      "basis": "WCAG 1.1.1 for a control that shows no text, whose name is its text alternative and is to describe its purpose, and WCAG 2.4.6 for a control that shows text, whose label is to be accurate and descriptive, as WCAG2ICT applies them to software. Found from the recorded picture and the tree: each visible control that can be tapped, long pressed or checked, not a field, that a screen reader stops on, with a name, once a visit. A name that is a generic word, a resource name, a numbered name or the control's class name is a warning with no model. Every other name is judged once for each screen by the project's model for vision-based checks, from the screen's picture with the control outlined, a close-up of it, its name, class and state, the text OCR read inside it and what a screen reader says on the screen; where it answers that the name does not say what the control does, the project's model for complex questions is asked to confirm. Every finding is a warning for a person to verify; with no model only the placeholder names are found.",
+      "android": "Give each control a name that says what it does: for an icon-only control, set android:contentDescription (in Compose, the Icon's contentDescription, or Modifier.semantics { contentDescription = ... }) to its action, such as \"Search\" or \"Play\"; for a control that shows text, make the text say what it does. Do not use a resource name, a class name or a generic word such as \"button\". Where the name needs the screen's context, such as a day of a calendar, give the context too, such as the month and the day.",
+      "flutter": "Give an icon-only control a tooltip or a Semantics(label: ...) that says what it does; for a control that shows text, make the text say what it does.",
+      "reactNative": "Set accessibilityLabel (or aria-label) to what the control does, and use accessibilityHint only to add to it, not to replace it.",
+      "web": "Give an icon-only button or link an accessible name, with aria-label or visually hidden text, that says what it does; for one that shows text, make the text say what it does.",
+      "sources": ["wcag-1.1.1", "wcag-2.4.6", "wcag2ict", "android-views", "compose-semantics", "flutter-semantics", "rn-accessibility"]
+    },
+    {
       "check": "no-heading",
       "title": "Screen with no heading",
       "issue": "No item shown on the screen is marked as a heading.",

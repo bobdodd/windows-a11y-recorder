@@ -8,6 +8,29 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Control names
+
+- A new check, "Control name that does not say what the control does
+  (WCAG 1.1.1, 2.4.6)", for each named control a screen reader stops
+  on, once a visit. WCAG 1.1.1 applies where the control shows no text,
+  and 2.4.6 where it does; each finding says which.
+- A name that is a generic word, a resource name, a numbered name or
+  the control's class name is a warning with no model.
+- Every other name is asked once for each screen of the project's model
+  for vision-based checks, with the whole screen and a close-up, the
+  name, class and state, the text OCR read inside the control and what
+  a screen reader says on the screen. The answer is given to every
+  visit with the name.
+- Where the answers agree that the name does not say what the control
+  does, the project's model for complex questions is asked to confirm,
+  and its answers decide. Agreed does-not-describe is a warning for a
+  person to verify, medium impact (an assumption); cannot tell, or two
+  answers, a warning to check manually; agreed describes, no finding.
+- The check is in the Android report, the project report, the model
+  checks, the Checks tab and its Summary tab, and the toasts' count of
+  questions not judged. The model's answers were not measured before
+  building.
+
 ### Headings not shown as headings
 
 - A new check, "Marked as a heading but not shown as one" (WCAG 1.3.1,
