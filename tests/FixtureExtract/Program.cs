@@ -16,7 +16,9 @@ using Recorder.Session;
 // 1. Trims the recording to the fixture app's visits: the events before the
 //    first and after the last are left out, as are the sound, the video,
 //    TalkBack's log, which no check reads, and the phone's notifications, so
-//    nothing of the phone's own apps is kept.
+//    nothing of the phone's own apps is kept. The phone's serial number is
+//    replaced by a stand-in, and any phone setting naming another app by a
+//    "left out" marker, as the repository is public (owner, 2026-11-19).
 // 2. Runs the rules on the trimmed recording with Windows OCR, keeping only
 //    the pictures they read, what OCR read in them, and their findings.
 // 3. Lists every text the trimmed recording holds that is not in the fixture
@@ -96,6 +98,7 @@ Directory.CreateDirectory(output);
 var trimmed = Path.Combine(output, AndroidFixtureFiles.Recording);
 var kept = new List<StoredEvent>();
 var left = new Dictionary<string, int>(StringComparer.Ordinal);
+var serials = new SortedSet<string>(StringComparer.Ordinal);
 IReadOnlyDictionary<string, string> recording;
 using (var reader = RecordingFileReader.Open(source))
 {
@@ -105,6 +108,7 @@ using (var reader = RecordingFileReader.Open(source))
     foreach (var message in reader.ReadAll().Where(message => RecordingFileBatchTarget.IsEventTopic(message.Channel.Topic)))
     {
         var stored = RecordingEventCodec.Decode(message.Data.Span);
+        AndroidFixtureFiles.AddSerials(stored.Event.Payload, serials);
         if (Leave(stored.Event, start, end) is { } why)
         {
             left[why] = left.GetValueOrDefault(why) + 1;
@@ -113,6 +117,28 @@ using (var reader = RecordingFileReader.Open(source))
 
         kept.Add(OnlyTheFixtureApp(stored, package, left));
     }
+}
+
+// The phone's serial number, in every event that names it and in the
+// recording's metadata, and the phone settings naming another app.
+var replaced = new SortedDictionary<string, int>(StringComparer.Ordinal);
+var settingPackages = AndroidFixtureFiles.SettingPackages(package);
+kept = [.. kept.Select(stored => stored with
+{
+    Event = stored.Event with
+    {
+        Payload = AndroidFixtureFiles.WithoutThePhonesOwn(stored.Event.Channel, stored.Event.Payload, serials, settingPackages, replaced),
+    },
+})];
+recording = recording.ToDictionary(
+    entry => entry.Key,
+    entry => serials.Aggregate(entry.Value, (value, serial) => value.Replace(serial, AndroidFixtureFiles.Serial, StringComparison.Ordinal)),
+    StringComparer.Ordinal);
+if (kept.FirstOrDefault(stored => serials.Any(serial => stored.Event.Payload.GetRawText().Contains(serial, StringComparison.Ordinal) ||
+        stored.Event.EventId.Contains(serial, StringComparison.Ordinal))) is { } named)
+{
+    Console.Error.WriteLine($"Event {named.EventKey} on {named.Event.Channel} still names the phone's serial number; the fixture was not written.");
+    return 1;
 }
 
 using (var target = new RecordingFileBatchTarget(trimmed, recording, recordState: false))
@@ -178,6 +204,7 @@ try
     Console.WriteLine($"FIXTURE EXTRACTED to {output}");
     Console.WriteLine($"  {kept.Count} events kept, from {start / 1e9:0.0} to {end / 1e9:0.0} seconds; left out: " +
         string.Join(", ", left.OrderBy(entry => entry.Key, StringComparer.Ordinal).Select(entry => $"{entry.Value} {entry.Key}")));
+    Console.WriteLine($"  replaced: {(replaced.Count == 0 ? "nothing" : string.Join(", ", replaced.Select(entry => $"{entry.Value} {entry.Key}")))}");
     Console.WriteLine($"  {copied.Count} pictures kept; OCR {(ocr is null ? "not used" : $"read {ocr.Pictures.Count}")}");
     Console.WriteLine($"  {new DirectoryInfo(output).EnumerateFiles("*", SearchOption.AllDirectories).Sum(file => file.Length) / 1024.0:0} KB in all");
     if (audit.MeasureProblem is { Length: > 0 } problem)
@@ -220,6 +247,24 @@ try
     foreach (var name in packages)
     {
         Console.WriteLine($"  {name}");
+    }
+
+    Console.WriteLine("READ BEFORE COMMITTING: the phone serial numbers and phone settings in the kept events");
+    var device = new SortedSet<string>(StringComparer.Ordinal);
+    var keptSerials = new SortedSet<string>(StringComparer.Ordinal);
+    foreach (var stored in kept)
+    {
+        AndroidFixtureFiles.AddSerials(stored.Event.Payload, keptSerials);
+        if (stored.Event.Channel == "preferences.android")
+        {
+            Leaves(stored.Event.Payload, string.Empty, device);
+        }
+    }
+
+    Console.WriteLine($"  serial = {(keptSerials.Count == 0 ? AndroidFixtureFiles.Serial + " (the stand-in) only" : string.Join(", ", keptSerials))}");
+    foreach (var setting in device)
+    {
+        Console.WriteLine($"  {setting}");
     }
 
     Console.WriteLine("READ BEFORE COMMITTING: the text in the kept events that is not in the fixture app's source");
@@ -336,6 +381,35 @@ static StoredEvent OnlyTheFixtureApp(StoredEvent stored, string package, Diction
 
     node["apps"] = kept;
     return stored with { Event = stored.Event with { Payload = JsonSerializer.SerializeToElement(node) } };
+}
+
+// Every value in the phone's settings events, by its path, such as
+// settings.secure/tts_default_synth = left out, leaving out the reading's
+// times, which are numbers only.
+static void Leaves(JsonElement element, string path, SortedSet<string> values)
+{
+    switch (element.ValueKind)
+    {
+        case JsonValueKind.Object:
+            foreach (var property in element.EnumerateObject())
+            {
+                Leaves(property.Value, path.Length == 0 ? property.Name : $"{path}.{property.Name}", values);
+            }
+
+            break;
+        case JsonValueKind.Array:
+            foreach (var item in element.EnumerateArray())
+            {
+                Leaves(item, path + "[]", values);
+            }
+
+            break;
+        case JsonValueKind.Number when path.EndsWith("Nanoseconds", StringComparison.Ordinal):
+            break;
+        default:
+            values.Add($"{path} = {(element.ValueKind == JsonValueKind.Null ? "null" : element.ToString())}");
+            break;
+    }
 }
 
 // The words of the fixture app's source: its Java, XML and HTML.

@@ -35,6 +35,10 @@ Changes on `main` since 1.1.0, not yet released.
   the pictures they read, OCR's readings and the findings. It lists
   every text kept that is not the fixture app's, to read before
   committing.
+- The extractor replaces the phone's serial number with a stand-in, and
+  any phone setting naming another app with a "left out" marker, as the
+  repository is public; it lists every serial and setting kept, and a
+  rule test fails on any fixture that still holds them.
 - Rule tests run the rules on each extracted recording under
   `tests/fixtures/android/`, with OCR's kept readings, and compare the
   findings with those made on the PC and with `expected.json`. They are

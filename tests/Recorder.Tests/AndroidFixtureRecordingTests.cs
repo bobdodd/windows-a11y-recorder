@@ -140,6 +140,43 @@ public sealed class AndroidFixtureRecordingTests
         Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems));
     }
 
+    // The repository is public, so a fixture holds no phone serial number
+    // but the stand-in, and no phone setting naming another app (owner,
+    // 2026-11-19).
+    [Fact]
+    public void TheFixturesHoldNoneOfThePhonesOwn()
+    {
+        var folders = Folders();
+        Assert.SkipWhen(folders.Count == 0, NoFixture);
+        using var expected = JsonDocument.Parse(File.ReadAllText(RepositoryPath("android", "fixtures", "expected.json")));
+        var packages = AndroidFixtureFiles.SettingPackages(expected.RootElement.GetProperty("package").GetString()!);
+        var problems = new List<string>();
+        foreach (var folder in folders)
+        {
+            var serials = new SortedSet<string>(StringComparer.Ordinal);
+            var replaced = new Dictionary<string, int>(StringComparer.Ordinal);
+            var stand = 0;
+            using var reader = RecordingFileReader.Open(Path.Combine(folder, AndroidFixtureFiles.Recording));
+            foreach (var message in reader.ReadAll().Where(message => RecordingFileBatchTarget.IsEventTopic(message.Channel.Topic)))
+            {
+                var stored = RecordingEventCodec.Decode(message.Data.Span);
+                AndroidFixtureFiles.AddSerials(stored.Event.Payload, serials);
+                stand += stored.Event.Payload.GetRawText().Contains($"\"{AndroidFixtureFiles.Serial}\"", StringComparison.Ordinal) ? 1 : 0;
+                AndroidFixtureFiles.WithoutThePhonesOwn(stored.Event.Channel, stored.Event.Payload, [], packages, replaced);
+            }
+
+            var name = Path.GetFileName(folder);
+            problems.AddRange(serials.Select(_ => $"{name}: names a phone serial number other than the stand-in"));
+            problems.AddRange(replaced.Select(entry => $"{name}: {entry.Value} {entry.Key} would be replaced"));
+            if (stand == 0)
+            {
+                problems.Add($"{name}: holds no stand-in serial, so it was not extracted with the phone's own details replaced");
+            }
+        }
+
+        Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems));
+    }
+
     // Whether a screen's expectation is of the finding: its check, on its item or OCR line.
     private static bool Lists(JsonElement expect, FixtureFinding finding) =>
         expect.GetProperty("check").GetString() == finding.Check &&

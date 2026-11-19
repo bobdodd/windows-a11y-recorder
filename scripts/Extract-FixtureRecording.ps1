@@ -8,13 +8,15 @@
     1. Builds tests\FixtureExtract.
     2. Runs it on the recording: it trims the recording to the fixture app's
        visits, leaving out the sound, the video and the phone's
-       notifications; runs the rules on what is left with Windows OCR and no
+       notifications, and replacing the phone's serial number and any
+       phone setting naming another app; runs the rules on what is left with Windows OCR and no
        model; and writes recording.mcap, manifest.json, the pictures the
        rules read, ocr.json and findings.json to the output folder.
-    3. Prints each visit's findings, then three lists headed READ BEFORE
-       COMMITTING: the recording's metadata, the packages named, and every
-       text kept that is not in the fixture app's source. Read them before
-       committing the folder.
+    3. Prints each visit's findings, then four lists headed READ BEFORE
+       COMMITTING: the recording's metadata, the packages named, the
+       serial numbers and phone settings kept, and every text kept that is
+       not in the fixture app's source. Read them before committing the
+       folder.
 
     The rule tests in tests\Recorder.Tests\AndroidFixtureRecordingTests.cs
     read every folder under tests\fixtures\android. See

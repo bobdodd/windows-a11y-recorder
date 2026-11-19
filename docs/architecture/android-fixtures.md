@@ -269,17 +269,24 @@ Built on 2026-11-19 against the owner's first recording of the tour.
      keeps only the fixture app's entry, as the others name the phone's
      apps and their versions. The video frames the rules read in place of
      a screenshot are copied, as a frame is used only if its file is
-     there when the recording is opened. A `manifest.json` lists only the
-     kept files;
+     there when the recording is opened. As the repository is public,
+     the phone's serial number is replaced by the stand-in
+     `fixture-phone` in every event and in the recording's metadata, and
+     any phone setting naming an app other than the fixture app, TalkBack
+     or the recorder's companion app by `left out`; the extractor writes
+     nothing if a kept event still names the serial (owner, 2026-11-19,
+     see "The fifth recording"). A `manifest.json` lists only the kept
+     files;
   2. runs the rules on the trimmed recording with Windows OCR and no
      model (every model check is marked not asked), keeping only the
      pictures the rules read, what OCR read in each (`ocr.json`), and
      the findings (`findings.json`);
-  3. prints each visit's findings, then three lists headed READ BEFORE
-     COMMITTING: the recording's metadata, the packages named in the
-     kept events, and every text kept that is not in the fixture app's
-     source, so a person can see that nothing of the phone's own is
-     kept before the folder is committed.
+  3. prints what it replaced and each visit's findings, then four lists
+     headed READ BEFORE COMMITTING: the recording's metadata, the
+     packages named in the kept events, the serial numbers and every
+     phone setting kept, and every text kept that is not in the fixture
+     app's source, so a person can see that nothing of the phone's own
+     is kept before the folder is committed.
 
   This keeps the trimmed recording rather than separate trees,
   screenshots and lines for each visit, as first planned: the checks
@@ -304,6 +311,8 @@ Built on 2026-11-19 against the owner's first recording of the tour.
     recording.
   - Each `app` expectation is compared in the same way with the
     fixture app's app-level findings, matched by check.
+  - No fixture may name a phone serial number other than the stand-in,
+    or hold a phone setting naming another app.
   - Any other error or warning on the fixture app, on a screen or the
     whole app, fails the test, naming it; any other information note or
     check not run is written to the test's output only.
@@ -546,6 +555,48 @@ option A"):
 - **The accessibility button (A):** the tour puts it in the navigation
   bar and puts it back afterwards. That the setting moves the button on
   the owner's phone while TalkBack is on is not yet recorded.
+
+## The fifth recording
+
+Measured on 2026-11-19 from the owner's fifth recording of the tour,
+made with TalkBack on and the owner's decisions on the fourth recording
+in place: the extractor's output on the PC, with Windows OCR, and the
+extracted folder, read here.
+
+- **The rules gave every expected answer.** Both rule tests passed on
+  the extracted folder in the Linux build: the rules found exactly what
+  they found on the PC, every `rule` and `app` expectation was met, and
+  no error or warning outside `expected.json` was found.
+  - The index, visited at the start and again after Record, had its
+    pictures, its expected heading warning on the app bar title and no
+    finding on its near miss.
+  - Delivery's near miss and the WebView's near miss were measured and
+    gave no finding; no line was left unmeasured as covered.
+- **The accessibility button was in the navigation bar.** The floating
+  button's window was not in the recording, and the pictures show the
+  button in the navigation bar, so the setting moved it on the owner's
+  phone with TalkBack on.
+- **The phone's own details were kept.** A search of every kept event
+  found the phone's serial number in 26 events (the screenshots, the
+  settings, the record of apps seen, the display density, the input
+  devices and the companion app's connection) and, in the phone's
+  settings, the package of another app installed on the phone as its
+  preferred speech engine. The READ BEFORE COMMITTING lists had missed
+  both, as they listed only the packages and text of the screens'
+  events. The folder was not committed.
+
+### The owner's decision on the fifth recording
+
+The owner chose on 2026-11-19 ("Go with option A and re-extract the
+recording with the serial and other app settings replaced"): the
+extractor replaces the serial with a stand-in and the settings naming
+another app with a marker, rather than removing them, as the recorder's
+checks on stored events require every one of these events to have a
+serial; and the READ BEFORE COMMITTING lists show every serial and
+setting kept. Run here on the extracted folder, with no OCR, it replaced
+the serial in 26 events and the speech engine in both settings events,
+and no kept event or output file named the serial afterwards; the
+rules' findings on the result equalled the PC's (measured).
 
 ## Model evaluation
 
