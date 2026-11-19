@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<!--
+  The fixture app's WebView screen, "Opening hours". Low and good contrast
+  text, and a value marked as a heading in body text, as on the Views
+  screens. See android/fixtures/expected.json. Every word is made up.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opening hours</title>
+<style>
+  body { margin: 16px; background: #ffffff; color: #202124; font-family: sans-serif; font-size: 16px; }
+  h1 { font-size: 24px; font-weight: bold; margin: 0 0 8px; }
+  p { margin: 8px 0; }
+  .value { font-size: 16px; font-weight: normal; margin: 8px 0; }
+</style>
+</head>
+<body>
+  <h1 id="web_heading">Opening hours</h1>
+  <p id="web_error" style="color: #b0b0b0">The shop opens at nine on weekdays.</p>
+  <p id="web_good">On Sundays it opens at eleven.</p>
+  <h2 id="web_value" class="value">Open now</h2>
+  <p>Hours may change on public holidays.</p>
+</body>
+</html>

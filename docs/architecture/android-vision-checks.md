@@ -15,6 +15,10 @@ text, as built"), and those marked "built" in the tables since; the
 others are not built. Each is to be measured on
 the recordings to hand before its rules are set, as the earlier checks
 were (see `android-checks.md` and `android-checks-candidates.md`).
+Where the recordings to hand have no suitable content, the fixture app
+gives each check not yet built screens with faults and near misses, and
+its first recording is the check's measurement (owner, 2026-11-18;
+`android-fixtures.md`).
 
 The owner's standing rule was first stated as: "As far as possible
 testing should be AI-free both for cost and repeatability, I expect to

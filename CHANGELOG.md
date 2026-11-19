@@ -8,6 +8,28 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Fixture app
+
+- A plan for testing the Android checks with screens of known faults
+  and near misses, `docs/architecture/android-fixtures.md`, with the
+  owner's decisions: the expected answers in the app's source, a
+  scripted tour of the screens, rule tests on compact fixtures in the
+  repository, a model evaluation run only on request, and the checks
+  not yet built first once the framework is proven.
+- The first fixture app, `android/fixtures/`, Views and WebView, with
+  five screens for checks already built: touch targets, text contrast,
+  control names, headings not shown as headings, and a WebView page.
+  Every word on them is made up.
+- `scripts/Build-FixtureApp.ps1` builds it with the companion app's
+  pinned tools; `scripts/Build-CompanionApp.ps1` takes `-App fixtures`
+  for this, and builds the companion app as before by default.
+- `scripts/Run-FixtureTour.ps1` installs the app with the recorder's own
+  adb and opens each screen in turn while the recorder records.
+- `android/fixtures/expected.json` lists what each check should find on
+  each element, and a test keeps it in step with the app and the
+  recorder's check names. The extractor and the rule tests that run the
+  checks on the fixtures follow the first recording of the tour.
+
 ### Control names
 
 - A new check, "Control name that does not say what the control does

@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "package": "io.github.bobdodd.a11yrecorder.fixtures",
+  "auditLevel": "AA",
+  "screens": [
+    {
+      "id": "touch-targets",
+      "title": "Basket",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "proof",
+      "expect": [
+        { "check": "touch-target-24dp", "item": "touch_pair_add", "by": "rule", "finding": "error",
+          "note": "20 dp, 2 dp from another 20 dp button, so their 24 dp circles meet" },
+        { "check": "touch-target-24dp", "item": "touch_pair_remove", "by": "rule", "finding": "error",
+          "note": "the other of the pair" },
+        { "check": "touch-target-24dp", "item": "touch_spaced", "by": "rule", "finding": "none",
+          "note": "20 dp, but its 24 dp circle meets no other target: 2.5.8's spacing exception" },
+        { "check": "touch-target-24dp", "item": "touch_medium", "by": "rule", "finding": "none",
+          "note": "32 dp" },
+        { "check": "touch-target-24dp", "item": "touch_large", "by": "rule", "finding": "none",
+          "note": "48 dp" },
+        { "check": "touch-target-size", "item": "touch_pair_add", "by": "rule", "finding": "error",
+          "note": "20 dp, under ATF's 48 dp" },
+        { "check": "touch-target-size", "item": "touch_pair_remove", "by": "rule", "finding": "error",
+          "note": "20 dp, under ATF's 48 dp" },
+        { "check": "touch-target-size", "item": "touch_spaced", "by": "rule", "finding": "error",
+          "note": "20 dp; ATF has no spacing exception" },
+        { "check": "touch-target-size", "item": "touch_medium", "by": "rule", "finding": "error",
+          "note": "32 dp, under ATF's 48 dp" },
+        { "check": "touch-target-size", "item": "touch_large", "by": "rule", "finding": "none",
+          "note": "48 dp" }
+      ]
+    },
+    {
+      "id": "text-contrast",
+      "title": "Delivery",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "proof",
+      "expect": [
+        { "check": "text-contrast-aa", "line": "Orders are packed on the day they are placed.", "by": "rule", "finding": "error",
+          "note": "#B0B0B0 on white, about 2.2:1, below 3:1 for large text" },
+        { "check": "text-contrast-aa", "line": "Orders over forty dollars travel free of charge.", "by": "rule", "finding": "warning",
+          "note": "#949494 on white, about 3.0:1, which fails unless the text is large" },
+        { "check": "text-contrast-aa", "line": "Parcels usually arrive within three working days.", "by": "rule", "finding": "none",
+          "note": "#767676 on white, about 4.54:1, just over 4.5:1; from the video, rather than a screenshot, the check warns that it is near the limit" }
+      ]
+    },
+    {
+      "id": "control-names",
+      "title": "Holiday photos",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "proof",
+      "expect": [
+        { "check": "control-name-not-descriptive", "item": "names_resource", "by": "rule", "finding": "warning",
+          "note": "named with a resource name, a placeholder found with no model" },
+        { "check": "control-name-not-descriptive", "item": "names_icon", "by": "model", "finding": "warning",
+          "note": "an arrow named \"Arrow\", which names the icon, not what it does" },
+        { "check": "control-name-not-descriptive", "item": "names_good", "by": "model", "finding": "none",
+          "note": "the same arrow named \"Next photo\"" }
+      ]
+    },
+    {
+      "id": "heading-look",
+      "title": "Points",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "proof",
+      "expect": [
+        { "check": "heading-not-shown", "item": "heading_value", "by": "model", "finding": "warning",
+          "note": "a value, \"1,250 points\", in body text, marked as a heading" },
+        { "check": "heading-not-shown", "item": "heading_good", "by": "model", "finding": "none",
+          "note": "\"Points\", 24 sp and bold, marked as a heading" }
+      ]
+    },
+    {
+      "id": "web-basics",
+      "title": "Opening hours",
+      "framework": "webview",
+      "how": "tour",
+      "seconds": 6,
+      "stage": "proof",
+      "expect": [
+        { "check": "text-contrast-aa", "line": "The shop opens at nine on weekdays.", "by": "rule", "finding": "error",
+          "note": "#B0B0B0 on white, about 2.2:1" },
+        { "check": "text-contrast-aa", "line": "On Sundays it opens at eleven.", "by": "rule", "finding": "none",
+          "note": "#202124 on white, about 16:1" },
+        { "check": "heading-not-shown", "item": "web_value", "by": "model", "finding": "warning",
+          "note": "an h2, \"Open now\", styled as body text; WebView is expected to report the HTML id as the item's resource name, to be measured" },
+        { "check": "heading-not-shown", "item": "web_heading", "by": "model", "finding": "none",
+          "note": "an h1, \"Opening hours\", 24 px and bold" }
+      ]
+    }
+  ]
+}

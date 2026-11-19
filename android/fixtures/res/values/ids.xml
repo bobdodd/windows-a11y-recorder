@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The stable IDs of the elements android/fixtures/expected.json names. A
+  finding on one is reported as
+  id:io.github.bobdodd.a11yrecorder.fixtures:id/<name>. A test keeps this
+  list and the expected answers in step.
+-->
+<resources>
+    <item type="id" name="screen_heading" />
+
+    <item type="id" name="touch_pair_add" />
+    <item type="id" name="touch_pair_remove" />
+    <item type="id" name="touch_spaced" />
+    <item type="id" name="touch_medium" />
+    <item type="id" name="touch_large" />
+
+    <item type="id" name="contrast_error" />
+    <item type="id" name="contrast_warning" />
+    <item type="id" name="contrast_near" />
+
+    <item type="id" name="names_resource" />
+    <item type="id" name="names_icon" />
+    <item type="id" name="names_good" />
+
+    <item type="id" name="heading_good" />
+    <item type="id" name="heading_value" />
+
+    <item type="id" name="web_page" />
+</resources>

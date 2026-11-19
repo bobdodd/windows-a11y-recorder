@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Windows A11y Recorder fixture app: screens with known faults and
+  near misses, for testing the recorder's Android checks. It is for
+  testing only and never published. See docs/architecture/android-fixtures.md.
+
+  It asks for no permissions. The tour opens a screen by starting
+  FixtureActivity with the string extra "screen" naming it, as
+  scripts/Run-FixtureTour.ps1 does.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.bobdodd.a11yrecorder.fixtures">
+
+    <application
+        android:label="@string/app_name"
+        android:allowBackup="false"
+        android:hasCode="true"
+        android:theme="@android:style/Theme.Material.Light">
+
+        <activity
+            android:name=".FixtureActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

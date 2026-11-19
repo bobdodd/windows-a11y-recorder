@@ -28,6 +28,11 @@
     updated by one signed with the same key, so keep that folder: a new key
     means removing the app from the phone before the next install.
 
+    -App fixtures builds the fixture app, a11yrecorder-fixtures.apk, from
+    android\fixtures instead, with the same pinned tools and its own key
+    (docs\architecture\android-fixtures.md). It also makes R.java for its
+    resource IDs and packs its assets.
+
     Runs on Windows PowerShell 5.1 and on PowerShell 7 on Windows or Linux.
 
     See docs\architecture\android-implementation-plan.md, part 0.
@@ -35,6 +40,7 @@
 
 [CmdletBinding()]
 param(
+    [ValidateSet("companion", "fixtures")] [string] $App = "companion",
     [string] $WorkFolder = "",
     [string] $DownloadFolder = "",
     [string] $SigningFolder = "",
@@ -47,24 +53,51 @@ Set-StrictMode -Version Latest
 [Net.ServicePointManager]::SecurityProtocol =
     [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
+# What differs between the apps this script builds.
+$apps = @{
+    companion = @{
+        Source      = "companion"
+        WorkFolder  = "companion"
+        Package     = "io.github.bobdodd.a11yrecorder.companion"
+        Apk         = "a11yrecorder-companion.apk"
+        Info        = "companion-app.txt"
+        Key         = "companion"
+        Title       = "companion app"
+        DisplayName = "Windows A11y Recorder companion"
+        MakeR       = $false
+    }
+    fixtures  = @{
+        Source      = "fixtures"
+        WorkFolder  = "fixture-app"
+        Package     = "io.github.bobdodd.a11yrecorder.fixtures"
+        Apk         = "a11yrecorder-fixtures.apk"
+        Info        = "fixtures-app.txt"
+        Key         = "fixtures"
+        Title       = "fixture app"
+        DisplayName = "Windows A11y Recorder fixtures"
+        MakeR       = $true
+    }
+}
+$chosen = $apps[$App]
+
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$source = Join-Path (Join-Path $repositoryRoot "android") "companion"
+$source = Join-Path (Join-Path $repositoryRoot "android") $chosen.Source
 if (-not $WorkFolder) {
-    $WorkFolder = Join-Path (Join-Path $repositoryRoot "artifacts") "companion"
+    $WorkFolder = Join-Path (Join-Path $repositoryRoot "artifacts") $chosen.WorkFolder
 }
 if (-not $DownloadFolder) {
     $DownloadFolder = Join-Path $WorkFolder "downloads"
 }
 if (-not $SigningFolder) {
     $localData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
-    $SigningFolder = Join-Path (Join-Path $localData "Windows A11y Recorder Build") "companion-signing"
+    $SigningFolder = Join-Path (Join-Path $localData "Windows A11y Recorder Build") "$($chosen.Key)-signing"
 }
 
 $onWindows = [IO.Path]::DirectorySeparatorChar -eq '\'
 $exe = if ($onWindows) { ".exe" } else { "" }
 
-$packageName = "io.github.bobdodd.a11yrecorder.companion"
-$apkName = "a11yrecorder-companion.apk"
+$packageName = $chosen.Package
+$apkName = $chosen.Apk
 $minimumSdk = 30
 $targetSdk = 37
 $sdkLicenseUrl = "https://developer.android.com/studio/terms"
@@ -259,12 +292,12 @@ function Confirm-SdkLicense {
     }
     if (-not $AcceptAndroidSdkLicense) {
         Write-Host ""
-        Write-Host "The companion app is built with Google's Android SDK Build-Tools and SDK"
+        Write-Host "The $($chosen.Title) is built with Google's Android SDK Build-Tools and SDK"
         Write-Host "platform, which are used under the Android Software Development Kit License"
         Write-Host "Agreement: $sdkLicenseUrl"
         $answer = Read-Host "Type yes to accept it and continue"
         if ($answer -ne "yes") {
-            throw "The Android SDK licence was not accepted, so the companion app was not built."
+            throw "The Android SDK licence was not accepted, so the $($chosen.Title) was not built."
         }
     }
     Set-Content -LiteralPath $record -Encoding UTF8 -Value @(
@@ -295,17 +328,17 @@ function Get-VersionCode {
 function Get-SigningKey {
     param([string] $Keytool)
 
-    $keyStore = Join-Path $SigningFolder "companion-signing.p12"
-    $passwordFile = Join-Path $SigningFolder "companion-signing-password.txt"
+    $keyStore = Join-Path $SigningFolder "$($chosen.Key)-signing.p12"
+    $passwordFile = Join-Path $SigningFolder "$($chosen.Key)-signing-password.txt"
     if ((Test-Path -LiteralPath $keyStore) -and (Test-Path -LiteralPath $passwordFile)) {
         return @{ KeyStore = $keyStore; PasswordFile = $passwordFile }
     }
     if ((Test-Path -LiteralPath $keyStore) -or (Test-Path -LiteralPath $passwordFile)) {
-        throw ("$SigningFolder has only one of companion-signing.p12 and " +
-            "companion-signing-password.txt. Restore the other, or remove both to make a new key.")
+        throw ("$SigningFolder has only one of $($chosen.Key)-signing.p12 and " +
+            "$($chosen.Key)-signing-password.txt. Restore the other, or remove both to make a new key.")
     }
 
-    Write-Host "Making the companion app's signing key in $SigningFolder"
+    Write-Host "Making the $($chosen.Title)'s signing key in $SigningFolder"
     New-Item -ItemType Directory -Force -Path $SigningFolder | Out-Null
     $bytes = New-Object byte[] 24
     $random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
@@ -315,9 +348,9 @@ function Get-SigningKey {
     [IO.File]::WriteAllText($passwordFile, $password)
     Invoke-Tool -Name "keytool" -FilePath $Keytool -Arguments @(
         "-genkeypair", "-keystore", $keyStore, "-storetype", "PKCS12",
-        "-storepass:file", $passwordFile, "-alias", "companion",
+        "-storepass:file", $passwordFile, "-alias", $chosen.Key,
         "-keyalg", "RSA", "-keysize", "3072", "-validity", "10000",
-        "-dname", "CN=Windows A11y Recorder companion") | Out-Null
+        "-dname", "CN=$($chosen.DisplayName)") | Out-Null
     return @{ KeyStore = $keyStore; PasswordFile = $passwordFile }
 }
 
@@ -352,7 +385,7 @@ Write-Host ((Invoke-Tool -Name "java" -FilePath $java -Arguments @("-version")) 
 
 $versionName = Get-ProductVersion
 $versionCode = Get-VersionCode
-Write-Host "Companion app $versionName, version code $versionCode."
+Write-Host "The $($chosen.Title) $versionName, version code $versionCode."
 
 $build = Join-Path $WorkFolder "build"
 if (Test-Path -LiteralPath $build) {
@@ -360,22 +393,32 @@ if (Test-Path -LiteralPath $build) {
 }
 $classes = Join-Path $build "classes"
 $dex = Join-Path $build "dex"
-New-Item -ItemType Directory -Force -Path $build, $classes, $dex | Out-Null
+$generated = Join-Path $build "generated"
+New-Item -ItemType Directory -Force -Path $build, $classes, $dex, $generated | Out-Null
 
 Write-Step "Resources"
 $compiledResources = Join-Path $build "resources.zip"
 $linked = Join-Path $build "linked.apk"
 Invoke-Tool -Name "aapt2 compile" -FilePath $aapt2 -Arguments @(
     "compile", "--dir", (Join-Path $source "res"), "-o", $compiledResources) | Out-Null
-Invoke-Tool -Name "aapt2 link" -FilePath $aapt2 -Arguments @(
+$linkArguments = @(
     "link", "-I", $androidJar,
     "--manifest", (Join-Path $source "AndroidManifest.xml"),
     "--min-sdk-version", "$minimumSdk", "--target-sdk-version", "$targetSdk",
-    "--version-code", "$versionCode", "--version-name", $versionName,
-    "-o", $linked, $compiledResources) | Out-Null
+    "--version-code", "$versionCode", "--version-name", $versionName)
+if ($chosen.MakeR) {
+    # R.java, so the source can name its resource IDs.
+    $linkArguments += @("--java", $generated)
+}
+$assets = Join-Path $source "assets"
+if (Test-Path -LiteralPath $assets) {
+    $linkArguments += @("-A", $assets)
+}
+Invoke-Tool -Name "aapt2 link" -FilePath $aapt2 -Arguments ($linkArguments + @("-o", $linked, $compiledResources)) | Out-Null
 
 Write-Step "Code"
-$javaFiles = @(Get-ChildItem -LiteralPath (Join-Path $source "src") -Recurse -Filter "*.java" -File |
+$javaFiles = @(@(Join-Path $source "src"; $generated) | ForEach-Object {
+        Get-ChildItem -LiteralPath $_ -Recurse -Filter "*.java" -File } |
         ForEach-Object { $_.FullName })
 if ($javaFiles.Count -eq 0) {
     throw "No Java source was found in $source."
@@ -409,7 +452,7 @@ New-Item -ItemType Directory -Force -Path $outputFolder | Out-Null
 $apk = Join-Path $outputFolder $apkName
 Invoke-Tool -Name "apksigner sign" -FilePath $java -Arguments @(
     "-jar", $apksignerJar, "sign", "--ks", $key.KeyStore, "--ks-pass", "file:$($key.PasswordFile)",
-    "--ks-key-alias", "companion", "--min-sdk-version", "$minimumSdk", "--out", $apk, $aligned) | Out-Null
+    "--ks-key-alias", $chosen.Key, "--min-sdk-version", "$minimumSdk", "--out", $apk, $aligned) | Out-Null
 $verify = Invoke-Tool -Name "apksigner verify" -FilePath $java -Arguments @(
     "-jar", $apksignerJar, "verify", "--print-certs", "--min-sdk-version", "$minimumSdk", $apk)
 if ($verify -notmatch "certificate SHA-256 digest:\s*([0-9a-f]{64})") {
@@ -419,7 +462,7 @@ if ($verify -notmatch "certificate SHA-256 digest:\s*([0-9a-f]{64})") {
 $certificate = $Matches[1]
 
 $hash = Get-Sha256 $apk
-Set-Content -LiteralPath (Join-Path $outputFolder "companion-app.txt") -Encoding UTF8 -Value @(
+Set-Content -LiteralPath (Join-Path $outputFolder $chosen.Info) -Encoding UTF8 -Value @(
     "package $packageName",
     "versionName $versionName",
     "versionCode $versionCode",
@@ -429,7 +472,7 @@ Set-Content -LiteralPath (Join-Path $outputFolder "companion-app.txt") -Encoding
     "signingCertificateSha256 $certificate")
 
 Write-Host ""
-Write-Host "COMPANION APP BUILT"
+Write-Host "$($chosen.Title.ToUpperInvariant()) BUILT"
 Write-Host "  $apk"
 Write-Host "  $versionName, version code $versionCode"
 Write-Host "  SHA-256 $hash"

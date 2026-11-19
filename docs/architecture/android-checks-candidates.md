@@ -19,6 +19,9 @@ addition to the text the tree gives, saying when it is.
 Checks that need a vision model are planned separately, in
 `android-vision-checks.md` (preliminary, 2026-11-15).
 
+Screens with faults and near misses for the checks here not yet built,
+and their order, are planned in `android-fixtures.md` (2026-11-18).
+
 ## Already built
 
 The ATF checks (touch target 48dp, speakable text, duplicate speakable
