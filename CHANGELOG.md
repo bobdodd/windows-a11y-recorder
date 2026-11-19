@@ -64,6 +64,9 @@ Changes on `main` since 1.1.0, not yet released.
   not tested after the heading and a gap before the tested lines, so
   TalkBack's focus outline and the accessibility button cover none of
   them.
+- The fixture app's WebView is held in a frame that keeps it clear of
+  the system bars, as the WebView given that padding itself drew its
+  page under the app bar.
 
 ### Control names
 

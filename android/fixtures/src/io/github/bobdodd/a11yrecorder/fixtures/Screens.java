@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.graphics.Typeface;
 import android.view.View;
 import android.webkit.WebView;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -146,7 +147,17 @@ final class Screens {
         web.setId(R.id.web_page);
         web.setBackgroundColor(Ui.BACKGROUND);
         web.loadDataWithBaseURL("https://fixtures.invalid/web/", page, "text/html", "utf-8", null);
-        return web;
+
+        // The WebView is held in a frame, which takes the padding that keeps
+        // the screen clear of the system bars: a WebView given the padding
+        // itself still filled the window, and drew the page's heading and
+        // first line under the app bar (measured on the third recording,
+        // 2026-11-19).
+        FrameLayout frame = new FrameLayout(activity);
+        frame.setBackgroundColor(Ui.BACKGROUND);
+        frame.addView(web, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        return frame;
     }
 
     // A line not tested, then a gap, so that what TalkBack draws over the

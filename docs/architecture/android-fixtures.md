@@ -424,6 +424,66 @@ bounds, not yet recorded). The button can be dragged elsewhere; if it
 then covers a tested line, the check says so and the rule test fails
 on that line as not judged. Recordings of real apps are not changed.
 
+## The third recording
+
+Measured on 2026-11-19 from the owner's third recording of the tour,
+made with TalkBack on and the fixture app with option A: the
+extractor's output on the PC, with Windows OCR, and the recording's
+events and screenshots in the sandbox. The recording was not kept.
+
+- **The proof checks on Views found what they were built to find.** On
+  the Delivery screen, `text-contrast-aa` gave an error at 2.17:1 and a
+  warning at 3.03:1, and nothing on the near miss: the outline was on
+  the line not tested, and the accessibility button's window met none
+  of the tested lines. With OCR, `control-name-not-descriptive` found
+  `names_resource`. The touch-target checks were as before.
+- **The WebView page loaded, but under the app bar.** The tree gave the
+  WebView the whole window, 0 to 2404 pixels down, and the page's
+  heading 39 to 107 pixels down, under the status bar and the app bar,
+  which end at 298; the heading was not visible to the user, and the
+  line not tested was under the app bar too. The WebView had been given
+  the padding that keeps the Views screens clear of the system bars,
+  and did not move its page in by it. As a result:
+  - the visit was split in two, named by different first texts, as the
+    heading was visible on the first snapshot and not on the next, so
+    the second visit was not matched to the "Opening hours" screen;
+  - `first-heading-low` warned that the first heading, the `h2`, was
+    260 dp down;
+  - the tested lines were under the accessibility button's window, so
+    `text-contrast-aa` did not measure them.
+
+  The WebView is now held in a frame that takes the padding, as the
+  Views screens' columns do. That this puts the page below the app bar
+  is inferred, not yet recorded.
+- **Findings no expectation names**, which would fail the rule tests:
+  - on the index screen, `text-shown-as-heading` warned that the app
+    bar's title, "A11y Fixtures", 46 pixels tall against 24 for body
+    text, is not marked as a heading. The index is in the tour but not
+    in `expected.json`. Not decided: see below.
+  - on the index screen, `non-text-contrast` did not measure two of the
+    screen buttons, under the accessibility button's window; a check
+    not run is only reported.
+- **The phone's own content was in the kept events.** In demo mode the
+  status bar still showed two notification icons of another app, in
+  the screenshots and in the tree, so the demo command that hides them
+  did not hide them on this phone; and the record of the apps seen in
+  the recording, read when it stopped, named another app and its
+  version. The fixture from this recording is not to be committed.
+
+### Open decisions
+
+- **The index screen's app bar title.** Either the index screen is
+  listed in `expected.json` with this warning as expected; or the
+  check leaves out an app bar title that is the window's title, which
+  changes it for real apps too; or the index screen is left out of the
+  extract.
+- **Notification icons in the status bar.** Either the extractor keeps
+  the status bar's window but not the text of its items; or the tour
+  asks the owner to clear the phone's notifications first and checks
+  that none is shown; or both.
+- **The record of the apps seen.** The extractor could keep only the
+  fixture app's entry in it.
+
 ## Model evaluation
 
 Run only on request, on the PC, as the earlier probes were: the model
