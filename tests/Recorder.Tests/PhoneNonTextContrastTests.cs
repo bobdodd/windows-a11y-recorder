@@ -158,6 +158,21 @@ public sealed class PhoneNonTextContrastTests
     }
 
     [Fact]
+    public void States_ATreesMark_WithTheSameFillAsTheOthers_ShowsNoStateByItsFill()
+    {
+        // The pill left out: the selected tab is filled like the others,
+        // so its fill shows no state, and it is judged as any tab is.
+        var (window, picture, lines) = Tabs(marked: true);
+        picture.Fill(48, 1020, 211, 1169, Bar).Fill(88, 1080, 171, 1110, Black);
+        var measures = Measure(window, picture, lines);
+
+        Assert.Empty(PhoneNonTextContrastRun.States(measures));
+        var home = PhoneNonTextContrastRun.Judge(Of(measures, "HOME"), PhonePictureKind.Screenshot, "Windows OCR, en-US");
+        Assert.Equal(PhoneCheckLevel.Info, home?.Level);
+        Assert.StartsWith("has visible text, 'HOME'", home?.Measured, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void States_OfTwoThatTouch_TheOneLessLikeTheColourAround_ShowsTheState()
     {
         var picture = new Picture()

@@ -1594,6 +1594,10 @@ were then looked at to check what the numbers meant.
   Text fields, and text OCR read with no word in the item's text in the
   tree, were judged differently from 2026-11-16 (see "Step 18:
   boundaries without a model").
+  From 2026-11-19, a state the tree marks counts only when its fill
+  differs from the others' (within the swatch's join limit); a control
+  filled like the others is judged as any control is (see step 29, "The
+  owner's decision on the selected tabs (2026-11-19)").
 - **Findings.** Under each visit, as for text, with the controls
   measured in it; and in the summary line, "at AA, its only level", with
   "graphics with no item in the tree are not checked".
@@ -5434,8 +5438,28 @@ the line, so bold alone is a close pass there (measured).
 
 The same probe found the non-text contrast check (step 5) giving an
 error on both selected tabs, a state filled #FFFFFF against the
-others' #FFFFFF. This is put to the owner as a separate issue and not
-changed here.
+others' #FFFFFF. This was put to the owner as a separate issue.
+
+#### The owner's decision on the selected tabs (2026-11-19)
+
+The owner: "I don't see why this was tested at all. Non-text contrast
+is for comparing different colours, not the same colour, identification
+of the tab is separate as you said. Please fix".
+
+As fixed: the non-text contrast check (WCAG 1.4.11) takes a control the
+tree marks selected or checked to show its state by its fill only when
+that fill differs from the commonest fill of the others in its row
+(within the swatch's join limit, as for a state found from the picture).
+A fill the same as theirs does not show the state, so there is no pair
+of colours for 1.4.11 to compare; the control is judged as any control
+is, by its visible text, icon or boundary. Whether the selected item is
+told apart in some other way is for the use of colour check of selected
+items (WCAG 1.4.1, above). This is in `PhoneNonTextContrastRun.States`
+and tested in `tests/Recorder.Tests/PhoneNonTextContrastTests.cs`. The
+evidence status: the probe measured both selected tabs filled #FFFFFF
+like the others; that the fixed check gives them no state error is
+inferred from the rule and the tests, and is to be seen on the phone
+recording.
 
 ### Checked
 

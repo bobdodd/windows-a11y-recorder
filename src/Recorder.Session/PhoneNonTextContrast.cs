@@ -499,7 +499,10 @@ public sealed class PhoneNonTextContrastRun
     /// The controls of the snapshot that show a state: in each row (or
     /// column) of two or more controls with one parent, one class and
     /// the same top and height (or left and width), the one the tree
-    /// marks selected or checked, when it marks just one; else, in a row
+    /// marks selected or checked, when it marks just one and its fill
+    /// differs from the others' (within the swatch's join limit), as a
+    /// fill the same as theirs does not show the state and 1.4.11 has no
+    /// fill to compare (owner, 2026-11-19); else, in a row
     /// (not a column, as cards stacked down the screen differ in colour
     /// with no state), when all but one share a fill (within the swatch's
     /// join limit) and one does not, that one; of two that touch with
@@ -522,7 +525,12 @@ public sealed class PhoneNonTextContrastRun
                 if (marked.Count == 1)
                 {
                     var others = row.Where(control => control != marked[0]).ToList();
-                    shown[marked[0]] = new StateShown(true, marked[0].Item.Node.Selected ? "selected" : "checked", others.Count, Commonest(others));
+                    var othersFill = Commonest(others);
+                    if (!SameFill(marked[0].Fill, othersFill))
+                    {
+                        shown[marked[0]] = new StateShown(true, marked[0].Item.Node.Selected ? "selected" : "checked", others.Count, othersFill);
+                    }
+
                     continue;
                 }
 
@@ -541,6 +549,9 @@ public sealed class PhoneNonTextContrastRun
 
         return shown;
     }
+
+    // Two fills within the swatch's join limit are one fill.
+    private static bool SameFill(uint first, uint second) => PhoneColours.Difference(first, second) < PhoneColours.JoinBelow;
 
     private static uint Commonest(IReadOnlyList<PhoneControlMeasure> controls) =>
         controls.GroupBy(control => control.Fill).OrderByDescending(group => group.Count()).ThenBy(group => group.Key).First().Key;
@@ -584,8 +595,6 @@ public sealed class PhoneNonTextContrastRun
     // The one control drawn differently from the rest of its row.
     private static PhoneControlMeasure? Odd(List<PhoneControlMeasure> row)
     {
-        static bool Same(uint first, uint second) => PhoneColours.Difference(first, second) < PhoneColours.JoinBelow;
-
         if (row.Count == 2)
         {
             // Two side by side are taken as one control's parts, such as a
@@ -594,7 +603,7 @@ public sealed class PhoneNonTextContrastRun
             var (left, right) = row[0].Item.Bounds.Left <= row[1].Item.Bounds.Left
                 ? (row[0].Item.Bounds, row[1].Item.Bounds)
                 : (row[1].Item.Bounds, row[0].Item.Bounds);
-            if (Same(row[0].Fill, row[1].Fill) || right.Left - left.Right > Math.Max(2, left.Height / 10))
+            if (SameFill(row[0].Fill, row[1].Fill) || right.Left - left.Right > Math.Max(2, left.Height / 10))
             {
                 return null;
             }
@@ -615,7 +624,7 @@ public sealed class PhoneNonTextContrastRun
         foreach (var candidate in row)
         {
             var others = row.Where(control => control != candidate).ToList();
-            if (!Same(candidate.Fill, others[0].Fill) && others.All(other => Same(other.Fill, others[0].Fill)))
+            if (!SameFill(candidate.Fill, others[0].Fill) && others.All(other => SameFill(other.Fill, others[0].Fill)))
             {
                 return candidate;
             }

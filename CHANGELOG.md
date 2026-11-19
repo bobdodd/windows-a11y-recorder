@@ -37,6 +37,15 @@ Changes on `main` since 1.1.0, not yet released.
   not measured. They are in the Checks tab, the summary and the report,
   with guidance. See `docs/architecture/android-checks.md`, step 29.
 
+### Non-text contrast of a selected state
+
+- The non-text contrast check (WCAG 1.4.11) no longer gives an error on
+  an item the tree marks selected or checked when its fill is the same
+  as the others' in its row: with one colour there is nothing to
+  compare, and how the item is told apart is for the use of colour
+  check (owner, 2026-11-19). Such an item is judged as any control is.
+  See `docs/architecture/android-checks.md`, step 29.
+
 ### Fixture app
 
 - A plan for testing the Android checks with screens of known faults
