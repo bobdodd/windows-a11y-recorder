@@ -1,0 +1,245 @@
+{
+  "schemaVersion": "1.1",
+  "sessionId": "20261119-152642-d8fe65feb4e3418b86b56cf512b6053c",
+  "status": "completed",
+  "startedUtc": "2026-11-19T15:26:42.3267354+00:00",
+  "endedUtc": "2026-11-19T15:27:32.8827139+00:00",
+  "durationNanoseconds": 50610012800,
+  "clockFrequency": 10000000,
+  "clockOriginTimestamp": 17780620552846,
+  "operatingSystem": "Microsoft Windows 10.0.19045",
+  "runtime": ".NET 10.0.12",
+  "architecture": "X64",
+  "configuration": {
+    "captureKeyboardAndMouse": false,
+    "captureUiAutomation": false,
+    "captureForegroundWindow": false,
+    "captureDesktopFrames": false,
+    "framesPerSecond": 5,
+    "captureMicrophone": true,
+    "captureSystemAudio": false,
+    "browserFullWalkInterval": 0
+  },
+  "collectors": [
+    {
+      "collectorType": "android.companion",
+      "implementation": "AndroidCompanionCollector",
+      "implementationVersion": "1.1.0.0",
+      "channels": [
+        "android.companion",
+        "clock.android",
+        "android.display",
+        "android.orientation"
+      ],
+      "captureMethod": "adb-forward-localabstract",
+      "capability": "Supported",
+      "limitations": [],
+      "lifecycle": "Disposed",
+      "health": "Healthy"
+    },
+    {
+      "collectorType": "android.screen",
+      "implementation": "AndroidScreenCollector",
+      "implementationVersion": "1.1.0.0",
+      "channels": [
+        "graphics.android.video",
+        "graphics.android.frames"
+      ],
+      "captureMethod": "scrcpy-server-5.0.1",
+      "capability": "SupportedWithLimitations",
+      "limitations": [
+        "compressed-on-phone",
+        "secure-windows-record-blank"
+      ],
+      "lifecycle": "Disposed",
+      "health": "Healthy"
+    },
+    {
+      "collectorType": "android.sound",
+      "implementation": "AndroidSoundCollector",
+      "implementationVersion": "1.1.0.0",
+      "channels": [
+        "audio.device"
+      ],
+      "captureMethod": "scrcpy-server-5.0.1",
+      "capability": "SupportedWithLimitations",
+      "limitations": [
+        "level-follows-phone-volume"
+      ],
+      "lifecycle": "Disposed",
+      "health": "Healthy"
+    },
+    {
+      "collectorType": "android.touch",
+      "implementation": "AndroidTouchCollector",
+      "implementationVersion": "1.1.0.0",
+      "channels": [
+        "input.android.raw",
+        "input.android.touch",
+        "input.android.key"
+      ],
+      "captureMethod": "adb-shell-getevent",
+      "capability": "SupportedWithLimitations",
+      "limitations": [
+        "multi-touch-protocol-b-only"
+      ],
+      "lifecycle": "Disposed",
+      "health": "Healthy"
+    },
+    {
+      "collectorType": "android.talkback",
+      "implementation": "AndroidTalkBackCollector",
+      "implementationVersion": "1.1.0.0",
+      "channels": [
+        "screen-reader.talkback.log",
+        "screen-reader.talkback.speech"
+      ],
+      "captureMethod": "adb-logcat",
+      "capability": "SupportedWithLimitations",
+      "limitations": [
+        "talkback-log-level-verbose-required",
+        "talkback-internal-log-lines"
+      ],
+      "lifecycle": "Disposed",
+      "health": "Healthy"
+    },
+    {
+      "collectorType": "android.accessibility",
+      "implementation": "AndroidAccessibilityCollector",
+      "implementationVersion": "1.1.0.0",
+      "channels": [
+        "accessibility.android.events"
+      ],
+      "captureMethod": "companion-accessibility-service",
+      "capability": "Supported",
+      "limitations": [],
+      "lifecycle": "Disposed",
+      "health": "Healthy"
+    },
+    {
+      "collectorType": "android.device",
+      "implementation": "AndroidDeviceCollector",
+      "implementationVersion": "1.1.0.0",
+      "channels": [
+        "device.android"
+      ],
+      "captureMethod": "adb-wm-density-and-dumpsys-package",
+      "capability": "Supported",
+      "limitations": [],
+      "lifecycle": "Disposed",
+      "health": "Healthy"
+    },
+    {
+      "collectorType": "android.accessibility-tree",
+      "implementation": "AndroidAccessibilityTreeCollector",
+      "implementationVersion": "1.1.0.0",
+      "channels": [
+        "accessibility.android.tree"
+      ],
+      "captureMethod": "companion-accessibility-service",
+      "capability": "Supported",
+      "limitations": [],
+      "lifecycle": "Disposed",
+      "health": "Healthy"
+    },
+    {
+      "collectorType": "android.screenshots",
+      "implementation": "AndroidScreenshotCollector",
+      "implementationVersion": "1.1.0.0",
+      "channels": [
+        "graphics.android.screenshots"
+      ],
+      "captureMethod": "companion-accessibility-service",
+      "capability": "Supported",
+      "limitations": [],
+      "lifecycle": "Disposed",
+      "health": "Healthy"
+    },
+    {
+      "collectorType": "android.settings",
+      "implementation": "AndroidSettingsCollector",
+      "implementationVersion": "1.1.0.0",
+      "channels": [
+        "preferences.android"
+      ],
+      "captureMethod": "adb-settings-and-companion-observer",
+      "capability": "Supported",
+      "limitations": [],
+      "lifecycle": "Disposed",
+      "health": "Healthy"
+    },
+    {
+      "collectorType": "windows.audio",
+      "implementation": "AudioCollector",
+      "implementationVersion": "1.1.0.0",
+      "channels": [
+        "audio.microphone"
+      ],
+      "captureMethod": "windows-audio-capture",
+      "capability": "Supported",
+      "limitations": [],
+      "lifecycle": "Disposed",
+      "health": "Healthy"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "frames/android/0000000014.png",
+      "sizeBytes": 177560,
+      "sha256": "17521360c0f30aa784854873fd3448b94a8302214c160783841f382971ed4c34"
+    },
+    {
+      "path": "frames/android/0000000167.png",
+      "sizeBytes": 169569,
+      "sha256": "811de9ecb997af9e0454a7141b1419c2af8054274eecec9c534bc295d5ef34e5"
+    },
+    {
+      "path": "frames/android/0000000316.png",
+      "sizeBytes": 193067,
+      "sha256": "fb68345911ad393343523183249877764782ac52492aece056ae64fcc06a5d72"
+    },
+    {
+      "path": "recording.mcap",
+      "sizeBytes": 1240992,
+      "sha256": "85a10cf464e9a4fcd6cebe3d628de63ed2232ea898f041eb4f0708b088ad46b8"
+    },
+    {
+      "path": "screenshots/android/0000000001.png",
+      "sizeBytes": 57144,
+      "sha256": "c094e130e4c7c677dce89e34475e1c43ff4f3d91bcb55b9b1c480e214ad1df72"
+    },
+    {
+      "path": "screenshots/android/0000000003.png",
+      "sizeBytes": 61446,
+      "sha256": "e36f40fac49fb110367cb649d89848a0a1eca7f52ec273d978493e98d1824a19"
+    },
+    {
+      "path": "screenshots/android/0000000006.png",
+      "sizeBytes": 48420,
+      "sha256": "8f8e209baa5ebbdb1250c11e775bf6cfbd8bcff518b12078f9795df0fed90c02"
+    },
+    {
+      "path": "screenshots/android/0000000009.png",
+      "sizeBytes": 69257,
+      "sha256": "434b19510ea2fcb78b08fb9c7cb3d7b210043413526a137a8d22fef3154f5877"
+    },
+    {
+      "path": "screenshots/android/0000000012.png",
+      "sizeBytes": 52592,
+      "sha256": "424a4169deca8494192b0817fd48f0d237ad37b64b3e8e07407ccf70733b7a30"
+    },
+    {
+      "path": "screenshots/android/0000000015.png",
+      "sizeBytes": 62016,
+      "sha256": "9b632d12cfb392c62dcdea6a060ef84f26e874bc6c4827b06acbb121de49f4b5"
+    },
+    {
+      "path": "screenshots/android/0000000018.png",
+      "sizeBytes": 88518,
+      "sha256": "c68d0cbe0c75b6328e008e57a0dd7569ff3301c40f6a11b8354fa89443e14d5d"
+    }
+  ],
+  "acceptedEventCount": 1397,
+  "droppedEventCount": 0,
+  "failure": null
+}

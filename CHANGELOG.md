@@ -39,6 +39,9 @@ Changes on `main` since 1.1.0, not yet released.
   any phone setting naming another app with a "left out" marker, as the
   repository is public; it lists every serial and setting kept, and a
   rule test fails on any fixture that still holds them.
+- The first fixture recording, `tests/fixtures/android/tour/`, from the
+  owner's fifth recording of the tour: the rule tests now run on it in
+  every build, and it gives every expected answer.
 - Rule tests run the rules on each extracted recording under
   `tests/fixtures/android/`, with OCR's kept readings, and compare the
   findings with those made on the PC and with `expected.json`. They are

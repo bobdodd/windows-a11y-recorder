@@ -33,10 +33,11 @@ What exists so far:
 Not yet built: the model evaluation, and the fixtures for the checks
 not yet built.
 
-No fixture recording is committed yet. The owner's first recording of
-the tour, on 2026-11-19, was measured in the sandbox and not kept (see
-"The first recording"); the tour was changed after it and is to be
-recorded again.
+One fixture recording is committed, `tests/fixtures/android/tour/`,
+extracted from the owner's fifth recording of the tour on 2026-11-19
+with the phone's serial and other apps' settings replaced (see "The
+fifth recording"). The earlier recordings were measured in the sandbox
+and not kept.
 
 ## Owner's decisions
 
@@ -597,6 +598,13 @@ setting kept. Run here on the extracted folder, with no OCR, it replaced
 the serial in 26 events and the speech engine in both settings events,
 and no kept event or output file named the serial afterwards; the
 rules' findings on the result equalled the PC's (measured).
+
+The owner then re-extracted the recording on the PC with Windows OCR.
+In the result, measured here: the stand-in serial is in 26 events and
+`left out` in the 2 settings events; neither the serial nor the other
+app's name is in any file; the pictures are byte for byte the ones
+reviewed before; and the three rule tests pass on it. It was committed
+as `tests/fixtures/android/tour/`.
 
 ## Model evaluation
 

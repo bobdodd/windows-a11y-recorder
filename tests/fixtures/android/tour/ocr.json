@@ -1,0 +1,2214 @@
+{
+  "version": 1,
+  "unavailable": null,
+  "pictures": [
+    {
+      "path": "frames/android/0000000014.png",
+      "engine": "Windows OCR, en-US",
+      "words": [
+        {
+          "text": "A1",
+          "box": {
+            "left": 39,
+            "top": 213,
+            "right": 90,
+            "bottom": 248,
+            "width": 51,
+            "height": 35,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "ly",
+          "box": {
+            "left": 103,
+            "top": 213,
+            "right": 151,
+            "bottom": 259,
+            "width": 48,
+            "height": 46,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "Fixtures",
+          "box": {
+            "left": 166,
+            "top": 212,
+            "right": 336,
+            "bottom": 249,
+            "width": 170,
+            "height": 37,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "creens",
+          "box": {
+            "left": 77,
+            "top": 387,
+            "right": 248,
+            "bottom": 420,
+            "width": 171,
+            "height": 33,
+            "isEmpty": false
+          },
+          "line": 1
+        },
+        {
+          "text": "BASKET",
+          "box": {
+            "left": 479,
+            "top": 501,
+            "right": 602,
+            "bottom": 526,
+            "width": 123,
+            "height": 25,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "DELIVERY",
+          "box": {
+            "left": 467,
+            "top": 618,
+            "right": 615,
+            "bottom": 643,
+            "width": 148,
+            "height": 25,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "HOLIDAY",
+          "box": {
+            "left": 403,
+            "top": 735,
+            "right": 539,
+            "bottom": 760,
+            "width": 136,
+            "height": 25,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "PHOTOS",
+          "box": {
+            "left": 550,
+            "top": 735,
+            "right": 679,
+            "bottom": 760,
+            "width": 129,
+            "height": 25,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "POINTS",
+          "box": {
+            "left": 482,
+            "top": 852,
+            "right": 599,
+            "bottom": 878,
+            "width": 117,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "OPENING",
+          "box": {
+            "left": 409,
+            "top": 969,
+            "right": 551,
+            "bottom": 995,
+            "width": 142,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 6
+        },
+        {
+          "text": "HOURS",
+          "box": {
+            "left": 563,
+            "top": 969,
+            "right": 671,
+            "bottom": 995,
+            "width": 108,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 6
+        }
+      ],
+      "problem": null
+    },
+    {
+      "path": "frames/android/0000000167.png",
+      "engine": "Windows OCR, en-US",
+      "words": [
+        {
+          "text": "A1",
+          "box": {
+            "left": 39,
+            "top": 213,
+            "right": 90,
+            "bottom": 248,
+            "width": 51,
+            "height": 35,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "ly",
+          "box": {
+            "left": 103,
+            "top": 213,
+            "right": 151,
+            "bottom": 259,
+            "width": 48,
+            "height": 46,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "Fixtures",
+          "box": {
+            "left": 166,
+            "top": 212,
+            "right": 336,
+            "bottom": 249,
+            "width": 170,
+            "height": 37,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "creens",
+          "box": {
+            "left": 77,
+            "top": 387,
+            "right": 248,
+            "bottom": 420,
+            "width": 171,
+            "height": 33,
+            "isEmpty": false
+          },
+          "line": 1
+        },
+        {
+          "text": "BASKET",
+          "box": {
+            "left": 479,
+            "top": 501,
+            "right": 602,
+            "bottom": 526,
+            "width": 123,
+            "height": 25,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "DELIVERY",
+          "box": {
+            "left": 467,
+            "top": 618,
+            "right": 615,
+            "bottom": 643,
+            "width": 148,
+            "height": 25,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "HOLIDAY",
+          "box": {
+            "left": 403,
+            "top": 735,
+            "right": 539,
+            "bottom": 760,
+            "width": 136,
+            "height": 25,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "PHOTOS",
+          "box": {
+            "left": 550,
+            "top": 735,
+            "right": 679,
+            "bottom": 761,
+            "width": 129,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "POINTS",
+          "box": {
+            "left": 482,
+            "top": 852,
+            "right": 599,
+            "bottom": 878,
+            "width": 117,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "OPENING",
+          "box": {
+            "left": 409,
+            "top": 969,
+            "right": 551,
+            "bottom": 995,
+            "width": 142,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 6
+        },
+        {
+          "text": "HOURS",
+          "box": {
+            "left": 563,
+            "top": 969,
+            "right": 671,
+            "bottom": 995,
+            "width": 108,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 6
+        }
+      ],
+      "problem": null
+    },
+    {
+      "path": "screenshots/android/0000000001.png",
+      "engine": "Windows OCR, en-US",
+      "words": [
+        {
+          "text": "A1",
+          "box": {
+            "left": 39,
+            "top": 213,
+            "right": 90,
+            "bottom": 248,
+            "width": 51,
+            "height": 35,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "ly",
+          "box": {
+            "left": 103,
+            "top": 213,
+            "right": 151,
+            "bottom": 259,
+            "width": 48,
+            "height": 46,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "Fixtures",
+          "box": {
+            "left": 166,
+            "top": 212,
+            "right": 336,
+            "bottom": 249,
+            "width": 170,
+            "height": 37,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "creens",
+          "box": {
+            "left": 77,
+            "top": 387,
+            "right": 248,
+            "bottom": 420,
+            "width": 171,
+            "height": 33,
+            "isEmpty": false
+          },
+          "line": 1
+        },
+        {
+          "text": "BASKET",
+          "box": {
+            "left": 479,
+            "top": 501,
+            "right": 602,
+            "bottom": 527,
+            "width": 123,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "DELIVERY",
+          "box": {
+            "left": 467,
+            "top": 618,
+            "right": 615,
+            "bottom": 643,
+            "width": 148,
+            "height": 25,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "HOLIDAY",
+          "box": {
+            "left": 403,
+            "top": 735,
+            "right": 539,
+            "bottom": 760,
+            "width": 136,
+            "height": 25,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "PHOTOS",
+          "box": {
+            "left": 550,
+            "top": 735,
+            "right": 679,
+            "bottom": 761,
+            "width": 129,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "POINTS",
+          "box": {
+            "left": 482,
+            "top": 852,
+            "right": 599,
+            "bottom": 878,
+            "width": 117,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "OPENING",
+          "box": {
+            "left": 409,
+            "top": 969,
+            "right": 551,
+            "bottom": 995,
+            "width": 142,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 6
+        },
+        {
+          "text": "HOURS",
+          "box": {
+            "left": 563,
+            "top": 969,
+            "right": 671,
+            "bottom": 995,
+            "width": 108,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 6
+        }
+      ],
+      "problem": null
+    },
+    {
+      "path": "screenshots/android/0000000003.png",
+      "engine": "Windows OCR, en-US",
+      "words": [
+        {
+          "text": "A1",
+          "box": {
+            "left": 39,
+            "top": 213,
+            "right": 90,
+            "bottom": 248,
+            "width": 51,
+            "height": 35,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "ly",
+          "box": {
+            "left": 103,
+            "top": 213,
+            "right": 151,
+            "bottom": 259,
+            "width": 48,
+            "height": 46,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "Fixtures",
+          "box": {
+            "left": 166,
+            "top": 212,
+            "right": 336,
+            "bottom": 249,
+            "width": 170,
+            "height": 37,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "creens",
+          "box": {
+            "left": 77,
+            "top": 387,
+            "right": 248,
+            "bottom": 420,
+            "width": 171,
+            "height": 33,
+            "isEmpty": false
+          },
+          "line": 1
+        },
+        {
+          "text": "BASKET",
+          "box": {
+            "left": 479,
+            "top": 501,
+            "right": 602,
+            "bottom": 527,
+            "width": 123,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "DELIVERY",
+          "box": {
+            "left": 467,
+            "top": 618,
+            "right": 615,
+            "bottom": 643,
+            "width": 148,
+            "height": 25,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "HOLIDAY",
+          "box": {
+            "left": 403,
+            "top": 735,
+            "right": 539,
+            "bottom": 760,
+            "width": 136,
+            "height": 25,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "PHOTOS",
+          "box": {
+            "left": 550,
+            "top": 735,
+            "right": 679,
+            "bottom": 761,
+            "width": 129,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "POINTS",
+          "box": {
+            "left": 482,
+            "top": 852,
+            "right": 599,
+            "bottom": 878,
+            "width": 117,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "OPENING",
+          "box": {
+            "left": 409,
+            "top": 969,
+            "right": 551,
+            "bottom": 995,
+            "width": 142,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 6
+        },
+        {
+          "text": "HOURS",
+          "box": {
+            "left": 563,
+            "top": 969,
+            "right": 671,
+            "bottom": 995,
+            "width": 108,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 6
+        },
+        {
+          "text": "Ally",
+          "box": {
+            "left": 443,
+            "top": 2317,
+            "right": 508,
+            "bottom": 2350,
+            "width": 65,
+            "height": 33,
+            "isEmpty": false
+          },
+          "line": 7
+        },
+        {
+          "text": "Fixtures",
+          "box": {
+            "left": 519,
+            "top": 2317,
+            "right": 637,
+            "bottom": 2343,
+            "width": 118,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 7
+        }
+      ],
+      "problem": null
+    },
+    {
+      "path": "screenshots/android/0000000006.png",
+      "engine": "Windows OCR, en-US",
+      "words": [
+        {
+          "text": "Basket",
+          "box": {
+            "left": 42,
+            "top": 211,
+            "right": 188,
+            "bottom": 249,
+            "width": 146,
+            "height": 38,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "Basket",
+          "box": {
+            "left": 42,
+            "top": 374,
+            "right": 217,
+            "bottom": 420,
+            "width": 175,
+            "height": 46,
+            "isEmpty": false
+          },
+          "line": 1
+        },
+        {
+          "text": "hange",
+          "box": {
+            "left": 66,
+            "top": 488,
+            "right": 169,
+            "bottom": 525,
+            "width": 103,
+            "height": 37,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "how",
+          "box": {
+            "left": 183,
+            "top": 487,
+            "right": 252,
+            "bottom": 518,
+            "width": 69,
+            "height": 31,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "many",
+          "box": {
+            "left": 265,
+            "top": 496,
+            "right": 358,
+            "bottom": 526,
+            "width": 93,
+            "height": 30,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "you",
+          "box": {
+            "left": 368,
+            "top": 496,
+            "right": 427,
+            "bottom": 526,
+            "width": 59,
+            "height": 30,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "want,",
+          "box": {
+            "left": 441,
+            "top": 491,
+            "right": 531,
+            "bottom": 523,
+            "width": 90,
+            "height": 32,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "or",
+          "box": {
+            "left": 544,
+            "top": 496,
+            "right": 578,
+            "bottom": 518,
+            "width": 34,
+            "height": 22,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "move",
+          "box": {
+            "left": 590,
+            "top": 496,
+            "right": 681,
+            "bottom": 518,
+            "width": 91,
+            "height": 22,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "on.",
+          "box": {
+            "left": 695,
+            "top": 496,
+            "right": 744,
+            "bottom": 518,
+            "width": 49,
+            "height": 22,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "-.5",
+          "box": {
+            "left": 71,
+            "top": 1051,
+            "right": 123,
+            "bottom": 1102,
+            "width": 52,
+            "height": 51,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "Basket",
+          "box": {
+            "left": 492,
+            "top": 2317,
+            "right": 591,
+            "bottom": 2343,
+            "width": 99,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 4
+        }
+      ],
+      "problem": null
+    },
+    {
+      "path": "screenshots/android/0000000009.png",
+      "engine": "Windows OCR, en-US",
+      "words": [
+        {
+          "text": "Delivery",
+          "box": {
+            "left": 42,
+            "top": 211,
+            "right": 212,
+            "bottom": 259,
+            "width": 170,
+            "height": 48,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "Delivery",
+          "box": {
+            "left": 42,
+            "top": 375,
+            "right": 249,
+            "bottom": 432,
+            "width": 207,
+            "height": 57,
+            "isEmpty": false
+          },
+          "line": 1
+        },
+        {
+          "text": "hoose",
+          "box": {
+            "left": 66,
+            "top": 488,
+            "right": 168,
+            "bottom": 518,
+            "width": 102,
+            "height": 30,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "how",
+          "box": {
+            "left": 182,
+            "top": 487,
+            "right": 251,
+            "bottom": 518,
+            "width": 69,
+            "height": 31,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "your",
+          "box": {
+            "left": 262,
+            "top": 496,
+            "right": 337,
+            "bottom": 526,
+            "width": 75,
+            "height": 30,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "order",
+          "box": {
+            "left": 349,
+            "top": 487,
+            "right": 437,
+            "bottom": 518,
+            "width": 88,
+            "height": 31,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "reaches",
+          "box": {
+            "left": 449,
+            "top": 487,
+            "right": 582,
+            "bottom": 518,
+            "width": 133,
+            "height": 31,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "you.",
+          "box": {
+            "left": 594,
+            "top": 496,
+            "right": 663,
+            "bottom": 526,
+            "width": 69,
+            "height": 30,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "Orders",
+          "box": {
+            "left": 41,
+            "top": 874,
+            "right": 153,
+            "bottom": 903,
+            "width": 112,
+            "height": 29,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "are",
+          "box": {
+            "left": 167,
+            "top": 882,
+            "right": 217,
+            "bottom": 903,
+            "width": 50,
+            "height": 21,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "packed",
+          "box": {
+            "left": 232,
+            "top": 874,
+            "right": 352,
+            "bottom": 911,
+            "width": 120,
+            "height": 37,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "on",
+          "box": {
+            "left": 367,
+            "top": 882,
+            "right": 406,
+            "bottom": 903,
+            "width": 39,
+            "height": 21,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "the",
+          "box": {
+            "left": 419,
+            "top": 874,
+            "right": 472,
+            "bottom": 903,
+            "width": 53,
+            "height": 29,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "day",
+          "box": {
+            "left": 486,
+            "top": 874,
+            "right": 545,
+            "bottom": 911,
+            "width": 59,
+            "height": 37,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "they",
+          "box": {
+            "left": 555,
+            "top": 874,
+            "right": 627,
+            "bottom": 911,
+            "width": 72,
+            "height": 37,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "are",
+          "box": {
+            "left": 639,
+            "top": 882,
+            "right": 690,
+            "bottom": 903,
+            "width": 51,
+            "height": 21,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "placed.",
+          "box": {
+            "left": 705,
+            "top": 874,
+            "right": 824,
+            "bottom": 911,
+            "width": 119,
+            "height": 37,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "Orders",
+          "box": {
+            "left": 41,
+            "top": 967,
+            "right": 153,
+            "bottom": 997,
+            "width": 112,
+            "height": 30,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "over",
+          "box": {
+            "left": 167,
+            "top": 975,
+            "right": 239,
+            "bottom": 997,
+            "width": 72,
+            "height": 22,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "forty",
+          "box": {
+            "left": 250,
+            "top": 966,
+            "right": 330,
+            "bottom": 1004,
+            "width": 80,
+            "height": 38,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "dollars",
+          "box": {
+            "left": 342,
+            "top": 967,
+            "right": 454,
+            "bottom": 997,
+            "width": 112,
+            "height": 30,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "travel",
+          "box": {
+            "left": 466,
+            "top": 967,
+            "right": 559,
+            "bottom": 997,
+            "width": 93,
+            "height": 30,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "free",
+          "box": {
+            "left": 572,
+            "top": 966,
+            "right": 637,
+            "bottom": 997,
+            "width": 65,
+            "height": 31,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "of",
+          "box": {
+            "left": 651,
+            "top": 966,
+            "right": 685,
+            "bottom": 997,
+            "width": 34,
+            "height": 31,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "charge.",
+          "box": {
+            "left": 697,
+            "top": 967,
+            "right": 820,
+            "bottom": 1004,
+            "width": 123,
+            "height": 37,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "Parcels",
+          "box": {
+            "left": 42,
+            "top": 1060,
+            "right": 165,
+            "bottom": 1090,
+            "width": 123,
+            "height": 30,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "usually",
+          "box": {
+            "left": 179,
+            "top": 1060,
+            "right": 298,
+            "bottom": 1098,
+            "width": 119,
+            "height": 38,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "arrive",
+          "box": {
+            "left": 310,
+            "top": 1061,
+            "right": 402,
+            "bottom": 1090,
+            "width": 92,
+            "height": 29,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "within",
+          "box": {
+            "left": 415,
+            "top": 1060,
+            "right": 514,
+            "bottom": 1090,
+            "width": 99,
+            "height": 30,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "three",
+          "box": {
+            "left": 527,
+            "top": 1060,
+            "right": 614,
+            "bottom": 1090,
+            "width": 87,
+            "height": 30,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "working",
+          "box": {
+            "left": 627,
+            "top": 1060,
+            "right": 760,
+            "bottom": 1097,
+            "width": 133,
+            "height": 37,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "days.",
+          "box": {
+            "left": 775,
+            "top": 1060,
+            "right": 861,
+            "bottom": 1098,
+            "width": 86,
+            "height": 38,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "Delivery",
+          "box": {
+            "left": 479,
+            "top": 2317,
+            "right": 602,
+            "bottom": 2350,
+            "width": 123,
+            "height": 33,
+            "isEmpty": false
+          },
+          "line": 6
+        }
+      ],
+      "problem": null
+    },
+    {
+      "path": "screenshots/android/0000000012.png",
+      "engine": "Windows OCR, en-US",
+      "words": [
+        {
+          "text": "Holiday",
+          "box": {
+            "left": 42,
+            "top": 211,
+            "right": 204,
+            "bottom": 259,
+            "width": 162,
+            "height": 48,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "photos",
+          "box": {
+            "left": 219,
+            "top": 211,
+            "right": 365,
+            "bottom": 258,
+            "width": 146,
+            "height": 47,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "Holiday",
+          "box": {
+            "left": 42,
+            "top": 375,
+            "right": 237,
+            "bottom": 432,
+            "width": 195,
+            "height": 57,
+            "isEmpty": false
+          },
+          "line": 1
+        },
+        {
+          "text": "photos",
+          "box": {
+            "left": 253,
+            "top": 375,
+            "right": 428,
+            "bottom": 431,
+            "width": 175,
+            "height": 56,
+            "isEmpty": false
+          },
+          "line": 1
+        },
+        {
+          "text": "hoto",
+          "box": {
+            "left": 66,
+            "top": 487,
+            "right": 141,
+            "bottom": 518,
+            "width": 75,
+            "height": 31,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "2",
+          "box": {
+            "left": 154,
+            "top": 489,
+            "right": 173,
+            "bottom": 517,
+            "width": 19,
+            "height": 28,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "of",
+          "box": {
+            "left": 186,
+            "top": 487,
+            "right": 220,
+            "bottom": 518,
+            "width": 34,
+            "height": 31,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "9,",
+          "box": {
+            "left": 232,
+            "top": 489,
+            "right": 258,
+            "bottom": 523,
+            "width": 26,
+            "height": 34,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "a",
+          "box": {
+            "left": 272,
+            "top": 496,
+            "right": 289,
+            "bottom": 518,
+            "width": 17,
+            "height": 22,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "beach",
+          "box": {
+            "left": 303,
+            "top": 487,
+            "right": 404,
+            "bottom": 518,
+            "width": 101,
+            "height": 31,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "at",
+          "box": {
+            "left": 418,
+            "top": 491,
+            "right": 449,
+            "bottom": 518,
+            "width": 31,
+            "height": 27,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "sunset.",
+          "box": {
+            "left": 462,
+            "top": 491,
+            "right": 585,
+            "bottom": 518,
+            "width": 123,
+            "height": 27,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "-.5",
+          "box": {
+            "left": 423,
+            "top": 581,
+            "right": 475,
+            "bottom": 632,
+            "width": 52,
+            "height": 51,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "Holiday",
+          "box": {
+            "left": 429,
+            "top": 2317,
+            "right": 541,
+            "bottom": 2350,
+            "width": 112,
+            "height": 33,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "photos",
+          "box": {
+            "left": 551,
+            "top": 2317,
+            "right": 653,
+            "bottom": 2350,
+            "width": 102,
+            "height": 33,
+            "isEmpty": false
+          },
+          "line": 4
+        }
+      ],
+      "problem": null
+    },
+    {
+      "path": "screenshots/android/0000000015.png",
+      "engine": "Windows OCR, en-US",
+      "words": [
+        {
+          "text": "Points",
+          "box": {
+            "left": 42,
+            "top": 212,
+            "right": 176,
+            "bottom": 249,
+            "width": 134,
+            "height": 37,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "Points",
+          "box": {
+            "left": 42,
+            "top": 375,
+            "right": 205,
+            "bottom": 420,
+            "width": 163,
+            "height": 45,
+            "isEmpty": false
+          },
+          "line": 1
+        },
+        {
+          "text": "very",
+          "box": {
+            "left": 62,
+            "top": 496,
+            "right": 132,
+            "bottom": 526,
+            "width": 70,
+            "height": 30,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "order",
+          "box": {
+            "left": 144,
+            "top": 487,
+            "right": 232,
+            "bottom": 518,
+            "width": 88,
+            "height": 31,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "earns",
+          "box": {
+            "left": 244,
+            "top": 496,
+            "right": 337,
+            "bottom": 518,
+            "width": 93,
+            "height": 22,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "points",
+          "box": {
+            "left": 351,
+            "top": 489,
+            "right": 455,
+            "bottom": 525,
+            "width": 104,
+            "height": 36,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "to",
+          "box": {
+            "left": 467,
+            "top": 491,
+            "right": 501,
+            "bottom": 518,
+            "width": 34,
+            "height": 27,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "spend",
+          "box": {
+            "left": 514,
+            "top": 487,
+            "right": 616,
+            "bottom": 525,
+            "width": 102,
+            "height": 38,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "later.",
+          "box": {
+            "left": 632,
+            "top": 487,
+            "right": 711,
+            "bottom": 518,
+            "width": 79,
+            "height": 31,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "1",
+          "box": {
+            "left": 42,
+            "top": 875,
+            "right": 53,
+            "bottom": 903,
+            "width": 11,
+            "height": 28,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": ",250",
+          "box": {
+            "left": 62,
+            "top": 875,
+            "right": 133,
+            "bottom": 909,
+            "width": 71,
+            "height": 34,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "points",
+          "box": {
+            "left": 147,
+            "top": 875,
+            "right": 251,
+            "bottom": 911,
+            "width": 104,
+            "height": 36,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "Points",
+          "box": {
+            "left": 42,
+            "top": 968,
+            "right": 148,
+            "bottom": 997,
+            "width": 106,
+            "height": 29,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "can",
+          "box": {
+            "left": 162,
+            "top": 975,
+            "right": 220,
+            "bottom": 997,
+            "width": 58,
+            "height": 22,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "be",
+          "box": {
+            "left": 235,
+            "top": 966,
+            "right": 274,
+            "bottom": 997,
+            "width": 39,
+            "height": 31,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "spent",
+          "box": {
+            "left": 288,
+            "top": 970,
+            "right": 383,
+            "bottom": 1004,
+            "width": 95,
+            "height": 34,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "when",
+          "box": {
+            "left": 395,
+            "top": 967,
+            "right": 484,
+            "bottom": 997,
+            "width": 89,
+            "height": 30,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "paying.",
+          "box": {
+            "left": 499,
+            "top": 968,
+            "right": 617,
+            "bottom": 1005,
+            "width": 118,
+            "height": 37,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "Every",
+          "box": {
+            "left": 496,
+            "top": 2317,
+            "right": 580,
+            "bottom": 2350,
+            "width": 84,
+            "height": 33,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "order",
+          "box": {
+            "left": 589,
+            "top": 2317,
+            "right": 670,
+            "bottom": 2343,
+            "width": 81,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "earns",
+          "box": {
+            "left": 680,
+            "top": 2324,
+            "right": 763,
+            "bottom": 2343,
+            "width": 83,
+            "height": 19,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "points",
+          "box": {
+            "left": 774,
+            "top": 2317,
+            "right": 865,
+            "bottom": 2350,
+            "width": 91,
+            "height": 33,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "to",
+          "box": {
+            "left": 875,
+            "top": 2319,
+            "right": 904,
+            "bottom": 2343,
+            "width": 29,
+            "height": 24,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "spend",
+          "box": {
+            "left": 914,
+            "top": 2317,
+            "right": 1006,
+            "bottom": 2350,
+            "width": 92,
+            "height": 33,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "later",
+          "box": {
+            "left": 1017,
+            "top": 2317,
+            "right": 1080,
+            "bottom": 2343,
+            "width": 63,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 5
+        }
+      ],
+      "problem": null
+    },
+    {
+      "path": "screenshots/android/0000000018.png",
+      "engine": "Windows OCR, en-US",
+      "words": [
+        {
+          "text": "Opening",
+          "box": {
+            "left": 41,
+            "top": 212,
+            "right": 218,
+            "bottom": 258,
+            "width": 177,
+            "height": 46,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "hours",
+          "box": {
+            "left": 236,
+            "top": 211,
+            "right": 355,
+            "bottom": 249,
+            "width": 119,
+            "height": 38,
+            "isEmpty": false
+          },
+          "line": 0
+        },
+        {
+          "text": "Opening",
+          "box": {
+            "left": 41,
+            "top": 346,
+            "right": 255,
+            "bottom": 402,
+            "width": 214,
+            "height": 56,
+            "isEmpty": false
+          },
+          "line": 1
+        },
+        {
+          "text": "hours",
+          "box": {
+            "left": 276,
+            "top": 346,
+            "right": 421,
+            "bottom": 391,
+            "width": 145,
+            "height": 45,
+            "isEmpty": false
+          },
+          "line": 1
+        },
+        {
+          "text": "The",
+          "box": {
+            "left": 40,
+            "top": 432,
+            "right": 103,
+            "bottom": 461,
+            "width": 63,
+            "height": 29,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "shop",
+          "box": {
+            "left": 116,
+            "top": 431,
+            "right": 198,
+            "bottom": 469,
+            "width": 82,
+            "height": 38,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "is",
+          "box": {
+            "left": 212,
+            "top": 433,
+            "right": 237,
+            "bottom": 461,
+            "width": 25,
+            "height": 28,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "on",
+          "box": {
+            "left": 250,
+            "top": 440,
+            "right": 290,
+            "bottom": 461,
+            "width": 40,
+            "height": 21,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "the",
+          "box": {
+            "left": 302,
+            "top": 432,
+            "right": 356,
+            "bottom": 461,
+            "width": 54,
+            "height": 29,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "high",
+          "box": {
+            "left": 369,
+            "top": 431,
+            "right": 439,
+            "bottom": 469,
+            "width": 70,
+            "height": 38,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "street.",
+          "box": {
+            "left": 453,
+            "top": 435,
+            "right": 558,
+            "bottom": 461,
+            "width": 105,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 2
+        },
+        {
+          "text": "The",
+          "box": {
+            "left": 40,
+            "top": 809,
+            "right": 103,
+            "bottom": 838,
+            "width": 63,
+            "height": 29,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "shop",
+          "box": {
+            "left": 116,
+            "top": 809,
+            "right": 198,
+            "bottom": 846,
+            "width": 82,
+            "height": 37,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "opens",
+          "box": {
+            "left": 211,
+            "top": 817,
+            "right": 314,
+            "bottom": 846,
+            "width": 103,
+            "height": 29,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "at",
+          "box": {
+            "left": 328,
+            "top": 812,
+            "right": 359,
+            "bottom": 838,
+            "width": 31,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "nine",
+          "box": {
+            "left": 372,
+            "top": 810,
+            "right": 441,
+            "bottom": 838,
+            "width": 69,
+            "height": 28,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "on",
+          "box": {
+            "left": 454,
+            "top": 817,
+            "right": 494,
+            "bottom": 838,
+            "width": 40,
+            "height": 21,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "weekdays.",
+          "box": {
+            "left": 507,
+            "top": 809,
+            "right": 684,
+            "bottom": 846,
+            "width": 177,
+            "height": 37,
+            "isEmpty": false
+          },
+          "line": 3
+        },
+        {
+          "text": "On",
+          "box": {
+            "left": 41,
+            "top": 876,
+            "right": 85,
+            "bottom": 904,
+            "width": 44,
+            "height": 28,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "Sundays",
+          "box": {
+            "left": 98,
+            "top": 874,
+            "right": 243,
+            "bottom": 912,
+            "width": 145,
+            "height": 38,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "it",
+          "box": {
+            "left": 257,
+            "top": 876,
+            "right": 276,
+            "bottom": 904,
+            "width": 19,
+            "height": 28,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "opens",
+          "box": {
+            "left": 288,
+            "top": 883,
+            "right": 391,
+            "bottom": 912,
+            "width": 103,
+            "height": 29,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "at",
+          "box": {
+            "left": 404,
+            "top": 878,
+            "right": 435,
+            "bottom": 904,
+            "width": 31,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "eleven.",
+          "box": {
+            "left": 448,
+            "top": 874,
+            "right": 565,
+            "bottom": 904,
+            "width": 117,
+            "height": 30,
+            "isEmpty": false
+          },
+          "line": 4
+        },
+        {
+          "text": "Open",
+          "box": {
+            "left": 41,
+            "top": 941,
+            "right": 128,
+            "bottom": 977,
+            "width": 87,
+            "height": 36,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "now",
+          "box": {
+            "left": 142,
+            "top": 948,
+            "right": 212,
+            "bottom": 969,
+            "width": 70,
+            "height": 21,
+            "isEmpty": false
+          },
+          "line": 5
+        },
+        {
+          "text": "Hours",
+          "box": {
+            "left": 42,
+            "top": 1007,
+            "right": 142,
+            "bottom": 1035,
+            "width": 100,
+            "height": 28,
+            "isEmpty": false
+          },
+          "line": 6
+        },
+        {
+          "text": "may",
+          "box": {
+            "left": 156,
+            "top": 1014,
+            "right": 227,
+            "bottom": 1043,
+            "width": 71,
+            "height": 29,
+            "isEmpty": false
+          },
+          "line": 6
+        },
+        {
+          "text": "change",
+          "box": {
+            "left": 238,
+            "top": 1006,
+            "right": 363,
+            "bottom": 1043,
+            "width": 125,
+            "height": 37,
+            "isEmpty": false
+          },
+          "line": 6
+        },
+        {
+          "text": "on",
+          "box": {
+            "left": 375,
+            "top": 1014,
+            "right": 415,
+            "bottom": 1035,
+            "width": 40,
+            "height": 21,
+            "isEmpty": false
+          },
+          "line": 6
+        },
+        {
+          "text": "public",
+          "box": {
+            "left": 430,
+            "top": 1005,
+            "right": 531,
+            "bottom": 1043,
+            "width": 101,
+            "height": 38,
+            "isEmpty": false
+          },
+          "line": 6
+        },
+        {
+          "text": "holidays.",
+          "box": {
+            "left": 544,
+            "top": 1005,
+            "right": 693,
+            "bottom": 1043,
+            "width": 149,
+            "height": 38,
+            "isEmpty": false
+          },
+          "line": 6
+        },
+        {
+          "text": "Opening",
+          "box": {
+            "left": 427,
+            "top": 2317,
+            "right": 558,
+            "bottom": 2350,
+            "width": 131,
+            "height": 33,
+            "isEmpty": false
+          },
+          "line": 7
+        },
+        {
+          "text": "hours",
+          "box": {
+            "left": 569,
+            "top": 2317,
+            "right": 652,
+            "bottom": 2343,
+            "width": 83,
+            "height": 26,
+            "isEmpty": false
+          },
+          "line": 7
+        }
+      ],
+      "problem": null
+    }
+  ]
+}
