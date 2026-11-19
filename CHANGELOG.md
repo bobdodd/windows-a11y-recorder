@@ -46,6 +46,15 @@ Changes on `main` since 1.1.0, not yet released.
   check (owner, 2026-11-19). Such an item is judged as any control is.
   See `docs/architecture/android-checks.md`, step 29.
 
+### Sensory instructions
+
+- The fixture app has a new screen, "Shopping list", for instructions
+  that rely on sensory characteristics (WCAG 1.3.3): one instruction
+  each that names a button only by its place, its shape or its colour,
+  and one each that names a button by its text as well. Its first
+  recording is to be measured, with no model, before the check's rules
+  are proposed. See `docs/architecture/android-checks.md`, step 31.
+
 ### Link purpose
 
 - Five new checks of WCAG 2.4.4 and 2.4.9 on the links in an item's

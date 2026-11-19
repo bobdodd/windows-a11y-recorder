@@ -32,9 +32,10 @@ What exists so far:
 
 Not yet built: the model evaluation, and most of the fixtures for the
 checks not yet built. The first screens for them, "Recipes"
-(`colour-only`) and "Kitchen help" (`link-purpose`), are built and wait
-for their first recordings (see "The colour screen" and "The link
-purpose screen").
+(`colour-only`), "Kitchen help" (`link-purpose`) and "Shopping list"
+(`sensory`), are built; Recipes and Kitchen help have been recorded,
+and Shopping list waits for its first recording (see "The colour
+screen", "The link purpose screen" and "The sensory screen").
 
 One fixture recording is committed, `tests/fixtures/android/tour/`,
 extracted from the owner's fifth recording of the tour on 2026-11-19
@@ -737,6 +738,37 @@ at the `unbuilt` stage until its recording is extracted and committed.
 | `link_described` | "knife safety guide" in a sentence | No finding |
 | `link_details_soups`, `link_details_salads` | "Details" after "Soups:" and after "Salads:", links to two different addresses | On each, a warning that it is not specific on its own, and a warning for the same words to different addresses |
 | `link_hours_first`, `link_hours_again` | "opening hours" in two sentences, links to the same address | No finding |
+
+#### The sensory screen
+
+`sensory`, titled "Shopping list", built on 2026-11-19 for instructions
+that rely on sensory characteristics (WCAG 1.3.3), which the owner
+chose as the next check (2026-11-19). It is opened by the tour. Its
+first recording is the check's "measure first" data, read with no
+model before rules are proposed to the owner, so its check names and
+levels in `expected.json` are only a proposal, marked
+`"by": "unbuilt"`.
+
+Each pair of instructions is above the row of two buttons it is about.
+One instruction names a button only by a sensory characteristic, and
+the other names the other button by its text as well.
+
+| Element | Built as | Expected (proposed) |
+| --- | --- | --- |
+| `instruction_location` | "To save the list, tap the button on the right.", above Clear and Save | A warning: a button named only by where it is (F14) |
+| `instruction_location_named` | "To empty the list, tap Clear, on the left." | No finding |
+| `instruction_shape` | "To add a thing to buy, tap the round button.", above a round Add and a square Sort | A warning: a button named only by its shape (F14) |
+| `instruction_shape_named` | "To sort the list, tap Sort, the square button." | No finding |
+| `instruction_colour` | "To mark the list as bought, tap the green button.", above a green Done and a grey Undo | A warning: a button named only by its colour (F13) |
+| `instruction_colour_named` | "To take that back, tap Undo, the grey button." | No finding |
+
+The buttons are clickable TextViews, white text on a fill: Clear, Save,
+Add and Sort in #1A4FA0 (7.9:1), Done in #1E7A3C (5.4:1) and Undo in
+#5F6368 (6.1:1), each ratio being both the text's on its fill and the
+fill's on white. Add is a 64 dp circle; the others are rectangles with
+square corners, 48 dp tall and at least 88 dp wide. So the touch target
+and contrast checks have nothing to find. Clicking a button does
+nothing. Size, orientation and sound are not on the screen.
 
 ### Driven by a person
 

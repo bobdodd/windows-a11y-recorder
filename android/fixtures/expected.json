@@ -162,6 +162,28 @@
         { "check": "link-same-text", "item": "link_hours_again", "by": "rule", "finding": "none",
           "note": "\"opening hours\", the same words as the link before, to the same address" }
       ]
+    },
+    {
+      "id": "sensory",
+      "title": "Shopping list",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "unbuilt",
+      "expect": [
+        { "check": "instruction-by-location", "item": "instruction_location", "by": "unbuilt", "finding": "warning",
+          "note": "\"tap the button on the right\", naming the Save button only by where it is (F14)" },
+        { "check": "instruction-by-location", "item": "instruction_location_named", "by": "unbuilt", "finding": "none",
+          "note": "\"tap Clear, on the left\", naming the button by its text as well as where it is" },
+        { "check": "instruction-by-shape", "item": "instruction_shape", "by": "unbuilt", "finding": "warning",
+          "note": "\"tap the round button\", naming the Add button only by its shape (F14)" },
+        { "check": "instruction-by-shape", "item": "instruction_shape_named", "by": "unbuilt", "finding": "none",
+          "note": "\"tap Sort, the square button\", naming the button by its text as well as its shape" },
+        { "check": "instruction-by-colour", "item": "instruction_colour", "by": "unbuilt", "finding": "warning",
+          "note": "\"tap the green button\", naming the Done button only by its colour (F13)" },
+        { "check": "instruction-by-colour", "item": "instruction_colour_named", "by": "unbuilt", "finding": "none",
+          "note": "\"tap Undo, the grey button\", naming the button by its text as well as its colour" }
+      ]
     }
   ]
 }

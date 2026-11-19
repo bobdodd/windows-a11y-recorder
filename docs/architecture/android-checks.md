@@ -5716,6 +5716,43 @@ first recording.
 - Whether TalkBack speaks a link's sentence when it is reached through
   the Links reading control is not recorded (not measured).
 
+## Step 31: instructions that rely on sensory characteristics (1.3.3)
+
+### The owner's request (2026-11-19)
+
+Asked which check to measure next, with no model first, the owner chose
+"Sensory instructions (1.3.3)".
+
+### What the standards say (checked in cited documents)
+
+- [Understanding 1.3.3](https://www.w3.org/WAI/WCAG22/Understanding/sensory-characteristics.html)
+  (level A): "Instructions provided for understanding and operating
+  content do not rely solely on sensory characteristics of components
+  such as shape, color, size, visual location, orientation, or sound",
+  with the note "For requirements related to color, refer to Guideline
+  1.4". Its examples of what fails are a "round button" or a "button to
+  the right". Shape and place are still useful cues "as long as the
+  information is also provided in other ways". In languages where
+  "above" and "below" mean before and after in the content, "choose one
+  of the links below" conforms if what it refers to is in the right
+  place in the reading order and unambiguous.
+- [F14](https://www.w3.org/WAI/WCAG22/Techniques/failures/F14) is
+  identifying content only by its shape or location, such as "press the
+  button to the right". Its test: find the text's references to content
+  and check "that the references do not rely on only the visual shape
+  or location of the content". The sufficient technique, G96, is
+  "Providing textual identification of items that otherwise rely only on
+  sensory information to be understood". Understanding 1.3.3 also lists F13, which
+  includes instructions that only refer to colour, and F26, a graphical
+  symbol alone.
+
+### Measuring first
+
+The fixture app's "Shopping list" screen (android-fixtures.md, "The
+sensory screen") has a fault and a near miss for place, shape and
+colour. Its first recording is to be read with no model and no OCR, as
+for step 30, before rules are proposed to the owner.
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A

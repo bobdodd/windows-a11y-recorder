@@ -3,6 +3,7 @@ package io.github.bobdodd.a11yrecorder.fixtures;
 import android.app.Activity;
 import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.TextPaint;
@@ -37,7 +38,8 @@ final class Screens {
             new Screen("heading-look", "Points", Screens::headingLook),
             new Screen("web-basics", "Opening hours", Screens::webBasics),
             new Screen("colour-only", "Recipes", Screens::colourOnly),
-            new Screen("link-purpose", "Kitchen help", Screens::linkPurpose)));
+            new Screen("link-purpose", "Kitchen help", Screens::linkPurpose),
+            new Screen("sensory", "Shopping list", Screens::sensory)));
 
     private Screens() {
     }
@@ -292,6 +294,81 @@ final class Screens {
         paragraph.setHighlightColor(Ui.BACKGROUND);
         paragraph.setMinHeight(Ui.dp(activity, 48));
         return paragraph;
+    }
+
+    // Instructions that rely on sensory characteristics (WCAG 1.3.3), each
+    // pair over the row of buttons it is about: one instruction that names
+    // a button only by where it is, its shape or its colour (fails), and one
+    // that names the other button by its text as well (passes). Each button
+    // is at least 48 dp each way, its white text at least 5:1 on its fill
+    // and its fill at least 5:1 on white, so the touch target and contrast
+    // checks have nothing to find. Clicking a button does nothing.
+    private static final int BUTTON_GREY = 0xFF5F6368;
+    private static final int BUTTON_GREEN = 0xFF1E7A3C;
+    private static final int BUTTON_BLUE = 0xFF1A4FA0;
+
+    private static View sensory(Activity activity) {
+        LinearLayout column = Ui.column(activity);
+        column.addView(Ui.heading(activity, "Shopping list"));
+        clearOfTalkBack(activity, column, "Six things to buy this week.");
+
+        column.addView(instruction(activity, R.id.instruction_location, "To save the list, tap the button on the right."));
+        column.addView(instruction(activity, R.id.instruction_location_named, "To empty the list, tap Clear, on the left."));
+        column.addView(buttons(activity,
+                button(activity, "Clear", BUTTON_BLUE, false),
+                button(activity, "Save", BUTTON_BLUE, false)));
+
+        column.addView(instruction(activity, R.id.instruction_shape, "To add a thing to buy, tap the round button."));
+        column.addView(instruction(activity, R.id.instruction_shape_named, "To sort the list, tap Sort, the square button."));
+        column.addView(buttons(activity,
+                button(activity, "Add", BUTTON_BLUE, true),
+                button(activity, "Sort", BUTTON_BLUE, false)));
+
+        column.addView(instruction(activity, R.id.instruction_colour, "To mark the list as bought, tap the green button."));
+        column.addView(instruction(activity, R.id.instruction_colour_named, "To take that back, tap Undo, the grey button."));
+        column.addView(buttons(activity,
+                button(activity, "Done", BUTTON_GREEN, false),
+                button(activity, "Undo", BUTTON_GREY, false)));
+        return column;
+    }
+
+    private static TextView instruction(Activity activity, int id, String text) {
+        TextView line = Ui.body(activity, text);
+        line.setId(id);
+        return line;
+    }
+
+    private static LinearLayout buttons(Activity activity, TextView first, TextView second) {
+        LinearLayout row = Ui.row(activity);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        int gap = Ui.dp(activity, 16);
+        row.setPadding(0, Ui.dp(activity, 8), 0, gap);
+        row.addView(first);
+        LinearLayout.LayoutParams apart = (LinearLayout.LayoutParams) second.getLayoutParams();
+        apart.leftMargin = gap;
+        row.addView(second);
+        return row;
+    }
+
+    // A button drawn as white text on a fill: a 64 dp circle if round, or
+    // a rectangle with square corners at least 48 dp each way.
+    private static TextView button(Activity activity, String text, int fill, boolean round) {
+        TextView button = Ui.text(activity, text, 16, 0xFFFFFFFF);
+        button.setGravity(Gravity.CENTER);
+        GradientDrawable shape = new GradientDrawable();
+        shape.setShape(round ? GradientDrawable.OVAL : GradientDrawable.RECTANGLE);
+        shape.setColor(fill);
+        button.setBackground(shape);
+        int across = Ui.dp(activity, 16);
+        button.setPadding(across, 0, across, 0);
+        int size = Ui.dp(activity, 64);
+        LinearLayout.LayoutParams params = round
+                ? new LinearLayout.LayoutParams(size, size)
+                : new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, Ui.dp(activity, 48));
+        button.setLayoutParams(params);
+        button.setMinWidth(Ui.dp(activity, round ? 64 : 88));
+        button.setOnClickListener(view -> { });
+        return button;
     }
 
     // A line not tested, then a gap, so that what TalkBack draws over the

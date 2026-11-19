@@ -39,4 +39,11 @@
     <item type="id" name="link_details_salads" />
     <item type="id" name="link_hours_first" />
     <item type="id" name="link_hours_again" />
+
+    <item type="id" name="instruction_location" />
+    <item type="id" name="instruction_location_named" />
+    <item type="id" name="instruction_shape" />
+    <item type="id" name="instruction_shape_named" />
+    <item type="id" name="instruction_colour" />
+    <item type="id" name="instruction_colour_named" />
 </resources>
