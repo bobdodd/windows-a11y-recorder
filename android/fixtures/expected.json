@@ -8,6 +8,19 @@
   ],
   "screens": [
     {
+      "id": "index",
+      "title": "A11y Fixtures",
+      "framework": "views",
+      "how": "start",
+      "stage": "built",
+      "expect": [
+        { "check": "text-shown-as-heading", "line": "A11y Fixtures", "by": "rule", "finding": "warning",
+          "note": "the app bar's title, about twice as tall as the buttons' text and not marked as a heading; the check's answer for an app bar title, expected as it is (owner, 2026-11-19)" },
+        { "check": "text-shown-as-heading", "line": "Screens", "by": "rule", "finding": "none",
+          "note": "the index's own heading, 24 sp and bold, marked as a heading" }
+      ]
+    },
+    {
       "id": "touch-targets",
       "title": "Basket",
       "framework": "views",

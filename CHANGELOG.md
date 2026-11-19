@@ -67,6 +67,14 @@ Changes on `main` since 1.1.0, not yet released.
 - The fixture app's WebView is held in a frame that keeps it clear of
   the system bars, as the WebView given that padding itself drew its
   page under the app bar.
+- The fixture app's index is in `expected.json` as the `start` screen,
+  with the app bar title's `text-shown-as-heading` warning expected and
+  the index's "Screens" heading as its near miss.
+- `scripts/Run-FixtureTour.ps1` lists other apps' notifications on the
+  phone before Record and asks for them to be cleared, as demo mode did
+  not hide their icons.
+- The fixture extractor keeps only the fixture app's entry in the
+  record of the apps seen in the recording.
 
 ### Control names
 

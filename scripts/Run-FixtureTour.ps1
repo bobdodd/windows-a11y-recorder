@@ -12,19 +12,22 @@
     2. Installs the fixture app, built by scripts\Build-FixtureApp.ps1.
     3. Checks that TalkBack is on, as the tour is recorded with it on, and
        waits for you to turn it on if it is not.
-    4. Puts the phone's status bar in Android's demo mode: a fixed clock,
-       a full battery and no notification icons, so the recording holds
-       nothing of the phone's own notifications in the status bar.
-    5. Opens the fixture app's index, so the recording starts in the
+    4. Lists the other apps that have notifications on the phone, and asks
+       you to clear them: demo mode did not hide their icons on the owner's
+       phone (measured, 2026-11-19). Enter checks again; GO records with
+       them.
+    5. Puts the phone's status bar in Android's demo mode: a fixed clock,
+       a full battery and no notification icons.
+    6. Opens the fixture app's index, so the recording starts in the
        fixture app rather than on the phone's home screen.
-    6. Asks you to press Record in the recorder, and waits for Enter.
-    7. Opens each screen android\fixtures\expected.json marks "tour", as a
+    7. Asks you to press Record in the recorder, and waits for Enter.
+    8. Opens each screen android\fixtures\expected.json marks "tour", as a
        new task, and holds it for its "seconds".
-    8. Asks you to press Stop, waits for Enter, and then takes the status
+    9. Asks you to press Stop, waits for Enter, and then takes the status
        bar out of demo mode. It does so too if the tour stops early.
 
     Screens marked "person" are left for a person to open from the app's
-    index. See docs\architecture\android-fixtures.md.
+    index. The screen marked "start" is the index itself. See docs\architecture\android-fixtures.md.
 
     Runs on Windows PowerShell 5.1 and on PowerShell 7.
 #>
@@ -117,6 +120,45 @@ while (-not (Test-TalkBack)) {
     Write-Host ""
     Write-Host "TalkBack is off on the phone. The tour is recorded with TalkBack on."
     Read-Host "Turn TalkBack on, then press Enter here" | Out-Null
+}
+
+# Other apps' notifications: demo mode did not hide their icons on the
+# owner's phone (measured, 2026-11-19), so the owner clears them first
+# (owner's choice B). The keys "cmd notification list" prints are
+# user|package|id|tag|uid; the system's, TalkBack's and the recorder's own
+# apps' are left, as a person may not be able to clear them.
+$ownPackages = @("android", "com.android.systemui", "com.google.android.marvin.talkback",
+    "io.github.bobdodd.a11yrecorder.companion", $package)
+
+function Get-OtherNotifications {
+    $keys = & $Adb @deviceArguments shell cmd notification list 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        return $null
+    }
+    $found = @($keys | ForEach-Object {
+            $parts = ([string]$_).Split("|")
+            if ($parts.Count -ge 5) { $parts[1] }
+        } | Where-Object { $_ -and ($ownPackages -notcontains $_) } | Sort-Object -Unique)
+    return ,$found
+}
+
+while ($true) {
+    $others = Get-OtherNotifications
+    if ($null -eq $others) {
+        Write-Host ""
+        Write-Host "The phone's notifications could not be listed."
+        Read-Host "Clear the phone's notifications, check that the status bar shows no notification icons, then press Enter here" | Out-Null
+        break
+    }
+    if ($others.Count -eq 0) {
+        break
+    }
+    Write-Host ""
+    Write-Host "The phone has notifications from: $($others -join ', '). Their icons would be in the recording."
+    $answer = Read-Host "Clear them on the phone, then press Enter here to check again, or type GO to record with them"
+    if ($answer -eq "GO") {
+        break
+    }
 }
 
 # FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_CLEAR_TASK: each screen is a new

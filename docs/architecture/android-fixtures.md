@@ -165,9 +165,12 @@ error, so the file cannot drift into meaning more than the tests read.
   screens apart. It describes the screen's made-up content, such as
   "Basket", not the check, so the title checks have nothing to find.
 - **framework:** `views` or `webview`.
-- **how:** `tour`, opened by the tour script, or `person`, which also
-  has `steps`, the steps a person takes on the screen, in at most five.
-- **seconds:** how long the tour holds the screen.
+- **how:** `tour`, opened by the tour script; `person`, which also
+  has `steps`, the steps a person takes on the screen, in at most five;
+  or `start`, the app's index, which the tour starts on and holds while
+  the person presses Record. Its title is the app's name, and it has no
+  `seconds` and no `steps`.
+- **seconds:** how long the tour holds a `tour` screen.
 - **stage:** `proof`, a built check proving the framework; `unbuilt`, a
   check not yet built; or `built`, a built check's later coverage.
 - **expect:** one entry for each check and element.
@@ -212,17 +215,22 @@ with what. The answer itself is scored by the model evaluation.
 3. checks that TalkBack is on (TalkBack among the enabled accessibility
    services and touch exploration on), and waits for the person to turn
    it on if it is not;
-4. puts the status bar in Android's demo mode: a fixed clock, a full
+4. lists the other apps with notifications on the phone, read with
+   `adb shell cmd notification list`, and asks the person to clear them,
+   as demo mode did not hide their icons on the owner's phone (measured,
+   2026-11-19). Enter checks again, and GO records with them. The
+   system's, TalkBack's and the recorder's own apps are not listed;
+5. puts the status bar in Android's demo mode: a fixed clock, a full
    battery and no notification icons. Network icons are not set, as the
    demo mode's network commands are reported to stop the System UI on
    recent Android;
-5. opens the fixture app's index, so the recording starts in the
+6. opens the fixture app's index, so the recording starts in the
    fixture app rather than on the home screen;
-6. asks the person to press Record in the recorder, and waits for
+7. asks the person to press Record in the recorder, and waits for
    Enter;
-7. opens each `tour` screen with `am start -W`, holds it for its
+8. opens each `tour` screen with `am start -W`, holds it for its
    `seconds`, and names it in the console as it goes;
-8. asks the person to press Stop, waits for Enter, and takes the status
+9. asks the person to press Stop, waits for Enter, and takes the status
    bar out of demo mode, as it does too if the tour stops early.
 
 Screens marked `person` are not opened by the tour; the person opens
@@ -249,8 +257,11 @@ Built on 2026-11-19 against the owner's first recording of the tour.
      events, which name other apps and hold their text, and TalkBack's
      log, which no check reads: on the second recording it was 3,281 of
      the 4,469 events in the span, one line each in the list of text
-     not the app's. What TalkBack said is kept, in its speech channel. A
-     `manifest.json` lists only the kept files;
+     not the app's. What TalkBack said is kept, in its speech channel.
+     The record of the apps seen in the recording, read when it stopped,
+     keeps only the fixture app's entry, as the others name the phone's
+     apps and their versions. A `manifest.json` lists only the kept
+     files;
   2. runs the rules on the trimmed recording with Windows OCR and no
      model (every model check is marked not asked), keeping only the
      pictures the rules read, what OCR read in each (`ocr.json`), and
@@ -458,8 +469,8 @@ events and screenshots in the sandbox. The recording was not kept.
 - **Findings no expectation names**, which would fail the rule tests:
   - on the index screen, `text-shown-as-heading` warned that the app
     bar's title, "A11y Fixtures", 46 pixels tall against 24 for body
-    text, is not marked as a heading. The index is in the tour but not
-    in `expected.json`. Not decided: see below.
+    text, is not marked as a heading. The index was in the tour but not
+    in `expected.json`; see the owner's decisions below.
   - on the index screen, `non-text-contrast` did not measure two of the
     screen buttons, under the accessibility button's window; a check
     not run is only reported.
@@ -470,19 +481,20 @@ events and screenshots in the sandbox. The recording was not kept.
   the recording, read when it stopped, named another app and its
   version. The fixture from this recording is not to be committed.
 
-### Open decisions
+### The owner's decisions on the third recording
 
-- **The index screen's app bar title.** Either the index screen is
-  listed in `expected.json` with this warning as expected; or the
-  check leaves out an app bar title that is the window's title, which
-  changes it for real apps too; or the index screen is left out of the
-  extract.
-- **Notification icons in the status bar.** Either the extractor keeps
-  the status bar's window but not the text of its items; or the tour
-  asks the owner to clear the phone's notifications first and checks
-  that none is shown; or both.
-- **The record of the apps seen.** The extractor could keep only the
-  fixture app's entry in it.
+The owner chose on 2026-11-19 ("1:A", "2: B", "3: yes"):
+
+- **The index screen's app bar title:** the index screen is listed in
+  `expected.json`, as the `start` screen, with this warning expected,
+  as the check judges any app bar title alike; the index's own
+  "Screens" heading is its near miss. The check is not changed.
+- **Notification icons in the status bar:** the tour asks the owner to
+  clear the phone's notifications before Record and checks that none
+  of another app is left. The extractor does not change the status
+  bar's window.
+- **The record of the apps seen:** the extractor keeps only the fixture
+  app's entry in it. Not yet run on a recording.
 
 ## Model evaluation
 

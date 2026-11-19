@@ -93,7 +93,7 @@ using (var reader = RecordingFileReader.Open(source))
             continue;
         }
 
-        kept.Add(stored);
+        kept.Add(OnlyTheFixtureApp(stored, package, left));
     }
 }
 
@@ -279,6 +279,37 @@ static string? Leave(Recorder.Contracts.RecorderEvent record, long start, long e
     return timed && (record.MonotonicNanoseconds < start || record.MonotonicNanoseconds > end)
         ? "outside the fixture app's visits"
         : null;
+}
+
+// The record of the apps seen in the recording, read when it stopped, with
+// only the fixture app's entry: the others name the phone's own apps and
+// their versions (owner, 2026-11-19).
+static StoredEvent OnlyTheFixtureApp(StoredEvent stored, string package, Dictionary<string, int> left)
+{
+    var payload = stored.Event.Payload;
+    if (stored.Event.Channel != "device.android" || payload.ValueKind != JsonValueKind.Object ||
+        !payload.TryGetProperty("apps", out var apps) || apps.ValueKind != JsonValueKind.Array)
+    {
+        return stored;
+    }
+
+    var node = JsonNode.Parse(payload.GetRawText())!.AsObject();
+    var kept = new JsonArray();
+    foreach (var app in apps.EnumerateArray())
+    {
+        if (app.ValueKind == JsonValueKind.Object && app.TryGetProperty("package", out var name) &&
+            name.ValueKind == JsonValueKind.String && name.GetString() == package)
+        {
+            kept.Add(JsonNode.Parse(app.GetRawText()));
+        }
+        else
+        {
+            left["other apps in the record of apps seen"] = left.GetValueOrDefault("other apps in the record of apps seen") + 1;
+        }
+    }
+
+    node["apps"] = kept;
+    return stored with { Event = stored.Event with { Payload = JsonSerializer.SerializeToElement(node) } };
 }
 
 // The words of the fixture app's source: its Java, XML and HTML.

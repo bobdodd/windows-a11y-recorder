@@ -17,7 +17,7 @@ public sealed partial class AndroidFixtureAppTests
     private static readonly string[] ExpectFields = ["check", "item", "line", "by", "finding", "note"];
     private static readonly string[] AppFields = ["check", "by", "finding", "note"];
     private static readonly string[] Frameworks = ["views", "webview"];
-    private static readonly string[] Hows = ["tour", "person"];
+    private static readonly string[] Hows = ["tour", "person", "start"];
     private static readonly string[] Stages = ["proof", "unbuilt", "built"];
     private static readonly string[] Bys = ["rule", "model", "unbuilt"];
     private static readonly string[] Findings = ["error", "warning", "info", "not-run", "none"];
@@ -52,6 +52,12 @@ public sealed partial class AndroidFixtureAppTests
             {
                 Assert.InRange(screen.GetProperty("seconds").GetInt32(), 1, 60);
                 Assert.False(screen.TryGetProperty("steps", out _), $"{id}: a tour screen has no steps");
+            }
+            else if (how == "start")
+            {
+                // The index, which the tour starts on, held while the owner presses Record.
+                Assert.False(screen.TryGetProperty("seconds", out _), $"{id}: the start screen has no seconds");
+                Assert.False(screen.TryGetProperty("steps", out _), $"{id}: the start screen has no steps");
             }
             else
             {
@@ -105,11 +111,18 @@ public sealed partial class AndroidFixtureAppTests
         var source = File.ReadAllText(FixturePath("src", "io", "github", "bobdodd", "a11yrecorder", "fixtures", "Screens.java"));
         var inApp = ScreenPattern().Matches(source).Select(m => (m.Groups["id"].Value, m.Groups["title"].Value)).ToList();
         using var expected = Expected();
-        var listed = expected.RootElement.GetProperty("screens").EnumerateArray()
+        var screens = expected.RootElement.GetProperty("screens").EnumerateArray().ToList();
+        var listed = screens
+            .Where(s => s.GetProperty("how").GetString() != "start")
             .Select(s => (s.GetProperty("id").GetString()!, s.GetProperty("title").GetString()!))
             .ToList();
         Assert.NotEmpty(inApp);
         Assert.Equal(inApp, listed);
+
+        // One start screen, the index, titled with the app's name.
+        var start = Assert.Single(screens, s => s.GetProperty("how").GetString() == "start");
+        var strings = File.ReadAllText(FixturePath("res", "values", "strings.xml"));
+        Assert.Contains($"<string name=\"app_name\">{start.GetProperty("title").GetString()}</string>", strings);
     }
 
     [Fact]
