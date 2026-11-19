@@ -31,9 +31,10 @@ What exists so far:
   tests").
 
 Not yet built: the model evaluation, and most of the fixtures for the
-checks not yet built. The first screen for them, "Recipes"
-(`colour-only`), is built and waits for its first recording (see "The
-colour screen").
+checks not yet built. The first screens for them, "Recipes"
+(`colour-only`) and "Kitchen help" (`link-purpose`), are built and wait
+for their first recordings (see "The colour screen" and "The link
+purpose screen").
 
 One fixture recording is committed, `tests/fixtures/android/tour/`,
 extracted from the owner's fifth recording of the tour on 2026-11-19
@@ -720,6 +721,23 @@ screenshot, with no OCR and no model:
 - **The paragraphs:** each is `clickable=false` and `focusable=true` in
   the tree; the link inside it is not an item of its own.
 
+#### The link purpose screen
+
+`link-purpose`, titled "Kitchen help", built on 2026-11-19 and opened
+by the tour, for the link purpose checks (android-checks.md, step 30).
+Every link is underlined, so the check of links shown only by colour
+has nothing to find. The addresses are example.org's, and the tour
+does not follow them. The expected findings are at AA. The screen stays
+at the `unbuilt` stage until its recording is extracted and committed.
+
+| Element | Built as | Expected |
+| --- | --- | --- |
+| `link_alone` | "Read more", a ClickableSpan that is all of its paragraph, after a paragraph saying what it is about | An error: a non-specific link with no context |
+| `link_here` | "here" in "To see the full menu, tap here." | No context finding; a warning that it is not specific on its own |
+| `link_described` | "knife safety guide" in a sentence | No finding |
+| `link_details_soups`, `link_details_salads` | "Details" after "Soups:" and after "Salads:", links to two different addresses | On each, a warning that it is not specific on its own, and a warning for the same words to different addresses |
+| `link_hours_first`, `link_hours_again` | "opening hours" in two sentences, links to the same address | No finding |
+
 ### Driven by a person
 
 | Check | WCAG | Fails | Near miss |
@@ -733,9 +751,6 @@ screenshot, with no OCR and no model:
 Screens for these can be built so they are ready, but each needs the
 recorder or companion app to record more, so they come last.
 
-- **Link text (2.4.4):** needs links' places, which the companion app
-  records from protocol 8 and the checks' items hold
-  (android-checks.md, step 29); no check reads them yet.
 - **Focus visible (2.4.7):** needs a Bluetooth keyboard.
 - **Resize text (1.4.4):** needs the font scale recorded, and a pass at
   the largest scale.

@@ -46,6 +46,29 @@ Changes on `main` since 1.1.0, not yet released.
   check (owner, 2026-11-19). Such an item is judged as any control is.
   See `docs/architecture/android-checks.md`, step 29.
 
+### Link purpose
+
+- Five new checks of WCAG 2.4.4 and 2.4.9 on the links in an item's
+  text, from the words alone, with no model:
+  - "Link with no words (WCAG 2.4.4)", an error;
+  - "Non-specific link with no context (WCAG 2.4.4)", a phrase such as
+    "read more" that is all of its item's text, an error;
+  - "Link text not specific on its own (WCAG 2.4.9, AAA)", such a
+    phrase in a sentence;
+  - "Same link text for different addresses (WCAG 2.4.9, AAA)", as a
+    screen reader's list of links gives the same words for both, a
+    check of its own (owner, 2026-11-19);
+  - "Same link text and context for different addresses (WCAG 2.4.4)",
+    an error.
+- The two 2.4.9 checks are errors at AAA and, at AA, warnings that
+  2.4.9 would fail, referring to WCAG 5.2.4 (owner, 2026-11-19). The
+  phrase list is English. Each finding says a person can set it aside if
+  the purpose would be ambiguous to users in general. They are in the
+  Checks tab, the summary and the report, with guidance. See
+  `docs/architecture/android-checks.md`, step 30.
+- The fixture app has a new screen, "Kitchen help", with faults and
+  near misses for these checks.
+
 ### Fixture app
 
 - A plan for testing the Android checks with screens of known faults

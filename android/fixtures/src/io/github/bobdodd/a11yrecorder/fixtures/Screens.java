@@ -8,6 +8,7 @@ import android.text.Spanned;
 import android.text.TextPaint;
 import android.text.method.LinkMovementMethod;
 import android.text.style.ClickableSpan;
+import android.text.style.URLSpan;
 import android.view.Gravity;
 import android.view.View;
 import android.webkit.WebView;
@@ -35,7 +36,8 @@ final class Screens {
             new Screen("control-names", "Holiday photos", Screens::controlNames),
             new Screen("heading-look", "Points", Screens::headingLook),
             new Screen("web-basics", "Opening hours", Screens::webBasics),
-            new Screen("colour-only", "Recipes", Screens::colourOnly)));
+            new Screen("colour-only", "Recipes", Screens::colourOnly),
+            new Screen("link-purpose", "Kitchen help", Screens::linkPurpose)));
 
     private Screens() {
     }
@@ -205,6 +207,31 @@ final class Screens {
         return column;
     }
 
+    // Link purpose (WCAG 2.4.4 and 2.4.9), each link underlined so the
+    // check of links told apart only by colour has nothing to find:
+    // "Read more" as all of its paragraph, after a paragraph that gives its
+    // context in another item (fails 2.4.4); "here" in a sentence that says
+    // where it leads (passes 2.4.4, fails 2.4.9: a warning at AA); a link
+    // whose words say where it leads (passes both); two "Details" links to
+    // different addresses, each after its course's name (non-specific, and
+    // the same words for different places); and two "opening hours" links
+    // to the same address (passes). The addresses are example.org's, and
+    // the tour does not follow them.
+    private static View linkPurpose(Activity activity) {
+        LinearLayout column = Ui.column(activity);
+        column.addView(Ui.heading(activity, "Kitchen help"));
+        clearOfTalkBack(activity, column, "Tips for cooking at home.");
+        column.addView(Ui.body(activity, "Knives are kept sharp and stored in the top drawer."));
+        column.addView(link(activity, R.id.link_alone, "", "Read more", "", true));
+        column.addView(link(activity, R.id.link_here, "To see the full menu, tap ", "here", ".", true));
+        column.addView(link(activity, R.id.link_described, "Before you start, read the ", "knife safety guide", ".", true));
+        column.addView(link(activity, R.id.link_details_soups, "Soups: ", "Details", "", "https://example.org/soups"));
+        column.addView(link(activity, R.id.link_details_salads, "Salads: ", "Details", "", "https://example.org/salads"));
+        column.addView(link(activity, R.id.link_hours_first, "See the ", "opening hours", " before you come.", "https://example.org/hours"));
+        column.addView(link(activity, R.id.link_hours_again, "The ", "opening hours", " change in winter.", "https://example.org/hours"));
+        return column;
+    }
+
     // A tab at least 48 dp each way, so the touch target checks have
     // nothing to find. A selected tab is marked selected for accessibility
     // services, and shown in TAB_SELECTED, and, when marked, bold and
@@ -231,8 +258,7 @@ final class Screens {
     // focusable, and the paragraph is at least 48 dp tall, so the touch
     // target checks have nothing to find.
     private static TextView link(Activity activity, int id, String before, String linked, String after, boolean underlined) {
-        SpannableString text = new SpannableString(before + linked + after);
-        text.setSpan(new ClickableSpan() {
+        return paragraph(activity, id, before, linked, after, new ClickableSpan() {
             @Override
             public void onClick(View view) {
             }
@@ -242,7 +268,23 @@ final class Screens {
                 paint.setColor(LINK);
                 paint.setUnderlineText(underlined);
             }
-        }, before.length(), before.length() + linked.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        });
+    }
+
+    // A paragraph holding a link to an address, a URLSpan, underlined.
+    private static TextView link(Activity activity, int id, String before, String linked, String after, String url) {
+        return paragraph(activity, id, before, linked, after, new URLSpan(url) {
+            @Override
+            public void updateDrawState(TextPaint paint) {
+                paint.setColor(LINK);
+                paint.setUnderlineText(true);
+            }
+        });
+    }
+
+    private static TextView paragraph(Activity activity, int id, String before, String linked, String after, Object span) {
+        SpannableString text = new SpannableString(before + linked + after);
+        text.setSpan(span, before.length(), before.length() + linked.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         TextView paragraph = Ui.body(activity, "");
         paragraph.setId(id);
         paragraph.setText(text);

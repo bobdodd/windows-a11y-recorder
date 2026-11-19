@@ -245,6 +245,21 @@ public static class PhoneCheckNames
     public const string LineBreakMidSentence = "line-break-mid-sentence";
 
     /// <summary>
+    /// Link purpose (step 30, PhoneLinkPurposeChecks), WCAG 2.4.4 and 2.4.9,
+    /// from the links recorded in items' text, each one discrete issue
+    /// (owner, 2026-11-19): a link with no words, a non-specific link with
+    /// no context and the same words and context to different addresses
+    /// (errors under 2.4.4); a non-specific link and the same words to
+    /// different addresses (errors under 2.4.9 at AAA, warnings referring to
+    /// 5.2.4 at AA).
+    /// </summary>
+    public const string LinkNoText = "link-no-text";
+    public const string LinkNoContext = "link-no-context";
+    public const string LinkNotSpecific = "link-not-specific";
+    public const string LinkSameTextAndContext = "link-same-text-and-context";
+    public const string LinkSameText = "link-same-text";
+
+    /// <summary>
     /// A link in an item's text told apart from the text around it only by
     /// colour, and an item marked selected shown so only by colour (step
     /// 29, PhoneColourOnlyRun), WCAG 1.4.1, each one discrete issue: an
@@ -263,6 +278,7 @@ public static class PhoneCheckNames
         TextGoneByItself, TextGoneAsContentChanged, TextUpdatingByItself, MovingByItself,
         ContextOnFocus, ContextOnScreenReaderFocus, ContextOnInput, OrientationRestricted,
         SpacedLetters, SpaceColumns, LineBreakMidSentence,
+        LinkNoText, LinkNoContext, LinkNotSpecific, LinkSameTextAndContext, LinkSameText,
         TitleMissing, TitleShared, NoHeading, FirstHeadingLow, ManyHeadings,
     ];
 
@@ -321,6 +337,11 @@ public static class PhoneCheckNames
         SpacedLetters => "Letters spaced apart with white space (WCAG 1.3.2, F32)",
         SpaceColumns => "Columns made with white space (WCAG 1.3.2, F33)",
         LineBreakMidSentence => "Line break in mid-sentence (WCAG 1.3.2)",
+        LinkNoText => "Link with no words (WCAG 2.4.4)",
+        LinkNoContext => "Non-specific link with no context (WCAG 2.4.4)",
+        LinkNotSpecific => "Link text not specific on its own (WCAG 2.4.9, AAA)",
+        LinkSameTextAndContext => "Same link text and context for different addresses (WCAG 2.4.4)",
+        LinkSameText => "Same link text for different addresses (WCAG 2.4.9, AAA)",
         LinkOnlyByColour => "Link told apart only by colour (WCAG 1.4.1)",
         SelectedOnlyByColour => "Selected state shown only by colour (WCAG 1.4.1)",
         _ => check,

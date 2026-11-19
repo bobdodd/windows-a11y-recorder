@@ -5633,6 +5633,80 @@ it (inferred, by applying them to the measured records).
    at AA and is an error at AAA); and two "Details" links to different
    addresses.
 
+### The owner's decision on the rules (2026-11-19)
+
+The owner: "The rules are ok, but specifically duplicate link text
+needs to called out because of screen-readers. So, separate error to
+just being a fail for lack of context at 2.4.9".
+
+So the same words for different addresses is a check of its own,
+apart from the non-specific link, as a screen reader's list of links
+gives the same words for both. It is read here as keeping rule 4's
+levels: an error at AAA under 2.4.9, and a warning at AA referring to
+5.2.4 (inferred from "The rules are ok"); when the items' other words
+are the same as well, it is an error under 2.4.4 at both levels. Making
+it an error at AA too is a one-line change.
+
+### As built
+
+`PhoneLinkPurposeChecks` in `Recorder.Session`, run on each window's
+items with the other per-window checks, with no model and no OCR. Only
+items shown to the user (visible, with bounds) are looked at, and every
+link recorded in their text. The words are compared after lower-casing,
+joining white space and trimming punctuation and symbols from the ends.
+
+| Check | Finding | Level |
+| --- | --- | --- |
+| `link-no-text`, "Link with no words (WCAG 2.4.4)" | A link with no letter or digit in its words | Error; at AAA it says 2.4.9 fails as well |
+| `link-no-context`, "Non-specific link with no context (WCAG 2.4.4)" | A non-specific phrase that is all of its item's text (F63) | Error |
+| `link-not-specific`, "Link text not specific on its own (WCAG 2.4.9, AAA)" | A non-specific phrase with other words in its item (F84) | Warning at AA, referring to 5.2.4; error at AAA |
+| `link-same-text-and-context`, "Same link text and context for different addresses (WCAG 2.4.4)" | The same words and the same other words in the item as a link to a different address | Error |
+| `link-same-text`, "Same link text for different addresses (WCAG 2.4.9, AAA)" | The same words as a link to a different address, its other words differing | Warning at AA, referring to 5.2.4; error at AAA |
+
+The non-specific phrases, in English: click, click here, tap, tap here,
+here, this, this link, link, go, continue, more, read more, learn more,
+find out more, see more, more info, more information, details, more
+details, info.
+
+Each finding says a person can set it aside if the link's purpose would
+be ambiguous to users in general. One item's findings for one check are
+merged into one result. The run counts the links read and the items
+with text whose links were not recorded, and the Summary has a section
+"Link purpose (WCAG 2.4.4, and 2.4.9 at AAA), five checks". The
+guidance file has an entry for each check, citing 2.4.4, 2.4.9, G91,
+G53, F63, F84, 5.2.4 and TalkBack's Links reading control.
+
+The fixture app has a new screen, "Kitchen help" (`link-purpose`), with
+a fault and a near miss for the non-specific and duplicate checks
+(android-fixtures.md, "The link purpose screen"). It waits for its
+first recording.
+
+### Checked
+
+- Rule tests, `PhoneLinkPurposeChecksTests`, on made-up windows: each
+  check's fault and near miss, the AA and AAA levels, the same words to
+  the same address making no finding, links with no address not
+  compared, and items not shown not looked at (measured, the tests
+  pass).
+- On the Recipes recording's measured records the rules make no
+  finding (inferred, by applying them; the checks have not yet been run
+  on a recording).
+
+### Limits
+
+- The phrase list is English; another language gets only the checks on
+  no words and on the same words.
+- Links with no recorded address, such as ClickableSpans, are not
+  compared for sameness, as two of them cannot be told to go to
+  different places.
+- Links are compared within one window, not across a screen's windows
+  or visits.
+- A content description over an item's text is not considered, so a
+  link whose item is described differently is judged on its text.
+- A control on its own that behaves like a link is not judged.
+- Whether TalkBack speaks a link's sentence when it is reached through
+  the Links reading control is not recorded (not measured).
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A

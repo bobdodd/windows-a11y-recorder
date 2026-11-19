@@ -31,4 +31,12 @@
     <item type="id" name="selected_marked" />
     <item type="id" name="link_colour" />
     <item type="id" name="link_underlined" />
+
+    <item type="id" name="link_alone" />
+    <item type="id" name="link_here" />
+    <item type="id" name="link_described" />
+    <item type="id" name="link_details_soups" />
+    <item type="id" name="link_details_salads" />
+    <item type="id" name="link_hours_first" />
+    <item type="id" name="link_hours_again" />
 </resources>

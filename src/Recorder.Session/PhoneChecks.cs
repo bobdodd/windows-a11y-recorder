@@ -256,6 +256,15 @@ public sealed class PhoneCheckRun
     /// </summary>
     public int SequenceTexts { get; private set; }
 
+    /// <summary>
+    /// Step 30: the links in shown items' text looked at for link purpose,
+    /// and the shown items with text whose links were not recorded (before
+    /// the companion app's protocol 8), once for each distinct sight.
+    /// </summary>
+    public int Links { get; private set; }
+
+    public int LinksNotRecorded { get; private set; }
+
     /// <summary>Why a snapshot could not be checked, one for each such snapshot.</summary>
     public IReadOnlyList<string> Problems { get; private set; } = [];
 
@@ -309,6 +318,7 @@ public sealed class PhoneCheckRun
             var byTaking = new Dictionary<string, (PhoneCheckWindow Window, IReadOnlyList<PhoneCheckResult> Results)?>(StringComparer.Ordinal);
             var fieldsByTaking = new Dictionary<string, PhoneFieldChecks.Measured>(StringComparer.Ordinal);
             var sequenceByTaking = new Dictionary<string, int>(StringComparer.Ordinal);
+            var linksByTaking = new Dictionary<string, PhoneLinkPurposeChecks.Measured>(StringComparer.Ordinal);
             foreach (var settled in visit.SettledSnapshots)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -361,10 +371,12 @@ public sealed class PhoneCheckRun
                             var context = new PhoneCheckContext((float)(density?.PixelsPerDp ?? 0), screen?.Width, screen?.Height, level);
                             var fieldCheck = PhoneFieldChecks.Measure(window, context);
                             var sequenceCheck = PhoneSequenceChecks.Measure(window);
+                            var linkCheck = PhoneLinkPurposeChecks.Measure(window, context);
                             checkedWindow = (window, [.. PhoneTreeChecks.Run(window, context), .. PhoneFocusChecks.Run(window, context), .. fieldCheck.Results,
-                                .. sequenceCheck.Results, .. PhoneScreenChecks.Run(window, context)]);
+                                .. sequenceCheck.Results, .. linkCheck.Results, .. PhoneScreenChecks.Run(window, context)]);
                             fieldsByTaking[key] = fieldCheck;
                             sequenceByTaking[key] = sequenceCheck.Texts;
+                            linksByTaking[key] = linkCheck;
                             if (checkedTakings.Add(taking.EventId))
                             {
                                 run.WindowsChecked++;
@@ -412,6 +424,12 @@ public sealed class PhoneCheckRun
                 if (sequenceByTaking.TryGetValue(key, out var sequenceTexts))
                 {
                     run.SequenceTexts += sequenceTexts;
+                }
+
+                if (linksByTaking.TryGetValue(key, out var linkCounts))
+                {
+                    run.Links += linkCounts.Links;
+                    run.LinksNotRecorded += linkCounts.NotRecorded;
                 }
                 textFocus.TryGetValue(visit.Screen.Package, out var sofar);
                 textFocus[visit.Screen.Package] = (sofar.Text + focus.TextItems, sofar.Focusable + focus.FocusableTextItems);

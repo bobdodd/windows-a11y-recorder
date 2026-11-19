@@ -305,6 +305,19 @@ public static class PhoneChecksSummary
             Result(Of(run.Findings, PhoneCheckNames.SpacedLetters, PhoneCheckNames.SpaceColumns, PhoneCheckNames.LineBreakMidSentence)),
             [$"{Count(run.SequenceTexts, "text")} looked at: each shown item's text, content description, hint, state description and pane title, from the tree, not OCR; text typed into a field is not looked at."],
             "Looked for: letters of a word spaced apart (3 or more single letters, 2 or more Han, kana or Hangul, initialisms included), 2 or more lines with gaps of 2 or more spaces or a tab, and a line break before a lowercase letter with no . ! ? : or ; before it. Whether the order of the content makes sense is not looked for."));
+
+        List<string> links = [$"{Count(run.Links, "link")} looked at, in shown items' text, from the tree, with no model."];
+        if (run.LinksNotRecorded > 0)
+        {
+            links.Add($"{Count(run.LinksNotRecorded, "shown item")} with text not checked, as the companion app did not record the links in the items' text before protocol 8.");
+        }
+
+        sections.Add(new PhoneSummarySection(
+            "Link purpose (WCAG 2.4.4, and 2.4.9 at AAA), five checks",
+            Result(Of(run.Findings, PhoneCheckNames.LinkNoText, PhoneCheckNames.LinkNoContext, PhoneCheckNames.LinkNotSpecific,
+                PhoneCheckNames.LinkSameTextAndContext, PhoneCheckNames.LinkSameText)),
+            links,
+            "Looked for: a link with no letter or digit; a non-specific phrase, such as \"read more\" or \"here\", in English only, alone in its item or with a sentence; and the same words to different recorded addresses. At AA, what fails only 2.4.9 is a warning referring to WCAG 5.2.4. A link's context is the rest of its own item's text. Whether a link's words describe where it leads is not judged."));
         return sections;
     }
 

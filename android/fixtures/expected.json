@@ -132,6 +132,36 @@
         { "check": "link-only-by-colour", "item": "link_underlined", "by": "rule", "finding": "none",
           "note": "a paragraph holding a link in the same colour, underlined; measured underlined, 2.34:1" }
       ]
+    },
+    {
+      "id": "link-purpose",
+      "title": "Kitchen help",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "unbuilt",
+      "expect": [
+        { "check": "link-no-context", "item": "link_alone", "by": "rule", "finding": "error",
+          "note": "\"Read more\", a ClickableSpan that is all of its paragraph's text, after a paragraph in another item" },
+        { "check": "link-no-context", "item": "link_here", "by": "rule", "finding": "none",
+          "note": "\"here\", in a sentence that says where it leads, so its context is in its own item" },
+        { "check": "link-not-specific", "item": "link_here", "by": "rule", "finding": "warning",
+          "note": "\"here\" passes 2.4.4 with its sentence but fails 2.4.9 on its words alone: a warning at AA, referring to WCAG 5.2.4" },
+        { "check": "link-not-specific", "item": "link_described", "by": "rule", "finding": "none",
+          "note": "\"knife safety guide\", words that say where the link leads" },
+        { "check": "link-not-specific", "item": "link_details_soups", "by": "rule", "finding": "warning",
+          "note": "\"Details\" after \"Soups:\", non-specific with its context in its item" },
+        { "check": "link-not-specific", "item": "link_details_salads", "by": "rule", "finding": "warning",
+          "note": "\"Details\" after \"Salads:\", non-specific with its context in its item" },
+        { "check": "link-same-text", "item": "link_details_soups", "by": "rule", "finding": "warning",
+          "note": "a URLSpan to one example.org address with the same words as the salads' link to another" },
+        { "check": "link-same-text", "item": "link_details_salads", "by": "rule", "finding": "warning",
+          "note": "a URLSpan to one example.org address with the same words as the soups' link to another" },
+        { "check": "link-same-text", "item": "link_hours_first", "by": "rule", "finding": "none",
+          "note": "\"opening hours\", the same words as the next link, to the same address" },
+        { "check": "link-same-text", "item": "link_hours_again", "by": "rule", "finding": "none",
+          "note": "\"opening hours\", the same words as the link before, to the same address" }
+      ]
     }
   ]
 }
