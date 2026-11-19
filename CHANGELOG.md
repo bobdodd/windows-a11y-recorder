@@ -60,6 +60,10 @@ Changes on `main` since 1.1.0, not yet released.
   `expected.json` does not list, and only report information notes.
   `expected.json` has an `app` list for app-level findings, with the
   fixture app's `no-live-region` warning.
+- The fixture app's Delivery, Points and WebView screens have a line
+  not tested after the heading and a gap before the tested lines, so
+  TalkBack's focus outline and the accessibility button cover none of
+  them.
 
 ### Control names
 

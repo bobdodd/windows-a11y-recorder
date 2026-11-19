@@ -73,9 +73,11 @@ final class Screens {
     // the text is large (a warning); and about 4.54:1, just over the 4.5:1
     // it needs (passes when measured from a screenshot; from the video the
     // check allows for the video's colours and warns that it is near).
+    // They follow a line not tested and a gap (see clearOfTalkBack).
     private static View textContrast(Activity activity) {
         LinearLayout column = Ui.column(activity);
         column.addView(Ui.heading(activity, "Delivery"));
+        clearOfTalkBack(activity, column, "Choose how your order reaches you.");
         TextView error = Ui.text(activity, "Orders are packed on the day they are placed.", 16, 0xFFB0B0B0);
         error.setId(R.id.contrast_error);
         column.addView(error);
@@ -107,13 +109,14 @@ final class Screens {
 
     // "Points", large and bold, marked as a heading (passes); a value,
     // "1,250 points", in body text, marked as a heading (fails, a model's
-    // question). The screen's own heading is the first.
+    // question). The screen's own heading is the first. The value follows
+    // a line not tested and a gap (see clearOfTalkBack).
     private static View headingLook(Activity activity) {
         LinearLayout column = Ui.column(activity);
         TextView good = Ui.heading(activity, "Points");
         good.setId(R.id.heading_good);
         column.addView(good);
-        column.addView(Ui.body(activity, "Every order earns points to spend later."));
+        clearOfTalkBack(activity, column, "Every order earns points to spend later.");
         TextView value = Ui.body(activity, "1,250 points");
         value.setId(R.id.heading_value);
         value.setTypeface(Typeface.DEFAULT);
@@ -144,6 +147,22 @@ final class Screens {
         web.setBackgroundColor(Ui.BACKGROUND);
         web.loadDataWithBaseURL("https://fixtures.invalid/web/", page, "text/html", "utf-8", null);
         return web;
+    }
+
+    // A line not tested, then a gap, so that what TalkBack draws over the
+    // screen covers nothing the contrast checks are tested on, as they do
+    // not measure what it covers. In the second recording, made with
+    // TalkBack on (measured, 2026-11-19), TalkBack's focus outline was
+    // drawn round the first line after the heading, and the accessibility
+    // button's window was at the screen's left edge from 543 to 661 pixels
+    // down, at 390 dpi, over the line after it. The gap puts the next line
+    // about 180 pixels below that window on that phone; a person can drag
+    // the button elsewhere, and then the checks say what it covers.
+    private static final int TALKBACK_GAP_DP = 120;
+
+    private static void clearOfTalkBack(Activity activity, LinearLayout column, String line) {
+        column.addView(Ui.body(activity, line));
+        column.addView(Ui.space(activity, 1, TALKBACK_GAP_DP));
     }
 
     private static String asset(Activity activity, String path) throws IOException {

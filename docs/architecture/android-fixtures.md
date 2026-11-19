@@ -414,6 +414,16 @@ model, after both were built:
   `names_resource` (as OCR was not used) and on the WebView screen,
   whose page did not load, with an unlisted `no-heading` error.
 
+Then chosen on 2026-11-19, quoted as given: "option A". The fixture
+app's screens with tested text, Delivery, Points and the WebView page,
+now have a line that is not tested after the heading, where TalkBack's
+focus lands, and then a 120 dp gap before the tested lines. On the
+owner's phone this puts the first tested line about 180 pixels below
+the accessibility button's window (inferred from the second recording's
+bounds, not yet recorded). The button can be dragged elsewhere; if it
+then covers a tested line, the check says so and the rule test fails
+on that line as not judged. Recordings of real apps are not changed.
+
 ## Model evaluation
 
 Run only on request, on the PC, as the earlier probes were: the model
