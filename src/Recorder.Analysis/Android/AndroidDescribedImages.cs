@@ -215,6 +215,21 @@ public static class AndroidDescribedImages
     }
 
     /// <summary>
+    /// The audit with no model asked about the names, images or headings
+    /// the rules leave, and the reason why: what <see cref="AskAsync"/>
+    /// gives where the task may use no model for vision-based checks, and
+    /// what the fixture tests run (android-fixtures.md, "Rule tests").
+    /// </summary>
+    public static AndroidAudit Unasked(AndroidAudit audit, string reason)
+    {
+        ArgumentNullException.ThrowIfNull(audit);
+        ArgumentNullException.ThrowIfNull(reason);
+        return audit.DescribedImages is { } run && run.Questions.Count > 0
+            ? audit.WithDescribedImages(run.Judged(new Dictionary<PhoneDescribedImageQuestion, PhoneDescribedImageAnswer>(), NotAsked(run.Questions.Count, reason)))
+            : audit;
+    }
+
+    /// <summary>
     /// Asks the model chosen for vision-based checks about each described
     /// image the rules leave in the audit, and gives the audit with the
     /// answers judged. An image the same as one answered before, in this
@@ -240,7 +255,7 @@ public static class AndroidDescribedImages
 
         if (context.NoModel(ModelUses.VisionChecks) is { } none)
         {
-            return audit.WithDescribedImages(run.Judged(new Dictionary<PhoneDescribedImageQuestion, PhoneDescribedImageAnswer>(), NotAsked(run.Questions.Count, none)));
+            return Unasked(audit, none);
         }
 
         var requests = Requests(run, load);

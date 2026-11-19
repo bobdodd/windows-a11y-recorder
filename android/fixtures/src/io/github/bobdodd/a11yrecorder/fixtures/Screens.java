@@ -7,6 +7,10 @@ import android.webkit.WebView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -120,12 +124,35 @@ final class Screens {
     }
 
     // A WebView page with low and good contrast text and a value marked as
-    // a heading; see assets/web/basics.html.
+    // a heading; see assets/web/basics.html. The page is read from the
+    // app's assets and given to the WebView as data, as a file:///android_asset
+    // URL did not load on the first recording (ERR_FILE_NOT_FOUND); where
+    // the asset cannot be read, the screen says so in plain text.
     private static View webBasics(Activity activity) {
+        String page;
+        try {
+            page = asset(activity, "web/basics.html");
+        } catch (IOException e) {
+            LinearLayout column = Ui.column(activity);
+            column.addView(Ui.body(activity, "The fixture page web/basics.html could not be read: " + e.getMessage()));
+            return column;
+        }
         WebView web = new WebView(activity);
         web.setId(R.id.web_page);
         web.setBackgroundColor(Ui.BACKGROUND);
-        web.loadUrl("file:///android_asset/web/basics.html");
+        web.loadDataWithBaseURL("https://fixtures.invalid/web/", page, "text/html", "utf-8", null);
         return web;
+    }
+
+    private static String asset(Activity activity, String path) throws IOException {
+        try (InputStream input = activity.getAssets().open(path);
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = input.read(buffer)) > 0) {
+                output.write(buffer, 0, read);
+            }
+            return new String(output.toByteArray(), StandardCharsets.UTF_8);
+        }
     }
 }

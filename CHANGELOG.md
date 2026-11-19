@@ -27,8 +27,26 @@ Changes on `main` since 1.1.0, not yet released.
   adb and opens each screen in turn while the recorder records.
 - `android/fixtures/expected.json` lists what each check should find on
   each element, and a test keeps it in step with the app and the
-  recorder's check names. The extractor and the rule tests that run the
-  checks on the fixtures follow the first recording of the tour.
+  recorder's check names.
+- The extractor, `tests/FixtureExtract`, run on the PC by
+  `scripts/Extract-FixtureRecording.ps1`, trims a recording of the tour
+  to the fixture app's visits, with no sound, video or notification
+  events, runs the rules on it with Windows OCR and no model, and keeps
+  the pictures they read, OCR's readings and the findings. It lists
+  every text kept that is not the fixture app's, to read before
+  committing.
+- Rule tests run the rules on each extracted recording under
+  `tests/fixtures/android/`, with OCR's kept readings, and compare the
+  findings with those made on the PC and with `expected.json`. They are
+  skipped until a recording is committed.
+- Each model check can now be marked not asked without a model run, and
+  `AndroidModelChecks.Unasked` marks them all, as the rule tests do.
+- The tour now checks that TalkBack is on, starts in the fixture app's
+  index, and puts the status bar in demo mode while it runs, so the
+  recording holds none of the phone's notifications or its home screen.
+- The WebView screen reads its page from the app's assets and gives it
+  to WebView itself, as WebView did not load it from
+  `file:///android_asset/` on the owner's phone.
 
 ### Control names
 

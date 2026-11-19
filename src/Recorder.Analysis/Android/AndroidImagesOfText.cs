@@ -162,6 +162,21 @@ public static class AndroidImagesOfText
     }
 
     /// <summary>
+    /// The audit with no model asked about the names, images or headings
+    /// the rules leave, and the reason why: what <see cref="AskAsync"/>
+    /// gives where the task may use no model for vision-based checks, and
+    /// what the fixture tests run (android-fixtures.md, "Rule tests").
+    /// </summary>
+    public static AndroidAudit Unasked(AndroidAudit audit, string reason)
+    {
+        ArgumentNullException.ThrowIfNull(audit);
+        ArgumentNullException.ThrowIfNull(reason);
+        return audit.ImagesOfText is { } run && run.Questions.Count > 0
+            ? audit.WithImagesOfText(run.Judged(new Dictionary<PhoneImageOfTextQuestion, PhoneInference>(), NotAsked(run.Questions.Count, reason)))
+            : audit;
+    }
+
+    /// <summary>
     /// Asks the model chosen for vision-based checks about each image the
     /// rules leave in the audit, and gives the audit with its findings
     /// judged. Where the task may use no model for vision-based checks,
@@ -184,7 +199,7 @@ public static class AndroidImagesOfText
 
         if (context.NoModel(ModelUses.VisionChecks) is { } none)
         {
-            return audit.WithImagesOfText(run.Judged(new Dictionary<PhoneImageOfTextQuestion, PhoneInference>(), NotAsked(run.Questions.Count, none)));
+            return Unasked(audit, none);
         }
 
         // A repeatable model's second answer would be the first: it is not

@@ -187,6 +187,21 @@ public static class AndroidScreenTitles
     }
 
     /// <summary>
+    /// The audit with no model asked, for text or vision, about what the
+    /// rules leave, and the reason why: what <see cref="AskAsync"/> gives
+    /// where the task may use no model for either, and what the fixture
+    /// tests run (android-fixtures.md, "Rule tests").
+    /// </summary>
+    public static AndroidAudit Unasked(AndroidAudit audit, string reason)
+    {
+        ArgumentNullException.ThrowIfNull(audit);
+        ArgumentNullException.ThrowIfNull(reason);
+        return audit.ScreenTitles is { } run && run.Questions.Count > 0
+            ? audit.WithScreenTitles(run.Judged(new Dictionary<PhoneScreenTitleQuestion, PhoneScreenTitleAnswer>(), NotAsked(run, run.TextQuestions > 0 ? reason : null, run.PicturedQuestions > 0 ? reason : null)))
+            : audit;
+    }
+
+    /// <summary>
     /// Asks the project's models about each screen title the rules leave
     /// in the audit, and gives the audit with the answers judged: a
     /// pictured question of the model for vision-based checks, any other of

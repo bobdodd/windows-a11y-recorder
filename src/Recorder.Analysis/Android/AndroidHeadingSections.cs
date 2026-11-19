@@ -183,6 +183,27 @@ public static class AndroidHeadingSections
     }
 
     /// <summary>
+    /// The audit with no model asked, for text or vision, about what the
+    /// rules leave, and the reason why: what <see cref="AskAsync"/> gives
+    /// where the task may use no model for either, and what the fixture
+    /// tests run (android-fixtures.md, "Rule tests").
+    /// </summary>
+    public static AndroidAudit Unasked(AndroidAudit audit, string reason)
+    {
+        ArgumentNullException.ThrowIfNull(audit);
+        ArgumentNullException.ThrowIfNull(reason);
+        if (audit.HeadingSections is not { } rules)
+        {
+            return audit;
+        }
+
+        var run = rules.WithHeadingLook(audit.HeadingLook);
+        return run.Questions.Count == 0
+            ? audit.WithHeadingSections(run)
+            : audit.WithHeadingSections(run.Judged(new Dictionary<PhoneHeadingSectionQuestion, PhoneHeadingSectionAnswer>(), NotAsked(run, run.TextQuestions > 0 ? reason : null, run.PicturedQuestions > 0 ? reason : null)));
+    }
+
+    /// <summary>
     /// Asks the project's models about each heading the rules leave, with
     /// the rules run again on the audit's check of text shown as a heading
     /// as it stands, so that text the model judged a heading is among them

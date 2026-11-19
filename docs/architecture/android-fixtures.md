@@ -24,12 +24,19 @@ What exists so far:
 - the tour, `scripts/Run-FixtureTour.ps1`, which opens each screen in
   turn while the recorder records;
 - the expected answers, `android/fixtures/expected.json`, and a test
-  that keeps them in step with the app's source and the checks' names.
+  that keeps them in step with the app's source and the checks' names;
+- the extractor, `tests/FixtureExtract`, run on the PC by
+  `scripts/Extract-FixtureRecording.ps1`, and the rule tests,
+  `tests/Recorder.Tests/AndroidFixtureRecordingTests.cs` (see "Rule
+  tests").
 
-Not yet built: the extractor that turns a recording into compact
-fixtures, the rule tests that run the checks on them, and the model
-evaluation. They wait for the owner's first recording of the tour, so
-that they are built against a real recording.
+Not yet built: the model evaluation, and the fixtures for the checks
+not yet built.
+
+No fixture recording is committed yet. The owner's first recording of
+the tour, on 2026-11-19, was measured in the sandbox and not kept (see
+"The first recording"); the tour was changed after it and is to be
+recorded again.
 
 ## Owner's decisions
 
@@ -191,12 +198,22 @@ with what. The answer itself is scored by the model evaluation.
    `%LOCALAPPDATA%\Windows A11y Recorder\android\platform-tools`, so the
    tour talks to the recorder's adb server rather than starting one of
    another version, which would stop the server under a recording;
-2. installs the fixture app if it is missing or older;
-3. asks the person to press Record in the recorder, and waits for
+2. installs the fixture app;
+3. checks that TalkBack is on (TalkBack among the enabled accessibility
+   services and touch exploration on), and waits for the person to turn
+   it on if it is not;
+4. puts the status bar in Android's demo mode: a fixed clock, a full
+   battery and no notification icons. Network icons are not set, as the
+   demo mode's network commands are reported to stop the System UI on
+   recent Android;
+5. opens the fixture app's index, so the recording starts in the
+   fixture app rather than on the home screen;
+6. asks the person to press Record in the recorder, and waits for
    Enter;
-4. opens each `tour` screen with `am start -W`, holds it for its
+7. opens each `tour` screen with `am start -W`, holds it for its
    `seconds`, and names it in the console as it goes;
-5. says when it has finished, so the person can press Stop.
+8. asks the person to press Stop, waits for Enter, and takes the status
+   bar out of demo mode, as it does too if the tour stops early.
 
 Screens marked `person` are not opened by the tour; the person opens
 them from the app's index and follows their steps.
@@ -204,24 +221,103 @@ them from the app's index and follows their steps.
 The tour is recorded with TalkBack on, as the owner's recordings of
 real apps are, so that the fixtures are like the recordings the checks
 meet. Whether TalkBack's focus outline changes any check's result on
-the fixture screens is to be measured on the first recording.
+the fixture screens is to be measured on the next recording; the first
+was made with TalkBack off.
 
 ## Rule tests
 
-To be built after the first recording, from it.
+Built on 2026-11-19 against the owner's first recording of the tour.
 
-- **The extractor** reads a recording of the tour and, for each visit
-  to a fixture screen, writes a folder under
-  `tests/fixtures/android/views/<screen>/`: the trees the checks read,
-  one settled screenshot, OCR's lines with their bounds, and the events
-  a check needs (such as TalkBack's speech). OCR is kept as text
-  because Windows OCR does not run in the Linux build. The size of the
-  folders is to be measured; only what the checks read is kept.
-- **The harness** is a test in `tests/Recorder.Tests` that runs the
-  checks on each folder and compares the findings with the expected
-  answers: an expected finding missing, a finding on a near miss, or an
-  unexpected finding fails the test, naming the screen, check and
-  element.
+- **The extractor**, `tests/FixtureExtract`, runs on the PC, as the
+  checks read Windows OCR, which does not run in the Linux build.
+  `scripts/Extract-FixtureRecording.ps1` builds it and runs it on the
+  newest recording, or the one named, writing
+  `tests/fixtures/android/tour/`. It:
+  1. trims the recording to the fixture app's visits, from the start of
+     the first to the end of the last, into a new `recording.mcap`.
+     Sound and video are left out, as are the phone's notification
+     events, which name other apps and hold their text. A
+     `manifest.json` lists only the kept files;
+  2. runs the rules on the trimmed recording with Windows OCR and no
+     model (every model check is marked not asked), keeping only the
+     pictures the rules read, what OCR read in each (`ocr.json`), and
+     the findings (`findings.json`);
+  3. prints each visit's findings, then three lists headed READ BEFORE
+     COMMITTING: the recording's metadata, the packages named in the
+     kept events, and every text kept that is not in the fixture app's
+     source, so a person can see that nothing of the phone's own is
+     kept before the folder is committed.
+
+  This keeps the trimmed recording rather than separate trees,
+  screenshots and lines for each visit, as first planned: the checks
+  read a recording's visits and events through the same playback the
+  recorder uses, so a trimmed recording tests that path too, with no
+  second loader to keep in step. Measured on the first recording: 1,099
+  events and five screenshots kept, 1.3 MB in all.
+- **The rule tests**, `AndroidFixtureRecordingTests`, read every folder
+  under `tests/fixtures/android/` that holds a `recording.mcap`, and
+  are skipped while there is none. Each run gives the rules OCR's
+  readings from `ocr.json`, so they run where Windows OCR does not.
+  - The rules' findings must equal `findings.json`, the findings made
+    on the PC: this shows the replay of OCR and the trimmed recording
+    lose nothing the rules read.
+  - Each `rule` expectation in `expected.json` is compared with the
+    findings of its screen, matched by its title: an `item` matches a
+    finding whose identity names that resource ID, and a `line` a
+    finding whose label or identity holds that text. An expected
+    finding missing, a finding at another level, or a finding on a near
+    miss fails the test, naming the recording, screen, check and
+    element. Every `tour` screen whose checks are built must be in some
+    recording.
+  - Findings that `expected.json` does not list are not yet judged: the
+    owner is to choose how (see "Open decisions").
+
+## The first recording
+
+Measured on 2026-11-19 in the sandbox, with no OCR and no model, from
+the owner's first recording of the tour. The recording was not kept.
+
+- **The proof checks found what they were built to find.** On the
+  touch-target screen, `touch-target-24dp` found the close pair and not
+  the spaced button, and `touch-target-size` found every button under
+  48 dp and not the 48 dp one. On the contrast screen,
+  `text-contrast-aa` gave an error at 2.17:1, a warning at 3.03:1 and
+  nothing on the near miss. With the recording trimmed, the rule tests
+  passed the replay test and failed the expected answers only where
+  the two faults below predict.
+- **The control-name check needs OCR.** It reads only snapshots OCR
+  has read, so with no OCR it found nothing on the control-name screen.
+  The extractor therefore runs with Windows OCR.
+- **The WebView screen did not load its page.** WebView showed its
+  own error page for `file:///android_asset/web/basics.html`, with
+  `net::ERR_FILE_NOT_FOUND`, though the page is in the app; the cause
+  is not known. The checks then reported that error page. The screen
+  now reads the page from the app's assets itself and gives it to
+  WebView with `loadDataWithBaseURL`, and shows a plain message naming
+  the file if it cannot be read.
+- **The recording held the phone's own content.** It began on the home
+  screen, whose launcher showed the owner's location, and the status
+  bar named other apps' notifications; a notification event held one
+  app's text. The tour now starts in the fixture app's index and puts
+  the status bar in demo mode, and the extractor leaves notification
+  events out and lists any text left that is not the fixture app's.
+- **TalkBack was off.** The recorded preferences showed touch
+  exploration off, so the tour now checks for TalkBack before it
+  starts.
+- **Findings no expectation names.** Measured on the fixture app's
+  screens: `non-text-contrast` information on every image button,
+  measured from the tree as OCR was not used; `duplicate-speakable-text`
+  information on each screen's heading, which repeats the app bar's
+  title; and an app-level `no-live-region` warning. These are left for
+  the owner's decision on unlisted findings.
+
+## Open decisions
+
+- **Unlisted findings.** Either every finding, information included,
+  is listed in `expected.json` and any other fails the test; or errors
+  and warnings must be listed and information is only reported. The
+  app-level findings, such as `no-live-region`, would need app-level
+  expectations in `expected.json` under either.
 
 ## Model evaluation
 

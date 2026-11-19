@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Extracts a fixture from a recording of the fixture app's tour, on the
+       PC (docs/architecture/android-fixtures.md, "Rule tests"). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Recorder.FixtureExtract</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Recorder.Analysis/Recorder.Analysis.csproj" />
+  </ItemGroup>
+</Project>

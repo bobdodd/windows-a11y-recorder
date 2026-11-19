@@ -132,6 +132,21 @@ public static class AndroidHeadingLook
     }
 
     /// <summary>
+    /// The audit with no model asked about the names, images or headings
+    /// the rules leave, and the reason why: what <see cref="AskAsync"/>
+    /// gives where the task may use no model for vision-based checks, and
+    /// what the fixture tests run (android-fixtures.md, "Rule tests").
+    /// </summary>
+    public static AndroidAudit Unasked(AndroidAudit audit, string reason)
+    {
+        ArgumentNullException.ThrowIfNull(audit);
+        ArgumentNullException.ThrowIfNull(reason);
+        return audit.HeadingLook is { } run && run.Questions.Count > 0
+            ? audit.WithHeadingLook(run.Judged(new Dictionary<PhoneHeadingQuestion, PhoneInference>(), NotAsked(run.Questions.Count, reason)))
+            : audit;
+    }
+
+    /// <summary>
     /// Asks the model chosen for vision-based checks about each piece of
     /// text the rules leave in the audit, and gives the audit with its
     /// findings judged. Where the task may use no model for vision-based
@@ -154,7 +169,7 @@ public static class AndroidHeadingLook
 
         if (context.NoModel(ModelUses.VisionChecks) is { } none)
         {
-            return audit.WithHeadingLook(run.Judged(new Dictionary<PhoneHeadingQuestion, PhoneInference>(), NotAsked(run.Questions.Count, none)));
+            return Unasked(audit, none);
         }
 
         // A question the model does not settle is asked again of the model

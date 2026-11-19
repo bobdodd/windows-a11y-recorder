@@ -22,6 +22,10 @@
     <ProjectReference Include="../../src/Recorder.Export/Recorder.Export.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The extracted fixture recordings' files (android-fixtures.md, "Rule tests"). -->
+    <Compile Include="../FixtureExtract/AndroidFixtureFiles.cs" Link="FixtureExtract/AndroidFixtureFiles.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <None Include="TestData\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

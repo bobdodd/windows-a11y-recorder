@@ -10,10 +10,18 @@
        tour talks to the recorder's adb server rather than starting one of
        another version, which would stop the server under a recording.
     2. Installs the fixture app, built by scripts\Build-FixtureApp.ps1.
-    3. Asks you to press Record in the recorder, and waits for Enter.
-    4. Opens each screen android\fixtures\expected.json marks "tour", as a
+    3. Checks that TalkBack is on, as the tour is recorded with it on, and
+       waits for you to turn it on if it is not.
+    4. Puts the phone's status bar in Android's demo mode: a fixed clock,
+       a full battery and no notification icons, so the recording holds
+       nothing of the phone's own notifications in the status bar.
+    5. Opens the fixture app's index, so the recording starts in the
+       fixture app rather than on the phone's home screen.
+    6. Asks you to press Record in the recorder, and waits for Enter.
+    7. Opens each screen android\fixtures\expected.json marks "tour", as a
        new task, and holds it for its "seconds".
-    5. Says when it has finished, so you can press Stop.
+    8. Asks you to press Stop, waits for Enter, and then takes the status
+       bar out of demo mode. It does so too if the tour stops early.
 
     Screens marked "person" are left for a person to open from the app's
     index. See docs\architecture\android-fixtures.md.
@@ -89,22 +97,64 @@ if (-not $NoInstall) {
     Invoke-Adb @("install", "-r", $Apk) | Out-Null
 }
 
-$total = ($tour | Measure-Object -Property seconds -Sum).Sum
-Write-Host ""
-Write-Host "The tour opens $($tour.Count) screens, about $total seconds in all."
-Read-Host "Press Record in the recorder, then press Enter here" | Out-Null
+function Get-Setting {
+    param([string] $Namespace, [string] $Name)
+    return ((Invoke-Adb @("shell", "settings", "get", $Namespace, $Name)) -join "").Trim()
+}
+
+function Test-TalkBack {
+    $services = Get-Setting "secure" "enabled_accessibility_services"
+    $exploring = Get-Setting "secure" "touch_exploration_enabled"
+    return ($services -match "com\.google\.android\.marvin\.talkback") -and ($exploring -eq "1")
+}
+
+function Send-DemoCommand {
+    param([string[]] $Extras)
+    Invoke-Adb (@("shell", "am", "broadcast", "-a", "com.android.systemui.demo") + $Extras) | Out-Null
+}
+
+while (-not (Test-TalkBack)) {
+    Write-Host ""
+    Write-Host "TalkBack is off on the phone. The tour is recorded with TalkBack on."
+    Read-Host "Turn TalkBack on, then press Enter here" | Out-Null
+}
 
 # FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_CLEAR_TASK: each screen is a new
 # activity in a new task, so no screen is left behind another.
 $flags = "0x10008000"
-$number = 0
-foreach ($screen in $tour) {
-    $number++
-    Write-Host ("{0} of {1}: {2} ({3}), {4} seconds" -f $number, $tour.Count, $screen.title, $screen.id, $screen.seconds)
-    Invoke-Adb @("shell", "am", "start", "-W", "-f", $flags,
-        "-n", "$package/.FixtureActivity", "--es", "screen", $screen.id) | Out-Null
-    Start-Sleep -Seconds $screen.seconds
-}
+$demoAllowed = Get-Setting "global" "sysui_demo_allowed"
+try {
+    # Network icons are left as they are: demo mode's network commands are
+    # reported to stop the status bar on recent Android versions.
+    Invoke-Adb @("shell", "settings", "put", "global", "sysui_demo_allowed", "1") | Out-Null
+    Send-DemoCommand @("-e", "command", "enter")
+    Send-DemoCommand @("-e", "command", "clock", "-e", "hhmm", "1200")
+    Send-DemoCommand @("-e", "command", "battery", "-e", "level", "100", "-e", "plugged", "false")
+    Send-DemoCommand @("-e", "command", "notifications", "-e", "visible", "false")
+    Invoke-Adb @("shell", "am", "start", "-W", "-f", $flags, "-n", "$package/.FixtureActivity") | Out-Null
 
-Write-Host ""
-Write-Host "TOUR FINISHED. Press Stop in the recorder."
+    $total = ($tour | Measure-Object -Property seconds -Sum).Sum
+    Write-Host ""
+    Write-Host "The phone shows the fixture app's index, with the status bar's clock at 12:00."
+    Write-Host "The tour opens $($tour.Count) screens, about $total seconds in all."
+    Read-Host "Press Record in the recorder, then press Enter here" | Out-Null
+
+    $number = 0
+    foreach ($screen in $tour) {
+        $number++
+        Write-Host ("{0} of {1}: {2} ({3}), {4} seconds" -f $number, $tour.Count, $screen.title, $screen.id, $screen.seconds)
+        Invoke-Adb @("shell", "am", "start", "-W", "-f", $flags,
+            "-n", "$package/.FixtureActivity", "--es", "screen", $screen.id) | Out-Null
+        Start-Sleep -Seconds $screen.seconds
+    }
+
+    Write-Host ""
+    Write-Host "TOUR FINISHED."
+    Read-Host "Press Stop in the recorder, then press Enter here" | Out-Null
+}
+finally {
+    Send-DemoCommand @("-e", "command", "exit")
+    $restore = if ($demoAllowed -eq "1") { "1" } else { "0" }
+    Invoke-Adb @("shell", "settings", "put", "global", "sysui_demo_allowed", $restore) | Out-Null
+    Write-Host "The status bar is out of demo mode."
+}

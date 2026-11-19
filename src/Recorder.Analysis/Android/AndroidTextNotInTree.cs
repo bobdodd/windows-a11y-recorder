@@ -145,6 +145,21 @@ public static class AndroidTextNotInTree
         $"{question.App}\n{question.Ocr}\n{question.ContainerClass}\n{question.ContainerText}\n{question.HeldByHidden}";
 
     /// <summary>
+    /// The audit with no model asked about the names, images or headings
+    /// the rules leave, and the reason why: what <see cref="AskAsync"/>
+    /// gives where the task may use no model for vision-based checks, and
+    /// what the fixture tests run (android-fixtures.md, "Rule tests").
+    /// </summary>
+    public static AndroidAudit Unasked(AndroidAudit audit, string reason)
+    {
+        ArgumentNullException.ThrowIfNull(audit);
+        ArgumentNullException.ThrowIfNull(reason);
+        return audit.TextNotInTree is { } run && run.Questions.Count > 0
+            ? audit.WithTextNotInTree(run.Judged(new Dictionary<PhoneTextNotInTreeQuestion, PhoneTextNotInTreeAnswer>(), NotAsked(run.Questions.Count, reason)))
+            : audit;
+    }
+
+    /// <summary>
     /// Asks the model chosen for vision-based checks about each line the
     /// rules leave in the audit, and gives the audit with the answers
     /// judged. A line the same as one answered before, in this run or on a
@@ -170,7 +185,7 @@ public static class AndroidTextNotInTree
 
         if (context.NoModel(ModelUses.VisionChecks) is { } none)
         {
-            return audit.WithTextNotInTree(run.Judged(new Dictionary<PhoneTextNotInTreeQuestion, PhoneTextNotInTreeAnswer>(), NotAsked(run.Questions.Count, none)));
+            return Unasked(audit, none);
         }
 
         var requests = Requests(run, load);
