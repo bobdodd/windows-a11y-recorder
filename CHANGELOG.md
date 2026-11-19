@@ -47,6 +47,19 @@ Changes on `main` since 1.1.0, not yet released.
 - The WebView screen reads its page from the app's assets and gives it
   to WebView itself, as WebView did not load it from
   `file:///android_asset/` on the owner's phone.
+- `scripts/Build-CompanionApp.ps1` gives forward slashes to any name in
+  the app with a backslash, and stops if one is left: the fixture app
+  built on Windows held `assets/web\basics.html`, which Android does
+  not find, so its WebView screen had no page.
+- The text and non-text contrast checks do not measure text or a
+  control that the focus outline a screen reader draws round the item
+  with accessibility focus, or another window, such as the
+  accessibility button, covers. Each is a check not run, saying why,
+  and is not counted as measured.
+- The rule tests fail on any error or warning on the fixture app that
+  `expected.json` does not list, and only report information notes.
+  `expected.json` has an `app` list for app-level findings, with the
+  fixture app's `no-live-region` warning.
 
 ### Control names
 

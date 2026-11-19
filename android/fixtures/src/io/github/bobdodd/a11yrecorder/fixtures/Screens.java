@@ -125,9 +125,11 @@ final class Screens {
 
     // A WebView page with low and good contrast text and a value marked as
     // a heading; see assets/web/basics.html. The page is read from the
-    // app's assets and given to the WebView as data, as a file:///android_asset
-    // URL did not load on the first recording (ERR_FILE_NOT_FOUND); where
-    // the asset cannot be read, the screen says so in plain text.
+    // app's assets and given to the WebView as data; where the asset cannot
+    // be read, the screen says so in plain text. On the first two recordings
+    // it could not be found, as the app built on Windows named it
+    // assets/web\basics.html, with a backslash (measured, 2026-11-19);
+    // scripts/Build-CompanionApp.ps1 now gives such names forward slashes.
     private static View webBasics(Activity activity) {
         String page;
         try {

@@ -134,6 +134,10 @@ error, so the file cannot drift into meaning more than the tests read.
   "version": 1,
   "package": "io.github.bobdodd.a11yrecorder.fixtures",
   "auditLevel": "AA",
+  "app": [
+    { "check": "no-live-region", "by": "rule", "finding": "warning",
+      "note": "the app has no live region" }
+  ],
   "screens": [
     {
       "id": "touch-targets",
@@ -152,6 +156,10 @@ error, so the file cannot drift into meaning more than the tests read.
 }
 ```
 
+- **app:** the app-level findings expected, those about the whole app
+  rather than a screen, such as `no-live-region`: each has `check`,
+  `by`, `finding` and `note`, as a screen's expectations do, and no
+  `item` or `line`.
 - **id:** the screen's name, as passed to `--es screen`.
 - **title:** the activity's title, which the recorder uses to tell
   screens apart. It describes the screen's made-up content, such as
@@ -183,8 +191,10 @@ error, so the file cannot drift into meaning more than the tests read.
 Findings not listed are unexpected. Each is reviewed when its screen is
 first recorded: either the screen is changed so the finding goes, or
 the finding is added to the expected answers with a note saying why it
-is right. After that review, any unexpected finding fails the rule
-tests, so a change to a check that adds false alarms is caught.
+is right. After that review, an unlisted error or warning fails the
+rule tests, so a change to a check that adds false alarms is caught;
+an unlisted information note or check not run is only reported (the
+owner's decision of 2026-11-19, below).
 
 For a model check, the rule tests can only test the part decided
 without a model: that the element is asked about, or left out, and
@@ -272,8 +282,14 @@ Built on 2026-11-19 against the owner's first recording of the tour.
     miss fails the test, naming the recording, screen, check and
     element. Every `tour` screen whose checks are built must be in some
     recording.
-  - Findings that `expected.json` does not list are not yet judged: the
-    owner is to choose how (see "Open decisions").
+  - Each `app` expectation is compared in the same way with the
+    fixture app's app-level findings, matched by check.
+  - Any other error or warning on the fixture app, on a screen or the
+    whole app, fails the test, naming it; any other information note or
+    check not run is written to the test's output only.
+  - A near miss whose check was not run, such as text not measured as
+    something is drawn over it, fails as not judged, rather than as a
+    false alarm.
 
 ## The first recording
 
@@ -339,26 +355,64 @@ with Windows OCR; that run's findings have not been read.
   recording, neither happened. The same will happen in recordings of
   real apps made with TalkBack on.
 - **The WebView screen still had no page.** The screen's own message
-  said the asset `web/basics.html` could not be read, so the app on the
-  phone did not hold it. The sandbox's build of the app holds
-  `assets/web/basics.html`; whether the PC's build does is to be
-  checked.
+  said the asset `web/basics.html` could not be read. The owner listed
+  the PC's build of the app: it holds `assets/web\basics.html`, with a
+  backslash, which Android does not find, where the sandbox's build
+  holds `assets/web/basics.html` (measured). The backslash comes from
+  aapt2's `-A` on Windows (inferred, as aapt2 writes the assets).
+  `scripts/Build-CompanionApp.ps1` now gives every such name forward
+  slashes and stops if one is left; this is likely also why the first
+  recording's `file:///android_asset/` URL was not found (inferred).
 
-## Open decisions
+## The owner's decisions on the second recording
 
-- **TalkBack's drawing over the screen.** Either the contrast checks
-  leave out what TalkBack and the system draw over the app (the focus
-  outline round the item with accessibility focus, and windows such as
-  the accessibility button, whose bounds the tree gives), and say so in
-  the finding; or an item covered by them is not measured, and the
-  finding says why; or the fixture app only is laid out so they cover
-  nothing measured, which leaves recordings of real apps as they are.
+Chosen on 2026-11-19, quoted as given: "1: B" and "2: I accept your
+recommendation".
 
-- **Unlisted findings.** Either every finding, information included,
-  is listed in `expected.json` and any other fails the test; or errors
-  and warnings must be listed and information is only reported. The
-  app-level findings, such as `no-live-region`, would need app-level
-  expectations in `expected.json` under either.
+1. **What is drawn over the app is not measured (B).** The text and
+   non-text contrast checks do not measure text or a control that
+   TalkBack's focus outline or another window, such as the
+   accessibility button, covers, and the finding, a check not run, says
+   why. Built as follows.
+   - **The focus outline** is found from the picture, round the item
+     the tree marks as having accessibility focus: at the middle of each
+     side, a run of one colour (within 48, summed over red, green and
+     blue) from the item's edge inward, the same colour on all four
+     sides, not the colour just outside, at least 4 of the screen's
+     pixels and under a quarter of the item's size. Its thickness is the
+     longest run. Text or a control is covered when its box meets the
+     item's bounds and is not wholly inside the outline.
+   - **A window above the app's** covers text or a control whose box
+     meets the window's bounds, as the tree gives them. Words whose
+     middle is under such a window are still left out as not the app's.
+   - The finding says, for example, "not measured, as an outline,
+     #6BC840, 10 pixels thick, is drawn over it, round it, the item with
+     accessibility focus, as a screen reader shows its focus", or "not
+     measured, as another window, untitled, TYPE_SYSTEM, is drawn over
+     part of it". Covered text and controls are not counted as measured.
+   - The outline is looked for round the item that has focus in the
+     tree the visit's items were read from; if focus moved before the
+     picture was taken, the outline is not found (inferred, not seen).
+2. **Unlisted findings.** Errors and warnings must be listed in
+   `expected.json`; information notes are only reported. App-level
+   findings are listed in its `app` array.
+
+Measured on the second recording, in the sandbox, with no OCR and no
+model, after both were built:
+
+- Every contrast finding on the outline's green and the button's purple
+  is now a check not run, saying why: on each screen, the line with the
+  outline, and on the Delivery and Points screens, the lines the
+  accessibility button's window meets.
+- On the Delivery screen this leaves none of its three lines measured:
+  the error line has the outline, and the button's window, at the left
+  edge from 543 to 661 pixels down, meets the warning line and the top
+  of the near miss's bounds. The fixture's contrast answers cannot be
+  confirmed from a recording made this way until the screen or the tour
+  is changed so TalkBack covers none of its lines.
+- The rule tests on it fail, as expected, on the Delivery lines, on
+  `names_resource` (as OCR was not used) and on the WebView screen,
+  whose page did not load, with an unlisted `no-heading` error.
 
 ## Model evaluation
 

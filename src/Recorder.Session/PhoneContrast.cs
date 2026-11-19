@@ -148,7 +148,9 @@ public sealed class PhoneSnapshotPictures
 /// the height of OCR's box round its words in the screen's pixels before
 /// the box was widened (0 when measured on an item's bounds), and the
 /// height of its letters' ink on the picture, in the picture's pixels (0
-/// when measured on an item's bounds or not measured; step 19).
+/// when measured on an item's bounds or not measured; step 19), and why
+/// the contrast check does not measure it, when something is drawn over
+/// it (<see cref="PhoneCover"/>).
 /// </summary>
 public sealed record PhoneTextLine(
     PhoneCheckItem? Item,
@@ -159,7 +161,8 @@ public sealed record PhoneTextLine(
     PhoneBounds Box,
     PhoneSwatch? Colours,
     int WordsHeight = 0,
-    int InkHeight = 0);
+    int InkHeight = 0,
+    string? Covered = null);
 
 /// <summary>A settled snapshot's measurement: its picture, the lines of text measured on it, and its controls.</summary>
 public sealed record PhoneContrastSnapshot(
@@ -293,10 +296,16 @@ public sealed class PhoneContrastRun
                     // can be smaller than the screen.
                     var screen = trees.ScreenAt(taking.MonotonicNanoseconds) ?? (pixels.Width, pixels.Height);
                     var scale = new PictureScale(pixels.Width / (double)screen.Width, pixels.Height / (double)screen.Height);
-                    var above = windows.Values
+                    var windowsAbove = windows.Values
                         .Where(entry => entry.Id != app.Id && entry.Layer > app.Layer)
-                        .Select(entry => entry.Bounds)
+                        .Select(entry => new PhoneWindowAbove(entry.Id, entry.TypeName, entry.Title, entry.Bounds))
                         .ToList();
+                    var above = windowsAbove.Select(entry => entry.Bounds).ToList();
+
+                    // What is drawn over the app is not the app's: the
+                    // contrast checks do not measure text or a control it
+                    // covers (owner, 2026-11-19).
+                    var outline = PhoneCover.OutlineOf(window, pixels, scale);
                     var lines = PhoneTextMatching.Lines(window, app.Bounds, above, reading?.Words, scale)
                         .Select(line =>
                         {
@@ -306,10 +315,13 @@ public sealed class PhoneContrastRun
                             {
                                 Colours = colours,
                                 InkHeight = colours is null || line.WordsHeight <= 0 ? 0 : PhoneColours.InkHeight(pixels, box, colours),
+                                Covered = PhoneCover.Why(line.Box, line.Item, outline, windowsAbove),
                             };
                         })
                         .ToList();
-                    var controls = PhoneControlMeasuring.Measure(window, app.Bounds, above, lines, reading is not null, pixels, scale);
+                    var controls = PhoneControlMeasuring.Measure(window, app.Bounds, above, lines, reading is not null, pixels, scale)
+                        .Select(control => control with { Covered = PhoneCover.Why(control.Item.Bounds, control.Item, outline, windowsAbove) })
+                        .ToList();
                     measured.Add(new PhoneContrastSnapshot(visit, settled, taking, picture, reading?.Engine, lines, controls, window));
                 }
                 catch (Exception exception) when (
@@ -367,9 +379,9 @@ public sealed class PhoneContrastRun
     }
 
     // The windows a snapshot lists, with their layers and bounds.
-    internal static Dictionary<int, (int Id, int Layer, PhoneBounds Bounds)> WindowsOf(ISessionEventRecordSource source, SessionTimelineEvent snapshot)
+    internal static Dictionary<int, (int Id, int Layer, PhoneBounds Bounds, string? TypeName, string? Title)> WindowsOf(ISessionEventRecordSource source, SessionTimelineEvent snapshot)
     {
-        var windows = new Dictionary<int, (int, int, PhoneBounds)>();
+        var windows = new Dictionary<int, (int, int, PhoneBounds, string?, string?)>();
         using var document = JsonDocument.Parse(source.ReadEventJson(snapshot));
         if (!document.RootElement.TryGetProperty("payload", out var payload) ||
             payload.ValueKind != JsonValueKind.Object ||
@@ -387,11 +399,15 @@ public sealed class PhoneContrastRun
             {
                 var layer = entry.TryGetProperty("layer", out var value) && value.ValueKind == JsonValueKind.Number ? value.GetInt32() : 0;
                 windows[id.GetInt32()] = (id.GetInt32(), layer, new PhoneBounds(
-                    Side(bounds, "left"), Side(bounds, "top"), Side(bounds, "right"), Side(bounds, "bottom")));
+                    Side(bounds, "left"), Side(bounds, "top"), Side(bounds, "right"), Side(bounds, "bottom")),
+                    Text(entry, "typeName"), Text(entry, "title"));
             }
         }
 
         return windows;
+
+        static string? Text(JsonElement entry, string name) =>
+            entry.TryGetProperty(name, out var text) && text.ValueKind == JsonValueKind.String ? text.GetString() : null;
 
         static int Side(JsonElement bounds, string name) =>
             bounds.TryGetProperty(name, out var side) && side.ValueKind == JsonValueKind.Number ? side.GetInt32() : 0;

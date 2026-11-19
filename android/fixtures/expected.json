@@ -2,6 +2,10 @@
   "version": 1,
   "package": "io.github.bobdodd.a11yrecorder.fixtures",
   "auditLevel": "AA",
+  "app": [
+    { "check": "no-live-region", "by": "rule", "finding": "warning",
+      "note": "the app has no live region, makes no announcement and shows no toast, so the rule asks the auditor to look for status messages" }
+  ],
   "screens": [
     {
       "id": "touch-targets",

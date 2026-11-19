@@ -241,10 +241,19 @@ public sealed class PhoneTextContrastRun
                     continue;
                 }
 
-                run.Lines++;
-                run._linesByScreen[visit.Screen] = run.LinesOn(visit.Screen) + 1;
-                run._linesByVisit[visit] = run.LinesIn(visit) + 1;
-                var judged = Judge(line, colours, snapshot.Picture.Kind, snapshot.Engine, level, density?.PixelsPerDp);
+                // Text with something drawn over it is not measured, and the
+                // finding says why (owner, 2026-11-19).
+                var judged = line.Covered is { } covered
+                    ? (PhoneCheckLevel.NotRun, $"not measured, as {covered}; {Source(line, snapshot.Picture.Kind, snapshot.Engine)}")
+                    : default((PhoneCheckLevel Level, string Measured)?);
+                if (judged is null)
+                {
+                    run.Lines++;
+                    run._linesByScreen[visit.Screen] = run.LinesOn(visit.Screen) + 1;
+                    run._linesByVisit[visit] = run.LinesIn(visit) + 1;
+                    judged = Judge(line, colours, snapshot.Picture.Kind, snapshot.Engine, level, density?.PixelsPerDp);
+                }
+
                 if (judged is not { } result)
                 {
                     run.Passed++;

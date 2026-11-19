@@ -15,6 +15,7 @@ public sealed partial class AndroidFixtureAppTests
 
     private static readonly string[] ScreenFields = ["id", "title", "framework", "how", "seconds", "stage", "steps", "expect"];
     private static readonly string[] ExpectFields = ["check", "item", "line", "by", "finding", "note"];
+    private static readonly string[] AppFields = ["check", "by", "finding", "note"];
     private static readonly string[] Frameworks = ["views", "webview"];
     private static readonly string[] Hows = ["tour", "person"];
     private static readonly string[] Stages = ["proof", "unbuilt", "built"];
@@ -26,10 +27,18 @@ public sealed partial class AndroidFixtureAppTests
     {
         using var expected = Expected();
         var root = expected.RootElement;
-        Assert.Equal(["version", "package", "auditLevel", "screens"], root.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(["version", "package", "auditLevel", "app", "screens"], root.EnumerateObject().Select(p => p.Name));
         Assert.Equal(1, root.GetProperty("version").GetInt32());
         Assert.Equal(Package, root.GetProperty("package").GetString());
         Assert.Contains(root.GetProperty("auditLevel").GetString(), new[] { "AA", "AAA" });
+
+        // The app-level findings expected, which name no item or line.
+        foreach (var expect in root.GetProperty("app").EnumerateArray())
+        {
+            Assert.Equal(AppFields, expect.EnumerateObject().Select(p => p.Name));
+            Assert.Contains(expect.GetProperty("by").GetString(), Bys);
+            Assert.Contains(expect.GetProperty("finding").GetString(), Findings);
+        }
 
         foreach (var screen in root.GetProperty("screens").EnumerateArray())
         {
@@ -81,6 +90,12 @@ public sealed partial class AndroidFixtureAppTests
             {
                 Assert.True(names.Contains(check), $"{screen}: {check} is not a check the recorder reports");
             }
+        }
+
+        foreach (var expect in expected.RootElement.GetProperty("app").EnumerateArray())
+        {
+            var check = expect.GetProperty("check").GetString()!;
+            Assert.True(names.Contains(check), $"the app: {check} is not a check the recorder reports");
         }
     }
 

@@ -26,7 +26,8 @@ public sealed record PhoneControlSide(PhoneSide Side, uint Adjacent, uint? Shape
 /// snapshot's picture: its sides that could be measured, the commonest
 /// colour inside it (its fill), its most contrasting colour with enough
 /// pixels against that fill (its icon), and the words OCR read in it, or,
-/// when OCR was not used, the app's text in it.
+/// when OCR was not used, the app's text in it; and why it is not judged,
+/// when something is drawn over it (<see cref="PhoneCover"/>).
 /// </summary>
 public sealed record PhoneControlMeasure(
     PhoneCheckItem Item,
@@ -35,7 +36,8 @@ public sealed record PhoneControlMeasure(
     uint? Icon,
     double IconRatio,
     string? VisibleText,
-    bool TextFromOcr)
+    bool TextFromOcr,
+    string? Covered = null)
 {
     /// <summary>The side of least contrast: one with nothing drawn, else the lowest ratio; null when no side was measured.</summary>
     public PhoneControlSide? Weakest => Sides.Count == 0
@@ -430,6 +432,12 @@ public sealed class PhoneNonTextContrastRun
 
             foreach (var control in snapshot.Controls)
             {
+                if (control.Covered is { } covered)
+                {
+                    Add(PhoneCheckNames.NonTextContrast, control.Item, PhoneCheckLevel.NotRun, $"not measured, as {covered}");
+                    continue;
+                }
+
                 run.Controls++;
                 run._controlsByVisit[visit] = run.ControlsIn(visit) + 1;
 

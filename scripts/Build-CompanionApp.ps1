@@ -437,11 +437,39 @@ Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::Open($linked, [System.IO.Compression.ZipArchiveMode]::Update)
 try {
+    # The app built on Windows held an asset in a folder with a backslash
+    # in its name, assets/web\basics.html (measured, 2026-11-19), named so
+    # by aapt2's -A (inferred), which Android does not find; a zip's names
+    # use forward slashes.
+    foreach ($entry in @($zip.Entries | Where-Object { $_.FullName.Contains("\") })) {
+        $name = $entry.FullName.Replace("\", "/")
+        $copy = $zip.CreateEntry($name, [System.IO.Compression.CompressionLevel]::Optimal)
+        $from = $entry.Open()
+        $to = $copy.Open()
+        try {
+            $from.CopyTo($to)
+        }
+        finally {
+            $to.Dispose()
+            $from.Dispose()
+        }
+        $entry.Delete()
+    }
     [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
         $zip, (Join-Path $dex "classes.dex"), "classes.dex") | Out-Null
 }
 finally {
     $zip.Dispose()
+}
+$check = [System.IO.Compression.ZipFile]::OpenRead($linked)
+try {
+    $wrong = @($check.Entries | Where-Object { $_.FullName.Contains("\") } | ForEach-Object { $_.FullName })
+}
+finally {
+    $check.Dispose()
+}
+if ($wrong.Count -gt 0) {
+    throw "The app holds names with a backslash, which Android does not find: $($wrong -join ', ')"
 }
 $aligned = Join-Path $build "aligned.apk"
 Invoke-Tool -Name "zipalign" -FilePath $zipalign -Arguments @("-f", "4", $linked, $aligned) | Out-Null

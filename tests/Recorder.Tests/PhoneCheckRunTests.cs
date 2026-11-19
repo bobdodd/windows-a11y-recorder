@@ -578,6 +578,58 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.Contains("below 4.5:1, the limit for large text", aaa.Findings[1].Times[0].Measured, StringComparison.Ordinal);
     }
 
+    // Text with something drawn over it, a focus outline or another window,
+    // is not measured, and the finding says why (owner, 2026-11-19): it is
+    // NotRun, and not counted among the lines measured or passed.
+    [Fact]
+    public void TextContrast_DoesNotMeasureCoveredText_AndSaysWhy()
+    {
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var window = new PhoneCheckWindow(512, 1, Items(0).Deserialize<AndroidTreeNode[]>(JsonSerializerOptions.Web)!);
+        var save = window.Items[1];
+        var at = visit.SettledSnapshots[0];
+        var line = new PhoneTextLine(save, save, PhoneTextPlace.AppTextPlacedByOcr, save.Text, "Save", new PhoneBounds(110, 220, 190, 275),
+            new PhoneSwatch(0xFFFFFF, 0x6BC840, 0, 2, 2), 39, Covered: "another window, untitled, TYPE_SYSTEM, is drawn over part of it");
+        var measured = PhoneContrastRun.Of(
+        [
+            new PhoneContrastSnapshot(
+                visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                new PhoneContrastPicture(PhonePictureKind.Screenshot, at.MonotonicNanoseconds + 250_000_000, "p.png", "p.png"),
+                "Windows OCR, en-US", [line]),
+        ]);
+
+        var run = PhoneTextContrastRun.Run(measured, archive.PhoneScreens, Device(), PhoneAuditLevel.AA);
+
+        Assert.Equal((0, 0), (run.Lines, run.Passed));
+        var finding = Assert.Single(run.Findings);
+        Assert.Equal(PhoneCheckLevel.NotRun, finding.Level);
+        Assert.StartsWith(
+            "not measured, as another window, untitled, TYPE_SYSTEM, is drawn over part of it; from the phone's screenshot",
+            finding.Times[0].Measured, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NonTextContrast_DoesNotJudgeACoveredControl_AndSaysWhy()
+    {
+        var (lines, measures) = PhoneNonTextContrastTests.TabsMeasured();
+        var covered = measures.Select((measure, index) => index == 0 ? measure with { Covered = "an outline is drawn over it" } : measure).ToList();
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var at = visit.SettledSnapshots[0];
+        var snapshot = new PhoneContrastSnapshot(
+            visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+            new PhoneContrastPicture(PhonePictureKind.Screenshot, at.MonotonicNanoseconds + 250_000_000, "p.png", "p.png"),
+            "Windows OCR, en-US", lines, covered);
+
+        var run = PhoneNonTextContrastRun.Run(PhoneContrastRun.Of([snapshot]), archive.PhoneScreens);
+
+        Assert.Equal(measures.Count - 1, run.Controls);
+        var first = Assert.Single(run.Findings, finding => finding.Identity == measures[0].Item.Identity);
+        Assert.Equal(PhoneCheckLevel.NotRun, first.Level);
+        Assert.StartsWith("not measured, as an outline is drawn over it", first.Times[0].Measured, StringComparison.Ordinal);
+    }
+
     // Step 5: the non-text contrast check, from the same measurement of the
     // bottom bar's tabs on two settled snapshots of the visit.
     [Fact]

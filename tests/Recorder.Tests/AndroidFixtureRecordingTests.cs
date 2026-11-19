@@ -39,11 +39,37 @@ public sealed class AndroidFixtureRecordingTests
         var package = expected.RootElement.GetProperty("package").GetString()!;
         var screens = expected.RootElement.GetProperty("screens").EnumerateArray().ToList();
         var problems = new List<string>();
+        var app = expected.RootElement.GetProperty("app").EnumerateArray().ToList();
         var visited = new HashSet<string>(StringComparer.Ordinal);
         foreach (var folder in folders)
         {
             var name = Path.GetFileName(folder);
             var found = await FindingsAsync(folder);
+            var listed = new HashSet<FixtureFinding>(ReferenceEqualityComparer.Instance);
+
+            // The app-level findings expected of the fixture app.
+            var ofApp = found.Where(f => f.App && f.Package == package).ToList();
+            foreach (var expect in app)
+            {
+                var check = expect.GetProperty("check").GetString()!;
+                var finding = expect.GetProperty("finding").GetString()!;
+                var matches = ofApp.Where(f => f.Check == check).ToList();
+                listed.UnionWith(matches);
+                if (finding == "none")
+                {
+                    problems.AddRange(matches.Select(f => $"{name}, the app: {check}: a false alarm, {f.Level}: {f.Measured}"));
+                }
+                else if (matches.Count == 0)
+                {
+                    problems.Add($"{name}, the app: {check}: missed; {finding} expected");
+                }
+                else
+                {
+                    problems.AddRange(matches
+                        .Where(f => !string.Equals(f.Level, finding, StringComparison.OrdinalIgnoreCase))
+                        .Select(f => $"{name}, the app: {check}: {f.Level} found, {finding} expected"));
+                }
+            }
             foreach (var screen in screens)
             {
                 var title = screen.GetProperty("title").GetString()!;
@@ -54,6 +80,7 @@ public sealed class AndroidFixtureRecordingTests
                 }
 
                 visited.Add(screen.GetProperty("id").GetString()!);
+                listed.UnionWith(onScreen.Where(f => screen.GetProperty("expect").EnumerateArray().Any(e => Lists(e, f))));
                 foreach (var expect in screen.GetProperty("expect").EnumerateArray())
                 {
                     if (expect.GetProperty("by").GetString() != "rule")
@@ -70,7 +97,9 @@ public sealed class AndroidFixtureRecordingTests
                     var where = $"{name}, {title}: {check} on {what}";
                     if (finding == "none")
                     {
-                        problems.AddRange(matches.Select(f => $"{where}: a false alarm on the near miss, {f.Level}: {f.Measured}"));
+                        problems.AddRange(matches.Select(f => f.Level == "NotRun"
+                            ? $"{where}: the near miss was not judged: {f.Measured}"
+                            : $"{where}: a false alarm on the near miss, {f.Level}: {f.Measured}"));
                     }
                     else if (matches.Count == 0)
                     {
@@ -84,6 +113,22 @@ public sealed class AndroidFixtureRecordingTests
                     }
                 }
             }
+
+            // An error or warning on the fixture app that expected.json does
+            // not list fails the test; any other finding is only reported
+            // (owner, 2026-11-19).
+            foreach (var f in found.Where(f => f.Package == package && !listed.Contains(f)))
+            {
+                var line = $"{name}, {(f.App ? "the app" : f.Screen)}: {f.Check} on {f.Identity}, {f.Level}: {f.Measured}";
+                if (f.Level is "Error" or "Warning")
+                {
+                    problems.Add($"{line}: not in expected.json");
+                }
+                else
+                {
+                    TestContext.Current.TestOutputHelper?.WriteLine(line);
+                }
+            }
         }
 
         // Every tour screen whose checks are built is in some recording.
@@ -94,6 +139,13 @@ public sealed class AndroidFixtureRecordingTests
             .Select(id => $"{id}: in the tour, but in no recording"));
         Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems));
     }
+
+    // Whether a screen's expectation is of the finding: its check, on its item or OCR line.
+    private static bool Lists(JsonElement expect, FixtureFinding finding) =>
+        expect.GetProperty("check").GetString() == finding.Check &&
+        (expect.TryGetProperty("item", out var item)
+            ? OfItem(finding, item.GetString()!)
+            : OfLine(finding, expect.GetProperty("line").GetString()!));
 
     // A finding of an element by its resource ID, which a view's identity
     // holds as "id:package:id/name#n" and a web page's as "id:name#n".
