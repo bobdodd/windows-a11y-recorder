@@ -14,8 +14,9 @@ using Recorder.Session;
 // the checks read Windows OCR's readings, which the Linux build cannot make.
 //
 // 1. Trims the recording to the fixture app's visits: the events before the
-//    first and after the last are left out, as are the sound, the video, and
-//    the phone's notifications, so nothing of the phone's own apps is kept.
+//    first and after the last are left out, as are the sound, the video,
+//    TalkBack's log, which no check reads, and the phone's notifications, so
+//    nothing of the phone's own apps is kept.
 // 2. Runs the rules on the trimmed recording with Windows OCR, keeping only
 //    the pictures they read, what OCR read in them, and their findings.
 // 3. Lists every text the trimmed recording holds that is not in the fixture
@@ -252,6 +253,14 @@ static string? Leave(Recorder.Contracts.RecorderEvent record, long start, long e
     if (channel == "graphics.android.video")
     {
         return "video";
+    }
+
+    if (channel == Recorder.Contracts.AndroidTalkBackRecords.LogChannel)
+    {
+        // TalkBack's own log, thousands of lines a minute with TalkBack's
+        // verbose logging on. No check reads it; what TalkBack said is kept,
+        // in its speech channel.
+        return "TalkBack log lines";
     }
 
     if (channel == "accessibility.android.events" &&

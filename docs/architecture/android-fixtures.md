@@ -236,7 +236,10 @@ Built on 2026-11-19 against the owner's first recording of the tour.
   1. trims the recording to the fixture app's visits, from the start of
      the first to the end of the last, into a new `recording.mcap`.
      Sound and video are left out, as are the phone's notification
-     events, which name other apps and hold their text. A
+     events, which name other apps and hold their text, and TalkBack's
+     log, which no check reads: on the second recording it was 3,281 of
+     the 4,469 events in the span, one line each in the list of text
+     not the app's. What TalkBack said is kept, in its speech channel. A
      `manifest.json` lists only the kept files;
   2. runs the rules on the trimmed recording with Windows OCR and no
      model (every model check is marked not asked), keeping only the
@@ -311,7 +314,45 @@ the owner's first recording of the tour. The recording was not kept.
   title; and an app-level `no-live-region` warning. These are left for
   the owner's decision on unlisted findings.
 
+## The second recording
+
+Measured on 2026-11-19 in the sandbox, with no OCR and no model, from
+the owner's second recording of the tour, made with TalkBack on and the
+changed tour. The recording was not kept. On the PC the extractor ran
+with Windows OCR; that run's findings have not been read.
+
+- **The tour's changes worked.** The recording began in the fixture
+  app's index; the status bar showed the demo clock and battery and no
+  notifications; no notification event was in the span. Apart from
+  TalkBack's log, the text not the app's was the status and navigation
+  bars, the accessibility button's window and the app's package
+  details.
+- **TalkBack's drawing changed the contrast results.** In the
+  screenshots, TalkBack's green focus outline is drawn round the first
+  line of text after each screen's heading, and the accessibility
+  button, a purple circle at the left edge, covers the start of the
+  second line. Measured on the items' bounds, with no OCR:
+  `contrast_error` was measured on the outline's green, #6BC840, at
+  2.11:1, an error still but for the wrong colour; and on the Points
+  screen `heading_value`, dark text, gave a false error at 2.98:1, on
+  the button's purple, #A28ACD. With TalkBack off, on the first
+  recording, neither happened. The same will happen in recordings of
+  real apps made with TalkBack on.
+- **The WebView screen still had no page.** The screen's own message
+  said the asset `web/basics.html` could not be read, so the app on the
+  phone did not hold it. The sandbox's build of the app holds
+  `assets/web/basics.html`; whether the PC's build does is to be
+  checked.
+
 ## Open decisions
+
+- **TalkBack's drawing over the screen.** Either the contrast checks
+  leave out what TalkBack and the system draw over the app (the focus
+  outline round the item with accessibility focus, and windows such as
+  the accessibility button, whose bounds the tree gives), and say so in
+  the finding; or an item covered by them is not measured, and the
+  finding says why; or the fixture app only is laid out so they cover
+  nothing measured, which leaves recordings of real apps as they are.
 
 - **Unlisted findings.** Either every finding, information included,
   is listed in `expected.json` and any other fails the test; or errors

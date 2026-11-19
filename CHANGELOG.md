@@ -30,8 +30,8 @@ Changes on `main` since 1.1.0, not yet released.
   recorder's check names.
 - The extractor, `tests/FixtureExtract`, run on the PC by
   `scripts/Extract-FixtureRecording.ps1`, trims a recording of the tour
-  to the fixture app's visits, with no sound, video or notification
-  events, runs the rules on it with Windows OCR and no model, and keeps
+  to the fixture app's visits, with no sound, video, notification
+  events or TalkBack log lines, runs the rules on it with Windows OCR and no model, and keeps
   the pictures they read, OCR's readings and the findings. It lists
   every text kept that is not the fixture app's, to read before
   committing.
