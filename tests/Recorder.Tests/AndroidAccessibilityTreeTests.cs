@@ -231,6 +231,73 @@ public sealed class AndroidAccessibilityTreeTests
     }
 
     [Fact]
+    public void Checks_ReadTheLinksInEachItemsText()
+    {
+        var window = CheckWindowOf(PayloadOf(CompanionProtocol.ReadTree(TreeLine()).Tree!));
+        Assert.NotNull(window);
+        var items = window.Items;
+
+        // An event's source item's web link: its words and address, its
+        // place not asked for.
+        Assert.True(items[0].LinksRecorded);
+        var web = Assert.Single(items[0].Links!);
+        Assert.Equal((6, 17, "example.org", "url", "https://example.org/"), (web.Start, web.End, web.Text, web.Kind, web.Url));
+        Assert.False(web.Located);
+        Assert.Equal("not-asked", web.Location);
+        Assert.Null(web.CharactersLocated);
+        Assert.Empty(web.Boxes);
+
+        // No links: recorded, and none.
+        Assert.True(items[1].LinksRecorded);
+        Assert.Empty(items[1].Links!);
+
+        // Two located links, the first over two lines, the second with
+        // none of its characters on the screen.
+        var links = items[2].Links!;
+        Assert.Equal(2, links.Count);
+        Assert.Equal(("cooking terms", "clickable", (string?)null), (links[0].Text, links[0].Kind, links[0].Url));
+        Assert.True(links[0].Located);
+        Assert.Equal(13, links[0].CharactersLocated);
+        Assert.Equal([new PhoneBounds(610, 900, 1012, 958), new PhoneBounds(42, 958, 180, 1016)], links[0].Boxes);
+        Assert.Equal("start", links[1].Text);
+        Assert.True(links[1].Located);
+        Assert.Equal(0, links[1].CharactersLocated);
+        Assert.Empty(links[1].Boxes);
+    }
+
+    [Fact]
+    public void Checks_AnItemFromBeforeProtocol8_HasItsLinksNotRecorded()
+    {
+        var payload = PayloadOf(CompanionProtocol.ReadTree(TreeLine()).Tree!);
+        foreach (var item in payload["windows"]![0]!["items"]!.AsArray())
+        {
+            item!.AsObject().Remove("links");
+        }
+
+        var window = CheckWindowOf(payload);
+
+        Assert.NotNull(window);
+        Assert.All(window.Items, item =>
+        {
+            Assert.False(item.LinksRecorded);
+            Assert.Null(item.Links);
+        });
+    }
+
+    // A snapshot's Settings window as the checks read it from the recording.
+    private static PhoneCheckWindow? CheckWindowOf(JsonObject payload)
+    {
+        var snapshot = new SessionTimelineEvent(1, "t1", "observed", "accessibility.android.tree", "tree", 2 * Second, "tree");
+        var record = new JsonObject { ["payload"] = payload }.ToJsonString();
+        return PhoneCheckRun.ReadWindow(new OneRecord(record), snapshot, 512);
+    }
+
+    private sealed class OneRecord(string record) : ISessionEventRecordSource
+    {
+        public string ReadEventJson(SessionTimelineEvent item) => record;
+    }
+
+    [Fact]
     public void Protocol_ASnapshotItCannotRead_IsAProblemNotAFailure()
     {
         var line = "{\"type\":\"accessibility-tree\",\"index\":\"two\"}";

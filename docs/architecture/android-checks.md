@@ -5273,8 +5273,22 @@ the order, please start with step 1".
 - **The fixture extractor** lists each link's address among the text
   to read before committing.
 
-Step 2, the recorder reading the links into each item for the checks,
-is not built yet.
+### As built (step 2, 2026-11-19)
+
+The owner asked: "Start step 2: have the recorder read the links into
+each item for the checks".
+
+- **Each item the checks read** (`PhoneCheckItem`) has `Links`: for each
+  link, its place in the text and its words, its kind, a web link's
+  address, its `location`, how many of its characters were located, and
+  its boxes in the same pixels as the item's bounds (`PhoneTextLink`).
+  The checks read a snapshot's window from its complete record, which
+  holds the links, so nothing more is stored.
+- **Not recorded is not none.** `LinksRecorded` is false, and `Links`
+  null, for an item from a recording made before protocol 8; an item of
+  a later recording with no links has an empty list.
+- No check reads the links yet, and nothing on the screen changes: the
+  rules for the colour checks come after step 3's measurement.
 
 ### Checked
 
@@ -5284,12 +5298,26 @@ as before, and the companion app builds with its pinned build. The new tests rea
 a made-up tree with a web link not located, an item with no links and
 two located links, one over two lines and one off the screen, an item
 from before protocol 8, and each kind of bad link the validator
-rejects. Not yet run on a phone.
+rejects. Run on the owner's phone in tests 60 to 62 (see the validation
+plan): both of the Recipes screen's links were located, each as one
+box inside its item's bounds.
+
+For step 2, in the Linux build environment: the solution builds with no
+warnings, the tests pass, 2,779 of them, with the tests that need
+Windows failing as before, and the new tests read the made-up tree through the reader
+the checks use, with each link's words, kind, address, place and boxes,
+an item with no links, and every item of a tree from before protocol 8
+as not recorded. A probe with no model, deleted afterwards, read the
+owner's recording of the Recipes screen in the same way: "cooking
+terms" and "kitchen safety notes", each located in full as one box,
+and no links in the other 21 items of the window; and a window of the
+committed fixture, from protocol 7, with its 16 items not recorded
+(measured).
 
 ### Limits
 
-- Whether the owner's phone gives the boxes, and whether they fall on
-  the links' words, is to be measured on the next recording.
+- Whether the boxes fall on the links' words in the screenshots is step
+  3's measurement, on the recording of tests 60 to 62.
 - An event's source item has its links but not where they are.
 - Joining characters into lines assumes text read left to right; a
   right-to-left link may be given a box for each character or a few

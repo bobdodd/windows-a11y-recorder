@@ -15,9 +15,12 @@ Changes on `main` since 1.1.0, not yet released.
   in the tree, its box on the screen for each line, asked of the app.
   Each says whether its place was found, and if not, why. The recorder
   keeps them and checks them; it accepts only a companion app of
-  protocol 8, so the companion app is to be installed again. The checks
-  do not read them yet. See `docs/architecture/android-checks.md`,
-  step 29.
+  protocol 8, so the companion app is to be installed again. See
+  `docs/architecture/android-checks.md`, step 29.
+- Each item the checks read has its links: their words, kind, address,
+  whether their places were found, and their boxes on the screen. An
+  item from a recording made before protocol 8 says its links were not
+  recorded, rather than that it has none. No check reads them yet.
 
 ### Fixture app
 

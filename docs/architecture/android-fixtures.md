@@ -726,8 +726,8 @@ Screens for these can be built so they are ready, but each needs the
 recorder or companion app to record more, so they come last.
 
 - **Link text (2.4.4):** needs links' places, which the companion app
-  records from protocol 8 (android-checks.md, step 29), and the
-  recorder is yet to read for the checks.
+  records from protocol 8 and the checks' items hold
+  (android-checks.md, step 29); no check reads them yet.
 - **Focus visible (2.4.7):** needs a Bluetooth keyboard.
 - **Resize text (1.4.4):** needs the font scale recorded, and a pass at
   the largest scale.

@@ -441,11 +441,34 @@ public sealed class PhoneCheckWindow
     public IReadOnlyList<PhoneCheckItem> Items { get; }
 }
 
+/// <summary>
+/// A link in an item's text as the checks see it (android-checks.md, step
+/// 29): its place in the item's text, in UTF-16 code units as a .NET string
+/// counts them, and its words; its kind, "url" or "clickable", and a web
+/// link's address; and whether the app gave its characters' places, how
+/// many, and its box on the screen for each line, in the same pixels as the
+/// item's bounds.
+/// </summary>
+public sealed record PhoneTextLink(
+    int Start,
+    int End,
+    string Text,
+    string Kind,
+    string? Url,
+    string Location,
+    int? CharactersLocated,
+    IReadOnlyList<PhoneBounds> Boxes)
+{
+    /// <summary>True when the app gave the places of the link's characters; <see cref="CharactersLocated"/> says how many had one.</summary>
+    public bool Located => Location == AndroidAccessibilityRecords.TextLinkLocated;
+}
+
 /// <summary>A window's item as the checks see it.</summary>
 public sealed class PhoneCheckItem
 {
     internal readonly List<PhoneCheckItem> _children = [];
     private string? _label;
+    private IReadOnlyList<PhoneTextLink>? _links;
 
     internal PhoneCheckItem(AndroidTreeNode node)
     {
@@ -472,6 +495,37 @@ public sealed class PhoneCheckItem
 
     /// <summary>The item as a row names it, as the tree view does: "Button "Save"", "ImageView described as "Back"", "View containing "Sleep"".</summary>
     public string Label => _label ??= PhoneTreeChecks.LabelOf(this);
+
+    /// <summary>
+    /// True when the recording says which links the item's text has: from
+    /// the companion app's protocol 8. A recording made before did not
+    /// record them, so its items' links are not known, which is not the
+    /// same as none.
+    /// </summary>
+    public bool LinksRecorded => Node.Links is not null;
+
+    /// <summary>
+    /// The links in the item's text, in the text's order; empty when it has
+    /// none, and null when they were not recorded (<see cref="LinksRecorded"/>).
+    /// The recorder's validator keeps each link within the text.
+    /// </summary>
+    public IReadOnlyList<PhoneTextLink>? Links => Node.Links is null ? null : _links ??= LinksOf(Node);
+
+    private static List<PhoneTextLink> LinksOf(AndroidTreeNode node)
+    {
+        var text = node.Text ?? string.Empty;
+        return node.Links!
+            .Select(link => new PhoneTextLink(
+                link.Start,
+                link.End,
+                text[link.Start..link.End],
+                link.Kind,
+                link.Url,
+                link.Location,
+                link.CharactersLocated,
+                [.. link.Boxes.Select(box => new PhoneBounds(box.Left, box.Top, box.Right, box.Bottom))]))
+            .ToList();
+    }
 
     internal bool InstanceOf(string className) => Classes.Contains(className);
 
