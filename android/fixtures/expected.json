@@ -114,6 +114,24 @@
         { "check": "heading-not-shown", "item": "web_heading", "by": "model", "finding": "none",
           "note": "an h1, \"Opening hours\", 24 px and bold" }
       ]
+    },
+    {
+      "id": "colour-only",
+      "title": "Recipes",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "unbuilt",
+      "expect": [
+        { "check": "selected-only-by-colour", "item": "selected_colour", "by": "unbuilt", "finding": "warning",
+          "note": "the selected tab of three, marked selected, shown in #B0306A against the others' #5F6368: the same luminance, so only the hue differs" },
+        { "check": "selected-only-by-colour", "item": "selected_marked", "by": "unbuilt", "finding": "none",
+          "note": "the selected tab of three, marked selected, in the same colours, and bold and underlined too" },
+        { "check": "link-only-by-colour", "item": "link_colour", "by": "unbuilt", "finding": "warning",
+          "note": "a paragraph holding a link shown only in #1558B0, about 2.3:1 against the #202124 body text and 6.9:1 on white, not underlined" },
+        { "check": "link-only-by-colour", "item": "link_underlined", "by": "unbuilt", "finding": "none",
+          "note": "a paragraph holding a link in the same colour, underlined" }
+      ]
     }
   ]
 }

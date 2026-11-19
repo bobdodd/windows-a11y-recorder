@@ -26,4 +26,9 @@
     <item type="id" name="heading_value" />
 
     <item type="id" name="web_page" />
+
+    <item type="id" name="selected_colour" />
+    <item type="id" name="selected_marked" />
+    <item type="id" name="link_colour" />
+    <item type="id" name="link_underlined" />
 </resources>

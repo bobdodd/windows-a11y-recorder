@@ -1,7 +1,14 @@
 package io.github.bobdodd.a11yrecorder.fixtures;
 
 import android.app.Activity;
+import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.TextPaint;
+import android.text.method.LinkMovementMethod;
+import android.text.style.ClickableSpan;
+import android.view.Gravity;
 import android.view.View;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
@@ -27,7 +34,8 @@ final class Screens {
             new Screen("text-contrast", "Delivery", Screens::textContrast),
             new Screen("control-names", "Holiday photos", Screens::controlNames),
             new Screen("heading-look", "Points", Screens::headingLook),
-            new Screen("web-basics", "Opening hours", Screens::webBasics)));
+            new Screen("web-basics", "Opening hours", Screens::webBasics),
+            new Screen("colour-only", "Recipes", Screens::colourOnly)));
 
     private Screens() {
     }
@@ -158,6 +166,90 @@ final class Screens {
         frame.addView(web, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         return frame;
+    }
+
+    // Two checks not yet built, of what is shown only by colour (1.4.1).
+    // A row of tabs whose selected tab differs only in colour: #B0306A
+    // against the others' #5F6368, both about 6:1 on white and of the
+    // same luminance, so the difference is hue alone (fails); a row whose
+    // selected tab is also bold and underlined (passes). A paragraph whose
+    // link is only coloured, #1558B0, about 2.3:1 against the body text
+    // and 6.9:1 on white (fails, under the 3:1 against the text that a
+    // colour alone would need); the same link underlined (passes). Clicking
+    // a tab or link does nothing, so the screen does not change. They follow a line not tested and a gap (see
+    // clearOfTalkBack), as the checks read their colours.
+    private static final int TAB = 0xFF5F6368;
+    private static final int TAB_SELECTED = 0xFFB0306A;
+    private static final int LINK = 0xFF1558B0;
+
+    private static View colourOnly(Activity activity) {
+        LinearLayout column = Ui.column(activity);
+        column.addView(Ui.heading(activity, "Recipes"));
+        clearOfTalkBack(activity, column, "Pick a course to see its recipes.");
+
+        LinearLayout courses = Ui.row(activity);
+        courses.addView(tab(activity, View.NO_ID, "Soups", false, false));
+        courses.addView(tab(activity, R.id.selected_colour, "Salads", true, false));
+        courses.addView(tab(activity, View.NO_ID, "Desserts", false, false));
+        column.addView(courses);
+
+        LinearLayout meals = Ui.row(activity);
+        meals.addView(tab(activity, View.NO_ID, "Breakfast", false, false));
+        meals.addView(tab(activity, R.id.selected_marked, "Lunch", true, true));
+        meals.addView(tab(activity, View.NO_ID, "Dinner", false, false));
+        column.addView(meals);
+
+        column.addView(Ui.space(activity, 1, 24));
+        column.addView(link(activity, R.id.link_colour, "Read the ", "cooking terms", " before you start.", false));
+        column.addView(link(activity, R.id.link_underlined, "Keep the ", "kitchen safety notes", " close by.", true));
+        return column;
+    }
+
+    // A tab at least 48 dp each way, so the touch target checks have
+    // nothing to find. A selected tab is marked selected for accessibility
+    // services, and shown in TAB_SELECTED, and, when marked, bold and
+    // underlined too.
+    private static TextView tab(Activity activity, int id, String text, boolean selected, boolean marked) {
+        TextView tab = Ui.text(activity, text, 16, selected ? TAB_SELECTED : TAB);
+        tab.setId(id);
+        tab.setGravity(Gravity.CENTER);
+        int across = Ui.dp(activity, 16);
+        tab.setPadding(across, 0, across, 0);
+        tab.setMinWidth(Ui.dp(activity, 48));
+        tab.setMinHeight(Ui.dp(activity, 48));
+        tab.setSelected(selected);
+        if (marked) {
+            tab.setTypeface(Typeface.DEFAULT_BOLD);
+            tab.setPaintFlags(tab.getPaintFlags() | Paint.UNDERLINE_TEXT_FLAG);
+        }
+        tab.setOnClickListener(view -> { });
+        return tab;
+    }
+
+    // A paragraph of body text holding one link in LINK, underlined or
+    // not. The link movement method makes the paragraph clickable and
+    // focusable, and the paragraph is at least 48 dp tall, so the touch
+    // target checks have nothing to find.
+    private static TextView link(Activity activity, int id, String before, String linked, String after, boolean underlined) {
+        SpannableString text = new SpannableString(before + linked + after);
+        text.setSpan(new ClickableSpan() {
+            @Override
+            public void onClick(View view) {
+            }
+
+            @Override
+            public void updateDrawState(TextPaint paint) {
+                paint.setColor(LINK);
+                paint.setUnderlineText(underlined);
+            }
+        }, before.length(), before.length() + linked.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        TextView paragraph = Ui.body(activity, "");
+        paragraph.setId(id);
+        paragraph.setText(text);
+        paragraph.setMovementMethod(LinkMovementMethod.getInstance());
+        paragraph.setHighlightColor(Ui.BACKGROUND);
+        paragraph.setMinHeight(Ui.dp(activity, 48));
+        return paragraph;
     }
 
     // A line not tested, then a gap, so that what TalkBack draws over the

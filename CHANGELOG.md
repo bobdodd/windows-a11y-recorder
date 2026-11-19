@@ -87,6 +87,13 @@ Changes on `main` since 1.1.0, not yet released.
 - `scripts/Run-FixtureTour.ps1` opens the index again after Record and
   holds it, and puts the accessibility button in the navigation bar for
   the tour, putting it back afterwards.
+- The fixture app's first screen for checks not yet built, "Recipes"
+  (`colour-only`), opened by the tour: a row of tabs whose selected tab
+  differs only in hue, and a row whose selected tab is also bold and
+  underlined, for a selected state shown only by colour; a paragraph
+  whose link is shown only by colour, and one whose link is also
+  underlined, for links shown only by colour (WCAG 1.4.1). Its first
+  recording is to be measured, with no model, before rules are proposed.
 
 ### Control names
 

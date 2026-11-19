@@ -30,8 +30,10 @@ What exists so far:
   `tests/Recorder.Tests/AndroidFixtureRecordingTests.cs` (see "Rule
   tests").
 
-Not yet built: the model evaluation, and the fixtures for the checks
-not yet built.
+Not yet built: the model evaluation, and most of the fixtures for the
+checks not yet built. The first screen for them, "Recipes"
+(`colour-only`), is built and waits for its first recording (see "The
+colour screen").
 
 One fixture recording is committed, `tests/fixtures/android/tour/`,
 extracted from the owner's fifth recording of the tour on 2026-11-19
@@ -661,6 +663,45 @@ the owner chooses.
 | Instructions that rely on shape, colour or place | 1.3.3 | "Tap the green button on the right" | "Tap Continue" beside a green button |
 | Video with no captions | 1.2.2 | A short made-up video with speech-like sound and no captions | The same video with captions shown |
 | Flashing | 2.3.1 | See "Limits" | A slow pulse under three a second |
+
+The owner chose to start with the selected state and the links shown
+only by colour, on one new screen (2026-11-19); the chart that relies on
+colour waits.
+
+#### The colour screen
+
+`colour-only`, titled "Recipes", built on 2026-11-19 and opened by the
+tour. Its checks are not built; their names in `expected.json`,
+`selected-only-by-colour` and `link-only-by-colour`, are chosen here,
+and the warnings expected on the faults are a proposal, to be chosen
+with the rules.
+
+| Element | Built as | Expected |
+| --- | --- | --- |
+| `selected_colour` | The selected tab of three, marked selected for accessibility services, in #B0306A against the others' #5F6368: both about 6:1 on white and of the same luminance, so only the hue differs | A selected state shown only by colour |
+| `selected_marked` | The selected tab of three, in the same colours, and bold and underlined too | No finding |
+| `link_colour` | A paragraph holding a link in #1558B0, not underlined: about 2.3:1 against the #202124 body text, under the 3:1 a colour alone would need, and 6.9:1 on white | A link shown only by colour |
+| `link_underlined` | A paragraph holding a link in the same colour, underlined | No finding |
+
+Every tab and paragraph is at least 48 dp tall, and the tabs at least
+48 dp wide, and every colour is at least 4.5:1 on white, so the touch
+target and contrast checks have nothing to find. Clicking a tab or link
+does nothing. The tested rows follow a line not tested and a gap, as on
+the other screens, as the checks read their colours.
+
+What the recorder holds for these, read from the companion app's source
+and not yet measured on a recording:
+
+- **Selected state:** each item's `selected` flag is recorded, so the
+  tree says which tab is selected and where it is. What tells it apart
+  on screen has to be read from the pixels.
+- **Links:** an item's text is recorded as plain text, so a link inside
+  a paragraph has no item or bounds of its own, and the tree cannot say
+  which words are the link. The paragraph is recorded as clickable, as
+  the link movement method makes it so, and OCR's words and the pixels
+  may show which words differ in colour. Whether that is enough, or the
+  companion app must record the links' spans, as link text (2.4.4)
+  needs, is the first recording's question.
 
 ### Driven by a person
 
