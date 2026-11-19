@@ -20,9 +20,11 @@ public static class CompanionProtocol
     /// 4 from step 7b, which added snapshots of the accessibility tree; 5
     /// from slice 8, step 8a, which added notices of settings changes; 6
     /// from android-checks.md, step 4a, which added screenshots; 7 from
-    /// android-checks.md, step 15, which added how the phone is held.
+    /// android-checks.md, step 15, which added how the phone is held; 8
+    /// from android-checks.md, step 29, which added the links in an item's
+    /// text and where they are on the screen.
     /// </summary>
-    public const int Version = 7;
+    public const int Version = 8;
 
     /// <summary>The companion app's socket, in Linux's abstract namespace.</summary>
     public const string SocketName = "a11yrecorder_companion";

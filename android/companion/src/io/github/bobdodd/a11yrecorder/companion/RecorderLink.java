@@ -81,14 +81,17 @@ import java.util.concurrent.RejectedExecutionException;
  * connection how the phone itself is held, from its accelerometer, at once
  * and each time it changes, each as an "orientation" message (see
  * {@link PhoneOrientation}); the sensor runs only while a connection asks.
+ * From protocol 8 each item of an event or a tree has "links", the links
+ * in its text, and a tree's items where each link is on the screen (see
+ * {@link TextLinks}).
  * See docs/architecture/android-implementation-plan.md, slices 2, 4, 7
- * and 8, docs/architecture/android-checks.md, steps 4a and 15, and
+ * and 8, docs/architecture/android-checks.md, steps 4a, 15 and 29, and
  * src/Recorder.Collectors.Android/CompanionProtocol.cs, which must agree
  * with this file.
  */
 final class RecorderLink {
     static final String SOCKET_NAME = "a11yrecorder_companion";
-    static final int PROTOCOL = 7;
+    static final int PROTOCOL = 8;
     private static final String TAG = "A11yRecorderCompanion";
 
     private final Context context;

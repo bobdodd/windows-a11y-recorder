@@ -2242,3 +2242,73 @@ Keep the phone's picture in view throughout.
 **On screen:** the next row says `Framework not recorded.` The recorder
 does not retrospectively label an old recording using the currently
 installed version of that app.
+
+## Step 29: links in an item's text (2026-11-19)
+
+The owner's decision, what Android gives, and what was built are in the
+architecture document's "Step 29: links in an item's text". A new
+companion app, protocol 8, records the links in each item's text and,
+in the tree, their boxes on the screen, so the companion app must be
+installed again (test 61). The checks do not read the links yet. Checked
+in the Linux build environment: the solution builds with no warnings,
+the tests pass with the others, and the companion app builds.
+
+Test 62 is a measurement, not a check's result: the recording of the
+fixture app's Recipes screen is read with no model, to see whether the
+boxes fall on the links' words, before rules are proposed for the two
+colour checks.
+
+## Test 60: build and install the twenty-second build
+
+Run only after its commit has been pushed.
+
+1. Close the recorder. Run this in PowerShell to build the installer and
+   the fixture app and launch the newest installer:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $ErrorActionPreference = "Stop"
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   git -C $repo pull --ff-only
+   if ($LASTEXITCODE -ne 0) { throw "Git pull failed." }
+   & (Join-Path $repo "scripts\Build-Installer.ps1")
+   & (Join-Path $repo "scripts\Build-FixtureApp.ps1")
+   $installer = Get-ChildItem (Join-Path $repo "artifacts\installer\output") -File -Filter "*.exe" |
+       Sort-Object LastWriteTime -Descending | Select-Object -First 1
+   if (-not $installer) { throw "No installer was found." }
+   Start-Process -FilePath $installer.FullName
+   ```
+
+2. Complete setup with "Start the recorder and set up the analysis
+   models" unchecked, and start the recorder from the Start menu.
+
+**On screen:** the build reports `INSTALLER BUILT`, the fixture app's
+build ends without an error, and the recorder opens after setup.
+
+## Test 61: install the companion app for protocol 8
+
+1. Connect the Pixel by USB, unlocked. In the recorder, in "Recording
+   target", choose "Android device".
+2. The panel offers "Install companion app". Choose it, and wait until
+   the companion line stops changing.
+
+**On screen:** the companion line reads "Companion app: installed, on,
+and answering (version 1.1.0, version code" with a number, and ends
+"protocol 8)." "protocol 7" is a failure.
+
+## Test 62: record the Recipes screen
+
+1. Run this in PowerShell:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $repo = Join-Path $env:USERPROFILE "windows-a11y-recorder"
+   & (Join-Path $repo "scripts\Run-FixtureTour.ps1") -Screens colour-only
+   ```
+
+2. Press Record in the recorder when the script asks, and Stop when it
+   asks.
+
+**On screen:** the phone shows the fixture app's "Recipes" screen
+during the recording, and the new recording is listed in the recorder.
+The recording is then measured on the development PC with no model.

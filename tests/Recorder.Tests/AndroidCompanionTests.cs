@@ -205,7 +205,7 @@ public sealed class AndroidCompanionTests
 
         var exception = await Assert.ThrowsAsync<CompanionUnavailableException>(() => app.ConnectAsync());
 
-        Assert.Contains("speaks protocol 5; this recorder speaks 7", exception.Message);
+        Assert.Contains("speaks protocol 5; this recorder speaks 8", exception.Message);
     }
 
     [Fact]
@@ -390,7 +390,8 @@ public sealed class AndroidCompanionTests
     [Fact]
     public void Protocol_OrientationRequestAndMessage()
     {
-        Assert.Equal(7, CompanionProtocol.Version);
+        // Added in protocol 7.
+        Assert.InRange(CompanionProtocol.Version, 7, int.MaxValue);
         Assert.Equal("{\"type\":\"orientation\"}\n", CompanionProtocol.OrientationRequest);
         Assert.Equal(
             new CompanionOrientation("changed", 270, 291, 123),

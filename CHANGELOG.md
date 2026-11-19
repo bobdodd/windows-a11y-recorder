@@ -8,6 +8,17 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Links in an item's text
+
+- The companion app, now protocol 8, records the links in each item's
+  text: where each is in the text, its kind, a web link's address, and,
+  in the tree, its box on the screen for each line, asked of the app.
+  Each says whether its place was found, and if not, why. The recorder
+  keeps them and checks them; it accepts only a companion app of
+  protocol 8, so the companion app is to be installed again. The checks
+  do not read them yet. See `docs/architecture/android-checks.md`,
+  step 29.
+
 ### Fixture app
 
 - A plan for testing the Android checks with screens of known faults

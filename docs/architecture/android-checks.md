@@ -5197,6 +5197,108 @@ where the first answers agree describes.
   first answer is given.
 - The impact, medium, is an assumption (see above).
 
+## Step 29: links in an item's text
+
+### The owner's decision (2026-11-19)
+
+The companion app did not record where the links in an item's text are,
+which the checks of links shown only by colour (1.4.1) and of link text
+(2.4.4) need. The owner asked to fix that before recording the fixture
+screen for links: "We have known that the recorder doesn't get link
+placement for a while now. Maybe we need to fix that properly before we
+do these fixture tests?" The owner then accepted this order: "I accept
+the order, please start with step 1".
+
+1. The companion app records the links in each item's text: where each
+   is in the text, its kind, its address for a web link, and its boxes
+   on the screen.
+2. The recorder reads them into each item for the checks. A recording
+   made before says that links were not recorded, not that there were
+   none.
+3. One phone recording, with the new companion app and the fixture
+   app's "Recipes" screen, measured with no model: whether the boxes
+   fall on the links' words in the screenshot. Then rules are proposed
+   for the two colour checks.
+4. The link text check (2.4.4) can use the same records, but is a
+   separate step for the owner to choose.
+
+### What Android gives (checked in cited documents)
+
+- [AccessibilityNodeInfo.getText](https://developer.android.com/reference/kotlin/android/view/accessibility/AccessibilityNodeInfo)
+  gives an item's text with its `ClickableSpan`s and `URLSpan`s
+  replaced by ones an accessibility service can click. The companion
+  app wrote the text with `toString()`, which drops them.
+- The same page's `EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY`, asked for
+  with `refreshWithExtraData`, gives a box for each of a run of
+  characters. [Android's source for the class](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/view/accessibility/AccessibilityNodeInfo.java)
+  says the box is null for a character that does not exist or is off
+  the screen, that the boxes are changed by the display's
+  magnification, and that one request asks for at most 20,000
+  characters.
+- [TextView's source](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/widget/TextView.java)
+  offers that key and maps each character's box to screen pixels.
+- Compose gives its links to accessibility services as such spans, as
+  TalkBack reads them ([Google issue 253292081](https://issuetracker.google.com/issues/253292081));
+  whether it gives their boxes is not known. A WebView's links are
+  items of their own in the tree, measured on the fixture app's web
+  page.
+
+### As built (step 1)
+
+- **The companion app, protocol 8.** Each item of an event or a tree
+  has `links`, in the text's order, each with `start` and `end` in the
+  text, in UTF-16 code units, `kind` (`url` for a `URLSpan`, otherwise
+  `clickable`), `url` for a web link, `location`, `charactersLocated`
+  and `boxes`. An item with no links has an empty list.
+- **Where the links are.** For a tree's item with links, the companion
+  app asks the app once for the characters from the first link's start
+  to the last one's end, on a copy of the item, so the item being read
+  is not changed. The boxes of each link's characters are joined into
+  one box for each line, rounded out to whole pixels. `location` says
+  what happened: `located`; `not-asked`, for an event's source item,
+  read on the service's main thread, where a call to the app would hold
+  up the service; `not-offered`, the item does not give its characters'
+  places; `too-long`, more than 20,000 characters; `not-returned`,
+  asked and nothing came back; or `text-changed`, the text changed
+  before the places came back, so they are not given. A located link
+  says how many of its characters had a box; one off the screen has
+  none.
+- **The recorder** accepts protocol 8 only, as for each protocol
+  before, so the Android device panel offers "Install companion app".
+  It keeps the links in each item (`AndroidTextLink`), and the
+  validator checks that each link is within the item's text, in order,
+  with boxes and a count only when located, and no more characters
+  located than the link has. A recording made before has no `links`,
+  read as not recorded.
+- **The fixture extractor** lists each link's address among the text
+  to read before committing.
+
+Step 2, the recorder reading the links into each item for the checks,
+is not built yet.
+
+### Checked
+
+In the Linux build environment: the solution builds with no warnings,
+the tests pass, 2,778 of them, with the tests that need Windows failing
+as before, and the companion app builds with its pinned build. The new tests read
+a made-up tree with a web link not located, an item with no links and
+two located links, one over two lines and one off the screen, an item
+from before protocol 8, and each kind of bad link the validator
+rejects. Not yet run on a phone.
+
+### Limits
+
+- Whether the owner's phone gives the boxes, and whether they fall on
+  the links' words, is to be measured on the next recording.
+- An event's source item has its links but not where they are.
+- Joining characters into lines assumes text read left to right; a
+  right-to-left link may be given a box for each character or a few
+  (inferred, not measured).
+- The boxes are changed by the display's magnification, as Android
+  says; the window-coordinate key that is not is newer and not used.
+- A web link's address is recorded, as the text is; it may hold
+  something personal, as text may.
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A

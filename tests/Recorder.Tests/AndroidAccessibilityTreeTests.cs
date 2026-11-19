@@ -106,11 +106,26 @@ public sealed class AndroidAccessibilityTreeTests
             return item;
         }
 
-        return new JsonArray(
-            Item(0, null, 0, [], null),
-            Item(1, 0, 1, [], null),
-            Item(2, 1, 2, [1], 0));
+        // The root's text holds a web link, not located, as an event's
+        // source item's links are not; the last item's text holds two
+        // links, located, the first over two lines.
+        var root = Item(0, null, 0, [], null);
+        root["text"] = "Visit example.org for more.";
+        root["links"] = JsonNode.Parse(
+            "[{\"start\":6,\"end\":17,\"kind\":\"url\",\"url\":\"https://example.org/\",\"location\":\"not-asked\"," +
+            "\"charactersLocated\":null,\"boxes\":[]}]");
+        var labelled = Item(2, 1, 2, [1], 0);
+        labelled["text"] = LinkedText;
+        labelled["links"] = JsonNode.Parse(
+            "[{\"start\":9,\"end\":22,\"kind\":\"clickable\",\"url\":null,\"location\":\"located\",\"charactersLocated\":13," +
+            "\"boxes\":[{\"left\":610,\"top\":900,\"right\":1012,\"bottom\":958},{\"left\":42,\"top\":958,\"right\":180,\"bottom\":1016}]}," +
+            "{\"start\":34,\"end\":39,\"kind\":\"clickable\",\"url\":null,\"location\":\"located\",\"charactersLocated\":0,\"boxes\":[]}]");
+        return new JsonArray(root, Item(1, 0, 1, [], null), labelled);
     }
+
+    // A made-up text with two links, "cooking terms" from 9 to 22 and
+    // "start" from 34 to 39.
+    private const string LinkedText = "Read the cooking terms before you start.";
 
     // The protocol
 
@@ -159,6 +174,60 @@ public sealed class AndroidAccessibilityTreeTests
         Assert.Null(settings.Items[0].Parent);
 
         Assert.Null(tree.Windows[1].Items);
+    }
+
+    [Fact]
+    public void Protocol_ReadsTheLinksInAnItemsText()
+    {
+        // Added in protocol 8.
+        Assert.Equal(8, CompanionProtocol.Version);
+        var (tree, problem) = CompanionProtocol.ReadTree(TreeLine());
+        Assert.Null(problem);
+        var items = tree!.Windows[0].Items!;
+
+        var web = Assert.Single(items[0].Links!);
+        Assert.Equal((6, 17, "url", "https://example.org/", "not-asked"), (web.Start, web.End, web.Kind, web.Url, web.Location));
+        Assert.Null(web.CharactersLocated);
+        Assert.Empty(web.Boxes);
+        Assert.Equal("example.org", items[0].Text![web.Start..web.End]);
+
+        Assert.Empty(items[1].Links!);
+
+        var links = items[2].Links!;
+        Assert.Equal(2, links.Count);
+        Assert.Equal("cooking terms", LinkedText[links[0].Start..links[0].End]);
+        Assert.Equal("clickable", links[0].Kind);
+        Assert.Null(links[0].Url);
+        Assert.Equal(AndroidAccessibilityRecords.TextLinkLocated, links[0].Location);
+        Assert.Equal(13, links[0].CharactersLocated);
+        Assert.Equal([new AndroidNodeBounds(610, 900, 1012, 958), new AndroidNodeBounds(42, 958, 180, 1016)], links[0].Boxes);
+        // Located, but none of its characters on the screen.
+        Assert.Equal("start", LinkedText[links[1].Start..links[1].End]);
+        Assert.Equal(0, links[1].CharactersLocated);
+        Assert.Empty(links[1].Boxes);
+    }
+
+    [Fact]
+    public void Protocol_AnItemFromBeforeProtocol8_HasNoLinksRecorded()
+    {
+        var tree = Tree(1, 5_002_000_000_000, 6 * Millisecond, true, "requested", null);
+        foreach (var item in tree["windows"]![0]!["items"]!.AsArray())
+        {
+            item!.AsObject().Remove("links");
+        }
+
+        var (read, problem) = CompanionProtocol.ReadTree(tree.ToJsonString());
+
+        Assert.Null(problem);
+        Assert.All(read!.Windows[0].Items!, item => Assert.Null(item.Links));
+        Assert.Empty(Validate(PayloadOf(read)));
+        var payload = PayloadOf(read);
+        foreach (var item in payload["windows"]![0]!["items"]!.AsArray())
+        {
+            item!.AsObject().Remove("links");
+        }
+
+        Assert.Empty(Validate(payload));
     }
 
     [Fact]
@@ -348,6 +417,18 @@ public sealed class AndroidAccessibilityTreeTests
     [InlineData("reasons", "[\"guess\"]", "android-accessibility-tree-reason-unknown")]
     [InlineData("finishedPhoneNanoseconds", "5001000000000", "android-accessibility-tree-finished-early")]
     [InlineData("index", "0", "payload-property-invalid")]
+    [InlineData("windows/0/items/2/links/0/start", "-1", "payload-property-invalid")]
+    [InlineData("windows/0/items/2/links/0/kind", "\"button\"", "payload-property-invalid")]
+    [InlineData("windows/0/items/2/links/0/location", "\"guessed\"", "payload-property-invalid")]
+    [InlineData("windows/0/items/2/links/0/end", "41", "android-text-link-outside-text")]
+    [InlineData("windows/0/items/2/links/0/end", "9", "android-text-link-outside-text")]
+    [InlineData("windows/0/items/1/links", "[{\"start\":0,\"end\":1,\"kind\":\"clickable\",\"url\":null,\"location\":\"not-asked\",\"charactersLocated\":null,\"boxes\":[]}]", "android-text-link-outside-text")]
+    [InlineData("windows/0/items/2/links/1/start", "0", "android-text-link-out-of-order")]
+    [InlineData("windows/0/items/2/links/0/charactersLocated", "14", "android-text-link-located-too-many")]
+    [InlineData("windows/0/items/2/links/0/charactersLocated", "null", "android-text-link-location-mismatch")]
+    [InlineData("windows/0/items/0/links/0/charactersLocated", "3", "android-text-link-location-mismatch")]
+    [InlineData("windows/0/items/0/links/0/boxes", "[{\"left\":0,\"top\":0,\"right\":1,\"bottom\":1}]", "android-text-link-location-mismatch")]
+    [InlineData("windows/0/items/2/links/0/boxes", "[{\"left\":0,\"top\":0,\"right\":1}]", "payload-property-missing")]
     public void Validator_RejectsABadSnapshot(string path, string value, string code)
     {
         var payload = Payload();
@@ -378,9 +459,10 @@ public sealed class AndroidAccessibilityTreeTests
     }
 
     // The payload the collector writes for a snapshot line.
-    private static JsonObject Payload()
+    private static JsonObject Payload() => PayloadOf(CompanionProtocol.ReadTree(TreeLine()).Tree!);
+
+    private static JsonObject PayloadOf(AndroidAccessibilityTree tree)
     {
-        var tree = CompanionProtocol.ReadTree(TreeLine()).Tree!;
         var text = JsonSerializer.Serialize(
             tree with { ReceivedAtNanoseconds = 2 * Second },
             new JsonSerializerOptions(JsonSerializerDefaults.Web));

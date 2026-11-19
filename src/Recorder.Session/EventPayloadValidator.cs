@@ -2674,10 +2674,14 @@ internal static class EventPayloadValidator
                 RequiredObjectArray("actions"),
                 NullableObject("collectionInfo"),
                 NullableObject("collectionItemInfo"),
-                NullableObject("rangeInfo")
+                NullableObject("rangeInfo"),
+                // From the companion app's protocol 8 (android-checks.md,
+                // step 29); a recording made before has none.
+                OptionalNullableObjectArray("links")
             ],
             issues,
             path);
+        ValidateAndroidTextLinks(node, issues, path);
         if (node.TryGetProperty("bounds", out var bounds) && bounds.ValueKind == JsonValueKind.Object)
         {
             ValidateShape(
@@ -2748,6 +2752,127 @@ internal static class EventPayloadValidator
                 ],
                 issues,
                 path + "/rangeInfo");
+        }
+    }
+
+    // The links in an item's text (android-checks.md, step 29): each within
+    // the text, in the text's order, with boxes only when located, and no
+    // more characters located than the link has.
+    private static void ValidateAndroidTextLinks(
+        JsonElement node,
+        ICollection<EventValidationIssue> issues,
+        string path)
+    {
+        if (!node.TryGetProperty("links", out var links) || links.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        var length = node.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String
+            ? text.GetString()!.Length
+            : 0;
+        var index = 0;
+        var previousStart = -1;
+        foreach (var link in links.EnumerateArray())
+        {
+            var linkPath = $"{path}/links/{index.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+            index++;
+            if (link.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            ValidateShape(
+                link,
+                [
+                    RequiredInteger("start", nonnegative: true),
+                    RequiredInteger("end", nonnegative: true),
+                    RequiredEnum("kind", [.. Recorder.Contracts.AndroidAccessibilityRecords.TextLinkKinds]),
+                    NullableText("url"),
+                    RequiredEnum("location", [.. Recorder.Contracts.AndroidAccessibilityRecords.TextLinkLocations]),
+                    NullableInteger("charactersLocated", nonnegative: true),
+                    RequiredObjectArray("boxes")
+                ],
+                issues,
+                linkPath);
+            if (link.TryGetProperty("start", out var startValue) && IsInteger(startValue) &&
+                link.TryGetProperty("end", out var endValue) && IsInteger(endValue))
+            {
+                var start = startValue.GetInt64();
+                var end = endValue.GetInt64();
+                if (start >= end || end > length)
+                {
+                    AddError(
+                        issues,
+                        "android-text-link-outside-text",
+                        linkPath,
+                        $"The link from {start} to {end} is not within the item's text of {length} characters.");
+                }
+                else
+                {
+                    if (start < previousStart)
+                    {
+                        AddError(
+                            issues,
+                            "android-text-link-out-of-order",
+                            linkPath,
+                            "The links are not in the text's order.");
+                    }
+
+                    previousStart = (int)start;
+                    if (link.TryGetProperty("charactersLocated", out var located) && IsInteger(located) &&
+                        located.GetInt64() > end - start)
+                    {
+                        AddError(
+                            issues,
+                            "android-text-link-located-too-many",
+                            linkPath + "/charactersLocated",
+                            $"More characters are located than the link's {end - start}.");
+                    }
+                }
+            }
+
+            var isLocated = link.TryGetProperty("location", out var location) &&
+                location.ValueKind == JsonValueKind.String &&
+                location.GetString() == Recorder.Contracts.AndroidAccessibilityRecords.TextLinkLocated;
+            if (link.TryGetProperty("charactersLocated", out var count) &&
+                (count.ValueKind == JsonValueKind.Null) == isLocated)
+            {
+                AddError(
+                    issues,
+                    "android-text-link-location-mismatch",
+                    linkPath + "/charactersLocated",
+                    isLocated
+                        ? "A located link must say how many of its characters were located."
+                        : "A link that was not located must not count located characters.");
+            }
+
+            if (link.TryGetProperty("boxes", out var boxes) && boxes.ValueKind == JsonValueKind.Array)
+            {
+                if (!isLocated && boxes.GetArrayLength() > 0)
+                {
+                    AddError(
+                        issues,
+                        "android-text-link-location-mismatch",
+                        linkPath + "/boxes",
+                        "A link that was not located must have no boxes.");
+                }
+
+                var boxIndex = 0;
+                foreach (var box in boxes.EnumerateArray())
+                {
+                    if (box.ValueKind == JsonValueKind.Object)
+                    {
+                        ValidateShape(
+                            box,
+                            [RequiredInteger("left"), RequiredInteger("top"), RequiredInteger("right"), RequiredInteger("bottom")],
+                            issues,
+                            $"{linkPath}/boxes/{boxIndex.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+                    }
+
+                    boxIndex++;
+                }
+            }
         }
     }
 

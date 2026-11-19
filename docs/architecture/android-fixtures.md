@@ -695,13 +695,12 @@ and not yet measured on a recording:
 - **Selected state:** each item's `selected` flag is recorded, so the
   tree says which tab is selected and where it is. What tells it apart
   on screen has to be read from the pixels.
-- **Links:** an item's text is recorded as plain text, so a link inside
-  a paragraph has no item or bounds of its own, and the tree cannot say
-  which words are the link. The paragraph is recorded as clickable, as
-  the link movement method makes it so, and OCR's words and the pixels
-  may show which words differ in colour. Whether that is enough, or the
-  companion app must record the links' spans, as link text (2.4.4)
-  needs, is the first recording's question.
+- **Links:** an item's text was recorded as plain text, so a link inside
+  a paragraph had no item or bounds of its own. The owner chose to fix
+  that first (2026-11-19): from protocol 8 the companion app records
+  each link's place in the text and its boxes on the screen (see
+  android-checks.md, step 29). Whether the boxes fall on the links'
+  words is measured on this screen's first recording.
 
 ### Driven by a person
 
@@ -716,8 +715,9 @@ and not yet measured on a recording:
 Screens for these can be built so they are ready, but each needs the
 recorder or companion app to record more, so they come last.
 
-- **Link text (2.4.4):** needs links' spans, which the companion app
-  does not record yet.
+- **Link text (2.4.4):** needs links' places, which the companion app
+  records from protocol 8 (android-checks.md, step 29), and the
+  recorder is yet to read for the checks.
 - **Focus visible (2.4.7):** needs a Bluetooth keyboard.
 - **Resize text (1.4.4):** needs the font scale recorded, and a pass at
   the largest scale.

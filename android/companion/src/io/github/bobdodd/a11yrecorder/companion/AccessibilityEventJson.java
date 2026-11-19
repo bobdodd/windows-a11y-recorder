@@ -108,9 +108,24 @@ final class AccessibilityEventJson {
         message.put("scrollable", record.isScrollable());
     }
 
-    /** One item, as the tree of slice 7 records it, without its place in the tree. */
-    @SuppressWarnings("deprecation")
+    /**
+     * One item, as the tree of slice 7 records it, without its place in the
+     * tree, with its text's links but not where they are on the screen.
+     */
     static JSONObject node(AccessibilityNodeInfo node) throws JSONException {
+        return node(node, false);
+    }
+
+    /**
+     * One item, as the tree of slice 7 records it, without its place in the
+     * tree.
+     *
+     * @param locateLinks whether to ask the app where the links in the item's
+     *     text are on the screen (see {@link TextLinks}), which is a call to
+     *     the app, made only off the service's main thread
+     */
+    @SuppressWarnings("deprecation")
+    static JSONObject node(AccessibilityNodeInfo node, boolean locateLinks) throws JSONException {
         JSONObject item = new JSONObject();
         item.put("windowId", node.getWindowId());
         item.put("className", text(node.getClassName()));
@@ -226,6 +241,9 @@ final class AccessibilityEventJson {
             entry.put("current", number(range.getCurrent()));
             item.put("rangeInfo", entry);
         }
+
+        // Read last, as asking where the links are is a call to the app.
+        item.put("links", TextLinks.links(node, locateLinks));
 
         return item;
     }

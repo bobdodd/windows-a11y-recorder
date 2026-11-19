@@ -62,7 +62,7 @@ public sealed class AndroidAccessibilityTests
         "\"actions\":[{\"id\":16,\"label\":null},{\"id\":2131362000,\"label\":\"Turn off\"}]," +
         "\"collectionInfo\":null,\"collectionItemInfo\":{\"rowIndex\":3,\"rowSpan\":1,\"columnIndex\":0,\"columnSpan\":1," +
         "\"selected\":false,\"rowTitle\":null,\"columnTitle\":null}," +
-        "\"rangeInfo\":{\"type\":0,\"min\":0.0,\"max\":100.0,\"current\":null}}," +
+        "\"rangeInfo\":{\"type\":0,\"min\":0.0,\"max\":100.0,\"current\":null},\"links\":[]}," +
         "\"handledPhoneNanoseconds\":" + (receivedPhoneNanoseconds + 300_000).ToString(CultureInfo.InvariantCulture) + "," +
         "\"index\":" + index.ToString(CultureInfo.InvariantCulture) + "}";
 
@@ -111,6 +111,8 @@ public sealed class AndroidAccessibilityTests
         Assert.Null(source.CollectionInfo);
         Assert.Equal(new AndroidCollectionItemInfo(3, 1, 0, 1, false, null, null), source.CollectionItemInfo);
         Assert.Equal(new AndroidRangeInfo(0, 0, 100, null), source.RangeInfo);
+        Assert.NotNull(source.Links);
+        Assert.Empty(source.Links);
     }
 
     [Fact]

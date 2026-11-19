@@ -249,7 +249,7 @@ final class AccessibilityTrees {
             }
             Step step = stack.pop();
             int place = nodes.size();
-            JSONObject item = AccessibilityEventJson.node(step.node);
+            JSONObject item = AccessibilityEventJson.node(step.node, true);
             item.put("index", place);
             item.put("parent", step.parent < 0 ? JSONObject.NULL : step.parent);
             item.put("depth", step.depth);

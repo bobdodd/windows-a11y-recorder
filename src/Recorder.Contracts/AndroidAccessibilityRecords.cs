@@ -109,6 +109,23 @@ public static class AndroidAccessibilityRecords
     /// <summary>The checked states an item can have.</summary>
     public static IReadOnlyList<string> CheckedStates { get; } = ["checked", "unchecked", "partial"];
 
+    /// <summary>The kinds of link in an item's text: a URLSpan, or another ClickableSpan.</summary>
+    public static IReadOnlyList<string> TextLinkKinds { get; } = ["url", "clickable"];
+
+    /// <summary>
+    /// Whether the companion app asked where a link's characters are on the
+    /// screen, and what came back (TextLinks.java): "not-asked", as for an
+    /// event's source item; "not-offered", the item does not give them;
+    /// "too-long", more characters than one request may ask for;
+    /// "not-returned", asked and none came back; "text-changed", the text
+    /// changed before they came back; or "located".
+    /// </summary>
+    public static IReadOnlyList<string> TextLinkLocations { get; } =
+        ["not-asked", "not-offered", "too-long", "not-returned", "text-changed", "located"];
+
+    /// <summary>The <see cref="TextLinkLocations"/> value for links whose boxes are given.</summary>
+    public const string TextLinkLocated = "located";
+
     /// <summary>
     /// The names of the bits set, in order of bit; a bit Android may add
     /// later is named by its value, such as "0x20000".
@@ -391,9 +408,46 @@ public record AndroidAccessibilityNode
     public AndroidCollectionItemInfo? CollectionItemInfo { get; init; }
 
     public AndroidRangeInfo? RangeInfo { get; init; }
+
+    /// <summary>
+    /// The links in the item's text, in the text's order, from the companion
+    /// app's protocol 8 (android-checks.md, step 29); empty when the text has
+    /// none, and null in a recording made before, which did not record them.
+    /// </summary>
+    public IReadOnlyList<AndroidTextLink>? Links { get; init; }
 }
 
 public sealed record AndroidNodeBounds(int Left, int Top, int Right, int Bottom);
+
+/// <summary>
+/// A link in an item's text (TextLinks.java): a ClickableSpan, or a URLSpan
+/// with its address, from <see cref="Start"/> up to <see cref="End"/> in the
+/// item's <see cref="AndroidAccessibilityNode.Text"/>, counted in UTF-16
+/// code units as both Java and .NET count them.
+/// </summary>
+/// <param name="Kind">"url" or "clickable"; see <see cref="AndroidAccessibilityRecords.TextLinkKinds"/>.</param>
+/// <param name="Url">The address, for a "url" link that has one.</param>
+/// <param name="Location">
+/// Whether the app was asked where the link's characters are on the screen,
+/// and what came back; see <see cref="AndroidAccessibilityRecords.TextLinkLocations"/>.
+/// </param>
+/// <param name="CharactersLocated">
+/// How many of the link's characters came back with a place, when the
+/// places came back; a character off the screen has none.
+/// </param>
+/// <param name="Boxes">
+/// A box on the screen, in pixels, for each line the located characters
+/// are on, joined from their boxes and rounded out to whole pixels; empty
+/// unless <see cref="Location"/> is "located".
+/// </param>
+public sealed record AndroidTextLink(
+    int Start,
+    int End,
+    string Kind,
+    string? Url,
+    string Location,
+    int? CharactersLocated,
+    IReadOnlyList<AndroidNodeBounds> Boxes);
 
 /// <summary>An action the item offers: its id, and its label when it has one, as for a custom action.</summary>
 public sealed record AndroidNodeAction(int Id, string? Label);
