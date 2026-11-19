@@ -48,16 +48,11 @@ public sealed partial class AndroidFixtureAppTests
             Assert.Contains(screen.GetProperty("stage").GetString(), Stages);
             var how = screen.GetProperty("how").GetString();
             Assert.Contains(how, Hows);
-            if (how == "tour")
+            if (how is "tour" or "start")
             {
+                // The start screen is the index, which the tour opens again after Record.
                 Assert.InRange(screen.GetProperty("seconds").GetInt32(), 1, 60);
-                Assert.False(screen.TryGetProperty("steps", out _), $"{id}: a tour screen has no steps");
-            }
-            else if (how == "start")
-            {
-                // The index, which the tour starts on, held while the owner presses Record.
-                Assert.False(screen.TryGetProperty("seconds", out _), $"{id}: the start screen has no seconds");
-                Assert.False(screen.TryGetProperty("steps", out _), $"{id}: the start screen has no steps");
+                Assert.False(screen.TryGetProperty("steps", out _), $"{id}: a {how} screen has no steps");
             }
             else
             {

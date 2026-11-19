@@ -167,10 +167,10 @@ error, so the file cannot drift into meaning more than the tests read.
 - **framework:** `views` or `webview`.
 - **how:** `tour`, opened by the tour script; `person`, which also
   has `steps`, the steps a person takes on the screen, in at most five;
-  or `start`, the app's index, which the tour starts on and holds while
-  the person presses Record. Its title is the app's name, and it has no
-  `seconds` and no `steps`.
-- **seconds:** how long the tour holds a `tour` screen.
+  or `start`, the app's index, which the tour starts on and opens again
+  after the person presses Record. Its title is the app's name, and it
+  has no `steps`.
+- **seconds:** how long the tour holds a `tour` or `start` screen.
 - **stage:** `proof`, a built check proving the framework; `unbuilt`, a
   check not yet built; or `built`, a built check's later coverage.
 - **expect:** one entry for each check and element.
@@ -220,18 +220,25 @@ with what. The answer itself is scored by the model evaluation.
    as demo mode did not hide their icons on the owner's phone (measured,
    2026-11-19). Enter checks again, and GO records with them. The
    system's, TalkBack's and the recorder's own apps are not listed;
-5. puts the status bar in Android's demo mode: a fixed clock, a full
+5. puts the accessibility button in the navigation bar, setting
+   `accessibility_button_mode` to 0 (1 is the floating menu, 2 the
+   gesture), as the floating button was over tested lines in a different
+   place on each recording;
+6. puts the status bar in Android's demo mode: a fixed clock, a full
    battery and no notification icons. Network icons are not set, as the
    demo mode's network commands are reported to stop the System UI on
    recent Android;
-6. opens the fixture app's index, so the recording starts in the
+7. opens the fixture app's index, so the recording starts in the
    fixture app rather than on the home screen;
-7. asks the person to press Record in the recorder, and waits for
+8. asks the person to press Record in the recorder, and waits for
    Enter;
-8. opens each `tour` screen with `am start -W`, holds it for its
-   `seconds`, and names it in the console as it goes;
-9. asks the person to press Stop, waits for Enter, and takes the status
-   bar out of demo mode, as it does too if the tour stops early.
+9. opens the index again, the `start` screen, so that it has a
+   screenshot of its own in the recording, then each `tour` screen, each
+   with `am start -W`, holds each for its `seconds`, and names each in
+   the console as it goes;
+10. asks the person to press Stop, waits for Enter, puts the
+   accessibility button's setting back, and takes the status bar out of
+   demo mode, as it does too if the tour stops early.
 
 Screens marked `person` are not opened by the tour; the person opens
 them from the app's index and follows their steps.
@@ -260,8 +267,10 @@ Built on 2026-11-19 against the owner's first recording of the tour.
      not the app's. What TalkBack said is kept, in its speech channel.
      The record of the apps seen in the recording, read when it stopped,
      keeps only the fixture app's entry, as the others name the phone's
-     apps and their versions. A `manifest.json` lists only the kept
-     files;
+     apps and their versions. The video frames the rules read in place of
+     a screenshot are copied, as a frame is used only if its file is
+     there when the recording is opened. A `manifest.json` lists only the
+     kept files;
   2. runs the rules on the trimmed recording with Windows OCR and no
      model (every model check is marked not asked), keeping only the
      pictures the rules read, what OCR read in each (`ocr.json`), and
@@ -495,6 +504,48 @@ The owner chose on 2026-11-19 ("1:A", "2: B", "3: yes"):
   bar's window.
 - **The record of the apps seen:** the extractor keeps only the fixture
   app's entry in it. Not yet run on a recording.
+
+## The fourth recording
+
+Measured on 2026-11-19 from the owner's fourth recording of the tour,
+made with TalkBack on and the owner's decisions on the third recording
+in place: the extractor's output on the PC, with Windows OCR, and the
+recording's events, read here.
+
+- **Worked:**
+  - the WebView page was below the app bar: its heading 337 to 405
+    pixels down, the app bar ending at 298. The page was one visit, with
+    no `first-heading-low` warning;
+  - Basket's touch targets, Holiday photos' `btn_close`, Delivery's
+    warning at 3.03:1 and its near miss, and the WebView's error at
+    2.17:1 were as expected;
+  - the record of the apps seen kept only the fixture app's entry, and
+    no other app's notification or text was in the kept events.
+- **The index had no picture in the fixture.** Its only screenshot was
+  taken 0.1 seconds before its first snapshot, so the rules matched the
+  snapshot to the video frame before the next screen opened, at 7.81
+  seconds. The extractor left out the video, and so the fixture had no
+  picture of the index and no finding on it.
+- **The accessibility button moved.** It was 543 to 661 pixels down on
+  the third recording and 889 to 1007 on the fourth, at the left edge,
+  over Delivery's error line and the WebView's near miss, which were not
+  measured. A gap in the layout cannot follow it.
+
+### The owner's decisions on the fourth recording
+
+The owner chose on 2026-11-19 ("Problem 1: option C", "Problem 2:
+option A"):
+
+- **The index's picture (C, both):** the extractor copies the video
+  frames the rules read in place of a screenshot, so the fixture gives
+  the full recording's answers; and the tour opens the index again after
+  Record and holds it for its `seconds`, so it has a screenshot of its
+  own. The frame the rules read on the fourth recording was taken as
+  the next screen opened, and may show that screen beginning to appear
+  (inferred).
+- **The accessibility button (A):** the tour puts it in the navigation
+  bar and puts it back afterwards. That the setting moves the button on
+  the owner's phone while TalkBack is on is not yet recorded.
 
 ## Model evaluation
 

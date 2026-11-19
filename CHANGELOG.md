@@ -75,6 +75,11 @@ Changes on `main` since 1.1.0, not yet released.
   not hide their icons.
 - The fixture extractor keeps only the fixture app's entry in the
   record of the apps seen in the recording.
+- The fixture extractor copies the video frames the rules read in place
+  of a screenshot, so the fixture gives the full recording's answers.
+- `scripts/Run-FixtureTour.ps1` opens the index again after Record and
+  holds it, and puts the accessibility button in the navigation bar for
+  the tour, putting it back afterwards.
 
 ### Control names
 

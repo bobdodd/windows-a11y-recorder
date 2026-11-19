@@ -16,15 +16,19 @@
        you to clear them: demo mode did not hide their icons on the owner's
        phone (measured, 2026-11-19). Enter checks again; GO records with
        them.
-    5. Puts the phone's status bar in Android's demo mode: a fixed clock,
+    5. Puts the accessibility button in the navigation bar, as it floated
+       over tested lines in a different place on each recording.
+    6. Puts the phone's status bar in Android's demo mode: a fixed clock,
        a full battery and no notification icons.
-    6. Opens the fixture app's index, so the recording starts in the
+    7. Opens the fixture app's index, so the recording starts in the
        fixture app rather than on the phone's home screen.
-    7. Asks you to press Record in the recorder, and waits for Enter.
-    8. Opens each screen android\fixtures\expected.json marks "tour", as a
-       new task, and holds it for its "seconds".
-    9. Asks you to press Stop, waits for Enter, and then takes the status
-       bar out of demo mode. It does so too if the tour stops early.
+    8. Asks you to press Record in the recorder, and waits for Enter.
+    9. Opens the index again, the screen android\fixtures\expected.json
+       marks "start", then each screen it marks "tour", each as a new
+       task, and holds each for its "seconds".
+    10. Asks you to press Stop, waits for Enter, and then puts the
+       accessibility button back and takes the status bar out of demo
+       mode. It does so too if the tour stops early.
 
     Screens marked "person" are left for a person to open from the app's
     index. The screen marked "start" is the index itself. See docs\architecture\android-fixtures.md.
@@ -165,7 +169,16 @@ while ($true) {
 # activity in a new task, so no screen is left behind another.
 $flags = "0x10008000"
 $demoAllowed = Get-Setting "global" "sysui_demo_allowed"
+# The accessibility button floats over the screen by default, and was in
+# a different place on each of the owner's recordings, over lines the
+# checks test (measured, 2026-11-19). For the tour it is put in the
+# navigation bar, Settings.Secure.ACCESSIBILITY_BUTTON_MODE_NAVIGATION_BAR
+# (0; 1 is the floating menu, 2 the gesture), and put back afterwards
+# (owner's choice, 2026-11-19).
+$buttonMode = Get-Setting "secure" "accessibility_button_mode"
+$start = @($expected.screens | Where-Object { $_.how -eq "start" })[0]
 try {
+    Invoke-Adb @("shell", "settings", "put", "secure", "accessibility_button_mode", "0") | Out-Null
     # Network icons are left as they are: demo mode's network commands are
     # reported to stop the status bar on recent Android versions.
     Invoke-Adb @("shell", "settings", "put", "global", "sysui_demo_allowed", "1") | Out-Null
@@ -175,11 +188,20 @@ try {
     Send-DemoCommand @("-e", "command", "notifications", "-e", "visible", "false")
     Invoke-Adb @("shell", "am", "start", "-W", "-f", $flags, "-n", "$package/.FixtureActivity") | Out-Null
 
-    $total = ($tour | Measure-Object -Property seconds -Sum).Sum
+    $total = $start.seconds + ($tour | Measure-Object -Property seconds -Sum).Sum
     Write-Host ""
     Write-Host "The phone shows the fixture app's index, with the status bar's clock at 12:00."
-    Write-Host "The tour opens $($tour.Count) screens, about $total seconds in all."
+    Write-Host "The accessibility button is in the navigation bar, not floating over the screen."
+    Write-Host "The tour opens the index again and $($tour.Count) screens, about $total seconds in all."
     Read-Host "Press Record in the recorder, then press Enter here" | Out-Null
+
+    # The index again, held as the other screens are, so that it is
+    # listed and has a screenshot of its own after Record: on the fourth
+    # recording its only screenshot came just before its first snapshot
+    # (measured, 2026-11-19).
+    Write-Host ("The index ({0}), {1} seconds" -f $start.title, $start.seconds)
+    Invoke-Adb @("shell", "am", "start", "-W", "-f", $flags, "-n", "$package/.FixtureActivity") | Out-Null
+    Start-Sleep -Seconds $start.seconds
 
     $number = 0
     foreach ($screen in $tour) {
@@ -195,6 +217,13 @@ try {
     Read-Host "Press Stop in the recorder, then press Enter here" | Out-Null
 }
 finally {
+    if ($buttonMode -eq "null" -or -not $buttonMode) {
+        Invoke-Adb @("shell", "settings", "delete", "secure", "accessibility_button_mode") | Out-Null
+    }
+    else {
+        Invoke-Adb @("shell", "settings", "put", "secure", "accessibility_button_mode", $buttonMode) | Out-Null
+    }
+    Write-Host "The accessibility button is back where it was."
     Send-DemoCommand @("-e", "command", "exit")
     $restore = if ($demoAllowed -eq "1") { "1" } else { "0" }
     Invoke-Adb @("shell", "settings", "put", "global", "sysui_demo_allowed", $restore) | Out-Null

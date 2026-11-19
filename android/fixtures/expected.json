@@ -12,6 +12,7 @@
       "title": "A11y Fixtures",
       "framework": "views",
       "how": "start",
+      "seconds": 5,
       "stage": "built",
       "expect": [
         { "check": "text-shown-as-heading", "line": "A11y Fixtures", "by": "rule", "finding": "warning",

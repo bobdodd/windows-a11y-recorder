@@ -52,6 +52,7 @@ var package = expected.RootElement.GetProperty("package").GetString()!;
 var original = await RecordingFilePlayback.OpenAsync(session, source);
 long start;
 long end;
+var frames = new SortedSet<string>(StringComparer.Ordinal);
 try
 {
     var visits = original.Archive.PhoneScreens.Visits.Where(visit => visit.Package == package).ToList();
@@ -67,6 +68,23 @@ try
     foreach (var other in others)
     {
         Console.WriteLine($"Note: visit {other.Number} between the fixture app's visits is to {other.Package}; it is kept, so read its text below.");
+    }
+
+    // The video frames the rules read in place of a screenshot, such as the
+    // first screen's when its only screenshot was taken just before its
+    // first snapshot (owner's choice, 2026-11-19). The video itself is left
+    // out, and a frame is used only if its file is there when the trimmed
+    // recording is opened, so these are copied first.
+    var pictures = PhoneSnapshotPictures.Of(original.Archive);
+    foreach (var visit in visits)
+    {
+        foreach (var settled in visit.SettledSnapshots)
+        {
+            if (pictures.Of(visit, settled) is { Kind: PhonePictureKind.Frame } picture)
+            {
+                frames.Add(picture.Path);
+            }
+        }
     }
 }
 finally
@@ -109,6 +127,14 @@ WriteManifest(session, output, kept.Count, []);
 
 // 2. The rules on the trimmed recording, reading the session's pictures.
 var copied = new List<string>();
+foreach (var frame in frames)
+{
+    var to = Path.Combine(output, frame);
+    Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+    File.Copy(Path.Combine(session, frame), to);
+    copied.Add(frame);
+}
+
 PhonePixels? Load(string path)
 {
     var relative = AndroidFixtureFiles.Relative(output, path);
