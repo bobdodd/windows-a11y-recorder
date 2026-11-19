@@ -5529,6 +5529,110 @@ inferred from the rule and the tests.
 - A web link's address is recorded, as the text is; it may hold
   something personal, as text may.
 
+## Step 30: link purpose (2.4.4 and 2.4.9)
+
+### The owner's requests (2026-11-19)
+
+The owner: "Start on the link text check (WCAG 2.4.4) using the same
+link records, measured with no model first". Then: "Remember to include
+the check for 2.4.9 as well when checks are set for AAA. When AA, please
+give a warning if 2.4.9 would fail and refer to 5.2.4 (accessibility
+supported)".
+
+### What the standards say (checked in cited documents)
+
+- [Understanding 2.4.4](https://www.w3.org/WAI/WCAG22/Understanding/link-purpose-in-context.html)
+  (level A): the purpose of each link "can be determined from the link
+  text alone or from the link text together with its programmatically
+  determined link context, except where the purpose of the link would be
+  ambiguous to users in general". The context can be "the same
+  sentence, paragraph, list item, or table cell as the link"; failure
+  F63 is link context "only in content that is not related to the
+  link".
+- [Understanding 2.4.9](https://www.w3.org/WAI/WCAG22/Understanding/link-purpose-link-only.html)
+  (level AAA): "A mechanism is available to allow the purpose of each
+  link to be identified from link text alone", with the same exception.
+  It is for links met "out of context, such as when the user agent
+  provides a list of all the links on a page". Failure F84 is "a
+  non-specific link such as "click here" or "more" without a
+  mechanism to change the link text to specific text".
+- [WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/) applies 2.4.4 to
+  software as written, and adds that in software "a "link" is any user
+  interface control that behaves like a hypertext link".
+- [WCAG 2.2's conformance requirement 5.2.4](https://www.w3.org/TR/WCAG22/#cc4):
+  "Only accessibility-supported ways of using technologies are relied
+  upon to satisfy the success criteria".
+- TalkBack has a Links reading control that moves "from one link to
+  the next", and a Links item in the TalkBack menu
+  ([Navigate your device with TalkBack](http://support.google.com/accessibility/android/answer/6006598),
+  [Use the TalkBack menu and reading controls](http://support.google.com/accessibility/android/answer/6007066)).
+  Whether TalkBack speaks the link's sentence when it reaches a link
+  this way is not said there and has not been recorded (not measured).
+
+### Measured on the phone (2026-11-19)
+
+A probe with no model and no OCR, deleted afterwards with its copy of
+the recording, read every snapshot of the owner's recording of the
+Recipes screen (tests 60 to 62) through `PhoneCheckWindow`, 14
+snapshots holding their windows (measured):
+
+- Two links, "cooking terms" and "kitchen safety notes", each of kind
+  "clickable" (a ClickableSpan), so with no address recorded, each
+  inside a sentence that is the whole text of its own TextView. Each
+  TextView is focusable and not clickable; its parent is a layout with
+  no text of its own.
+- No item of another app's window had a link.
+- The six course tabs are clickable TextViews with no link in their
+  text. They choose what the screen shows rather than go somewhere, so
+  they are taken not to behave like links (inferred).
+
+Both links' words say what they lead to, so the recording holds near
+misses only. None of the rules proposed below would make a finding on
+it (inferred, by applying them to the measured records).
+
+### The rules proposed (for the owner to choose)
+
+1. **Which links.** The links recorded in an item's text (step 29),
+   whether located on the screen or not, as the check reads the words,
+   not the picture. A control on its own that behaves like a link is
+   not judged, as the tree does not tell it apart from a button.
+2. **A link's context for 2.4.4.** The rest of its own item's text: the
+   same sentence or paragraph, as in G53 and H78. Text in other items,
+   such as a heading above, is not taken as context (F63).
+3. **No model.** Each finding comes from the words alone:
+   - A link with no letter or digit in its words: an error under 2.4.4
+     (and 2.4.9 at AAA).
+   - A link whose words are a non-specific phrase from a fixed list,
+     such as "click here", "here", "more", "read more", "learn more",
+     "details" or "link", ignoring case and end punctuation:
+     - with no other words in its item: an error under 2.4.4, its
+       context being only in other items (F63);
+     - with other words in its item: no 2.4.4 finding, as the sentence
+       gives the context.
+   - Two links in one window with the same words and different recorded
+     addresses: a 2.4.9 finding; under 2.4.4 too only when their items'
+     other words are the same as well.
+   The exception, a purpose "ambiguous to users in general", needs
+   judgement, so each finding says a person can set it aside on that
+   ground.
+4. **2.4.9 by audit level** (owner, 2026-11-19). At AAA, a
+   non-specific link, or the same words for different addresses, is an
+   error under 2.4.9 (F84), even when its sentence passes 2.4.4. At AA,
+   the same is a warning that 2.4.9 would fail, referring to 5.2.4: the
+   pass under 2.4.4 relies on TalkBack giving the sentence with the
+   link, which is not known for links reached through TalkBack's Links
+   reading control or menu.
+5. **Language.** The list of non-specific phrases is English. The app's
+   language is not recorded, so a link in another language gets only
+   the rules on no words and on the same words for different addresses,
+   and the finding says the phrase list is English.
+6. **The fixture.** The Recipes screen has the near misses. A fault
+   needs the fixture app changed and a new phone recording: a "Read
+   more" link that is its item's whole text, after a paragraph (2.4.4
+   error); "To see the full menu, tap here." (2.4.4 passes; 2.4.9 warns
+   at AA and is an error at AAA); and two "Details" links to different
+   addresses.
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A
