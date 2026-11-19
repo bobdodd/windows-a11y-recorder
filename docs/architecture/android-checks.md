@@ -5691,6 +5691,15 @@ first recording.
 - On the Recipes recording's measured records the rules make no
   finding (inferred, by applying them; the checks have not yet been run
   on a recording).
+- On the owner's PC, with the recorder installed from the pushed build
+  (2026-11-19), the owner recorded the tour of the Kitchen help screen
+  and saw the checks working in the Checks window at AA. Seen in the
+  owner's screenshot: "Non-specific link with no context (WCAG 2.4.4): 1
+  error" on "Read more", with that link outlined on the phone's picture,
+  and "Link text not specific on its own (WCAG 2.4.9, AAA): 3 warnings",
+  the number expected for "here" and the two "Details" links (seen by
+  the owner). The same link text findings, the near misses and the AAA
+  level were below or outside the screenshot, so are not yet seen.
 
 ### Limits
 
