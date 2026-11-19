@@ -5290,6 +5290,76 @@ each item for the checks".
 - No check reads the links yet, and nothing on the screen changes: the
   rules for the colour checks come after step 3's measurement.
 
+### What the standards say on colour alone (checked in cited documents)
+
+- [WCAG 2.2's Understanding 1.4.1](https://www.w3.org/WAI/WCAG22/Understanding/use-of-color.html)
+  says that colours differing "not only in their hue" but in lightness,
+  at a contrast of "3:1 or greater", count as an additional visual
+  distinction; and that a link "styled to appear no different than
+  neighboring static text would not fail this success criterion".
+- [Technique G183](https://www.w3.org/WAI/WCAG22/Techniques/general/G183)
+  says that a link distinguished from the text around it only by colour
+  needs a contrast of at least 3:1 against that text.
+- [Failure F73](https://www.w3.org/WAI/WCAG22/Techniques/failures/F73)
+  is a link identifiable by colour that is not "visually identifiable
+  via some other means (e.g., underlined, bolded, italicized,
+  sufficient difference in lightness, etc)", and a cue shown only on
+  hover or focus "is still a failure".
+- Neither page speaks of a selected state; the 3:1 note in
+  Understanding 1.4.1 is about any content told apart by colour.
+  [WCAG2ICT](https://www.w3.org/TR/wcag2ict-22/) applies 1.4.1 to
+  software.
+
+### Measured on the phone (step 3, 2026-11-19)
+
+A probe with no model read the recording of tests 60 to 62 (session
+`20261119-164155-2f4f607d26a540d89710ce2bd9a7f7db`): the last snapshot
+of the Recipes screen, taken from 14.98 seconds, and screenshot 6, taken
+after it with the screen settled. The probe and its copies were deleted
+afterwards. A pixel counted as ink at 30% or more of the way from white
+to black, by its darkest channel; "blue" had blue over red by 30 or
+more, "neutral" channels within 25 of each other.
+
+**The link boxes fall on the links' words.** In both paragraphs, every
+blue ink pixel was inside the link's box and every neutral one outside
+it: 2,101 and 3,724 blue pixels inside, none outside; none of the
+paragraphs' 3,677 and 2,592 neutral ink pixels inside. The blue ink
+spanned 204 to 447 and 201 to 551 across, in boxes from 202 to 450 and
+201 to 553, so each box held its link's ink with up to 3 pixels to
+spare. Underlines and backgrounds:
+
+| Paragraph | Link colour | Text colour | Link against text | Underline rows in the box | Stroke, link to text | Background in and out of the box |
+| --- | --- | --- | --- | --- | --- | --- |
+| `link_colour` | #1558B0 | #202124 | 2.34:1 | none | 0.95 | white, white |
+| `link_underlined` | #1558B0 | #202124 | 2.34:1 | 1316 and 1317, in a box from 1271 to 1324 | 1.00 | white, white |
+
+A row counted as an underline when its ink spanned 85% or more of the
+ink's width. The stroke is the mean length of the runs of ink across
+each row, at 50% ink or more, leaving out underline rows and runs of 40
+pixels or more.
+
+**The tabs.** The tree marks Salads and Lunch selected, and no other
+tab. On the screenshot:
+
+| Tab | Selected | Colour | Stroke | Underline rows |
+| --- | --- | --- | --- | --- |
+| Soups | no | #5F6368 | 4.12 | none |
+| Salads | yes | #B0306A | 4.67 | none |
+| Desserts | no | #5F6368 | 4.47 | none |
+| Breakfast | no | #5F6368 | 4.36 | none |
+| Lunch | yes | #B0306A | 6.32 | 1035 and 1036 |
+| Dinner | no | #5F6368 | 3.74 | none |
+
+The two colours are 1.00:1 against each other (both about 6:1 on
+white), so only their hue differs. Against the mean of its row's
+unselected tabs, Salads' stroke is 1.09 times, and the bold Lunch's
+1.56 times. Every colour in the screenshot was exactly as the fixture
+app sets it.
+
+**Also seen.** The two paragraphs are recorded as focusable but not
+clickable, where the fixture app's source comment expects the link
+movement method to make them clickable.
+
 ### Checked
 
 In the Linux build environment: the solution builds with no warnings,
