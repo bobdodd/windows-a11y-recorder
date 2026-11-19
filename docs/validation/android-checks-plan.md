@@ -2312,3 +2312,33 @@ and answering (version 1.1.0, version code" with a number, and ends
 **On screen:** the phone shows the fixture app's "Recipes" screen
 during the recording, and the new recording is listed in the recorder.
 The recording is then measured on the development PC with no model.
+
+## Results of tests 60 to 62 (2026-11-19)
+
+Tests 60 to 62 passed on the development PC with the build of 0da3854
+(session `20261119-164155-2f4f607d26a540d89710ce2bd9a7f7db`). The
+recording's companion app is version 1.1.0, version code 897, protocol 8
+(measured). In the player's Accessibility tree window, at 00:00:15.098,
+the owner saw these items' recorded fields in Selected event values:
+
+- TextView "Read the cooking terms before you start.": one link, start
+  9, end 22, kind `clickable`, no address, `located`, 13 characters
+  located, one box (202, 1154, 450, 1207).
+- TextView "Keep the kitchen safety notes close by.": one link, start 9,
+  end 29, kind `clickable`, no address, `located`, 20 characters
+  located, one box (201, 1271, 553, 1324).
+- TextView "Salads": `"links": []`.
+
+So the owner's phone gives the characters' places for a TextView's
+links, and each link fitted on one line. Measured on the recording: each
+box is inside its item's bounds; the Recipes screen is in the tree from
+14.49 seconds to the end, at 31.7; and in its first four snapshots, to
+14.71 seconds, the boxes are up to 171 pixels further right than in the
+last two, from 14.91, which fits the screen sliding in as it opened
+(inferred, not measured). Whether the boxes fall on the links' words in
+the screenshots is step 3's measurement, on this recording.
+
+A link is not a row of the tree, as Android gives it no item of its
+own: it is a field of its item, at the end of Selected event values.
+The tree window opens with the rows collapsed, so the paragraphs were
+found by expanding five rows under the Recipes window.
