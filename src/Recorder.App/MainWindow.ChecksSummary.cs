@@ -64,6 +64,7 @@ public partial class MainWindow
                 HeadingNotShown = _phoneHeadingNotShown,
                 ControlNames = _phoneControlNames,
                 LabelInName = _phoneLabelInName,
+                ColourOnly = _phoneColourOnly,
             });
 
             // The overview and the audit level, then the project's models,

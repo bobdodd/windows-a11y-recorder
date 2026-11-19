@@ -144,6 +144,7 @@ public partial class MainWindow
     private (PhoneControlNameRun Rules, IReadOnlyList<ControlNameRequest> Requests)? _controlNamesRequests;
     private int _controlNamesUnanswered;
     private PhoneLabelInNameRun? _phoneLabelInName;
+    private PhoneColourOnlyRun? _phoneColourOnly;
     private PhoneCheckSettings? _checkSettings;
 
     // The finding chosen in the list, and which of its times is shown.
@@ -236,6 +237,7 @@ public partial class MainWindow
             _controlNamesRequests = null;
             _controlNamesUnanswered = 0;
             _phoneLabelInName = null;
+            _phoneColourOnly = null;
             _shownFinding = null;
             if (_playbackArchive is { PhoneScreens.Recorded: true } opened)
             {
@@ -413,6 +415,9 @@ public partial class MainWindow
 
         // Label in Name is level A, so the same at both audit levels.
         _phoneLabelInName = run is null ? null : PhoneLabelInNameRun.Run(run, archive.PhoneScreens);
+
+        // The checks of use of colour are level A, so the same at both audit levels.
+        _phoneColourOnly = run is null ? null : PhoneColourOnlyRun.Run(run, archive.PhoneScreens);
         ShowPhoneScreenRows();
     }
 
@@ -1448,7 +1453,7 @@ public partial class MainWindow
                 _phoneLabelInName is not null || _phoneHeadingLook is not null || _phoneImageAlternative is not null ||
                 _phoneDescribedImages is not null || _phoneScreenTitles is not null || _phoneDecorativeImages is not null ||
                 _phoneHeadingSections is not null || _phoneTextNotInTree is not null || _phoneHeadingNotShown is not null ||
-                _phoneControlNames is not null)
+                _phoneControlNames is not null || _phoneColourOnly is not null)
             {
                 // The status message check follows every snapshot, settled
                 // or not, so can find a message in a visit too brief to
@@ -1777,6 +1782,51 @@ public partial class MainWindow
             {
                 AddCheckRows(findings, $", from {Count(controls, "control")} checked");
             }
+        }
+
+        if (_phoneColourOnly is { } colour)
+        {
+            AddColourOnlyRows(colour, visit, shownAt);
+        }
+    }
+
+    // The rows of the two checks of use of colour (android-checks.md, step
+    // 29): each check's findings, or a row saying why it has none.
+    private void AddColourOnlyRows(PhoneColourOnlyRun colour, PhoneVisit visit, long shownAt)
+    {
+        var findings = colour.For(visit);
+        var links = findings.Where(finding => finding.Check == PhoneCheckNames.LinkOnlyByColour).ToList();
+        var selected = findings.Where(finding => finding.Check == PhoneCheckNames.SelectedOnlyByColour).ToList();
+        if (links.Count > 0)
+        {
+            AddCheckRows(links, $", from {Count(colour.LinksIn(visit), "link")} measured");
+        }
+        else
+        {
+            var state = colour.LinksNotRecordedIn(visit)
+                ? "not checked, as the companion app did not record the links in the items' text before protocol 8."
+                : colour.LinksIn(visit) == 0
+                    ? "no link measured in this visit."
+                    : $"no findings, from {Count(colour.LinksIn(visit), "link")} measured.";
+            _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{PhoneCheckNames.Title(PhoneCheckNames.LinkOnlyByColour)}: {state}", shownAt, null)
+            {
+                IsCheck = true,
+            });
+        }
+
+        if (selected.Count > 0)
+        {
+            AddCheckRows(selected, $", from {Count(colour.SelectedIn(visit), "item")} marked selected measured");
+        }
+        else
+        {
+            var state = colour.SelectedIn(visit) == 0
+                ? "no item marked selected measured in this visit."
+                : $"no findings, from {Count(colour.SelectedIn(visit), "item")} marked selected measured.";
+            _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{PhoneCheckNames.Title(PhoneCheckNames.SelectedOnlyByColour)}: {state}", shownAt, null)
+            {
+                IsCheck = true,
+            });
         }
     }
 

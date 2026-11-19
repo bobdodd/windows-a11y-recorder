@@ -244,6 +244,16 @@ public static class PhoneCheckNames
     public const string SpaceColumns = "space-columns";
     public const string LineBreakMidSentence = "line-break-mid-sentence";
 
+    /// <summary>
+    /// A link in an item's text told apart from the text around it only by
+    /// colour, and an item marked selected shown so only by colour (step
+    /// 29, PhoneColourOnlyRun), WCAG 1.4.1, each one discrete issue: an
+    /// error from the rules, with no model (owner, 2026-11-19). Not of the
+    /// tree's checks.
+    /// </summary>
+    public const string LinkOnlyByColour = "link-only-by-colour";
+    public const string SelectedOnlyByColour = "selected-only-by-colour";
+
     /// <summary>The checks in the order the Checks tab lists them.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
@@ -311,6 +321,8 @@ public static class PhoneCheckNames
         SpacedLetters => "Letters spaced apart with white space (WCAG 1.3.2, F32)",
         SpaceColumns => "Columns made with white space (WCAG 1.3.2, F33)",
         LineBreakMidSentence => "Line break in mid-sentence (WCAG 1.3.2)",
+        LinkOnlyByColour => "Link told apart only by colour (WCAG 1.4.1)",
+        SelectedOnlyByColour => "Selected state shown only by colour (WCAG 1.4.1)",
         _ => check,
     };
 

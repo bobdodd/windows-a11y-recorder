@@ -173,10 +173,18 @@ public sealed record PhoneContrastSnapshot(
     string? Engine,
     IReadOnlyList<PhoneTextLine> Lines,
     IReadOnlyList<PhoneControlMeasure>? MeasuredControls = null,
-    PhoneCheckWindow? Window = null)
+    PhoneCheckWindow? Window = null,
+    IReadOnlyList<PhoneLinkLook>? MeasuredLinks = null,
+    IReadOnlyList<PhoneSelectedLook>? MeasuredSelected = null)
 {
     /// <summary>The controls measured for non-text contrast (step 5).</summary>
     public IReadOnlyList<PhoneControlMeasure> Controls => MeasuredControls ?? [];
+
+    /// <summary>The links in the items' text, measured for the check of links told apart only by colour (step 29).</summary>
+    public IReadOnlyList<PhoneLinkLook> Links => MeasuredLinks ?? [];
+
+    /// <summary>The items marked selected, measured for the check of a selected state shown only by colour (step 29).</summary>
+    public IReadOnlyList<PhoneSelectedLook> Selected => MeasuredSelected ?? [];
 }
 
 /// <summary>
@@ -322,7 +330,12 @@ public sealed class PhoneContrastRun
                     var controls = PhoneControlMeasuring.Measure(window, app.Bounds, above, lines, reading is not null, pixels, scale)
                         .Select(control => control with { Covered = PhoneCover.Why(control.Item.Bounds, control.Item, outline, windowsAbove) })
                         .ToList();
-                    measured.Add(new PhoneContrastSnapshot(visit, settled, taking, picture, reading?.Engine, lines, controls, window));
+                    // The checks of use of colour measure only a screenshot,
+                    // as the video's colours are approximate (step 29).
+                    var exact = picture.Kind == PhonePictureKind.Screenshot ? pixels : null;
+                    var links = PhoneColourCues.Links(window, exact, scale, outline, windowsAbove);
+                    var selected = PhoneColourCues.Selected(window, exact, scale, outline, windowsAbove);
+                    measured.Add(new PhoneContrastSnapshot(visit, settled, taking, picture, reading?.Engine, lines, controls, window, links, selected));
                 }
                 catch (Exception exception) when (
                     exception is IOException or InvalidDataException or InvalidOperationException or

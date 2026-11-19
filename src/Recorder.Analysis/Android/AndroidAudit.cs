@@ -50,6 +50,7 @@ public sealed class AndroidAudit
         TextNotInTree = other.TextNotInTree;
         HeadingNotShown = other.HeadingNotShown;
         ControlNames = other.ControlNames;
+        ColourOnly = other.ColourOnly;
     }
 
     public PhoneCheckRun Tree { get; }
@@ -104,6 +105,9 @@ public sealed class AndroidAudit
     /// <summary>A control name that does not say what the control does (android-checks.md, step 28).</summary>
     public PhoneControlNameRun? ControlNames { get; private init; }
 
+    /// <summary>Links told apart only by colour and selected states shown only by colour (android-checks.md, step 29).</summary>
+    public PhoneColourOnlyRun? ColourOnly { get; private init; }
+
     /// <summary>The findings of the whole app, not of one visit, such as no live region in the app.</summary>
     public IReadOnlyList<PhoneFinding> AppFindings => Tree.AppFindings;
 
@@ -128,6 +132,7 @@ public sealed class AndroidAudit
         .. TextNotInTree?.For(visit) ?? [],
         .. HeadingNotShown?.For(visit) ?? [],
         .. ControlNames?.For(visit) ?? [],
+        .. ColourOnly?.For(visit) ?? [],
     ];
 
     /// <summary>
@@ -333,6 +338,7 @@ public sealed class AndroidAudit
             TextNotInTree = measured is null ? null : PhoneTextNotInTreeRun.Run(measured, screens, speech, accessibility),
             HeadingNotShown = measured is null ? null : PhoneHeadingNotShownRun.Run(measured, screens),
             ControlNames = measured is null ? null : PhoneControlNameRun.Run(measured, screens),
+            ColourOnly = measured is null ? null : PhoneColourOnlyRun.Run(measured, screens),
         };
     }
 }

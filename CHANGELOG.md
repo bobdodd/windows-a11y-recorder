@@ -20,7 +20,22 @@ Changes on `main` since 1.1.0, not yet released.
 - Each item the checks read has its links: their words, kind, address,
   whether their places were found, and their boxes on the screen. An
   item from a recording made before protocol 8 says its links were not
-  recorded, rather than that it has none. No check reads them yet.
+  recorded, rather than that it has none.
+
+### Use of colour
+
+- Two new checks of WCAG 1.4.1, measured on the phone's screenshot with
+  no model, so each finding is an error (owner, 2026-11-19): "Link told
+  apart only by colour", a link in an item's text of another colour
+  with no underline, no bold, under 3:1 against the text around it and
+  no background 3:1 from the text's; and "Selected state shown only by
+  colour", an item marked selected that differs from the items beside
+  it only in colour, with no underline or bar they lack and no bold.
+  Bold is strokes 1.3 times as wide, chosen for now. Italics and marks
+  such as dots or ticks are not detected. A link or item under the
+  focus outline or another window, or shown only on a video frame, is
+  not measured. They are in the Checks tab, the summary and the report,
+  with guidance. See `docs/architecture/android-checks.md`, step 29.
 
 ### Fixture app
 

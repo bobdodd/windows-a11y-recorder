@@ -175,7 +175,9 @@ error, so the file cannot drift into meaning more than the tests read.
   has no `steps`.
 - **seconds:** how long the tour holds a `tour` or `start` screen.
 - **stage:** `proof`, a built check proving the framework; `unbuilt`, a
-  check not yet built; or `built`, a built check's later coverage.
+  check not yet built, or built with its screen's recording not yet
+  extracted and committed, as every other tour screen must be in a
+  recording; or `built`, a built check's later coverage.
 - **expect:** one entry for each check and element.
   - **check:** a check's name as the recorder reports it, such as
     `touch-target-24dp`; a test checks every name against the
@@ -681,16 +683,18 @@ colour waits.
 #### The colour screen
 
 `colour-only`, titled "Recipes", built on 2026-11-19 and opened by the
-tour. Its checks are not built; their names in `expected.json`,
-`selected-only-by-colour` and `link-only-by-colour`, are chosen here,
-and the warnings expected on the faults are a proposal, to be chosen
-with the rules.
+tour. Its checks were built on 2026-11-19 (android-checks.md, step 29,
+step 4), with the rules the owner chose, and their names in
+`expected.json`, `selected-only-by-colour` and `link-only-by-colour`,
+are the recorder's. Both are errors, as no model is involved (owner,
+2026-11-19). The screen stays at the `unbuilt` stage until its
+recording is extracted and committed.
 
 | Element | Built as | Expected |
 | --- | --- | --- |
-| `selected_colour` | The selected tab of three, marked selected for accessibility services, in #B0306A against the others' #5F6368: both about 6:1 on white and of the same luminance, so only the hue differs | A selected state shown only by colour |
+| `selected_colour` | The selected tab of three, marked selected for accessibility services, in #B0306A against the others' #5F6368: both about 6:1 on white and of the same luminance, so only the hue differs | An error: a selected state shown only by colour |
 | `selected_marked` | The selected tab of three, in the same colours, and bold and underlined too | No finding |
-| `link_colour` | A paragraph holding a link in #1558B0, not underlined: about 2.3:1 against the #202124 body text, under the 3:1 a colour alone would need, and 6.9:1 on white | A link shown only by colour |
+| `link_colour` | A paragraph holding a link in #1558B0, not underlined: about 2.3:1 against the #202124 body text, under the 3:1 a colour alone would need, and 6.9:1 on white | An error: a link shown only by colour |
 | `link_underlined` | A paragraph holding a link in the same colour, underlined | No finding |
 
 Every tab and paragraph is at least 48 dp tall, and the tabs at least
@@ -699,18 +703,22 @@ target and contrast checks have nothing to find. Clicking a tab or link
 does nothing. The tested rows follow a line not tested and a gap, as on
 the other screens, as the checks read their colours.
 
-What the recorder holds for these, read from the companion app's source
-and not yet measured on a recording:
+Measured on the screen's first recording (2026-11-19), on the phone's
+screenshot, with no OCR and no model:
 
-- **Selected state:** each item's `selected` flag is recorded, so the
-  tree says which tab is selected and where it is. What tells it apart
-  on screen has to be read from the pixels.
-- **Links:** an item's text was recorded as plain text, so a link inside
-  a paragraph had no item or bounds of its own. The owner chose to fix
-  that first (2026-11-19): from protocol 8 the companion app records
-  each link's place in the text and its boxes on the screen (see
-  android-checks.md, step 29). Whether the boxes fall on the links'
-  words is measured on this screen's first recording.
+- **Selected state:** each tab's `selected` flag is recorded, so the
+  tree says which tab is selected and where it is. On the pixels, the
+  selected tabs' text is 1.00:1 against the others' in lightness. Salads'
+  strokes are 0.99 times as wide as the others', with no underline or
+  bar; Lunch's are 1.38 times as wide, over the 1.3 for bold, and it is
+  underlined.
+- **Links:** from protocol 8 the companion app records each link's place
+  in the text and its boxes on the screen (android-checks.md, step 29).
+  The boxes fall on the links' words. Each link is 2.34:1 against the
+  text around it; the plain link's strokes are 0.96 times as wide as the
+  text's, and the underlined link was found underlined.
+- **The paragraphs:** each is `clickable=false` and `focusable=true` in
+  the tree; the link inside it is not an item of its own.
 
 ### Driven by a person
 

@@ -5360,6 +5360,83 @@ app sets it.
 clickable, where the fixture app's source comment expects the link
 movement method to make them clickable.
 
+### The owner's decision on the rules (2026-11-19)
+
+Four questions were put, after the measurements above:
+
+1. Should an underline, bold, 3:1 in lightness, a background 3:1 apart
+   and, for tabs, a mark the others lack all count as a cue other than
+   colour?
+2. Bold at 1.3 times the stroke sits between the measured 1.09 (not
+   bold) and 1.56 (bold), on one bold sample: accept it, or measure more
+   first?
+3. A warning or an error?
+4. Italics cannot be detected: accept that limit?
+
+The owner's answers, verbatim: "1: yes / 2: Accept for now / 3: If there
+is no model involved, error / 4: yes". So every cue counts, bold is 1.3
+times for now, each finding is an error, as no model is involved, and
+italics are a known limit.
+
+### As built (step 4)
+
+Two checks, each finding one discrete issue, judged by rules with no
+model, so each finding is an error (`PhoneColourOnlyRun`, measured by
+`PhoneColourCues` in the contrast run's pass over each settled
+snapshot):
+
+- **`link-only-by-colour`, "Link told apart only by colour (WCAG
+  1.4.1)".** For each link in an item's text from protocol 8, its ink
+  in its boxes is compared with the item's text outside all its links'
+  boxes. The ink is the commonest colour at least 10 Delta E from the
+  commonest colour, its background, with at least 10 pixels of it. No
+  difference of colour, in the ink or the background, is no finding, as
+  Understanding 1.4.1 says. Otherwise the link passes on any of: 3:1 or
+  more between the two inks, unrounded; an underline under every line
+  of it, a row of ink across 85% or more of the ink's width in the lower
+  half of its box; strokes 1.3 times as wide as the text's or more, the
+  mean length of the runs of ink across each row, leaving out underline
+  rows and runs as long as a line is high; or 3:1 or more between the
+  backgrounds. A finding names its colours, its ratio, its stroke ratio
+  and its background. Its identity is the item's with "link" and the
+  link's place among the item's links, from 1.
+- **`selected-only-by-colour`, "Selected state shown only by colour
+  (WCAG 1.4.1)".** For each item the tree marks selected, with items
+  beside it of the same class and parent not selected, its look is
+  compared with theirs: their commonest ink, their commonest background
+  and their mean stroke. No difference of colour is no finding. It
+  passes on any of: 3:1 or more between the inks or between the
+  backgrounds; strokes 1.3 times as wide as theirs or more; an
+  underline none of them has; or a bar across 85% of its width, or down
+  85% of its height, that none of them has. An item beside it with
+  something drawn over it is left out; with none left, the item is not
+  measured.
+- **Not measured** (not run, saying why): a link whose place was not
+  recorded, whose characters are not all placed, which is its item's
+  whole text, or whose ink or text around it was not found; an item
+  with the focus outline or a window above drawn over it, or not wholly
+  on the picture; and anything shown only on a frame of the video,
+  whose colours are approximate.
+- **Not recorded:** a snapshot whose items' links were not recorded,
+  from a companion app before protocol 8, is counted, and the Checks tab
+  and the summary say the link check was not run for it.
+
+Run on the owner's recording of tests 60 to 62 with no OCR and no model
+(a probe, deleted afterwards): `link_colour` and `selected_colour` are
+errors, and `link_underlined` and `selected_marked` have no finding
+(measured). The plain link's strokes were 0.96 times the text's, and
+the underlined link was found underlined. Salads' strokes were 0.99
+times the others', and Lunch's 1.38 times, over the 1.3 for bold, and
+Lunch was found underlined. These differ from step 3's 1.09 and 1.56,
+as the built check takes as ink a pixel nearer the ink than the
+background, and leaves out the underline's rows; Lunch's 1.38 is near
+the line, so bold alone is a close pass there (measured).
+
+The same probe found the non-text contrast check (step 5) giving an
+error on both selected tabs, a state filled #FFFFFF against the
+others' #FFFFFF. This is put to the owner as a separate issue and not
+changed here.
+
 ### Checked
 
 In the Linux build environment: the solution builds with no warnings,
@@ -5384,10 +5461,35 @@ and no links in the other 21 items of the window; and a window of the
 committed fixture, from protocol 7, with its 16 items not recorded
 (measured).
 
+For step 4, in the Linux build environment: the solution builds with no
+warnings, the tests pass, 2,799 of them, with the tests that need
+Windows failing as before. The new tests draw made-up pictures in the
+fixture app's colours: a plain link (an error), and its near misses
+underlined, bold, 3:1 in lightness and on a background 3:1 apart (no
+finding), a link just under bold (an error), a link in the text's
+colour (no finding), and links not located, partly located, the whole
+text, under the focus outline and on a video frame (not measured); a
+selected tab told apart only by hue (an error), bold, underlined or
+with a bar (no finding), drawn like the others (no finding), with an
+item beside it covered (measured against the rest), itself covered or
+on a video frame (not measured); and the run's errors, merging across
+snapshots, not-run findings, and a recording from before protocol 8.
+The owner's recording was read with no OCR and no model, as in "As
+built (step 4)" above.
+
 ### Limits
 
-- Whether the boxes fall on the links' words in the screenshots is step
-  3's measurement, on the recording of tests 60 to 62.
+- Whether the boxes fall on the links' words was measured on one
+  recording, of tests 60 to 62 (step 3).
+- Italics are not detected (owner, 2026-11-19), so an italic link of
+  another colour is an error a person has to check.
+- Bold is 1.3 times the stroke, chosen "for now" on one bold sample.
+- Marks other than an underline or a bar across or down the item, such
+  as a dot or a tick, are not detected.
+- An item under the focus outline or another window is not measured,
+  nor a link or item shown only on a frame of the video.
+- A selected state is checked only where the tree marks the item
+  selected; an app that shows a state without marking it is not.
 - An event's source item has its links but not where they are.
 - Joining characters into lines assumes text read left to right; a
   right-to-left link may be given a box for each character or a few

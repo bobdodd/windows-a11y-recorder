@@ -4132,4 +4132,123 @@ public sealed class PhoneCheckRunTests : IDisposable
 
         public string ReadEventJson(SessionTimelineEvent item) => _records[item.MonotonicNanoseconds];
     }
+
+    // Step 29, step 4: the two checks of use of colour, from looks measured
+    // as PhoneColourOnlyTests measures them, so with no picture here.
+    private static PhoneCheckWindow Coloured(bool linksRecorded = true)
+    {
+        const string Text = "android.widget.TextView";
+        IReadOnlyList<AndroidTextLink>? Links(params AndroidTextLink[] links) => linksRecorded ? links : null;
+        static AndroidTextLink Link(int start, int end, int top) =>
+            new(start, end, "clickable", null, AndroidAccessibilityRecords.TextLinkLocated, end - start, [new AndroidNodeBounds(300, top, 500, top + 40)]);
+        return new PhoneCheckWindow(512, 1,
+        [
+            Control(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout", clickable: false) with { Links = Links() },
+            Control(1, 0, (40, 100, 1040, 300), Text, text: "See the glossary or the index", clickable: false) with { Links = Links(Link(8, 16, 120), Link(24, 29, 180)) },
+            Control(2, 0, (40, 1000, 940, 1100), "android.widget.LinearLayout", clickable: false) with { Links = Links() },
+            Control(3, 2, (40, 1000, 340, 1100), Text, text: "First") with { Selected = true, Links = Links() },
+            Control(4, 2, (340, 1000, 640, 1100), Text, text: "Second") with { Links = Links() },
+        ]);
+    }
+
+    private (SessionPlaybackArchive Archive, PhoneContrastRun Measured) ColourRun(PhoneCheckWindow window, bool measured = true)
+    {
+        var archive = Archive(out _);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var paragraph = window.Items[1];
+        var tab = window.Items[3];
+        var links = paragraph.Links ?? [];
+        var plain = new PhoneInkLook(0x1558B0, 0xFFFFFF, 4);
+        var text = new PhoneInkLook(0x202124, 0xFFFFFF, 4);
+        IReadOnlyList<PhoneLinkLook> linkLooks = !measured || links.Count == 0 ? [] :
+        [
+            new PhoneLinkLook(paragraph, links[0], 1, links[0].Boxes[0], null, plain, text),
+            new PhoneLinkLook(paragraph, links[1], 2, links[1].Boxes[0], null, plain, text, Underlined: true),
+        ];
+        IReadOnlyList<PhoneSelectedLook> selectedLooks = !measured ? [] :
+        [
+            new PhoneSelectedLook(tab, 1, null, new PhoneInkLook(0xB0306A, 0xFFFFFF, 4), new PhoneInkLook(0x5F6368, 0xFFFFFF, 4)),
+        ];
+        PhoneContrastSnapshot Snapshot(int settled, PhonePictureKind kind = PhonePictureKind.Screenshot)
+        {
+            var at = visit.SettledSnapshots[settled];
+            return new PhoneContrastSnapshot(
+                visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                new PhoneContrastPicture(kind, at.MonotonicNanoseconds + 250_000_000, "p.png", "p.png"),
+                null, [], null, window, linkLooks, selectedLooks);
+        }
+
+        return (archive, PhoneContrastRun.Of([Snapshot(0), Snapshot(1)]));
+    }
+
+    [Fact]
+    public void ColourOnly_FindsALinkAndASelectedItemToldApartOnlyByColour_AsErrors()
+    {
+        var window = Coloured();
+        var (archive, measured) = ColourRun(window);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+
+        var run = PhoneColourOnlyRun.Run(measured, archive.PhoneScreens);
+
+        // Each found once for the visit, at both settled snapshots.
+        Assert.Equal((4, 2, 2, 0), (run.Links, run.LinksPassed, run.Selected, run.SelectedPassed));
+        Assert.Equal((4, 2), (run.LinksIn(visit), run.SelectedIn(visit)));
+        Assert.False(run.LinksNotRecordedIn(visit));
+        Assert.Equal(2, run.Findings.Count);
+        Assert.All(run.Findings, finding => Assert.Equal(PhoneCheckLevel.Error, finding.Level));
+        Assert.All(run.Findings, finding => Assert.Equal(2, finding.Times.Count));
+        var link = Assert.Single(run.Findings, finding => finding.Check == PhoneCheckNames.LinkOnlyByColour);
+        Assert.Equal($"{window.Items[1].Identity} link 1", link.Identity);
+        Assert.Equal($"link 'glossary' in {window.Items[1].Label}", link.Label);
+        Assert.Equal(new PhoneBounds(300, 120, 500, 160), link.Times[0].Bounds);
+        Assert.EndsWith("so it is told apart from the text only by colour; from the phone's screenshot", link.Times[0].Measured, StringComparison.Ordinal);
+        var selected = Assert.Single(run.Findings, finding => finding.Check == PhoneCheckNames.SelectedOnlyByColour);
+        Assert.Equal(window.Items[3].Identity, selected.Identity);
+        Assert.Equal(window.Items[3].Bounds, selected.Times[0].Bounds);
+        Assert.Equal(run.Findings, run.For(visit));
+        Assert.Equal("Link told apart only by colour (WCAG 1.4.1)", PhoneCheckNames.Title(PhoneCheckNames.LinkOnlyByColour));
+        Assert.Equal("Selected state shown only by colour (WCAG 1.4.1)", PhoneCheckNames.Title(PhoneCheckNames.SelectedOnlyByColour));
+    }
+
+    [Fact]
+    public void ColourOnly_ALinkNotMeasured_IsNotRun_WithWhy()
+    {
+        var window = Coloured();
+        var (archive, _) = ColourRun(window, measured: false);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+        var at = visit.SettledSnapshots[0];
+        var paragraph = window.Items[1];
+        var measured = PhoneContrastRun.Of(
+        [
+            new PhoneContrastSnapshot(
+                visit, at, archive.PhoneAccessibility.TakenBy(at, visit.WindowId)!,
+                new PhoneContrastPicture(PhonePictureKind.Frame, at.MonotonicNanoseconds + 250_000_000, "p.png", "p.png"),
+                null, [], null, window,
+                [new PhoneLinkLook(paragraph, paragraph.Links![0], 1, paragraph.Links[0].Boxes[0], PhoneColourCues.FromVideo)],
+                [new PhoneSelectedLook(window.Items[3], 1, PhoneColourCues.FromVideo)]),
+        ]);
+
+        var run = PhoneColourOnlyRun.Run(measured, archive.PhoneScreens);
+
+        Assert.Equal((0, 0), (run.Links, run.Selected));
+        Assert.Equal(2, run.Findings.Count);
+        Assert.All(run.Findings, finding => Assert.Equal(PhoneCheckLevel.NotRun, finding.Level));
+        Assert.All(run.Findings, finding => Assert.Equal(
+            "not measured, as only a frame of the video shows it, whose colours are approximate", finding.Times[0].Measured));
+    }
+
+    [Fact]
+    public void ColourOnly_ARecordingFromBeforeProtocol8_HasItsLinksNotRecorded()
+    {
+        var window = Coloured(linksRecorded: false);
+        var (archive, measured) = ColourRun(window);
+        var visit = Assert.Single(archive.PhoneScreens.Visits);
+
+        var run = PhoneColourOnlyRun.Run(measured, archive.PhoneScreens);
+
+        Assert.Equal((0, 2), (run.Links, run.LinksNotRecorded));
+        Assert.True(run.LinksNotRecordedIn(visit));
+        var only = Assert.Single(run.Findings);
+        Assert.Equal(PhoneCheckNames.SelectedOnlyByColour, only.Check);
+    }
 }

@@ -50,6 +50,9 @@ public sealed record PhoneChecksSummaryInput
     public PhoneControlNameRun? ControlNames { get; init; }
 
     public PhoneLabelInNameRun? LabelInName { get; init; }
+
+    /// <summary>Links told apart only by colour and selected states shown only by colour (android-checks.md, step 29).</summary>
+    public PhoneColourOnlyRun? ColourOnly { get; init; }
 }
 
 /// <summary>
@@ -157,7 +160,8 @@ public static class PhoneChecksSummary
             .Concat(input.TextNotInTree?.Findings ?? [])
             .Concat(input.HeadingNotShown?.Findings ?? [])
             .Concat(input.ControlNames?.Findings ?? [])
-            .Concat(input.LabelInName?.Findings ?? []);
+            .Concat(input.LabelInName?.Findings ?? [])
+            .Concat(input.ColourOnly?.Findings ?? []);
     }
 
     private static List<PhoneSummarySection> TreeSections(PhoneChecksSummaryInput input)
@@ -563,6 +567,23 @@ public static class PhoneChecksSummary
                 Result(labels.Findings),
                 [F($"{Count(labels.Controls, "control")} checked, {labels.Passed:N0} passed, {labels.Unread:N0} with no label read.")],
                 $"The label is all the text inside a control, and the text of any item it is labelled by, from {read}, against its content description; text beside a control is not taken as its label."));
+        }
+
+        if (input.ColourOnly is { } colour)
+        {
+            var links = PhoneCheckNames.Title(PhoneCheckNames.LinkOnlyByColour);
+            sections.Add(colour.Links == 0 && colour.LinksNotRecorded > 0
+                ? NotChecked(links, "the companion app did not record the links in the items' text before protocol 8")
+                : new PhoneSummarySection(
+                    links,
+                    Result(Of(colour.Findings, PhoneCheckNames.LinkOnlyByColour)),
+                    [F($"{Count(colour.Links, "link")} measured on screenshots, {colour.LinksPassed:N0} passed.")],
+                    "A link's colour is compared with the text around it in its item; an underline, bold strokes, or a difference in lightness of 3:1, in its colour or its background, tells it apart by more than colour. Italics are not detected."));
+            sections.Add(new PhoneSummarySection(
+                PhoneCheckNames.Title(PhoneCheckNames.SelectedOnlyByColour),
+                Result(Of(colour.Findings, PhoneCheckNames.SelectedOnlyByColour)),
+                [F($"{Count(colour.Selected, "item")} marked selected measured on screenshots, {colour.SelectedPassed:N0} passed.")],
+                "An item the tree marks selected is compared with the items beside it of its class not selected; an underline or a bar they lack, bold strokes, or a difference in lightness of 3:1, in its colour or its background, shows its state by more than colour. An app that does not mark the selected item in the tree is not checked."));
         }
 
         return sections;
