@@ -5500,6 +5500,12 @@ on a video frame (not measured); and the run's errors, merging across
 snapshots, not-run findings, and a recording from before protocol 8.
 The owner's recording was read with no OCR and no model, as in "As
 built (step 4)" above.
+On the owner's PC, with the recorder installed from the pushed build
+(2026-11-19), the owner saw the checks working in the Checks window on
+the Recipes visit, with the chosen finding outlined on the "cooking
+terms" link (seen by the owner). Whether the selected tabs are now free
+of a non-text contrast state error was not reported, so is still
+inferred from the rule and the tests.
 
 ### Limits
 
