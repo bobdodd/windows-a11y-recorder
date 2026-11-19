@@ -608,6 +608,16 @@ app's name is in any file; the pictures are byte for byte the ones
 reviewed before; and the three rule tests pass on it. It was committed
 as `tests/fixtures/android/tour/`.
 
+The text list then read some of an item's text by names the companion
+app does not write (`hintText` and `tooltipText`, where it writes
+`hint` and `tooltip`), and left out its supplementary description, its
+actions' labels and its row and column titles. Fixed on 2026-11-19: the
+list reads those fields by the names the companion app writes, and each
+link's address (step 29). Run here on the committed fixture with no
+OCR, the list was the same before and after the fix, so that fixture
+holds none of that text that is not in the fixture app's source
+(measured).
+
 ## Model evaluation
 
 Run only on request, on the PC, as the earlier probes were: the model

@@ -436,8 +436,9 @@ static void Texts(JsonElement element, string channel, string own, SortedDiction
                     {
                         packages.Add(value);
                     }
-                    else if (property.Name is "text" or "contentDescription" or "paneTitle" or "hintText" or "stateDescription" or
-                             "tooltipText" or "title" or "beforeText" or "line" or "message" or "error" or "containerTitle" or "url" &&
+                    else if (property.Name is "text" or "contentDescription" or "paneTitle" or "hint" or "stateDescription" or
+                             "tooltip" or "supplementalDescription" or "label" or "rowTitle" or "columnTitle" or
+                             "title" or "beforeText" or "line" or "message" or "error" or "containerTitle" or "url" &&
                              value.Trim() is { Length: > 0 } trimmed && !own.Contains(trimmed, StringComparison.Ordinal) && !IsValueName(trimmed))
                     {
                         var key = $"{channel}: {Clip(trimmed)}";
