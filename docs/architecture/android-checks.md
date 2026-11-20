@@ -5746,12 +5746,92 @@ Asked which check to measure next, with no model first, the owner chose
   includes instructions that only refer to colour, and F26, a graphical
   symbol alone.
 
-### Measuring first
+### Measured on the phone (2026-11-19)
 
-The fixture app's "Shopping list" screen (android-fixtures.md, "The
-sensory screen") has a fault and a near miss for place, shape and
-colour. Its first recording is to be read with no model and no OCR, as
-for step 30, before rules are proposed to the owner.
+A probe with no model and no OCR, deleted afterwards with its copy of
+the recording, read the owner's recording of the fixture app's
+"Shopping list" screen (android-fixtures.md, "The sensory screen")
+through `PhoneCheckWindow`, and the screenshot of its one settled
+snapshot (measured):
+
+- **The instructions.** Each is a TextView of its own, with its
+  resource ID, its text as built, not clickable and not focusable, a
+  child of the screen's column. Each pair comes before its row of
+  buttons in the tree's order, as on the screen.
+- **The buttons.** Each is a clickable, focusable TextView whose text
+  is its name ("Clear", "Save", "Add", "Sort", "Done", "Undo"), with no
+  content description, inside a LinearLayout with no text. Nothing in
+  the tree says a button's shape or colour.
+- **Place.** The bounds give it: in each row the second button's left
+  edge is to the right of the first's right edge, at the same top, so
+  Save is the button on the right of Clear.
+- **Shape.** The screenshot gives it: Add's four corners, 3 pixels in,
+  are #FFFFFF, the background, and the middles of its four sides are its
+  fill; 74% of its box is its fill, near the 79% of a circle in a
+  square. Every other button's corners and sides are its fill, about
+  96% of its box.
+- **Colour.** The screenshot gives each fill exactly as built: #1A4FA0
+  for Clear, Save, Add and Sort (7.87:1 on white), #1E7A3C for Done
+  (5.38:1) and #5F6368 for Undo (6.05:1).
+- **Other checks.** On the visit, no other check gave an error or a
+  warning: the heading's duplicate speakable text (information, as on
+  every screen) and the line under TalkBack's focus outline (not
+  measured) were the only findings.
+
+One thing the rules must allow for, found by applying them to these
+records (inferred): the fault "To save the list, tap the button on the
+right." holds "save", which is the Save button's name, though as a
+verb in the instruction's purpose, not as the button named. A rule that
+passes any instruction holding a control's name would pass this fault.
+
+### The rules proposed (for the owner to choose)
+
+1. **Which text.** The text and content descriptions of the items
+   shown in the app's windows, in English. An instruction is a sentence
+   with a verb of operating, such as "tap", "press", "click", "select",
+   "choose", "touch" or "use", followed by what it refers to: the words
+   after the verb, to the end of the clause or sentence.
+2. **What is sensory.** Words in what the instruction refers to, from
+   fixed English lists, one list for each characteristic in 1.3.3:
+   - place: right, left, top, bottom, corner, beside, next to, upper,
+     lower;
+   - shape: round, circle, circular, square, triangle, triangular,
+     oval, star, arrow;
+   - colour: red, green, blue, yellow, orange, purple, pink, grey or
+     gray, black, white, brown;
+   - size: big, large, small, little, larger, smaller, tiny;
+   - sound: beep, tone, chime, sound, hear;
+   - orientation: horizontal, vertical, sideways, upside down.
+
+   "Above" and "below" are not counted, as Understanding 1.3.3 lets
+   them stand for before and after in the content.
+3. **When it relies only on them.** When what the instruction refers to
+   holds none of the names of the window's controls (their text or
+   content description, whole words, ignoring case). The words before
+   the verb are not looked at, so "To save the list" does not count as
+   naming Save. This is G96 read in reverse: the item is identified by
+   its text as well, or it is not.
+4. **One check for each characteristic** (atomic findings): "Instruction
+   relies on place", "on shape", "on colour", "on size", "on sound" and
+   "on orientation", each under 1.3.3; the colour check also cites
+   1.4.1 and F13, and the place and shape checks F14. An instruction
+   that relies on two, such as "tap the green button on the right",
+   gives two findings.
+5. **Level.** No model is involved, so by the owner's rule for the use
+   of colour checks ("If there is no model involved, error",
+   2026-11-19) each finding is an error. As the lists cannot tell every
+   use of a word, each says a person can set it aside if the
+   instruction names the control in another way.
+6. **The pixels are not needed.** The rule judges the words alone. The
+   screenshot could name the control the words most likely mean, such
+   as the one round button, but that does not change the finding and is
+   not proposed.
+7. **The fixture.** The Shopping list screen has place, shape and
+   colour. Size, sound and orientation would need a change to the
+   fixture app and a new recording.
+
+Not yet measured: how often these rules fire on the owner's real
+recordings, which remain the test of false alarms in real apps.
 
 ## Decisions on the open questions (2026-11-11)
 
