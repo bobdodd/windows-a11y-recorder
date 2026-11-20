@@ -134,3 +134,23 @@ versions, Compose, WebView or other custom or virtual nodes.
 The synthetic APK was uninstalled and the temporary APK and build
 files removed. No changes to recording, the companion or the fixture
 app were made. No rule or preflight checkbox was implemented.
+
+### Installed companion comparison
+
+An unchanged v1.1.0 companion (protocol 8) returned the same six
+resource IDs through its normal `accessibility-trees` request on the
+physical phone at API 37, 390 dpi and font scale 1.0. The active,
+focused synthetic window was not truncated and had no missing
+children. The companion returned both explicit label links and
+reported all three editable fields' hints separately. The hint-only
+field had no label link, and none of the three fields had an
+out-of-window label.
+
+The companion did not return text size, text-size unit or typeface
+for any of the six nodes. The earlier instrumentation run obtained
+size and unit from Android at the same settings; their absence here
+is a gap in the companion export, not in the synthetic nodes. A
+typography preflight needs explicit companion collection of the
+rendering extra and an availability result. It need not recreate
+the label relationships the companion already exports. No APK or raw
+tree was retained, and no recorder or phone settings were changed.

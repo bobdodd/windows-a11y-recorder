@@ -16,6 +16,10 @@ Changes on `main` since 1.1.0, not yet released.
   hints. Bundled or declared font information remains separate from
   what Android exposes through accessibility. No recorder feature or
   check was added. See `docs/architecture/android-framework-metadata.md`.
+- Compared the same synthetic screen with the installed protocol 8
+  companion at the same phone settings. Its normal tree export
+  matched the two explicit label links and the hints, but exported no
+  text size, unit or typeface for any of the six nodes.
 
 ### Links in an item's text
 
