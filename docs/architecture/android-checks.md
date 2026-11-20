@@ -5928,6 +5928,65 @@ screen").
   not known.
 - Not yet measured: false alarms on the owner's real recordings.
 
+## Step 32: a chart that relies on colour (1.4.1)
+
+### The owner's request (2026-11-20)
+
+Told which checks needing a model were left, the owner chose this one:
+"Let's do A chart that relies on colour next. We will need to test
+against different types of chart and graph, and we have to think about
+outlines on bars etc. I imagine the fixtures will be many and varied."
+
+### What the standards say (checked in cited documents)
+
+- [Understanding 1.4.1](https://www.w3.org/WAI/WCAG22/Understanding/use-of-color.html)
+  (level A): colour must not be "the only visual means of conveying
+  information". Colours that differ "not only in their hue" but also in
+  lightness count as "an additional visual distinction, as long as the
+  difference in relative luminance between the colors leads to a
+  contrast ratio of 3:1 or greater". But "if content relies on the
+  user's ability to accurately perceive or differentiate a particular
+  color an additional visual indicator will be required regardless of
+  the contrast ratio between those colors". For colour within an image
+  (situation B) the sufficient techniques are G111, colour and pattern,
+  and G14, the information also in text.
+- [F13](https://www.w3.org/WAI/WCAG22/Techniques/failures/F13) is a
+  failure of 1.1.1, 1.3.3 and 1.4.1 "due to having a chart that conveys
+  information by color", instructions that only refer to colour, and a
+  text alternative that leaves out what the colours convey.
+- [G111](https://www.w3.org/WAI/WCAG22/Techniques/general/G111) is
+  using colour and pattern, so that what the colour conveys is also
+  conveyed by a pattern.
+- [Understanding 1.4.11](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html)
+  (level AA): its pie chart that has "labels for each slice (so passes
+  1.4.1 Use of Color)" still fails 1.4.11 when the slices' edges are
+  not 3:1 against each other; with visible labels and values it is not
+  applicable; and a darker border around a slice is one way to pass.
+  Graph lines "should have 3:1 contrast against their background".
+- [G209](https://www.w3.org/WAI/WCAG22/Techniques/general/G209) is
+  providing sufficient contrast at the boundaries between adjoining
+  colours, such as with a border, which is a 1.4.11 technique.
+
+So, as read (inferred): an outline the same on every series is a
+boundary, a 1.4.11 matter, and does not tell the series apart for
+1.4.1; outlines that differ, such as a dashed one, do. Words on the
+chart, markers of different shapes, a dashed line and a pattern each
+tell the series apart. A lightness difference of 3:1 or more does too,
+unless a particular colour carries the meaning, such as red for over
+budget.
+
+### The fixtures (2026-11-20)
+
+The fixture app has twelve new screens, each a chart kind with one
+fault and one near miss (android-fixtures.md, "The chart screens"):
+grouped bars, two series of close lightness, outlined bars, lines,
+lines with a coloured-text legend, a pie, stacked bars, highlighted
+bars, a scatter plot, a heat map, a chart drawn into a bitmap, and SVG
+charts on a web page. The proposed check, `chart-only-by-colour`, is
+not built; its expectations are marked `"by": "unbuilt"`. Their first
+recording is to be measured with no model before rules are proposed to
+the owner.
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A

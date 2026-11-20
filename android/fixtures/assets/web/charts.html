@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<!--
+  The fixture app's WebView chart screen, "Library loans", for the check
+  not yet built of a chart that relies on colour (WCAG 1.4.1): two SVG bar
+  charts, one whose two series differ only in hue (#B0306A and #00796B,
+  1.14:1 against each other, each at least 5:1 on white), and one whose
+  second series has white diagonal stripes as well, in the chart and its
+  legend (G111). Each chart is an img with a label giving its data and not
+  its colours; its words are HTML text outside the SVG. A line not tested
+  and a gap come first, as on the Views screens. See
+  android/fixtures/expected.json. Every word is made up.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Library loans</title>
+<style>
+  body { margin: 16px; background: #ffffff; color: #202124; font-family: sans-serif; font-size: 16px; }
+  h1 { font-size: 24px; font-weight: bold; margin: 0 0 8px; }
+  p { margin: 8px 0; }
+  .chart { display: block; width: 360px; height: 120px; }
+  .axis { display: flex; width: 360px; font-size: 14px; margin: 2px 0; }
+  .axis span { flex: 1; text-align: center; }
+  .legend { display: flex; align-items: center; font-size: 14px; margin: 4px 0 12px; }
+  .legend svg { width: 24px; height: 16px; margin-right: 4px; }
+  .legend span { margin-right: 16px; }
+</style>
+</head>
+<body>
+  <h1 id="web_heading">Library loans</h1>
+  <p>Books borrowed at each branch, by month.</p>
+  <div style="height: 120px"></div>
+
+  <svg width="0" height="0" aria-hidden="true" style="position: absolute">
+    <defs>
+      <pattern id="stripes" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <rect width="7" height="7" fill="#00796b"></rect>
+        <line x1="0" y1="0" x2="0" y2="7" stroke="#ffffff" stroke-width="3"></line>
+      </pattern>
+    </defs>
+  </svg>
+
+  <p>Last year</p>
+  <svg id="web_chart_hue" class="chart" viewBox="0 0 360 120" role="img"
+       aria-label="Bar chart of books borrowed last year. Spring: town 70, village 50. Summer: town 95, village 80. Autumn: town 60, village 75. Winter: town 40, village 30.">
+    <rect x="18" y="57" width="26" height="62" fill="#b0306a"></rect>
+    <rect x="46" y="75" width="26" height="44" fill="#00796b"></rect>
+    <rect x="108" y="35" width="26" height="84" fill="#b0306a"></rect>
+    <rect x="136" y="48" width="26" height="71" fill="#00796b"></rect>
+    <rect x="198" y="66" width="26" height="53" fill="#b0306a"></rect>
+    <rect x="226" y="52" width="26" height="67" fill="#00796b"></rect>
+    <rect x="288" y="84" width="26" height="35" fill="#b0306a"></rect>
+    <rect x="316" y="93" width="26" height="26" fill="#00796b"></rect>
+    <line x1="0" y1="119.5" x2="360" y2="119.5" stroke="#202124" stroke-width="1"></line>
+  </svg>
+  <div class="axis"><span>Spring</span><span>Summer</span><span>Autumn</span><span>Winter</span></div>
+  <div class="legend">
+    <svg viewBox="0 0 24 16" aria-hidden="true"><rect x="2" y="2" width="20" height="12" fill="#b0306a"></rect></svg><span>Town</span>
+    <svg viewBox="0 0 24 16" aria-hidden="true"><rect x="2" y="2" width="20" height="12" fill="#00796b"></rect></svg><span>Village</span>
+  </div>
+
+  <p>This year</p>
+  <svg id="web_chart_pattern" class="chart" viewBox="0 0 360 120" role="img"
+       aria-label="Bar chart of books borrowed this year. Spring: town 65, village 55. Summer: town 90, village 85. Autumn: town 70, village 60. Winter: town 45, village 35.">
+    <rect x="18" y="62" width="26" height="57" fill="#b0306a"></rect>
+    <rect x="46" y="71" width="26" height="48" fill="url(#stripes)"></rect>
+    <rect x="108" y="39" width="26" height="80" fill="#b0306a"></rect>
+    <rect x="136" y="44" width="26" height="75" fill="url(#stripes)"></rect>
+    <rect x="198" y="57" width="26" height="62" fill="#b0306a"></rect>
+    <rect x="226" y="66" width="26" height="53" fill="url(#stripes)"></rect>
+    <rect x="288" y="80" width="26" height="39" fill="#b0306a"></rect>
+    <rect x="316" y="88" width="26" height="31" fill="url(#stripes)"></rect>
+    <line x1="0" y1="119.5" x2="360" y2="119.5" stroke="#202124" stroke-width="1"></line>
+  </svg>
+  <div class="axis"><span>Spring</span><span>Summer</span><span>Autumn</span><span>Winter</span></div>
+  <div class="legend">
+    <svg viewBox="0 0 24 16" aria-hidden="true"><rect x="2" y="2" width="20" height="12" fill="#b0306a"></rect></svg><span>Town</span>
+    <svg viewBox="0 0 24 16" aria-hidden="true"><rect x="2" y="2" width="20" height="12" fill="url(#stripes)"></rect></svg><span>Village</span>
+  </div>
+</body>
+</html>

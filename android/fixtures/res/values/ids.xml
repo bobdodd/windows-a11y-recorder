@@ -46,4 +46,27 @@
     <item type="id" name="instruction_shape_named" />
     <item type="id" name="instruction_colour" />
     <item type="id" name="instruction_colour_named" />
+
+    <item type="id" name="chart_bars_hue" />
+    <item type="id" name="chart_bars_pattern" />
+    <item type="id" name="chart_bars_close" />
+    <item type="id" name="chart_bars_lightness" />
+    <item type="id" name="chart_outlined_hue" />
+    <item type="id" name="chart_outlined_dashed" />
+    <item type="id" name="chart_lines_hue" />
+    <item type="id" name="chart_lines_markers" />
+    <item type="id" name="chart_lines_coloured_legend" />
+    <item type="id" name="chart_lines_labelled" />
+    <item type="id" name="chart_pie_hue" />
+    <item type="id" name="chart_pie_labelled" />
+    <item type="id" name="chart_stacked_hue" />
+    <item type="id" name="chart_stacked_labelled" />
+    <item type="id" name="chart_highlight_colour" />
+    <item type="id" name="chart_highlight_marked" />
+    <item type="id" name="chart_scatter_hue" />
+    <item type="id" name="chart_scatter_shapes" />
+    <item type="id" name="chart_heat_hue" />
+    <item type="id" name="chart_heat_numbers" />
+    <item type="id" name="chart_image_hue" />
+    <item type="id" name="chart_image_pattern" />
 </resources>

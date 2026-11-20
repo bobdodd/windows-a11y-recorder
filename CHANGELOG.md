@@ -46,6 +46,17 @@ Changes on `main` since 1.1.0, not yet released.
   check (owner, 2026-11-19). Such an item is judged as any control is.
   See `docs/architecture/android-checks.md`, step 29.
 
+### Charts that rely on colour
+
+- The fixture app has twelve new screens for a chart that relies on
+  colour (WCAG 1.4.1), each one kind of chart with one that fails and
+  one near miss: grouped bars, bars of close lightness, outlined bars,
+  lines, lines with a legend in the lines' colours, a pie, stacked
+  bars, bars highlighted by colour, a scatter plot, a heat map, a chart
+  in an image, and SVG charts on a web page. Their first recording is
+  to be measured, with no model, before the check's rules are proposed.
+  See `docs/architecture/android-checks.md`, step 32.
+
 ### Sensory instructions
 
 - The fixture app has a new screen, "Shopping list", for instructions

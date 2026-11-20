@@ -184,6 +184,174 @@
         { "check": "instruction-by-colour", "item": "instruction_colour_named", "by": "rule", "finding": "none",
           "note": "\"tap Undo, the grey button\", naming the button by its text as well as its colour" }
       ]
+    },
+    {
+      "id": "chart-bars",
+      "title": "Plant sales",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "unbuilt",
+      "expect": [
+        { "check": "chart-only-by-colour", "item": "chart_bars_hue", "by": "unbuilt", "finding": "warning",
+          "note": "two series told apart only by hue, red against green at 1.10:1, with a legend of colour swatches (F13)" },
+        { "check": "chart-only-by-colour", "item": "chart_bars_pattern", "by": "unbuilt", "finding": "none",
+          "note": "the same chart with the second series hatched, in the bars and the legend (G111)" }
+      ]
+    },
+    {
+      "id": "chart-lightness",
+      "title": "Seed orders",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "unbuilt",
+      "expect": [
+        { "check": "chart-only-by-colour", "item": "chart_bars_close", "by": "unbuilt", "finding": "warning",
+          "note": "two blues 1.61:1 apart, so the lightness difference is under 3:1 and the series rely on colour" },
+        { "check": "chart-only-by-colour", "item": "chart_bars_lightness", "by": "unbuilt", "finding": "none",
+          "note": "a dark and a light blue 3.61:1 apart, which Understanding 1.4.1 treats as more than a colour difference" }
+      ]
+    },
+    {
+      "id": "chart-outlines",
+      "title": "Shop visits",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "unbuilt",
+      "expect": [
+        { "check": "chart-only-by-colour", "item": "chart_outlined_hue", "by": "unbuilt", "finding": "warning",
+          "note": "pastel bars with the same dark outline on both series; the outline meets 1.4.11 but does not tell the series apart" },
+        { "check": "chart-only-by-colour", "item": "chart_outlined_dashed", "by": "unbuilt", "finding": "none",
+          "note": "the same chart with the second series in a dashed outline, in the bars and the legend" }
+      ]
+    },
+    {
+      "id": "chart-lines",
+      "title": "Rainfall",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "unbuilt",
+      "expect": [
+        { "check": "chart-only-by-colour", "item": "chart_lines_hue", "by": "unbuilt", "finding": "warning",
+          "note": "two solid lines told apart only by hue, with no markers" },
+        { "check": "chart-only-by-colour", "item": "chart_lines_markers", "by": "unbuilt", "finding": "none",
+          "note": "the same lines with circle and square markers, and the second line dashed" }
+      ]
+    },
+    {
+      "id": "chart-line-labels",
+      "title": "River levels",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "unbuilt",
+      "expect": [
+        { "check": "chart-only-by-colour", "item": "chart_lines_coloured_legend", "by": "unbuilt", "finding": "warning",
+          "note": "the legend is the series names written in the line colours, so the names only match the lines by colour" },
+        { "check": "chart-only-by-colour", "item": "chart_lines_labelled", "by": "unbuilt", "finding": "none",
+          "note": "each line has its name at its end, with no legend" }
+      ]
+    },
+    {
+      "id": "chart-pie",
+      "title": "Household budget",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "unbuilt",
+      "expect": [
+        { "check": "chart-only-by-colour", "item": "chart_pie_hue", "by": "unbuilt", "finding": "warning",
+          "note": "four slices told apart only by hue, with a legend of colour swatches" },
+        { "check": "chart-only-by-colour", "item": "chart_pie_labelled", "by": "unbuilt", "finding": "none",
+          "note": "the same pie with each slice's name and share beside it on a leader line" }
+      ]
+    },
+    {
+      "id": "chart-stacked",
+      "title": "Energy mix",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "unbuilt",
+      "expect": [
+        { "check": "chart-only-by-colour", "item": "chart_stacked_hue", "by": "unbuilt", "finding": "warning",
+          "note": "three stacked segments told apart only by hue, with a legend of colour swatches" },
+        { "check": "chart-only-by-colour", "item": "chart_stacked_labelled", "by": "unbuilt", "finding": "none",
+          "note": "the same stack with each segment's name written in it" }
+      ]
+    },
+    {
+      "id": "chart-highlight",
+      "title": "Monthly spending",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "unbuilt",
+      "expect": [
+        { "check": "chart-only-by-colour", "item": "chart_highlight_colour", "by": "unbuilt", "finding": "warning",
+          "note": "the months over budget are only a brighter red, 3.13:1 from the others, but the meaning still relies on the colour" },
+        { "check": "chart-only-by-colour", "item": "chart_highlight_marked", "by": "unbuilt", "finding": "none",
+          "note": "the months over budget are hatched and have the word Over above them" }
+      ]
+    },
+    {
+      "id": "chart-scatter",
+      "title": "Orchard survey",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "unbuilt",
+      "expect": [
+        { "check": "chart-only-by-colour", "item": "chart_scatter_hue", "by": "unbuilt", "finding": "warning",
+          "note": "two groups of circles told apart only by hue" },
+        { "check": "chart-only-by-colour", "item": "chart_scatter_shapes", "by": "unbuilt", "finding": "none",
+          "note": "the same points with one group as circles and the other as triangles" }
+      ]
+    },
+    {
+      "id": "chart-heat",
+      "title": "Class attendance",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "unbuilt",
+      "expect": [
+        { "check": "chart-only-by-colour", "item": "chart_heat_hue", "by": "unbuilt", "finding": "warning",
+          "note": "a grid whose levels are only red, orange and green, with a colour key" },
+        { "check": "chart-only-by-colour", "item": "chart_heat_numbers", "by": "unbuilt", "finding": "none",
+          "note": "the same grid with each cell's number written in it" }
+      ]
+    },
+    {
+      "id": "chart-image",
+      "title": "Ticket sales",
+      "framework": "views",
+      "how": "tour",
+      "seconds": 5,
+      "stage": "unbuilt",
+      "expect": [
+        { "check": "chart-only-by-colour", "item": "chart_image_hue", "by": "unbuilt", "finding": "warning",
+          "note": "a chart drawn into a bitmap in an ImageView, its two series told apart only by hue" },
+        { "check": "chart-only-by-colour", "item": "chart_image_pattern", "by": "unbuilt", "finding": "none",
+          "note": "the same bitmap chart with the second series hatched" }
+      ]
+    },
+    {
+      "id": "web-charts",
+      "title": "Library loans",
+      "framework": "webview",
+      "how": "tour",
+      "seconds": 6,
+      "stage": "unbuilt",
+      "expect": [
+        { "check": "chart-only-by-colour", "item": "web_chart_hue", "by": "unbuilt", "finding": "warning",
+          "note": "an SVG bar chart whose two series are told apart only by hue" },
+        { "check": "chart-only-by-colour", "item": "web_chart_pattern", "by": "unbuilt", "finding": "none",
+          "note": "the same SVG chart with the second series striped by an SVG pattern" }
+      ]
     }
   ]
 }

@@ -39,7 +39,19 @@ final class Screens {
             new Screen("web-basics", "Opening hours", Screens::webBasics),
             new Screen("colour-only", "Recipes", Screens::colourOnly),
             new Screen("link-purpose", "Kitchen help", Screens::linkPurpose),
-            new Screen("sensory", "Shopping list", Screens::sensory)));
+            new Screen("sensory", "Shopping list", Screens::sensory),
+            new Screen("chart-bars", "Plant sales", ChartScreens::bars),
+            new Screen("chart-lightness", "Seed orders", ChartScreens::lightness),
+            new Screen("chart-outlines", "Shop visits", ChartScreens::outlines),
+            new Screen("chart-lines", "Rainfall", ChartScreens::lines),
+            new Screen("chart-line-labels", "River levels", ChartScreens::lineLabels),
+            new Screen("chart-pie", "Household budget", ChartScreens::pie),
+            new Screen("chart-stacked", "Energy mix", ChartScreens::stacked),
+            new Screen("chart-highlight", "Monthly spending", ChartScreens::highlight),
+            new Screen("chart-scatter", "Orchard survey", ChartScreens::scatter),
+            new Screen("chart-heat", "Class attendance", ChartScreens::heat),
+            new Screen("chart-image", "Ticket sales", ChartScreens::image),
+            new Screen("web-charts", "Library loans", Screens::webCharts)));
 
     private Screens() {
     }
@@ -147,12 +159,23 @@ final class Screens {
     // assets/web\basics.html, with a backslash (measured, 2026-11-19);
     // scripts/Build-CompanionApp.ps1 now gives such names forward slashes.
     private static View webBasics(Activity activity) {
+        return webPage(activity, "web/basics.html");
+    }
+
+    // Two SVG bar charts, one told apart only by hue and one with a
+    // pattern as well, for the check not yet built of a chart that relies
+    // on colour (1.4.1); see assets/web/charts.html and ChartScreens.
+    private static View webCharts(Activity activity) {
+        return webPage(activity, "web/charts.html");
+    }
+
+    private static View webPage(Activity activity, String path) {
         String page;
         try {
-            page = asset(activity, "web/basics.html");
+            page = asset(activity, path);
         } catch (IOException e) {
             LinearLayout column = Ui.column(activity);
-            column.addView(Ui.body(activity, "The fixture page web/basics.html could not be read: " + e.getMessage()));
+            column.addView(Ui.body(activity, "The fixture page " + path + " could not be read: " + e.getMessage()));
             return column;
         }
         WebView web = new WebView(activity);
@@ -380,7 +403,7 @@ final class Screens {
     // down, at 390 dpi, over the line after it. The gap puts the next line
     // about 180 pixels below that window on that phone; a person can drag
     // the button elsewhere, and then the checks say what it covers.
-    private static final int TALKBACK_GAP_DP = 120;
+    static final int TALKBACK_GAP_DP = 120;
 
     private static void clearOfTalkBack(Activity activity, LinearLayout column, String line) {
         column.addView(Ui.body(activity, line));

@@ -35,7 +35,9 @@ checks not yet built. The first screens for them, "Recipes"
 (`colour-only`), "Kitchen help" (`link-purpose`) and "Shopping list"
 (`sensory`), are built; Recipes and Kitchen help have been recorded,
 and Shopping list waits for its first recording (see "The colour
-screen", "The link purpose screen" and "The sensory screen").
+screen", "The link purpose screen" and "The sensory screen"). Twelve
+chart screens, `chart-bars` to `web-charts`, are built and wait for
+their first recording (see "The chart screens").
 
 One fixture recording is committed, `tests/fixtures/android/tour/`,
 extracted from the owner's fifth recording of the tour on 2026-11-19
@@ -680,7 +682,7 @@ the owner chooses.
 
 The owner chose to start with the selected state and the links shown
 only by colour, on one new screen (2026-11-19); the chart that relies on
-colour waits.
+colour waited, and was chosen next on 2026-11-20 ("The chart screens").
 
 #### The colour screen
 
@@ -772,6 +774,77 @@ fill's on white. Add is a 64 dp circle; the others are rectangles with
 square corners, 48 dp tall and at least 88 dp wide. So the touch target
 and contrast checks have nothing to find. Clicking a button does
 nothing. Size, orientation and sound are not on the screen.
+
+#### The chart screens
+
+Twelve screens, built on 2026-11-20 for a chart that relies on colour
+(WCAG 1.4.1), which the owner chose as the next check (2026-11-20),
+asking for different kinds of chart and graph and for outlines on bars
+to be thought about. Each is opened by the tour and holds one chart
+that fails and one near miss of the same kind. Their first recording is
+the check's "measure first" data, read with no model before rules are
+proposed to the owner (android-checks.md, step 32). The check's name in
+`expected.json`, `chart-only-by-colour`, is a proposal, marked
+`"by": "unbuilt"`: a fault is a warning there for now, as whether a
+model is involved is not yet decided. The screens stay at the
+`unbuilt` stage.
+
+Eleven are Views screens, drawn by `Charts.java` on a custom View (or,
+on one screen, into a bitmap in an ImageView), and one is a WebView
+page of SVG charts, `assets/web/charts.html`.
+
+| Screen | Element | Built as | Expected |
+| --- | --- | --- | --- |
+| `chart-bars`, "Plant sales" | `chart_bars_hue` | Grouped bars, two series in #C62828 and #2E7D32, 1.10:1 against each other, with a legend of colour swatches | A warning: told apart only by hue (F13) |
+| | `chart_bars_pattern` | The same, with the second series hatched in white, in the bars and the legend (G111) | No finding |
+| `chart-lightness`, "Seed orders" | `chart_bars_close` | Two blues, #3F6FD8 and #2A4FA8, 1.61:1 against each other | A warning: the lightness difference is under 3:1 |
+| | `chart_bars_lightness` | #1A237E and #5C7CFA, 3.61:1 against each other | No finding |
+| `chart-outlines`, "Shop visits" | `chart_outlined_hue` | Pastel bars, #F4B6C2 and #A8DAB5, each under 3:1 on white and 1.08:1 against each other, both with the same 2 dp outline in #202124 | A warning: the outline marks each bar's edge but not its series |
+| | `chart_outlined_dashed` | The same, with the second series' outline dashed, in the bars and the legend | No finding |
+| `chart-lines`, "Rainfall" | `chart_lines_hue` | Two solid lines, red and green as above, with no markers, and a legend of line swatches | A warning: told apart only by hue |
+| | `chart_lines_markers` | The same, with circle markers on one line and square markers on the other, which is also dashed | No finding |
+| `chart-line-labels`, "River levels" | `chart_lines_coloured_legend` | Two lines, red and green, whose legend is only the rivers' names written in the lines' colours | A warning: the names match the lines only by colour |
+| | `chart_lines_labelled` | Each line's name in #202124 at its right-hand end, with no legend | No finding |
+| `chart-pie`, "Household budget" | `chart_pie_hue` | Four slices in #B0306A, #00796B, #A85400 and #7B3FA0, separated by 2 dp white gaps, with a legend of colour swatches | A warning: told apart only by hue |
+| | `chart_pie_labelled` | The same colours, each slice's name and share beside it on a leader line, with no legend (G14) | No finding |
+| `chart-stacked`, "Energy mix" | `chart_stacked_hue` | Stacked bars in #8D5A2B, #00796B and #7B3FA0, with a legend | A warning: told apart only by hue |
+| | `chart_stacked_labelled` | The same, each segment's name in white inside it | No finding |
+| `chart-highlight`, "Monthly spending" | `chart_highlight_colour` | Bars in #1A237E, those over budget in #E53935, 3.13:1 from the others, with a legend | A warning: the meaning relies on a particular colour, whatever the contrast |
+| | `chart_highlight_marked` | The bars over budget hatched too, with the word "Over" above each, and the hatching in the legend | No finding |
+| `chart-scatter`, "Orchard survey" | `chart_scatter_hue` | Two groups of circles in #B0306A and #00796B | A warning: told apart only by hue |
+| | `chart_scatter_shapes` | The same, one group as circles and the other as triangles | No finding |
+| `chart-heat`, "Class attendance" | `chart_heat_hue` | A grid whose three levels are #C62828, #A85400 and #2E7D32, at most 1.10:1 against each other, with a colour key | A warning: told apart only by hue |
+| | `chart_heat_numbers` | The same, each cell's percentage in white inside it | No finding |
+| `chart-image`, "Ticket sales" | `chart_image_hue` | Grouped bars in red and green drawn into a bitmap in an ImageView | A warning: told apart only by hue |
+| | `chart_image_pattern` | The same, the second series hatched | No finding |
+| `web-charts`, "Library loans" | `web_chart_hue` | An SVG bar chart, two series in #B0306A and #00796B, with a legend of swatches | A warning: told apart only by hue |
+| | `web_chart_pattern` | The same, the second series striped by an SVG pattern, in the bars and the legend | No finding |
+
+Every chart has a content description, or on the web page an
+`aria-label` on an SVG with `role="img"`, giving its data and not its
+colours, so the chart's text alternative is not what is tested. Every
+word on or beside a chart (titles, axis names, legends, labels, values)
+is a TextView or HTML text, not drawn, so the check of text on screen
+not in the tree has nothing to find; a chart with drawn words is left
+for later. The legend swatches are not important for accessibility.
+Every fill is at least 3:1 on white but the pastels, every word in
+#202124 or in white on a fill at least 5:1, so the contrast checks
+have nothing to find. The charts follow a line not tested and a gap,
+as on the other screens.
+
+Two choices follow the standards (android-checks.md, step 32):
+
+- **Outlines.** An outline the same on every series marks where each
+  bar is, which is a matter of non-text contrast (1.4.11, G209), not of
+  telling the series apart. So the outlined fault fails 1.4.1 with its
+  outlines, and a near miss needs the outlines to differ, here by a
+  dashed line. The pastels themselves would fail 1.4.11 without their
+  outlines; that check is not yet built, and these bars are outlined.
+- **Lightness.** Understanding 1.4.1 treats colours that also differ by
+  3:1 or more in lightness as not relying on colour alone, but not when
+  the content relies on a particular colour, such as red for over
+  budget. So `chart_bars_lightness` passes at 3.61:1, and
+  `chart_highlight_colour` fails at 3.13:1.
 
 ### Driven by a person
 
