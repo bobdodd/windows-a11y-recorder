@@ -6206,9 +6206,18 @@ fixture app's `expected.json` the 24 chart expectations are now
   the request's key, pictures and text; picture B's size and outline;
   the kept answers confirmed, overturned, waiting and unanswered; and
   each answer's level (measured, the tests pass).
-- Not yet checked: the model's answers on the chart screens' recording.
-  They were not measured before building, so whether the model tells
-  the faults from the near misses is to be seen on the phone.
+- On the chart screens' recording, in the installer built from 775ebd6
+  (owner, 2026-11-20, seen in the Checks window): on the WebView
+  "Library loans" screen, 2 items with two or more colours were
+  measured and 1 warning was given, on the chart told apart only by
+  hue, `web_chart_hue`; the chart with a striped series,
+  `web_chart_pattern`, had none. The project's model for simple
+  questions answered `only-colour` twice and its model for complex
+  questions confirmed it. The owner accepted the check as working for
+  now.
+- Not yet checked: the model's answers on the other chart screens of
+  that recording, and whether the text contrast warning on
+  `chart_highlight_colour` stays with OCR on.
 
 ### Limits
 

@@ -70,6 +70,10 @@ Changes on `main` since 1.1.0, not yet released.
   warning for a person to verify. It is in the Checks tab, the summary
   and the report, with guidance; the chart screens' expectations are
   now by model. See `docs/architecture/android-checks.md`, step 32.
+- Seen on the chart screens' recording (owner, 2026-11-20): on the
+  WebView chart screen, the chart told apart only by hue was warned and
+  the one with a striped series was not. The other chart screens are
+  not yet confirmed.
 
 ### Sensory instructions
 
