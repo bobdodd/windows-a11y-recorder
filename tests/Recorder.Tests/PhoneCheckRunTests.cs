@@ -2819,6 +2819,274 @@ public sealed class PhoneCheckRunTests : IDisposable
         Assert.EndsWith("; check manually", split.Text, StringComparison.Ordinal);
     }
 
+    // Step 32: a chart that relies on colour. A window of made-up items: a
+    // chart with two solid red bars and a green hatched one, a grey-only
+    // item, a line of text, a small icon and the chart's legend line below
+    // it; and the screenshot drawn to match.
+    private static (PhoneCheckWindow Window, PhoneTextLine[] Lines, PhonePixels Pixels) Charted()
+    {
+        var window = new PhoneCheckWindow(512, 1,
+        [
+            ImageNode(0, null, (0, 0, 1080, 2400), "android.widget.FrameLayout"),
+            ImageNode(1, 0, (100, 600, 980, 1200), "android.view.View", "Sales by quarter"),
+            ImageNode(2, 0, (100, 1300, 980, 1500), "android.view.View"),
+            ImageNode(3, 0, (100, 300, 980, 400), "android.widget.TextView", text: "Quarterly sales"),
+            ImageNode(4, 0, (40, 100, 100, 160), "android.widget.ImageView", "Menu"),
+            ImageNode(5, 0, (100, 1220, 980, 1280), "android.widget.TextView", text: "Shop, Online"),
+        ]);
+        var rgb = new uint[1080 * 2400];
+        Array.Fill(rgb, 0xFFFFFFu);
+        void Fill(int left, int top, int right, int bottom, uint colour, Func<int, int, bool>? where = null)
+        {
+            for (var y = top; y < bottom; y++)
+            {
+                for (var x = left; x < right; x++)
+                {
+                    if (where?.Invoke(x, y) ?? true)
+                    {
+                        rgb[(y * 1080) + x] = colour;
+                    }
+                }
+            }
+        }
+
+        Fill(200, 700, 300, 1100, 0xC62828);
+        Fill(500, 800, 600, 1100, 0xC62828);
+        Fill(350, 700, 450, 1100, 0x2E7D32, (x, y) => (x + y) % 12 < 3);
+        Fill(200, 1350, 400, 1450, 0x9E9E9E);
+        Fill(500, 1350, 700, 1450, 0x424242);
+        var items = window.Items;
+        PhoneTextLine Line(int item, string ocr, (int Left, int Top, int Right, int Bottom) box) =>
+            new(items[item], items[item], PhoneTextPlace.AppTextPlacedByOcr, items[item].Text, ocr,
+                new PhoneBounds(box.Left, box.Top, box.Right, box.Bottom), new PhoneSwatch(0xFFFFFF, 0x000000, 21, 2, 2), 46, 40);
+        return (window,
+        [
+            Line(3, "Quarterly sales", (110, 310, 600, 390)),
+            Line(5, "Shop, Online", (110, 1230, 500, 1270)),
+        ], new PhonePixels(1080, 2400, rgb));
+    }
+
+    // Every settled snapshot of every visit of the recording, each with the
+    // window of made-up items measured on its screenshot.
+    private PhoneChartColourRun ChartRun(bool returning = false, string? engine = "Windows OCR, en-US")
+    {
+        var archive = Archive(out _, returning);
+        var snapshots = new List<PhoneContrastSnapshot>();
+        foreach (var visit in archive.PhoneScreens.Visits)
+        {
+            foreach (var settled in visit.SettledSnapshots)
+            {
+                if (archive.PhoneAccessibility.TakenBy(settled, visit.WindowId) is not { } taken)
+                {
+                    continue;
+                }
+
+                var (window, lines, pixels) = Charted();
+                var name = $"p{snapshots.Count}.png";
+                snapshots.Add(new(visit, settled, taken,
+                    new PhoneContrastPicture(PhonePictureKind.Screenshot, settled.MonotonicNanoseconds, name, name),
+                    engine, lines, null, window,
+                    MeasuredCharts: PhoneChartMeasuring.Charts(window, pixels, PictureScale.One, 2.625, null, [])));
+            }
+        }
+
+        return PhoneChartColourRun.Run(PhoneContrastRun.Of(snapshots), archive.PhoneScreens);
+    }
+
+    // Rules 1 and 2: only a visible item with no text of its own, nothing
+    // inside it and 48 dp each way is measured; its fills are the colours
+    // other than its commonest covering 1% of it, with their pieces and how
+    // much of their bounding boxes they fill.
+    [Fact]
+    public void ChartColours_Measuring_FindsFillsPiecesAndPatterns()
+    {
+        var (window, _, pixels) = Charted();
+
+        var looks = PhoneChartMeasuring.Charts(window, pixels, PictureScale.One, 2.625, null, []);
+
+        Assert.Equal([1, 2], looks.Select(look => look.Item.Node.Index));
+        var chart = looks[0];
+        Assert.Equal((0xFFFFFFu, true), (chart.Background, chart.Asked));
+        Assert.Equal(["#C62828", "#2E7D32"], chart.Fills.Select(fill => fill.Hex));
+        Assert.Equal((2, 1.0), (chart.Fills[0].Pieces, chart.Fills[0].MedianFill));
+        Assert.Equal(70000 / 528000.0, chart.Fills[0].Share, 6);
+        Assert.True(chart.Fills[1].Pieces >= 5, "the hatching is in many pieces");
+        Assert.InRange(chart.Fills[1].MedianFill, 0, 0.5);
+        Assert.InRange(chart.Fills[1].Share, 0.01, 0.03);
+
+        // Grey fills only: measured, not asked.
+        Assert.False(looks[1].Asked);
+        Assert.True(PhoneChartMeasuring.Grey(0x9E9E9E));
+        Assert.False(PhoneChartMeasuring.Grey(0xC62828));
+
+        // Only a frame of the video: nothing is measured.
+        Assert.Empty(PhoneChartMeasuring.Charts(window, null, PictureScale.One, 2.625, null, []));
+
+        // At a density where the chart is under 48 dp tall, it is not measured.
+        Assert.Empty(PhoneChartMeasuring.Charts(window, pixels, PictureScale.One, 13, null, []));
+
+        Assert.Equal("#C62828 and #2E7D32 1.10:1", PhoneChartColourRun.RatiosText(chart.Fills));
+        Assert.StartsWith("#C62828, 13% of it, in 2 pieces of 40 pixels or more filling a median 100% of their bounding boxes; #2E7D32, ",
+            PhoneChartColourRun.FillsText(chart.Fills), StringComparison.Ordinal);
+    }
+
+    // Rule 3: each item asked about once for each screen, with no finding
+    // until a model's answers are given; then each finding on every visit
+    // with the item.
+    [Fact]
+    public void ChartColours_AsksOnceForEachScreen_AndGivesTheAnswerToEveryVisit()
+    {
+        var run = ChartRun(returning: true);
+
+        Assert.Empty(run.Findings);
+        var screens = run.Questions.Select(question => question.Visit.Screen).Distinct().Count();
+        Assert.Equal(screens, run.Questions.Count);
+        var question = run.Questions[0];
+        Assert.Equal(("View", "Sales by quarter", true), (question.Role, question.Description, question.UsedOcr));
+        Assert.Equal(new PhoneBounds(0, 0, 1080, 1800), question.Area);
+        Assert.Equal(
+            [("Quarterly sales", "above the item", true), ("Shop, Online", "below the item", true)],
+            question.Near.Select(line => (line.Text, line.Where, line.FromOcr)));
+        Assert.Contains("an item of class View with no text of its own, on #FFFFFF, with 2 colours", question.Time.Measured, StringComparison.Ordinal);
+
+        var visits = run.Entries.Where(entry => entry.Question == question).Select(entry => entry.Visit).ToList();
+        Assert.True(visits.Count >= 2);
+        var answer = new PhoneChartAnswer(PhoneChartOutcome.Finding,
+            new PhoneInference(PhoneCheckLevel.Warning, "made up", Inferred: true, "Haiku", Cloud: false));
+        var judged = run.Judged(new Dictionary<PhoneChartQuestion, PhoneChartAnswer> { [question] = answer }, "note");
+
+        Assert.All(visits, visit => Assert.Equal((PhoneCheckNames.ChartOnlyByColour, PhoneCheckLevel.Warning), (Assert.Single(judged.For(visit)).Check, Assert.Single(judged.For(visit)).Level)));
+        Assert.Equal(visits.Count, judged.Findings.Count);
+        Assert.Equal((run.Questions.Count - 1, "note", 1), (judged.Unanswered, judged.ModelNote, judged.Inferences.Count()));
+        Assert.Equal("Chart that relies on colour (WCAG 1.4.1)", PhoneCheckNames.Title(PhoneCheckNames.ChartOnlyByColour));
+
+        // An answer that is no finding is counted.
+        var notChart = run.Judged(new Dictionary<PhoneChartQuestion, PhoneChartAnswer>
+        {
+            [question] = answer with { Outcome = PhoneChartOutcome.NotAChart },
+        }, null);
+
+        Assert.Empty(notChart.Findings);
+        Assert.Equal((1, 0), (notChart.NotCharts, notChart.NotOnlyColour));
+    }
+
+    // Rule 3's request: both pictures, the class, description, fills,
+    // ratios and the text near the item, four answers.
+    [Fact]
+    public void ChartColours_RequestGivesBothPicturesTheFillsAndTheTextNearIt()
+    {
+        var run = ChartRun();
+        var (_, _, pixels) = Charted();
+
+        var request = Recorder.Analysis.Android.AndroidChartColours.RequestOf(run.Questions[0], pixels);
+
+        Assert.Matches("^chart-colour-[0-9a-f]{16}$", request.Key);
+        Assert.Equal(request.Key, Recorder.Analysis.Android.AndroidChartColours.RequestOf(run.Questions[0], new PhonePixels(1080, 2400, [.. pixels.Rgb])).Key);
+        Assert.Equal(request.Key + "-3", request.StepKey(3));
+        Assert.Equal(("android-chart-colour", 1, Recorder.Analysis.ModelUses.VisionChecks, true),
+            (request.Request.PromptTemplate, request.Request.PromptTemplateVersion, request.Request.Use, request.Request.ReusedAcrossTasks));
+        Assert.Equal(["not-a-chart", "only-colour", "not-only-colour", "cannot-tell"], request.Request.Answers);
+        Assert.Equal(2, request.Request.Images.Count);
+        Assert.Contains("The outlined item is of class View, with no text of its own. Its description, which a screen reader says but which is not shown, is \"Sales by quarter\".", request.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("Contrast ratios between those colours: #C62828 and #2E7D32 1.10:1.", request.Request.Input, StringComparison.Ordinal);
+        Assert.Contains("- \"Shop, Online\", below the item, in #000000", request.Request.Input, StringComparison.Ordinal);
+        Assert.EndsWith("First write one or two sentences saying what each colour stands for and what else, if anything, shows it, then give the answer.", request.Request.Input, StringComparison.Ordinal);
+        Assert.Equal(run.Questions.Count, Recorder.Analysis.Android.AndroidChartColours.Requests(run, _ => pixels).Count);
+        Assert.Empty(Recorder.Analysis.Android.AndroidChartColours.Requests(run, _ => null));
+
+        // Picture B: the area at most 1,024 pixels on its longer side, the
+        // item outlined in cyan outside it.
+        var area = Recorder.Analysis.Android.AndroidChartColours.Area(pixels, run.Questions[0].Area, run.Questions[0].Bounds);
+        Assert.Equal(614, area.Width);
+        Assert.InRange(area.Height, 1023, 1024);
+        var scale = 1024 / 1800.0;
+        Assert.Equal(0x00E5FFu, area.Pixels[((int)(600 * scale) - 2) * area.Width + (int)(500 * scale)]);
+        Assert.Equal(0xFFFFFFu, area.Pixels[((int)(650 * scale)) * area.Width + (int)(150 * scale)] & 0xFFFFFF);
+    }
+
+    // Rule 4: agreed only-colour is put to the model for complex questions
+    // to confirm, whose answers decide; agreed not-a-chart or
+    // not-only-colour is no finding; with no model for complex questions
+    // the first answers stand.
+    [Fact]
+    public void ChartColours_KeptAnswers_ConfirmOnlyColourWithTheModelForComplexQuestions()
+    {
+        var run = ChartRun();
+        var (_, _, pixels) = Charted();
+        var requests = run.Questions.Select(question => Recorder.Analysis.Android.AndroidChartColours.RequestOf(question, pixels)).ToList();
+        var request = requests[0];
+        static Recorder.Analysis.KeptAnswer Answer(string answer) =>
+            new(JsonSerializer.SerializeToElement(new { answer, reason = "Red and green bars match the legend only by colour." }), "service", """{"temperature": null}""");
+        Dictionary<string, Recorder.Analysis.KeptAnswer> Kept(string one, string two, int first = 1) => new()
+        {
+            [request.StepKey(first)] = Answer(one), [request.StepKey(first + 1)] = Answer(two),
+        };
+        var only = Kept("only-colour", "only-colour");
+
+        // Confirmed: a warning for a person to verify.
+        var confirmed = Recorder.Analysis.Android.AndroidChartColours.FromKept(run, [request], only, "Haiku", Kept("only-colour", "only-colour", 3), "Sonnet");
+
+        var finding = confirmed.Findings[0];
+        Assert.Equal((PhoneCheckNames.ChartOnlyByColour, PhoneCheckLevel.Warning), (finding.Check, finding.Level));
+        Assert.StartsWith(
+            "Haiku, a cloud model, the project's model for simple questions, answered only-colour twice, so the question was put to the project's model for complex questions to confirm; " +
+            "Sonnet, a cloud model, inferred from the pictures twice that the item is a chart or other graphic that shows something only by colour, with its colours, measured, #C62828, #2E7D32, with contrast ratios #C62828 and #2E7D32 1.10:1:",
+            finding.Inference!.Text, StringComparison.Ordinal);
+        Assert.EndsWith("; a person should verify this", finding.Inference.Text, StringComparison.Ordinal);
+        Assert.Contains("1 item answered: 0 judged not to be charts and 0 to show what their colours stand for another way too, not confirmed", confirmed.ModelNote, StringComparison.Ordinal);
+
+        // Overturned by the model for complex questions: no finding.
+        var overturned = Recorder.Analysis.Android.AndroidChartColours.FromKept(run, [request], only, "Haiku", Kept("not-only-colour", "not-only-colour", 3), "Sonnet");
+
+        Assert.Empty(overturned.Findings);
+        Assert.Equal(1, overturned.NotOnlyColour);
+
+        // Waiting for the model for complex questions: not judged.
+        var waiting = Recorder.Analysis.Android.AndroidChartColours.FromKept(run, [request], only, "Haiku", new Dictionary<string, Recorder.Analysis.KeptAnswer>(), "Sonnet");
+
+        Assert.Empty(waiting.Findings);
+        Assert.Equal(run.Questions.Count, waiting.Unanswered);
+        Assert.Contains("waiting for the model for complex questions", waiting.ModelNote, StringComparison.Ordinal);
+
+        // No model for complex questions: the first answers stand.
+        Assert.NotEmpty(Recorder.Analysis.Android.AndroidChartColours.FromKept(run, [request], only, "Haiku").Findings);
+        var notChart = Recorder.Analysis.Android.AndroidChartColours.FromKept(run, [request], Kept("not-a-chart", "not-a-chart"), "Haiku", null, "Sonnet");
+        Assert.Empty(notChart.Findings);
+        Assert.Equal(1, notChart.NotCharts);
+        var split = Recorder.Analysis.Android.AndroidChartColours.FromKept(run, [request], Kept("not-a-chart", "only-colour"), "Haiku");
+        Assert.EndsWith("; check manually", split.Findings[0].Inference!.Text, StringComparison.Ordinal);
+
+        // No answers: nothing judged.
+        var unanswered = Recorder.Analysis.Android.AndroidChartColours.FromKept(run, requests, new Dictionary<string, Recorder.Analysis.KeptAnswer>(), "Haiku");
+        Assert.Empty(unanswered.Findings);
+        Assert.EndsWith($", {run.Questions.Count} {(run.Questions.Count == 1 ? "item" : "items")} not yet asked", unanswered.ModelNote, StringComparison.Ordinal);
+        Assert.Equal(
+            "1 item left by the rules was not judged, as no model may be used for vision-based checks: no model",
+            Recorder.Analysis.Android.AndroidChartColours.NotAsked(1, "no model"));
+    }
+
+    // Rule 4's levels.
+    [Theory]
+    [InlineData("only-colour", PhoneCheckLevel.Warning, "that the item is a chart or other graphic that shows something only by colour")]
+    [InlineData("not-only-colour", PhoneCheckLevel.Info, "that the item shows what its colours stand for another visual way too, not confirmed")]
+    [InlineData("not-a-chart", PhoneCheckLevel.Info, "that the item is not a chart or other graphic whose colours stand for something, not confirmed")]
+    [InlineData("cannot-tell", PhoneCheckLevel.Warning, "could not tell from the pictures twice whether the item relies on colour alone")]
+    public void ChartColours_Interpret_GivesEachAgreedAnswersLevel(string answer, PhoneCheckLevel level, string says)
+    {
+        var question = ChartRun().Questions[0];
+
+        var inference = Recorder.Analysis.Android.AndroidChartColours.Interpret(new(answer, "First."), new(answer, "Second."), "Haiku", cloud: false, question);
+
+        Assert.Equal((level, true, false), (inference.Level, inference.Inferred, inference.Cloud));
+        Assert.StartsWith("Haiku, a local model,", inference.Text, StringComparison.Ordinal);
+        Assert.Contains(says, inference.Text, StringComparison.Ordinal);
+
+        var split = Recorder.Analysis.Android.AndroidChartColours.Interpret(new(answer, "First."), new(answer == "cannot-tell" ? "only-colour" : "cannot-tell", "Second."), "Haiku", cloud: false, question);
+
+        Assert.Equal(PhoneCheckLevel.Warning, split.Level);
+        Assert.EndsWith("; check manually", split.Text, StringComparison.Ordinal);
+    }
+
     // The body text is the height most of the characters have.
     [Fact]
     public void HeadingLook_BodyHeight_IsTheMedianInkHeightByCharacters()

@@ -53,6 +53,9 @@ public sealed record PhoneChecksSummaryInput
 
     /// <summary>Links told apart only by colour and selected states shown only by colour (android-checks.md, step 29).</summary>
     public PhoneColourOnlyRun? ColourOnly { get; init; }
+
+    /// <summary>A chart or other graphic that relies on colour (android-checks.md, step 32).</summary>
+    public PhoneChartColourRun? ChartColours { get; init; }
 }
 
 /// <summary>
@@ -161,7 +164,8 @@ public static class PhoneChecksSummary
             .Concat(input.HeadingNotShown?.Findings ?? [])
             .Concat(input.ControlNames?.Findings ?? [])
             .Concat(input.LabelInName?.Findings ?? [])
-            .Concat(input.ColourOnly?.Findings ?? []);
+            .Concat(input.ColourOnly?.Findings ?? [])
+            .Concat(input.ChartColours?.Findings ?? []);
     }
 
     private static List<PhoneSummarySection> TreeSections(PhoneChecksSummaryInput input)
@@ -603,6 +607,25 @@ public static class PhoneChecksSummary
                 Result(Of(colour.Findings, PhoneCheckNames.SelectedOnlyByColour)),
                 [F($"{Count(colour.Selected, "item")} marked selected measured on screenshots, {colour.SelectedPassed:N0} passed.")],
                 "An item the tree marks selected is compared with the items beside it of its class not selected; an underline or a bar they lack, bold strokes, or a difference in lightness of 3:1, in its colour or its background, shows its state by more than colour. An app that does not mark the selected item in the tree is not checked."));
+        }
+
+        if (input.ChartColours is { } charts)
+        {
+            var title = PhoneCheckNames.Title(PhoneCheckNames.ChartOnlyByColour);
+            sections.Add(charts.SnapshotsRead == 0
+                ? NotChecked(title, "it needs the phone's screenshots, and only frames of the video show these screens")
+                : new PhoneSummarySection(
+                    title,
+                    Result(charts.Findings),
+                    WithNote(
+                        [
+                            $"{Count(charts.Items, "item")} with no text of its own and two or more colours, each once a visit, on {Count(charts.SnapshotsRead, "screenshot")}.",
+                            $"{Count(charts.NotMeasured, "item")} once a visit not measured, as something was drawn over {(charts.NotMeasured == 1 ? "it" : "them")} or {(charts.NotMeasured == 1 ? "it was" : "they were")} not wholly on the picture.",
+                            $"{Count(charts.Questions.Count, "item")} once for each screen for the model for vision-based checks.",
+                            F($"{charts.NotCharts:N0} judged not to be charts and {charts.NotOnlyColour:N0} to show what their colours stand for another way too, not confirmed."),
+                            $"{Count(charts.Unanswered, "item")} not judged.",
+                        ],
+                        charts.ModelNote)));
         }
 
         return sections;

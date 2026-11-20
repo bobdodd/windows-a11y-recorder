@@ -65,6 +65,7 @@ public partial class MainWindow
                 ControlNames = _phoneControlNames,
                 LabelInName = _phoneLabelInName,
                 ColourOnly = _phoneColourOnly,
+                ChartColours = _phoneChartColours,
             });
 
             // The overview and the audit level, then the project's models,

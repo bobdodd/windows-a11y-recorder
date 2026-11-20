@@ -37,8 +37,8 @@ checks not yet built. The first screens for them, "Recipes"
 and Shopping list waits for its first recording (see "The colour
 screen", "The link purpose screen" and "The sensory screen"). Twelve
 chart screens, `chart-bars` to `web-charts`, are built and were first
-recorded and measured on 2026-11-20 (see "The chart screens" and
-android-checks.md, step 32).
+recorded and measured on 2026-11-20; their check is built as a model
+check (see "The chart screens" and android-checks.md, step 32).
 
 One fixture recording is committed, `tests/fixtures/android/tour/`,
 extracted from the owner's fifth recording of the tour on 2026-11-19
@@ -785,11 +785,11 @@ to be thought about. Each is opened by the tour and holds one chart
 that fails and one near miss of the same kind. Their first recording,
 made on 2026-11-20, is the check's "measure first" data, read with no
 model before rules were proposed to the owner (android-checks.md, step
-32). The check's name in
-`expected.json`, `chart-only-by-colour`, is a proposal, marked
-`"by": "unbuilt"`: a fault is a warning there for now, as whether a
-model is involved is not yet decided. The screens stay at the
-`unbuilt` stage.
+32). The check, `chart-only-by-colour`, is built as a model check
+(owner, 2026-11-20), so each expectation in `expected.json` is
+`"by": "model"`: a warning on each fault, as a model is involved, and
+none on each near miss. The screens stay at the `unbuilt` stage until
+a replay extract of them is committed.
 
 Eleven are Views screens, drawn by `Charts.java` on a custom View (or,
 on one screen, into a bitmap in an ImageView), and one is a WebView

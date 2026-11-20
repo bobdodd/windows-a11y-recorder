@@ -200,7 +200,7 @@ Each row is one issue, so that its remediation can be specific.
 | A selected state shown only by colour | 1.4.1 | Apart from colour, what shows this tab or item is selected? | Rows of controls of one class and size where one is drawn differently, as asked in `android-checks.md` step 5 |
 | An error shown only by colour | 1.4.1 | Apart from colour, what shows this field is in error? | Fields whose colours change after input, with no error text |
 | Links shown only by colour | 1.4.1 | Apart from colour, what shows this text is a link? | Clickable text within other text |
-| A chart that relies on colour | 1.4.1 | Can the chart's series be told apart without colour? | The graphics found above that are charts |
+| A chart that relies on colour | 1.4.1 | Is this a chart, what does each colour stand for, and can that be told without colour? | Items with no text of their own and two or more fills on the screenshot (built, see "Charts that rely on colour, as built") |
 | Instructions that rely on shape, colour or place | 1.3.3 | Does this text refer to something only by its shape, colour or place? | Text in the tree or the OCR text with words such as "green", "round", "on the right"; text only, with the picture for a screen mostly of images (requirement 5) |
 
 ## Settling existing warnings
@@ -602,6 +602,26 @@ answers decide. Agreed does-not-describe is a warning for a person to
 verify, medium impact, an assumption; cannot tell, or two answers, a
 warning to check manually; agreed describes, counted, no finding. The
 model's answers were not measured before building.
+
+### Charts that rely on colour, as built
+
+Built on 2026-11-20, at the owner's request, "Go ahead and build the
+model check for chart colour use", after the rules proposed from the
+pixels alone were withdrawn: what a chart's colours stand for, and
+whether that can be told without colour, needs a model. Step 32 of
+`android-checks.md` has the measurement and the rules: each visible
+item with no text of its own, nothing inside it and 48 dp each way,
+whose box on the phone's screenshot holds two or more fills of 1% or
+more, not all grey, is asked once for each screen, with the whole
+screen, the item and the screen above and below it, its class and
+description, the fills, their pieces and ratios, and the text near it
+from OCR and the tree. Four answers: not a chart, only colour, not only
+colour, cannot tell. Agreed only-colour is put to the model for complex
+questions to confirm, as are unsettled answers, and its answers decide.
+Agreed only-colour is a warning for a person to verify, medium impact,
+an assumption; cannot tell, or two answers, a warning to check
+manually; the others counted, no finding. The model's answers were not
+measured before building.
 
 ### Simple and complex questions, measured on 2026-11-17
 

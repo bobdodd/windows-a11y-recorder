@@ -53,9 +53,23 @@ Changes on `main` since 1.1.0, not yet released.
   one near miss: grouped bars, bars of close lightness, outlined bars,
   lines, lines with a legend in the lines' colours, a pie, stacked
   bars, bars highlighted by colour, a scatter plot, a heat map, a chart
-  in an image, and SVG charts on a web page. Their first recording is
-  to be measured, with no model, before the check's rules are proposed.
-  See `docs/architecture/android-checks.md`, step 32.
+  in an image, and SVG charts on a web page. Their first recording was
+  measured with no model before rules were proposed.
+- A new check of WCAG 1.4.1, "Chart that relies on colour", built as a
+  model check (owner, 2026-11-20), as only a model can tell whether an
+  item is a chart, what its colours stand for and whether that can be
+  told without colour. Each item with no text of its own, nothing inside
+  it and 48 dp each way, whose box on the phone's screenshot holds two
+  or more fills of 1% or more, not all grey, is measured with no model:
+  its fills, their pieces and how much of their boxes they fill, and the
+  ratios between them. The project's model for vision-based checks is
+  then asked once for each screen, with the whole screen, the item with
+  the screen above and below it, its description and the text near it,
+  and agreed answers that it relies on colour alone are confirmed by
+  the model for complex questions where there is one. Each finding is a
+  warning for a person to verify. It is in the Checks tab, the summary
+  and the report, with guidance; the chart screens' expectations are
+  now by model. See `docs/architecture/android-checks.md`, step 32.
 
 ### Sensory instructions
 

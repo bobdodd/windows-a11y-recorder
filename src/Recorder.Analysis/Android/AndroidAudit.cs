@@ -13,13 +13,15 @@ namespace Recorder.Analysis.Android;
 /// no text alternative, the icon and description checks, the screen
 /// title check, the decorative image check, the check of a heading
 /// that does not describe its section, the check of text on screen not
-/// in the tree, the check of a marked heading not shown as one and the
-/// check of a control name that does not say what the control does are
+/// in the tree, the check of a marked heading not shown as one, the
+/// check of a control name that does not say what the control does and
+/// the check of a chart that relies on colour are
 /// asked after, where a model may be used (<see cref="AndroidImagesOfText"/>, <see cref="AndroidHeadingLook"/>,
 /// <see cref="AndroidImageAlternative"/>, <see cref="AndroidDescribedImages"/>,
 /// <see cref="AndroidScreenTitles"/>, <see cref="AndroidDecorativeImages"/>,
 /// <see cref="AndroidHeadingSections"/>, <see cref="AndroidTextNotInTree"/>,
-/// <see cref="AndroidHeadingNotShown"/>, <see cref="AndroidControlNames"/>;
+/// <see cref="AndroidHeadingNotShown"/>, <see cref="AndroidControlNames"/>,
+/// <see cref="AndroidChartColours"/>;
 /// android-report.md, "The audit").
 /// </summary>
 public sealed class AndroidAudit
@@ -51,6 +53,7 @@ public sealed class AndroidAudit
         HeadingNotShown = other.HeadingNotShown;
         ControlNames = other.ControlNames;
         ColourOnly = other.ColourOnly;
+        ChartColours = other.ChartColours;
     }
 
     public PhoneCheckRun Tree { get; }
@@ -108,6 +111,9 @@ public sealed class AndroidAudit
     /// <summary>Links told apart only by colour and selected states shown only by colour (android-checks.md, step 29).</summary>
     public PhoneColourOnlyRun? ColourOnly { get; private init; }
 
+    /// <summary>A chart or other graphic that relies on colour (android-checks.md, step 32).</summary>
+    public PhoneChartColourRun? ChartColours { get; private init; }
+
     /// <summary>The findings of the whole app, not of one visit, such as no live region in the app.</summary>
     public IReadOnlyList<PhoneFinding> AppFindings => Tree.AppFindings;
 
@@ -133,6 +139,7 @@ public sealed class AndroidAudit
         .. HeadingNotShown?.For(visit) ?? [],
         .. ControlNames?.For(visit) ?? [],
         .. ColourOnly?.For(visit) ?? [],
+        .. ChartColours?.For(visit) ?? [],
     ];
 
     /// <summary>
@@ -141,8 +148,9 @@ public sealed class AndroidAudit
     /// (android-vision-checks.md, decision 2). The icon and description
     /// checks, the screen title check, the decorative image check, the
     /// check of a heading's section, the check of text not in the tree, the
-    /// check of a marked heading not shown as one and the check of a
-    /// control's name give every answer, as most make no finding.
+    /// check of a marked heading not shown as one, the check of a control's
+    /// name and the check of a chart that relies on colour give every
+    /// answer, as most make no finding.
     /// </summary>
     public IReadOnlyList<PhoneInference> Inferences =>
     [
@@ -155,6 +163,7 @@ public sealed class AndroidAudit
             .Concat(TextNotInTree?.Inferences ?? [])
             .Concat(HeadingNotShown?.Inferences ?? [])
             .Concat(ControlNames?.Inferences ?? [])
+            .Concat(ChartColours?.Inferences ?? [])
             .Where(inference => inference.Inferred),
     ];
 
@@ -266,6 +275,17 @@ public sealed class AndroidAudit
         return new(this) { ControlNames = run };
     }
 
+    /// <summary>
+    /// The audit with the check of a chart that relies on colour judged by
+    /// a model's answers (<see cref="AndroidChartColours"/>), every other
+    /// check as it was.
+    /// </summary>
+    public AndroidAudit WithChartColours(PhoneChartColourRun run)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        return new(this) { ChartColours = run };
+    }
+
     /// <summary>Every finding, the app's first.</summary>
     public IEnumerable<PhoneFinding> All(PhoneScreenTimeline screens)
     {
@@ -339,6 +359,7 @@ public sealed class AndroidAudit
             HeadingNotShown = measured is null ? null : PhoneHeadingNotShownRun.Run(measured, screens),
             ControlNames = measured is null ? null : PhoneControlNameRun.Run(measured, screens),
             ColourOnly = measured is null ? null : PhoneColourOnlyRun.Run(measured, screens),
+            ChartColours = measured is null ? null : PhoneChartColourRun.Run(measured, screens),
         };
     }
 }

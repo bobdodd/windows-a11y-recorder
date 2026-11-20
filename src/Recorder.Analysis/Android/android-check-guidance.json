@@ -14,6 +14,7 @@
     "wcag-1.3.2": { "title": "Understanding SC 1.3.2 Meaningful Sequence", "url": "https://www.w3.org/WAI/WCAG22/Understanding/meaningful-sequence.html" },
     "wcag-1.3.3": { "title": "Understanding SC 1.3.3 Sensory Characteristics", "url": "https://www.w3.org/WAI/WCAG22/Understanding/sensory-characteristics.html" },
     "wcag-f14": { "title": "Technique F14: Failure of Success Criterion 1.3.3 due to identifying content only by its shape or location", "url": "https://www.w3.org/WAI/WCAG22/Techniques/failures/F14" },
+    "wcag-g111": { "title": "Technique G111: Using color and pattern", "url": "https://www.w3.org/WAI/WCAG22/Techniques/general/G111" },
     "wcag-f13": { "title": "Technique F13: Failure of Success Criteria 1.1.1, 1.3.3, and 1.4.1 due to having a chart that conveys information by color, instructions that only refer to color, and a text alternative that does not include information that is conveyed by color differences in the image", "url": "https://www.w3.org/WAI/WCAG22/Techniques/failures/F13" },
     "wcag-g96": { "title": "Technique G96: Providing textual identification of items that otherwise rely only on sensory information to be understood", "url": "https://www.w3.org/WAI/WCAG22/Techniques/general/G96" },
     "wcag-1.3.4": { "title": "Understanding SC 1.3.4 Orientation", "url": "https://www.w3.org/WAI/WCAG22/Understanding/orientation.html" },
@@ -698,6 +699,22 @@
       "reactNative": "Show the selected tab with an underline, a bar or bold text as well as its colour.",
       "web": "Show the selected item, such as the tab with aria-selected=\"true\", with a border, underline or bold text as well as its colour.",
       "sources": ["wcag-1.4.1", "wcag2ict"]
+    },
+    {
+      "check": "chart-only-by-colour",
+      "title": "Chart that relies on colour",
+      "issue": "A chart, graph, map or other graphic shows what its parts stand for only by their colours, such as bars or slices matched to a legend by colour alone, with no words on the parts, no patterns, no marker shapes and no difference in lightness to tell them apart.",
+      "why": "People who cannot tell the colours apart, such as many people with colour blindness or low vision, and anyone on a screen in bright light, cannot tell which part is which, so cannot read the chart, or read it wrongly.",
+      "affects": ["People with colour blindness", "People with low vision", "Older people, who see colours less well"],
+      "impact": "medium",
+      "criteria": ["1.4.1"],
+      "related": ["1.1.1", "1.4.11"],
+      "basis": "WCAG 1.4.1 as WCAG2ICT applies it to software, failure F13 and technique G111. Measured on the phone's screenshot with no model: each visible item with no text of its own and nothing visible inside it, 48 dp or more each way, with nothing drawn over it, whose box holds two or more colours other than its commonest, each covering 1% or more of it, not all grey; each colour's share, its pieces and how much of their boxes they fill, and the contrast ratio of each pair, are given as evidence. Judged by the project's model for vision-based checks from the whole screen and the item with the screen above and below it, its description, and the text near it from the tree and OCR: whether it is a chart or other graphic whose colours stand for something, and whether each thing they stand for is also shown another visual way, such as words on the parts, a pattern, marker shapes or a difference in lightness of 3 to 1. As a model is involved, every finding is a warning for a person to verify; a description a screen reader says but that is not shown does not count as another visual means.",
+      "android": "Show what each colour stands for another way as well: put the value or the series name on or beside each bar, slice or line; give each series a pattern, such as hatching, a marker shape or a dashed line; or make neighbouring colours 3 to 1 or more apart in lightness. A chart library's legend and labels can be turned on, and a View's onDraw or a Compose Canvas can draw text and patterns with the colours.",
+      "flutter": "Draw labels, patterns or marker shapes with the colours in the chart's painter or chart package, such as a label on each bar or a dash pattern for each line.",
+      "reactNative": "Give each series a label, a pattern or a marker shape as well as its colour, in the chart component's options or the SVG it draws.",
+      "web": "Give each series a pattern, marker shape or direct label as well as its colour, such as an SVG pattern fill or text beside each bar; a legend matched by colour alone is not enough.",
+      "sources": ["wcag-1.4.1", "wcag-f13", "wcag-g111", "wcag-1.4.11", "wcag2ict"]
     },
     {
       "check": "link-no-text",

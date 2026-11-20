@@ -175,7 +175,8 @@ public sealed record PhoneContrastSnapshot(
     IReadOnlyList<PhoneControlMeasure>? MeasuredControls = null,
     PhoneCheckWindow? Window = null,
     IReadOnlyList<PhoneLinkLook>? MeasuredLinks = null,
-    IReadOnlyList<PhoneSelectedLook>? MeasuredSelected = null)
+    IReadOnlyList<PhoneSelectedLook>? MeasuredSelected = null,
+    IReadOnlyList<PhoneChartLook>? MeasuredCharts = null)
 {
     /// <summary>The controls measured for non-text contrast (step 5).</summary>
     public IReadOnlyList<PhoneControlMeasure> Controls => MeasuredControls ?? [];
@@ -185,6 +186,9 @@ public sealed record PhoneContrastSnapshot(
 
     /// <summary>The items marked selected, measured for the check of a selected state shown only by colour (step 29).</summary>
     public IReadOnlyList<PhoneSelectedLook> Selected => MeasuredSelected ?? [];
+
+    /// <summary>The items with two or more fills, measured for the check of a chart that relies on colour (step 32).</summary>
+    public IReadOnlyList<PhoneChartLook> Charts => MeasuredCharts ?? [];
 }
 
 /// <summary>
@@ -335,7 +339,11 @@ public sealed class PhoneContrastRun
                     var exact = picture.Kind == PhonePictureKind.Screenshot ? pixels : null;
                     var links = PhoneColourCues.Links(window, exact, scale, outline, windowsAbove);
                     var selected = PhoneColourCues.Selected(window, exact, scale, outline, windowsAbove);
-                    measured.Add(new PhoneContrastSnapshot(visit, settled, taking, picture, reading?.Engine, lines, controls, window, links, selected));
+                    // With no density recorded, 48 pixels stand for 48 dp,
+                    // the least, so that no item is left out for its size.
+                    var pixelsPerDp = archive.PhoneDevice.DensityAt(taking.MonotonicNanoseconds)?.PixelsPerDp ?? 1;
+                    var charts = PhoneChartMeasuring.Charts(window, exact, scale, pixelsPerDp, outline, windowsAbove);
+                    measured.Add(new PhoneContrastSnapshot(visit, settled, taking, picture, reading?.Engine, lines, controls, window, links, selected, charts));
                 }
                 catch (Exception exception) when (
                     exception is IOException or InvalidDataException or InvalidOperationException or

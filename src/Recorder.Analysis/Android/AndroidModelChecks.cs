@@ -29,6 +29,7 @@ public static class AndroidModelChecks
         audit = AndroidHeadingSections.Unasked(audit, reason);
         audit = AndroidTextNotInTree.Unasked(audit, reason);
         audit = AndroidHeadingNotShown.Unasked(audit, reason);
-        return AndroidControlNames.Unasked(audit, reason);
+        audit = AndroidControlNames.Unasked(audit, reason);
+        return AndroidChartColours.Unasked(audit, reason);
     }
 }

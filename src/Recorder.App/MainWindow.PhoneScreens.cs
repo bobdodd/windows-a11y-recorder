@@ -145,6 +145,16 @@ public partial class MainWindow
     private int _controlNamesUnanswered;
     private PhoneLabelInNameRun? _phoneLabelInName;
     private PhoneColourOnlyRun? _phoneColourOnly;
+
+    // The check of a chart that relies on colour, the same way
+    // (android-checks.md, step 32); its kept answers are found by its
+    // requests, and an item judged to rely on colour alone by the model
+    // for simple questions waits for the model for complex questions to
+    // confirm it, where there is one.
+    private PhoneChartColourRun? _phoneChartColours;
+    private PhoneChartColourRun? _phoneChartColoursRules;
+    private (PhoneChartColourRun Rules, IReadOnlyList<ChartColourRequest> Requests)? _chartColoursRequests;
+    private int _chartColoursUnanswered;
     private PhoneCheckSettings? _checkSettings;
 
     // The finding chosen in the list, and which of its times is shown.
@@ -238,6 +248,10 @@ public partial class MainWindow
             _controlNamesUnanswered = 0;
             _phoneLabelInName = null;
             _phoneColourOnly = null;
+            _phoneChartColours = null;
+            _phoneChartColoursRules = null;
+            _chartColoursRequests = null;
+            _chartColoursUnanswered = 0;
             _shownFinding = null;
             if (_playbackArchive is { PhoneScreens.Recorded: true } opened)
             {
@@ -407,6 +421,12 @@ public partial class MainWindow
         _phoneControlNamesRules = run is null ? null : PhoneControlNameRun.Run(run, archive.PhoneScreens);
         _phoneControlNames = _phoneControlNamesRules;
         _controlNamesUnanswered = _phoneControlNamesRules?.Questions.Count ?? 0;
+
+        // The check of a chart that relies on colour (WCAG 1.4.1, level A)
+        // runs at both audit levels; its kept answers are given below.
+        _phoneChartColoursRules = run is null ? null : PhoneChartColourRun.Run(run, archive.PhoneScreens);
+        _phoneChartColours = _phoneChartColoursRules;
+        _chartColoursUnanswered = _phoneChartColoursRules?.Questions.Count ?? 0;
         JudgeTextContrast();
 
         // Non-text contrast has one level, AA (WCAG 2.2's 1.4.11), so is
@@ -477,6 +497,7 @@ public partial class MainWindow
         await ApplyKeptTextNotInTreeAnswersAsync();
         await ApplyKeptHeadingNotShownAnswersAsync();
         await ApplyKeptControlNameAnswersAsync();
+        await ApplyKeptChartColourAnswersAsync();
     }
 
     private async Task ApplyKeptImageAnswersAsync()
@@ -1087,6 +1108,68 @@ public partial class MainWindow
         ShowPhoneScreenRows();
     }
 
+    private async Task ApplyKeptChartColourAnswersAsync()
+    {
+        if (_phoneChartColoursRules is not { } rules)
+        {
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        if (rules.Questions.Count == 0)
+        {
+            _chartColoursUnanswered = 0;
+            UpdateAskChecksModelButton();
+            return;
+        }
+
+        var name = _openProjectModels?.VisionChecks;
+        var problem = name is null
+            ? $"the project's settings choose no model for {ModelUses.Name(ModelUses.VisionChecks)}"
+            : ProjectModels.Problem(ProjectChoices, ModelUses.VisionChecks, name);
+        var none = new Dictionary<PhoneChartQuestion, PhoneChartAnswer>();
+        PhoneChartColourRun shown;
+        if (problem is not null || AnalysisCatalogOrNull is not { } catalog || ProjectChoices.Profile(name!) is not { } profile)
+        {
+            shown = rules.Judged(none, AndroidChartColours.NotAsked(rules.Questions.Count, problem ?? "the analysis catalog is not open"));
+        }
+        else
+        {
+            try
+            {
+                if (_chartColoursRequests is not { } made || !ReferenceEquals(made.Rules, rules))
+                {
+                    var requests = await Task.Run(() => AndroidChartColours.Requests(rules, PhonePictures.Load));
+                    made = (rules, requests);
+                    _chartColoursRequests = made;
+                }
+
+                var keys = made.Requests.SelectMany(request => new[] { request.StepKey(1), request.StepKey(2) }).ToList();
+                var kept = await catalog.AcceptedAnswersAsync(keys, name!, profile.Model, CancellationToken.None);
+                var (complexKept, complexName) = await KeptComplexAnswersAsync(catalog, made.Requests.Select(request => (Func<int, string>)request.StepKey));
+                shown = AndroidChartColours.FromKept(rules, made.Requests, kept, name!, complexKept, complexName);
+            }
+            catch (Exception exception) when (exception is NpgsqlException or InvalidOperationException or IOException or ObjectDisposedException)
+            {
+                shown = rules.Judged(none, $"the model's kept answers could not be read: {exception.Message}");
+            }
+        }
+
+        // The recording changed while the answers were read.
+        if (!ReferenceEquals(rules, _phoneChartColoursRules))
+        {
+            return;
+        }
+
+        // A question waiting for the model for complex questions, to settle
+        // or to confirm its answer, is not judged, so is counted with those
+        // not yet asked.
+        _phoneChartColours = shown;
+        _chartColoursUnanswered = problem is not null ? 0 : shown.Unanswered;
+        UpdateAskChecksModelButton();
+        ShowPhoneScreenRows();
+    }
+
     private async Task ApplyKeptHeadingSectionAnswersAsync()
     {
         if (_phoneHeadingSectionsMeasured is not { } measured)
@@ -1234,7 +1317,7 @@ public partial class MainWindow
             task.State is AnalysisTaskStates.Queued or AnalysisTaskStates.Running) == true;
         var models = _openProjectModels;
         var vision = _imagesOfTextUnanswered + _headingLookUnanswered + _imageAlternativeUnanswered + _describedImagesUnanswered + _titleVisionUnanswered + _decorativeUnanswered + _sectionVisionUnanswered +
-            _textNotInTreeUnanswered + _headingNotShownUnanswered + _controlNamesUnanswered > 0 &&
+            _textNotInTreeUnanswered + _headingNotShownUnanswered + _controlNamesUnanswered + _chartColoursUnanswered > 0 &&
             models is { VisionChecks: not null } && models.ChecksProblem(ProjectChoices, ModelUses.VisionChecks) is null;
         var text = _titleTextUnanswered + _sectionTextUnanswered > 0 &&
             models is { TextChecks: not null } && models.ChecksProblem(ProjectChoices, ModelUses.TextChecks) is null;
@@ -1453,7 +1536,7 @@ public partial class MainWindow
                 _phoneLabelInName is not null || _phoneHeadingLook is not null || _phoneImageAlternative is not null ||
                 _phoneDescribedImages is not null || _phoneScreenTitles is not null || _phoneDecorativeImages is not null ||
                 _phoneHeadingSections is not null || _phoneTextNotInTree is not null || _phoneHeadingNotShown is not null ||
-                _phoneControlNames is not null || _phoneColourOnly is not null)
+                _phoneControlNames is not null || _phoneColourOnly is not null || _phoneChartColours is not null)
             {
                 // The status message check follows every snapshot, settled
                 // or not, so can find a message in a visit too brief to
@@ -1788,6 +1871,22 @@ public partial class MainWindow
         {
             AddColourOnlyRows(colour, visit, shownAt);
         }
+
+        if (_phoneChartColours is { SnapshotsRead: > 0 } charts)
+        {
+            var findings = charts.For(visit);
+            if (findings.Count > 0)
+            {
+                AddCheckRows(findings, $", from {Count(charts.In(visit).Count(), "item")} with two or more colours in this visit");
+            }
+            else
+            {
+                _phoneScreenRows.Add(new PhoneScreenRowView(3, $"{PhoneCheckNames.Title(PhoneCheckNames.ChartOnlyByColour)}: {ChartColoursState(charts, visit)}", shownAt, null)
+                {
+                    IsCheck = true,
+                });
+            }
+        }
     }
 
     // The rows of the two checks of use of colour (android-checks.md, step
@@ -2048,6 +2147,48 @@ public partial class MainWindow
         return parts.Count == 0
             ? $"no findings, from {Count(entries.Count, "control name")}."
             : $"no findings, from {Count(entries.Count, "control name")}: {string.Join("; ", parts)}.";
+    }
+
+    // What became of a visit's items in the check of a chart that relies on
+    // colour, where it made no finding: how many were judged not to be
+    // charts or to show what their colours stand for another way too, or
+    // not yet judged.
+    private static string ChartColoursState(PhoneChartColourRun charts, PhoneVisit visit)
+    {
+        if (!charts.Read(visit))
+        {
+            return "not checked, as no screenshot of this visit was measured.";
+        }
+
+        var entries = charts.In(visit).ToList();
+        if (entries.Count == 0)
+        {
+            return "no findings: no item with no text of its own holds two or more colours on the screenshots of this visit.";
+        }
+
+        int Of(PhoneChartOutcome outcome) => entries.Count(entry => charts.Answers.TryGetValue(entry.Question, out var answer) && answer.Outcome == outcome);
+        var notCharts = Of(PhoneChartOutcome.NotAChart);
+        var notOnly = Of(PhoneChartOutcome.NotOnlyColour);
+        var waiting = entries.Count(entry => !charts.Answers.ContainsKey(entry.Question));
+        var parts = new List<string>();
+        if (notCharts > 0)
+        {
+            parts.Add($"{Count(notCharts, "item")} judged not to be charts, not confirmed");
+        }
+
+        if (notOnly > 0)
+        {
+            parts.Add($"{Count(notOnly, "item")} judged to show what their colours stand for another way too, not confirmed");
+        }
+
+        if (waiting > 0)
+        {
+            parts.Add($"{Count(waiting, "item")} for the model for vision-based checks, not yet judged");
+        }
+
+        return parts.Count == 0
+            ? $"no findings, from {Count(entries.Count, "item")}."
+            : $"no findings, from {Count(entries.Count, "item")}: {string.Join("; ", parts)}.";
     }
 
     // What became of a visit's described images in the decorative image

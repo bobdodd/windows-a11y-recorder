@@ -5982,10 +5982,11 @@ fault and one near miss (android-fixtures.md, "The chart screens"):
 grouped bars, two series of close lightness, outlined bars, lines,
 lines with a coloured-text legend, a pie, stacked bars, highlighted
 bars, a scatter plot, a heat map, a chart drawn into a bitmap, and SVG
-charts on a web page. The proposed check, `chart-only-by-colour`, is
-not built; its expectations are marked `"by": "unbuilt"`. Their first
+charts on a web page. The check, `chart-only-by-colour`, was first
+proposed with its expectations marked `"by": "unbuilt"`; their first
 recording was measured with no model before rules were proposed to the
-owner.
+owner. It is now built as a model check, its expectations
+`"by": "model"` (see "The owner's decision" and "As built" below).
 
 ### Measured on the phone (2026-11-20)
 
@@ -6115,6 +6116,116 @@ Every screen was drawn as built, with nothing cut off or overlapping.
 
 Not yet measured: how often these rules fire on the owner's real
 recordings, which remain the test of false alarms in real apps.
+### The owner's decision (2026-11-20)
+
+The owner: "I expect charts to be recognized by AI surely? ... Our new
+tests are supposed to be looking at the USE OF COLOUR, so we are
+additionally looking at the colours used in the charts and what they
+represent. I don't see what you can measure here", then "Go ahead and
+build the model check for chart colour use".
+
+So the rules proposed above are withdrawn. Whether an item is a chart,
+what each colour stands for and whether that can be told without
+colour are judged by a model, as only a model can (the owner's rule,
+"AI only when non-AI cannot do the test"). The measurements are kept as
+evidence for the model and the finding: the fills, their shares, their
+pieces and how much of their boxes they fill, and the ratios. As a
+model is involved, each finding is a warning (owner, 2026-11-19). The
+text contrast warning on `chart_highlight_colour` stays a separate
+issue, not yet fixed: whether it comes with OCR on is still to be seen.
+
+### As built
+
+`PhoneChartMeasuring` and `PhoneChartColourRun` in `Recorder.Session`
+measure and choose the items with no model; `AndroidChartColours` in
+`Recorder.Analysis` asks the project's model for vision-based checks.
+
+| Check | Finding | Level |
+| --- | --- | --- |
+| `chart-only-by-colour`, "Chart that relies on colour (WCAG 1.4.1)" | A model judged the item a chart or other graphic that shows something only by colour, or could not tell | Warning |
+
+1. **Which items** (no model). On the phone's screenshot only, as the
+   video's colours are approximate: each visible item with bounds, no
+   text of its own and no visible item inside it, at least 48 dp wide
+   and tall, not under the focus outline or another window and wholly
+   on the picture. The commonest colour in its box is taken as its
+   background; its fills are the other colours each covering at least
+   1% of the box, at most eight. An item with two or more fills, one or
+   more of them not grey (channels 24 or more apart), is asked about.
+   An item under something else, or not wholly on the picture, is
+   counted as not measured.
+2. **What is measured** (no model). Each fill's share of the box, its
+   pieces of 40 pixels or more (four-connected), the median share of
+   its bounding box a piece fills, and each pair's contrast ratio. They
+   are given to the model and in the finding as measured facts.
+3. **The question.** Once for each screen and item, from the first
+   screenshot measured: picture A, the whole screen with the item
+   outlined in cyan; picture B, the item and as much again of its
+   height above and below it, across the window, at most 1,024 pixels on
+   its longer side, where a title, legend or labels may be; the item's
+   class, and its description, said to be what a screen reader says but
+   not shown; the background, fills and ratios; and the lines of text in
+   picture B's area, OCR's and the tree's where OCR read none, with
+   where each is against the item and its colour where measured, not
+   the item's own description. The question says which other visual
+   means count (words on or beside each part, a pattern, marker
+   shapes, a dashed line or outline, lightness of 3:1 unless a
+   particular colour carries the meaning) and which do not (the same
+   outline on every part, a legend told apart only by colour, an unseen
+   description). Four answers, reason first: `not-a-chart`,
+   `only-colour`, `not-only-colour` and `cannot-tell`. It is asked twice,
+   once for a local model at temperature 0, and each answer is kept by
+   its request.
+4. **What the answers make.** Agreed `only-colour` is put to the model
+   for complex questions to confirm, as are unsettled answers, where
+   the project has one, and its answers decide. Agreed `only-colour` is
+   a warning for a person to verify, naming the colours and ratios with
+   the model's reason; `cannot-tell`, or two answers, a warning to check
+   manually; agreed `not-a-chart` or `not-only-colour`, counted, no
+   finding. Each finding is on every visit to the screen with the item,
+   with every time it was measured. With no model nothing is judged and
+   no finding is made.
+
+The Checks tab has a row for the check on each visit, the summary a
+section, and the report a section "Charts that rely on colour" and the
+model's note. The guidance file's entry, `chart-only-by-colour`, cites
+1.4.1 with 1.1.1 and 1.4.11 related, F13, G111 and WCAG2ICT, with
+medium impact, an assumption as for the other checks of colour. In the
+fixture app's `expected.json` the 24 chart expectations are now
+`"by": "model"`, a warning on each fault and none on each near miss
+(android-fixtures.md, "The chart screens").
+
+### Checked
+
+- Rule tests in `PhoneCheckRunTests` on a made-up window and screenshot:
+  a chart's two fills, solid and hatched, with their shares, pieces and
+  median fills; an item of grey fills measured but not asked; items with
+  text, with items inside them or under 48 dp not measured; nothing
+  measured from a video frame; one question for each screen, with its
+  area and the text near it; a finding on every visit once answered;
+  the request's key, pictures and text; picture B's size and outline;
+  the kept answers confirmed, overturned, waiting and unanswered; and
+  each answer's level (measured, the tests pass).
+- Not yet checked: the model's answers on the chart screens' recording.
+  They were not measured before building, so whether the model tells
+  the faults from the near misses is to be seen on the phone.
+
+### Limits
+
+- A chart drawn as many items, such as one View for each bar, is not
+  found, as each item has one fill; nor is a chart with text of its own,
+  or under 48 dp.
+- An item whose fills are all grey is not asked about, so a chart of
+  greys alone is not checked.
+- The background is taken as the box's commonest colour, so a chart
+  mostly of one fill is measured against that fill.
+- A photo or illustration with two flat colours of 1% or more is asked
+  about, for the model to answer `not-a-chart`. How often that happens
+  on the owner's real recordings is not measured.
+- Whether a chart's description gives what its colours convey, F13's
+  1.1.1 part, is not judged.
+- The density is the phone's where recorded, else one pixel a dp,
+  which lets smaller items in.
 
 ## Decisions on the open questions (2026-11-11)
 

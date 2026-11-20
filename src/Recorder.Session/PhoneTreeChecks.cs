@@ -279,6 +279,17 @@ public static class PhoneCheckNames
     public const string LinkOnlyByColour = "link-only-by-colour";
     public const string SelectedOnlyByColour = "selected-only-by-colour";
 
+    /// <summary>
+    /// A chart that relies on colour (step 32, PhoneChartColourRun), WCAG
+    /// 1.4.1 and F13: an item with two or more fills on the phone's
+    /// screenshot that the project's model for vision-based checks, and
+    /// its model for complex questions where there is one, judges from
+    /// the pictures to be a chart or other graphic showing something only
+    /// by colour, a warning for a person to verify, as a model is
+    /// involved (owner, 2026-11-20).
+    /// </summary>
+    public const string ChartOnlyByColour = "chart-only-by-colour";
+
     /// <summary>The checks in the order the Checks tab lists them.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
@@ -358,6 +369,7 @@ public static class PhoneCheckNames
         InstructionByColour => "Instruction relies on colour (WCAG 1.3.3, 1.4.1)",
         LinkOnlyByColour => "Link told apart only by colour (WCAG 1.4.1)",
         SelectedOnlyByColour => "Selected state shown only by colour (WCAG 1.4.1)",
+        ChartOnlyByColour => "Chart that relies on colour (WCAG 1.4.1)",
         _ => check,
     };
 
