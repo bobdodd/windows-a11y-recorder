@@ -8,6 +8,15 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Native Android accessibility preflight research
+
+- Measured a standalone synthetic native screen on a physical Android
+  phone without a model. Android reported live text size and unit on all
+  six nodes and distinguished XML and code-created field labels from
+  hints. Bundled or declared font information remains separate from
+  what Android exposes through accessibility. No recorder feature or
+  check was added. See `docs/architecture/android-framework-metadata.md`.
+
 ### Links in an item's text
 
 - The companion app, now protocol 8, records the links in each item's

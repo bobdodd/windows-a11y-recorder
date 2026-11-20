@@ -93,3 +93,44 @@ that recorded app only, not every capture or installer step. React
 Native and old-recording target-machine acceptance remain unverified.
 Tests 57 to 59 in `docs/validation/android-checks-plan.md` keep
 installation, collection and old-recording behaviour separate.
+
+## Native accessibility preflight measurement
+
+This is evidence from a standalone synthetic native Views screen, not
+recorder behaviour. The APK resource table and layout were read with
+[AAPT2](https://developer.android.com/tools/aapt2). An authorized USB
+phone run measured the synthetic screen through Android's public
+accessibility nodes with no model: API 37, 390 dpi logical density,
+and font scale 1.0. The test did not change settings or inspect any
+other app.
+
+| Synthetic resource ID | Package or fixture declaration | Live node size and unit | Live field evidence |
+| --- | --- | --- | --- |
+| `probe_heading` | `18sp` and Carlito Regular in a compiled style | 44 px, `sp` | Not a field |
+| `xml_label` | `14dp`, `serif`, and XML `labelFor` | 34 px, `dp` | Not a field |
+| `code_label` | `21sp`, monospace, and `setLabelFor` in Java; only its ID is present in the resource table | 51.1875 px, `sp` | Not a field |
+| `xml_field` | XML email field with a separate hint and email autofill declaration | 44 px, `sp` | Editable; labelled by `xml_label`; hint showing |
+| `code_field` | Java-created postal field with a separate hint | 44 px, `sp` | Editable; labelled by `code_label`; hint showing |
+| `hint_field` | XML field with a hint and no separate label | 44 px, `sp` | Editable; hint showing; no label relationship returned |
+
+All six nodes advertised the rendering extra. The pixel values and
+units returned by Android matched the fixture's in-process `TextView`
+values. The unit is reported separately and does not make the pixel
+number a value in `sp` or `dp`
+([rendering information API](https://developer.android.com/reference/kotlin/android/view/accessibility/AccessibilityNodeInfo.ExtraRenderingInfo)).
+Android reported both label links separately from the hints
+([accessibility node API](https://developer.android.com/reference/kotlin/android/view/accessibility/AccessibilityNodeInfo)).
+An autofill declaration is not evidence of a runtime accessible label.
+
+The APK bundled Carlito Regular and Caladea Italic. The heading style
+references Carlito; the presence of Caladea is not evidence of use.
+Matching the three expected typefaces via the fixture's own `TextView`
+objects is ground truth available inside this test only, not something
+the recorder obtained via accessibility. The rendering extra exposes
+no font-family getter. This one font scale does not establish resizing
+behaviour, and this run says nothing about coverage of other Android
+versions, Compose, WebView or other custom or virtual nodes.
+
+The synthetic APK was uninstalled and the temporary APK and build
+files removed. No changes to recording, the companion or the fixture
+app were made. No rule or preflight checkbox was implemented.
