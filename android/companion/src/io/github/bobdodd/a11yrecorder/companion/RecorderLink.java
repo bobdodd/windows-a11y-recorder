@@ -84,6 +84,8 @@ import java.util.concurrent.RejectedExecutionException;
  * From protocol 8 each item of an event or a tree has "links", the links
  * in its text, and a tree's items where each link is on the screen (see
  * {@link TextLinks}).
+ * From protocol 9 a "text-rendering" request reads only size evidence in
+ * the selected package's active window (see {@link TextRendering}).
  * See docs/architecture/android-implementation-plan.md, slices 2, 4, 7
  * and 8, docs/architecture/android-checks.md, steps 4a, 15 and 29, and
  * src/Recorder.Collectors.Android/CompanionProtocol.cs, which must agree
@@ -91,7 +93,7 @@ import java.util.concurrent.RejectedExecutionException;
  */
 final class RecorderLink {
     static final String SOCKET_NAME = "a11yrecorder_companion";
-    static final int PROTOCOL = 8;
+    static final int PROTOCOL = 9;
     private static final String TAG = "A11yRecorderCompanion";
 
     private final Context context;
@@ -107,6 +109,8 @@ final class RecorderLink {
     private volatile boolean stopping;
     // Asks for a snapshot of every window; set before start().
     private volatile Runnable treeRequests;
+    // Reads one active package's text sizes only when expressly requested.
+    private volatile TextRendering textRendering;
     // Asks for a screenshot at once; set before start().
     private volatile Runnable screenshotRequests;
     // How the phone is held; set before start().
@@ -244,6 +248,10 @@ final class RecorderLink {
     /** What to run when a connection asks for tree snapshots; set before start(). */
     void setTreeRequests(Runnable requests) {
         treeRequests = requests;
+    }
+
+    void setTextRendering(TextRendering reader) {
+        textRendering = reader;
     }
 
     /** True when a connection has asked for tree snapshots. */
@@ -587,6 +595,19 @@ final class RecorderLink {
                 if (requests != null) {
                     requests.run();
                 }
+            } else if ("text-rendering".equals(type)) {
+                Object packageName = request.opt("packageName");
+                if (!TextRendering.validPackage(packageName)) {
+                    sendError("text-rendering needs a package name");
+                    return;
+                }
+                TextRendering rendering = textRendering;
+                if (rendering == null) {
+                    sendError("text-rendering is not available");
+                    return;
+                }
+                // On this client's reader thread, not the service or the regular sender.
+                send(rendering.read((String) packageName));
             } else if ("screenshots".equals(type)) {
                 screenshotsWanted = true;
                 Runnable requests = screenshotRequests;

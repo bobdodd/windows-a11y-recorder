@@ -100,6 +100,51 @@ public sealed class AndroidCompanionTests
     // The protocol
 
     [Fact]
+    public void TextRendering_RequestAndRead_KeepPixelsAndUnitSeparate()
+    {
+        Assert.Equal("{\"type\":\"text-rendering\",\"packageName\":\"org.example.synthetic\"}\n",
+            CompanionProtocol.TextRenderingRequest("org.example.synthetic"));
+        var report = Assert.IsType<CompanionTextRendering>(CompanionProtocol.Parse("""
+            {"type":"text-rendering","packageName":"org.example.synthetic","status":"complete","nodes":[
+                {"index":0,"viewId":null,"visibleToUser":true,"status":"not-advertised"},
+                {"index":1,"viewId":"org.example.synthetic:id/sample","visibleToUser":false,"status":"available","textSizePx":51.1875,"textSizeUnit":2},
+                {"index":2,"viewId":null,"visibleToUser":true,"status":"available","textSizePx":0}
+            ]}
+            """));
+
+        Assert.Equal("org.example.synthetic", report.PackageName);
+        Assert.Equal("complete", report.Status);
+        Assert.Equal(new CompanionTextSize(0, null, true, "not-advertised", null, null), report.Nodes[0]);
+        Assert.Equal(new CompanionTextSize(1, "org.example.synthetic:id/sample", false, "available", 51.1875, 2), report.Nodes[1]);
+        Assert.Equal(new CompanionTextSize(2, null, true, "available", 0, null), report.Nodes[2]);
+    }
+
+    [Fact]
+    public void TextRendering_NotActive_ReturnsNoNodes()
+    {
+        var report = Assert.IsType<CompanionTextRendering>(CompanionProtocol.Parse("""
+            {"type":"text-rendering","packageName":"org.example.synthetic","status":"not-active","nodes":[]}
+            """));
+        Assert.Equal("not-active", report.Status);
+        Assert.Empty(report.Nodes);
+    }
+
+    [Theory]
+    [InlineData("""{"index":0,"viewId":null,"status":"available","textSizePx":-1}""")]
+    [InlineData("""{"index":0,"viewId":null,"status":"available","textSizePx":1,"textSizeUnit":-1}""")]
+    [InlineData("""{"index":0,"viewId":null,"status":"available","textSizeUnit":2}""")]
+    [InlineData("""{"index":0,"viewId":null,"status":"unavailable","textSizePx":1}""")]
+    [InlineData("""{"index":1,"viewId":null,"status":"unavailable"}""")]
+    [InlineData("""{"index":0,"viewId":null,"status":"unavailable"}""")]
+    public void TextRendering_RejectsInvalidNode(string node)
+    {
+        var reply = $$"""
+            {"type":"text-rendering","packageName":"org.example.synthetic","status":"complete","nodes":[{{node}}]}
+            """;
+        Assert.Throws<FormatException>(() => CompanionProtocol.Parse(reply));
+    }
+
+    [Fact]
     public void Protocol_ReadsEachMessage()
     {
         var hello = Assert.IsType<CompanionHello>(CompanionProtocol.Parse(
@@ -205,7 +250,7 @@ public sealed class AndroidCompanionTests
 
         var exception = await Assert.ThrowsAsync<CompanionUnavailableException>(() => app.ConnectAsync());
 
-        Assert.Contains("speaks protocol 5; this recorder speaks 8", exception.Message);
+        Assert.Contains($"speaks protocol 5; this recorder speaks {CompanionProtocol.Version}", exception.Message);
     }
 
     [Fact]

@@ -180,7 +180,7 @@ public sealed class AndroidAccessibilityTreeTests
     public void Protocol_ReadsTheLinksInAnItemsText()
     {
         // Added in protocol 8.
-        Assert.Equal(8, CompanionProtocol.Version);
+        Assert.True(CompanionProtocol.Version >= 8);
         var (tree, problem) = CompanionProtocol.ReadTree(TreeLine());
         Assert.Null(problem);
         var items = tree!.Windows[0].Items!;

@@ -20,6 +20,13 @@ Changes on `main` since 1.1.0, not yet released.
   companion at the same phone settings. Its normal tree export
   matched the two explicit label links and the hints, but exported no
   text size, unit or typeface for any of the six nodes.
+- Protocol 9 adds a one-shot companion request for the selected
+  active app's text sizes. It keeps pixel size, unit, Android's
+  visibility flag and availability separate and does not return any
+  text values. A physical-phone test of the request and collector
+  matched all six synthetic results. The recorder does not request
+  this during normal capture, and no checkbox or check was added.
+  A rebuilt recorder needs the matching protocol 9 companion.
 
 ### Links in an item's text
 

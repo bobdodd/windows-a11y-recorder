@@ -149,8 +149,42 @@ out-of-window label.
 The companion did not return text size, text-size unit or typeface
 for any of the six nodes. The earlier instrumentation run obtained
 size and unit from Android at the same settings; their absence here
-is a gap in the companion export, not in the synthetic nodes. A
-typography preflight needs explicit companion collection of the
-rendering extra and an availability result. It need not recreate
-the label relationships the companion already exports. No APK or raw
-tree was retained, and no recorder or phone settings were changed.
+is a gap in the protocol 8 export, not in the synthetic nodes. The
+label relationships do not need to be collected again. No APK or
+raw tree was retained, and no recorder or phone settings were changed.
+
+### One-shot text sizing in protocol 9
+
+On its existing ADB-only socket the companion accepts
+`{"type":"text-rendering","packageName":"org.example.synthetic"}`.
+The reply is a `text-rendering` message addressed to the requester
+only. It samples the selected app's active accessibility window, not
+all open windows or all screens of the app. An inactive package
+returns no nodes, and a change of active window during the read
+discards the result. Collection is limited to 512 node lookups and a
+two-second traversal budget checked between steps, not a hard timeout
+on individual Android calls. An incomplete traversal says `partial`.
+
+Each node has a snapshot index, optional resource ID, Android's
+`visibleToUser` flag and an availability status. Pixel size and
+Android text-size unit are separate fields when returned by the
+[rendering information API](https://developer.android.com/reference/kotlin/android/view/accessibility/AccessibilityNodeInfo.ExtraRenderingInfo).
+An unavailable size is not zero; an unavailable unit is not guessed.
+The response contains no node text, field values, font families,
+or copies of APKs. The recorder understands the protocol messages
+but does not request sizes in normal recordings. No picker, checkbox
+or accessibility rule was added. A rebuilt recorder requires the
+matching protocol 9 companion.
+
+On the physical phone, a temporary instrumentation harness ran the
+production protocol handler and size collector with Android supplying
+the active nodes. At API 37, 390 dpi and font scale 1.0, all six
+pixel sizes and unit codes matched both a direct Android query and
+the table above. Android marked the heading and XML label not
+visible, but returned their sizes. The protocol kept those readings
+with `visibleToUser: false`; it did not infer that the nodes were on
+screen. Five non-text nodes returned no text size. The inactive and
+invalid package requests returned no node data, and a normal clock
+request still worked. This did not install or validate the release
+companion service or change the installed one. The test APK, build
+files and temporary ADB forward were removed.

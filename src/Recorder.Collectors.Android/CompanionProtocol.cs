@@ -22,9 +22,10 @@ public static class CompanionProtocol
     /// from android-checks.md, step 4a, which added screenshots; 7 from
     /// android-checks.md, step 15, which added how the phone is held; 8
     /// from android-checks.md, step 29, which added the links in an item's
-    /// text and where they are on the screen.
+    /// text and where they are on the screen; 9 adds a one-shot request
+    /// for the selected active app's text rendering evidence.
     /// </summary>
-    public const int Version = 8;
+    public const int Version = 9;
 
     /// <summary>The companion app's socket, in Linux's abstract namespace.</summary>
     public const string SocketName = "a11yrecorder_companion";
@@ -63,6 +64,13 @@ public static class CompanionProtocol
     /// "accessibility-tree" line.
     /// </summary>
     public const string AccessibilityTreesRequest = "{\"type\":\"accessibility-trees\"}\n";
+
+    /// <summary>Asks once for text sizes in the selected package's active window.</summary>
+    public static string TextRenderingRequest(string packageName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageName);
+        return JsonSerializer.Serialize(new { type = "text-rendering", packageName }) + "\n";
+    }
 
     /// <summary>
     /// Asks the app for a screenshot of the display now, and another each
@@ -165,6 +173,7 @@ public static class CompanionProtocol
                 // a snapshot can be large, and the clock replies behind it
                 // are timed as they are read.
                 "accessibility-tree" => new CompanionAccessibilityTreeLine(line),
+                "text-rendering" => ReadTextRendering(root),
                 // Read later, off the connection's reading, by
                 // ReadScreenshot, as for a snapshot: a screenshot is large.
                 "screenshot" or "screenshot-failed" => new CompanionScreenshotLine(line),
@@ -176,6 +185,51 @@ public static class CompanionProtocol
                 _ => new CompanionUnknown(type)
             };
         }
+    }
+
+    private static CompanionTextRendering ReadTextRendering(JsonElement root)
+    {
+        var list = Member(root, "nodes");
+        if (list.ValueKind != JsonValueKind.Array)
+        {
+            throw new FormatException("The companion's text-rendering nodes are not an array.");
+        }
+
+        var nodes = new List<CompanionTextSize>();
+        foreach (var item in list.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                throw new FormatException("A text-rendering node is not an object.");
+            }
+
+            var id = Member(item, "viewId");
+            var viewId = id.ValueKind == JsonValueKind.Null ? null : String(item, "viewId");
+            var status = String(item, "status");
+            double? px = null;
+            if (item.TryGetProperty("textSizePx", out var value))
+            {
+                if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out var size)
+                    || !double.IsFinite(size) || size < 0)
+                {
+                    throw new FormatException("A text-rendering pixel size is invalid.");
+                }
+
+                px = size;
+            }
+
+            var unit = OptionalInt(item, "textSizeUnit");
+            var index = Int(item, "index");
+            if (index != nodes.Count || unit is < 0
+                || (status == "available") != px.HasValue || (unit.HasValue && !px.HasValue))
+            {
+                throw new FormatException("A text-rendering node has inconsistent evidence.");
+            }
+
+            nodes.Add(new CompanionTextSize(index, viewId, Bool(item, "visibleToUser"), status, px, unit));
+        }
+
+        return new CompanionTextRendering(String(root, "packageName"), String(root, "status"), nodes);
     }
 
     // An event that cannot be read is told, not thrown, so that one such
@@ -407,6 +461,14 @@ public sealed record CompanionAccessibilityEvent(AndroidAccessibilityEvent? Even
 /// <see cref="CompanionProtocol.ReadTree"/>.
 /// </summary>
 public sealed record CompanionAccessibilityTreeLine(string Line) : CompanionMessage;
+
+/// <summary>A one-shot report from the selected active package, with no text values.</summary>
+public sealed record CompanionTextRendering(
+    string PackageName, string Status, IReadOnlyList<CompanionTextSize> Nodes) : CompanionMessage;
+
+/// <summary>A node's Android visibility flag, pixel size and unit code, kept separately.</summary>
+public sealed record CompanionTextSize(
+    int Index, string? ViewId, bool VisibleToUser, string Status, double? TextSizePx, int? TextSizeUnit);
 
 /// <summary>
 /// A screenshot or a refusal, sent to a connection that asked for them

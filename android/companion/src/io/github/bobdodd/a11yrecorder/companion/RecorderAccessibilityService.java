@@ -39,6 +39,7 @@ public final class RecorderAccessibilityService extends AccessibilityService {
             link = new RecorderLink(this);
             trees = new AccessibilityTrees(this, link);
             link.setTreeRequests(trees::requested);
+            link.setTextRendering(new TextRendering(this::getRootInActiveWindow));
             screenshots = new Screenshots(this, link);
             link.setScreenshotRequests(screenshots::requested);
             RecorderLink started = link;
