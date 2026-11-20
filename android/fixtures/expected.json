@@ -171,17 +171,17 @@
       "seconds": 5,
       "stage": "unbuilt",
       "expect": [
-        { "check": "instruction-by-location", "item": "instruction_location", "by": "unbuilt", "finding": "warning",
+        { "check": "instruction-by-place", "item": "instruction_location", "by": "rule", "finding": "error",
           "note": "\"tap the button on the right\", naming the Save button only by where it is (F14)" },
-        { "check": "instruction-by-location", "item": "instruction_location_named", "by": "unbuilt", "finding": "none",
+        { "check": "instruction-by-place", "item": "instruction_location_named", "by": "rule", "finding": "none",
           "note": "\"tap Clear, on the left\", naming the button by its text as well as where it is" },
-        { "check": "instruction-by-shape", "item": "instruction_shape", "by": "unbuilt", "finding": "warning",
+        { "check": "instruction-by-shape", "item": "instruction_shape", "by": "rule", "finding": "error",
           "note": "\"tap the round button\", naming the Add button only by its shape (F14)" },
-        { "check": "instruction-by-shape", "item": "instruction_shape_named", "by": "unbuilt", "finding": "none",
+        { "check": "instruction-by-shape", "item": "instruction_shape_named", "by": "rule", "finding": "none",
           "note": "\"tap Sort, the square button\", naming the button by its text as well as its shape" },
-        { "check": "instruction-by-colour", "item": "instruction_colour", "by": "unbuilt", "finding": "warning",
+        { "check": "instruction-by-colour", "item": "instruction_colour", "by": "rule", "finding": "error",
           "note": "\"tap the green button\", naming the Done button only by its colour (F13)" },
-        { "check": "instruction-by-colour", "item": "instruction_colour_named", "by": "unbuilt", "finding": "none",
+        { "check": "instruction-by-colour", "item": "instruction_colour_named", "by": "rule", "finding": "none",
           "note": "\"tap Undo, the grey button\", naming the button by its text as well as its colour" }
       ]
     }

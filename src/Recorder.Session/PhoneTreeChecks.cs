@@ -260,6 +260,16 @@ public static class PhoneCheckNames
     public const string LinkSameText = "link-same-text";
 
     /// <summary>
+    /// Instructions that rely on sensory characteristics (step 31,
+    /// PhoneSensoryChecks), WCAG 1.3.3, from the words of shown items' text,
+    /// each characteristic one discrete issue: an error from the rules, with
+    /// no model (owner, 2026-11-19).
+    /// </summary>
+    public const string InstructionByPlace = "instruction-by-place";
+    public const string InstructionByShape = "instruction-by-shape";
+    public const string InstructionByColour = "instruction-by-colour";
+
+    /// <summary>
     /// A link in an item's text told apart from the text around it only by
     /// colour, and an item marked selected shown so only by colour (step
     /// 29, PhoneColourOnlyRun), WCAG 1.4.1, each one discrete issue: an
@@ -279,6 +289,7 @@ public static class PhoneCheckNames
         ContextOnFocus, ContextOnScreenReaderFocus, ContextOnInput, OrientationRestricted,
         SpacedLetters, SpaceColumns, LineBreakMidSentence,
         LinkNoText, LinkNoContext, LinkNotSpecific, LinkSameTextAndContext, LinkSameText,
+        InstructionByPlace, InstructionByShape, InstructionByColour,
         TitleMissing, TitleShared, NoHeading, FirstHeadingLow, ManyHeadings,
     ];
 
@@ -342,6 +353,9 @@ public static class PhoneCheckNames
         LinkNotSpecific => "Link text not specific on its own (WCAG 2.4.9, AAA)",
         LinkSameTextAndContext => "Same link text and context for different addresses (WCAG 2.4.4)",
         LinkSameText => "Same link text for different addresses (WCAG 2.4.9, AAA)",
+        InstructionByPlace => "Instruction relies on place (WCAG 1.3.3)",
+        InstructionByShape => "Instruction relies on shape (WCAG 1.3.3)",
+        InstructionByColour => "Instruction relies on colour (WCAG 1.3.3, 1.4.1)",
         LinkOnlyByColour => "Link told apart only by colour (WCAG 1.4.1)",
         SelectedOnlyByColour => "Selected state shown only by colour (WCAG 1.4.1)",
         _ => check,

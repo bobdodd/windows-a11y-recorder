@@ -318,6 +318,12 @@ public static class PhoneChecksSummary
                 PhoneCheckNames.LinkSameTextAndContext, PhoneCheckNames.LinkSameText)),
             links,
             "Looked for: a link with no letter or digit; a non-specific phrase, such as \"read more\" or \"here\", in English only, alone in its item or with a sentence; and the same words to different recorded addresses. At AA, what fails only 2.4.9 is a warning referring to WCAG 5.2.4. A link's context is the rest of its own item's text. Whether a link's words describe where it leads is not judged."));
+
+        sections.Add(new PhoneSummarySection(
+            "Sensory characteristics (WCAG 1.3.3), three checks",
+            Result(Of(run.Findings, PhoneCheckNames.InstructionByPlace, PhoneCheckNames.InstructionByShape, PhoneCheckNames.InstructionByColour)),
+            [$"{Count(run.Instructions, "instruction")} looked at: a verb such as \"tap\" or \"press\" and the words after it, in shown items' text and content descriptions, from the tree, with no model."],
+            "Looked for: an instruction that names a control by its place, such as \"on the right\", its shape, such as \"round\", or its colour, such as \"green\", and by none of the window's controls' names, in English only. Size, sound and orientation are not looked for, nor \"above\" and \"below\"."));
         return sections;
     }
 

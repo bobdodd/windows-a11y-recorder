@@ -54,6 +54,19 @@ Changes on `main` since 1.1.0, not yet released.
   and one each that names a button by its text as well. Its first
   recording is to be measured, with no model, before the check's rules
   are proposed. See `docs/architecture/android-checks.md`, step 31.
+- Three new checks of WCAG 1.3.3 on the instructions in an item's text,
+  from the words alone, with no model, each an error:
+  - "Instruction relies on place (WCAG 1.3.3)";
+  - "Instruction relies on shape (WCAG 1.3.3)";
+  - "Instruction relies on colour (WCAG 1.3.3, 1.4.1)".
+
+  An instruction is a verb such as "tap" or "press" and the words after
+  it; it is a finding when they hold a word from a fixed English list
+  of places, shapes or colours and none of the window's controls'
+  names. Size, sound and orientation are not looked for. The Summary
+  has a section for them, and the Shopping list screen's expectations
+  are now these checks. See `docs/architecture/android-checks.md`,
+  step 31.
 
 ### Link purpose
 

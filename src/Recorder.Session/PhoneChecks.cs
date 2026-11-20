@@ -265,6 +265,13 @@ public sealed class PhoneCheckRun
 
     public int LinksNotRecorded { get; private set; }
 
+    /// <summary>
+    /// Step 31: the instructions in shown items' text and content
+    /// descriptions looked at for sensory characteristics, once for each
+    /// distinct sight.
+    /// </summary>
+    public int Instructions { get; private set; }
+
     /// <summary>Why a snapshot could not be checked, one for each such snapshot.</summary>
     public IReadOnlyList<string> Problems { get; private set; } = [];
 
@@ -319,6 +326,7 @@ public sealed class PhoneCheckRun
             var fieldsByTaking = new Dictionary<string, PhoneFieldChecks.Measured>(StringComparer.Ordinal);
             var sequenceByTaking = new Dictionary<string, int>(StringComparer.Ordinal);
             var linksByTaking = new Dictionary<string, PhoneLinkPurposeChecks.Measured>(StringComparer.Ordinal);
+            var instructionsByTaking = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var settled in visit.SettledSnapshots)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -372,8 +380,10 @@ public sealed class PhoneCheckRun
                             var fieldCheck = PhoneFieldChecks.Measure(window, context);
                             var sequenceCheck = PhoneSequenceChecks.Measure(window);
                             var linkCheck = PhoneLinkPurposeChecks.Measure(window, context);
+                            var sensoryCheck = PhoneSensoryChecks.Measure(window);
                             checkedWindow = (window, [.. PhoneTreeChecks.Run(window, context), .. PhoneFocusChecks.Run(window, context), .. fieldCheck.Results,
-                                .. sequenceCheck.Results, .. linkCheck.Results, .. PhoneScreenChecks.Run(window, context)]);
+                                .. sequenceCheck.Results, .. linkCheck.Results, .. sensoryCheck.Results, .. PhoneScreenChecks.Run(window, context)]);
+                            instructionsByTaking[key] = sensoryCheck.Instructions;
                             fieldsByTaking[key] = fieldCheck;
                             sequenceByTaking[key] = sequenceCheck.Texts;
                             linksByTaking[key] = linkCheck;
@@ -430,6 +440,11 @@ public sealed class PhoneCheckRun
                 {
                     run.Links += linkCounts.Links;
                     run.LinksNotRecorded += linkCounts.NotRecorded;
+                }
+
+                if (instructionsByTaking.TryGetValue(key, out var instructionCount))
+                {
+                    run.Instructions += instructionCount;
                 }
                 textFocus.TryGetValue(visit.Screen.Package, out var sofar);
                 textFocus[visit.Screen.Package] = (sofar.Text + focus.TextItems, sofar.Focusable + focus.FocusableTextItems);

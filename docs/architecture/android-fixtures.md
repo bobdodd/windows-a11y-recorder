@@ -745,21 +745,24 @@ at the `unbuilt` stage until its recording is extracted and committed.
 that rely on sensory characteristics (WCAG 1.3.3), which the owner
 chose as the next check (2026-11-19). It is opened by the tour. Its
 first recording is the check's "measure first" data, read with no
-model before rules are proposed to the owner, so its check names and
-levels in `expected.json` are only a proposal, marked
-`"by": "unbuilt"`.
+model before rules are proposed to the owner. The owner chose the
+place, shape and colour rules (2026-11-19), so its checks are built:
+`instruction-by-place`, `instruction-by-shape` and
+`instruction-by-colour`, each an error with no model (android-checks.md
+step 31), marked `"by": "rule"`. The screen stays `"unbuilt"` until its
+recording is extracted and committed, as for the colour-only screen.
 
 Each pair of instructions is above the row of two buttons it is about.
 One instruction names a button only by a sensory characteristic, and
 the other names the other button by its text as well.
 
-| Element | Built as | Expected (proposed) |
+| Element | Built as | Expected |
 | --- | --- | --- |
-| `instruction_location` | "To save the list, tap the button on the right.", above Clear and Save | A warning: a button named only by where it is (F14) |
+| `instruction_location` | "To save the list, tap the button on the right.", above Clear and Save | An error, `instruction-by-place`: a button named only by where it is (F14) |
 | `instruction_location_named` | "To empty the list, tap Clear, on the left." | No finding |
-| `instruction_shape` | "To add a thing to buy, tap the round button.", above a round Add and a square Sort | A warning: a button named only by its shape (F14) |
+| `instruction_shape` | "To add a thing to buy, tap the round button.", above a round Add and a square Sort | An error, `instruction-by-shape`: a button named only by its shape (F14) |
 | `instruction_shape_named` | "To sort the list, tap Sort, the square button." | No finding |
-| `instruction_colour` | "To mark the list as bought, tap the green button.", above a green Done and a grey Undo | A warning: a button named only by its colour (F13) |
+| `instruction_colour` | "To mark the list as bought, tap the green button.", above a green Done and a grey Undo | An error, `instruction-by-colour`: a button named only by its colour (F13) |
 | `instruction_colour_named` | "To take that back, tap Undo, the grey button." | No finding |
 
 The buttons are clickable TextViews, white text on a fill: Clear, Save,

@@ -5833,6 +5833,101 @@ passes any instruction holding a control's name would pass this fault.
 Not yet measured: how often these rules fire on the owner's real
 recordings, which remain the test of false alarms in real apps.
 
+### The owner's decision on the rules (2026-11-19)
+
+The owner: "Build the sensory check rules with the place, shape and
+colour lists".
+
+So rules 1, 2, 3, 4 and 5 are built for place, shape and colour only,
+three checks, each an error. The size, sound and orientation lists are
+not built (read from "with the place, shape and colour lists"), and
+rule 6 stays as proposed: the pixels are not used.
+
+### As built
+
+`PhoneSensoryChecks` in `Recorder.Session`, run on each window's items
+with the other per-window checks, with no model, no OCR and no picture.
+
+| Check | Finding | Level |
+| --- | --- | --- |
+| `instruction-by-place`, "Instruction relies on place (WCAG 1.3.3)" | An instruction with a place word and no control's name (F14) | Error |
+| `instruction-by-shape`, "Instruction relies on shape (WCAG 1.3.3)" | An instruction with a shape word and no control's name (F14) | Error |
+| `instruction-by-colour`, "Instruction relies on colour (WCAG 1.3.3, 1.4.1)" | An instruction with a colour word and no control's name (F13) | Error |
+
+- **The text looked at.** The text and content description of each item
+  shown to the user (visible, with bounds); a field's text is what was
+  typed into it, so it is not looked at.
+- **An instruction.** The text is split into sentences at ".", "!", "?"
+  or ";" before a space or the end, and at line breaks. An instruction
+  is a verb of operating and the words after it, to the next such verb
+  or the end of the sentence; a comma does not end it. The verbs, in
+  English: tap, press, click, select, choose, touch, use and hit, and
+  their "-ing" forms. Other forms, such as "taps" or "pressed", describe
+  rather than instruct, so are not counted.
+- **The words**, whole words ignoring case:
+  - place: right, left, top, bottom, corner, beside, next to, upper,
+    lower ("above" and "below" are not counted);
+  - shape: round, circle, circular, square, triangle, triangular, oval,
+    star, arrow, and the nouns' plurals;
+  - colour: red, green, blue, yellow, orange, purple, pink, grey, gray,
+    black, white, brown.
+- **The controls' names.** A control is a shown item that is clickable,
+  long-clickable, checkable or editable, other than the instruction's
+  own item and the items it is inside. Its names are its content
+  description, its text (not a field's) and its hint, or, when it has
+  no text or description of its own, those of the items inside it. A
+  name counts when all its words are in the instruction together and in
+  order, ignoring case. The words before the verb are not looked at.
+- **The findings.** One for each characteristic an instruction relies
+  on, so "tap the green button on the right" gives two. One item's
+  findings for one check are merged into one result. Each quotes the
+  instruction and the word, and says a person can set it aside if the
+  instruction names the control in another way, or the word is not
+  about how the control looks or where it is.
+
+The run counts the instructions looked at, and the Summary has a
+section "Sensory characteristics (WCAG 1.3.3), three checks", saying
+that size, sound and orientation are not looked for, nor "above" and
+"below". The guidance file has an entry for each check, citing 1.3.3,
+F14 or F13 and 1.4.1, G96 and WCAG2ICT.
+
+In the fixture app's `expected.json`, the Shopping list screen's
+expectations are now these checks, `"by": "rule"`, an error on each
+fault and none on each near miss (android-fixtures.md, "The sensory
+screen").
+
+### Checked
+
+- Rule tests, `PhoneSensoryChecksTests`, on made-up windows: each
+  check's fault and near miss, a control's name before the verb not
+  counted, an instruction ending at the next verb, two characteristics
+  giving two findings, "above" and "below" not counted, a description
+  with no verb of operating not looked at, hidden items and hidden
+  controls not looked at, a control named by the text inside it, the
+  titles, and the second limit below, kept as a test so a change to it
+  is seen (measured, the tests pass).
+- On the Shopping list recording's measured records (above), the rules
+  give an error on each of the three faults and none on the three near
+  misses (inferred, by applying them to the instructions' text and the
+  buttons' names; the checks have not yet been run on a recording).
+
+### Limits
+
+- English only, and words only: a list word in another sense gives a
+  false alarm, such as "right" meaning correct, or "left" meaning gone,
+  after a verb of operating.
+- A control's name used in another sense after the verb passes wrongly:
+  "tap the round button to add an item" passes when a control is named
+  Add.
+- Within one window only: a control named in another window, or not
+  shown, does not count.
+- Size, sound and orientation are not looked for, and neither are
+  instructions with no verb of operating, such as "the green button
+  saves the list".
+- The pixels are not used, so whether the word is true of a control is
+  not known.
+- Not yet measured: false alarms on the owner's real recordings.
+
 ## Decisions on the open questions (2026-11-11)
 
 8. **Screens titled by their content are separate for now.** A
