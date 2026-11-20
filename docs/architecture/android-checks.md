@@ -5984,8 +5984,137 @@ lines with a coloured-text legend, a pie, stacked bars, highlighted
 bars, a scatter plot, a heat map, a chart drawn into a bitmap, and SVG
 charts on a web page. The proposed check, `chart-only-by-colour`, is
 not built; its expectations are marked `"by": "unbuilt"`. Their first
-recording is to be measured with no model before rules are proposed to
-the owner.
+recording was measured with no model before rules were proposed to the
+owner.
+
+### Measured on the phone (2026-11-20)
+
+A probe with no model and no OCR, deleted afterwards with its copies of
+the recording, read the owner's recording of the tour of the twelve
+chart screens through `PhoneCheckWindow`, the screenshot of each
+visit's first settled snapshot, and the checks' findings (measured).
+Every screen was drawn as built, with nothing cut off or overlapping.
+
+- **The tree.** Each chart is one item with its resource ID and its
+  content description as built, visible, not focusable and with no
+  text: `android.view.View` for the drawn charts, `ImageView` for the
+  bitmap and `android.widget.Image` for the SVG charts. Nothing in the
+  tree says that an item is a chart, or what its colours are. The
+  words are their own TextViews, or web text, with their text as built;
+  the legend swatches are not in the tree.
+- **The fills.** On the screenshot each chart's fills are exactly the
+  colours built, and the pairs' ratios are as designed: 1.10:1 for red
+  and green, 1.14:1 for magenta and teal, 1.00:1 to 1.29:1 for the pie's
+  four, 1.09:1 to 1.29:1 for the stack's three, 1.04:1 to 1.10:1 for the
+  heat map's three, 1.61:1 and 3.61:1 for the two pairs of blues, 1.08:1
+  for the pastels and 3.13:1 for the highlight. The smallest fill
+  covers 1.3% of its chart's box (the scatter plot's circles). Counting
+  the colours that each cover at least 0.3% of the box and are not
+  white or grey gives the two to four fills built on every chart but
+  the hatched bitmap, where four blends of the green at the hatching's
+  scaled edges cover 0.3% to 0.6% each; at 1% only the fills built are
+  counted. Each chart's box holds 23 to 1,815 distinct colours in all.
+- **Patterns.** A solid series is three to five pieces of its colour,
+  one per bar, each filling its bounding box (ratio 1.00). A hatched or
+  striped series is 30 to 47 pieces, with a median ratio of 0.10 to
+  0.28, in the Views, bitmap and SVG charts alike.
+- **Outlines.** The outlines and axis in #202124 are one connected
+  piece on the chart with the same outlines, and 85 pieces when one
+  series' outlines are dashed.
+- **Lines and markers.** A solid line is one to six pieces of its colour,
+  as the lines cross and cut each other; the dashed line with square
+  markers is 27. The circle markers merge with their line and were not
+  measured apart.
+- **Scatter shapes.** The circles fill 0.78 to 0.81 of their boxes and
+  the triangles 0.52.
+- **Words on the chart.** On the near misses with words, TextViews lie
+  inside the chart's bounds: the pie's four labels, the stack's nine
+  segment words, the heat map's fifteen numbers and the lines' two end
+  names. On the faults, the only TextViews inside are the row names
+  (the stack's years, the heat map's classes), one per row and not per
+  piece.
+- **The coloured legend.** The legend names under the coloured-legend
+  fault are drawn in #C62828 and #2E7D32, the lines' own colours; every
+  other legend's words are #202124.
+- **Other checks.** No other check gave an error. Two warnings came:
+  the app's live region warning, already expected, and a text contrast
+  warning on `chart_highlight_colour`, 4.23:1 for #E53935 on white,
+  measured on the item's bounds. With no OCR, an item with no children
+  that has words, here only its content description, and is not an
+  ImageView, is measured as a line of text on its bounds, so the chart's
+  red bars were measured as text (measured; the cause read from the
+  code). Every other chart's fills are 4.5:1 or more on white, so they
+  were measured as text too, but passed. The duplicate speakable text
+  information findings rose to 77, as the two charts on each screen
+  share their axis words.
+
+### What the measurements allow (inferred)
+
+- Whether two series rely on colour alone can be judged from the
+  pixels for every pair here but one: the hue pairs, the close blues
+  and the pastels, set against the pattern, dash, shape, lightness and
+  word near misses, each differ in something measured above.
+- The highlight cannot be: its two colours are 3.13:1 apart, which the
+  lightness rule passes, and that the red means "over budget" is in the
+  legend's words, not the pixels. Telling that a particular colour
+  carries a meaning needs the words to be understood.
+- Nothing in the tree marks a chart, so a rule finds one by its pixels
+  (a few flat fills) or by English words in its description. Photos,
+  icons and other flat graphics were not on these screens, so how
+  often each would catch something that is not a chart is not
+  measured.
+- Whether a chart's description gives what its colours convey, F13's
+  1.1.1 part, needs the description to be understood.
+
+### The rules proposed (for the owner to choose)
+
+1. **Which items.** An item with no text of its own, at least 96 dp
+   wide and tall, shown whole on the phone's screenshot, not under the
+   focus outline or another window, whose box holds two or more fills:
+   colours each covering at least 1% of the box, not white, black or
+   grey, and not the colour of the background around the item.
+   Optionally as well, or instead: a description holding "chart",
+   "graph", "plot", "diagram" or "map", English words only.
+2. **Which fills need telling apart.** Each pair of fills under 3:1
+   against each other (Understanding 1.4.1). Pairs at 3:1 or more pass.
+3. **Told apart other than by colour,** for a pair, if any of:
+   - **a pattern:** one fill is in ten or more pieces of at least 40
+     pixels, with a median piece filling under half its bounding box,
+     and the other is not;
+   - **a dashed outline or line:** the dark outlines next to one fill's
+     pieces are in ten or more pieces and those next to the other's are
+     not, or one line fill is in ten or more pieces and the other is not;
+   - **a shape:** both fills are in three or more similar pieces, such
+     as markers, and their median fill of their boxes differs by 0.15 or
+     more;
+   - **words:** every piece of both fills (each bar, slice, segment,
+     cell or line) has a tree text item inside the chart's box that
+     overlaps it or is nearest to it, within 24 dp.
+4. **The finding.** A chart with a pair told apart by none of these is
+   a finding, naming the pair's colours and ratio. One finding per
+   chart, listing every such pair, rather than one per pair, as the
+   fix is to the chart (proposed, as the owner prefers atomic findings
+   and may choose one per pair).
+5. **Level.** No model is involved, so by the owner's rule ("If there
+   is no model involved, error", 2026-11-19) each finding is an error.
+6. **What is left to a model.** A particular colour carrying a meaning
+   whatever the contrast (the highlight fault), and whether the
+   description gives what the colours convey. Proposed: the highlight's
+   expectation becomes `"by": "model"` and stays unbuilt until a model
+   check is chosen.
+7. **The text contrast warning on a chart** is a separate issue:
+   - **(a)** the recorder: with no OCR, an item whose only words are
+     its content description is not measured as text, as the
+     description is not shown; or
+   - **(b)** the fixture: the highlight's red is made 4.5:1 or more on
+     white, which would bring it under 3:1 against the navy and so make
+     it a hue fault like the others, losing the case for rule 6.
+
+   Proposed: (a), as a client app's chart with a description would have
+   the same false alarm.
+
+Not yet measured: how often these rules fire on the owner's real
+recordings, which remain the test of false alarms in real apps.
 
 ## Decisions on the open questions (2026-11-11)
 

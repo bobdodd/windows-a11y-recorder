@@ -36,8 +36,9 @@ checks not yet built. The first screens for them, "Recipes"
 (`sensory`), are built; Recipes and Kitchen help have been recorded,
 and Shopping list waits for its first recording (see "The colour
 screen", "The link purpose screen" and "The sensory screen"). Twelve
-chart screens, `chart-bars` to `web-charts`, are built and wait for
-their first recording (see "The chart screens").
+chart screens, `chart-bars` to `web-charts`, are built and were first
+recorded and measured on 2026-11-20 (see "The chart screens" and
+android-checks.md, step 32).
 
 One fixture recording is committed, `tests/fixtures/android/tour/`,
 extracted from the owner's fifth recording of the tour on 2026-11-19
@@ -781,9 +782,10 @@ Twelve screens, built on 2026-11-20 for a chart that relies on colour
 (WCAG 1.4.1), which the owner chose as the next check (2026-11-20),
 asking for different kinds of chart and graph and for outlines on bars
 to be thought about. Each is opened by the tour and holds one chart
-that fails and one near miss of the same kind. Their first recording is
-the check's "measure first" data, read with no model before rules are
-proposed to the owner (android-checks.md, step 32). The check's name in
+that fails and one near miss of the same kind. Their first recording,
+made on 2026-11-20, is the check's "measure first" data, read with no
+model before rules were proposed to the owner (android-checks.md, step
+32). The check's name in
 `expected.json`, `chart-only-by-colour`, is a proposal, marked
 `"by": "unbuilt"`: a fault is a warning there for now, as whether a
 model is involved is not yet decided. The screens stay at the
