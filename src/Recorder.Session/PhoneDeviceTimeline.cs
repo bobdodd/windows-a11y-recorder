@@ -161,6 +161,8 @@ public sealed class PhoneDeviceTimeline
     /// <summary>Whether the recording holds the apps' versions.</summary>
     public bool VersionsRecorded { get; }
 
+    public IReadOnlyCollection<string> PackagesWithVersionRecords => _versions.Keys;
+
     /// <summary>The density in use at a recording time, or null when none was recorded.</summary>
     public PhoneDensityPeriod? DensityAt(long time)
     {
@@ -197,7 +199,7 @@ public sealed class PhoneDeviceTimeline
         var description = result.Status switch
         {
             "detected" when result.Names.Count > 0 =>
-                $"Framework: {string.Join(", ", result.Names)} (bundled APK library detected at the stop; use by this screen is not established).",
+                $"Framework: {string.Join(", ", result.Names)} (bundled APK library detected at the stop; use by any particular screen is not established).",
             "unknown" => "Framework unknown: no supported Flutter or React Native library marker was found.",
             _ => "Framework unavailable."
         };

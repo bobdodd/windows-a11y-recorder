@@ -226,7 +226,7 @@ public sealed class AndroidFrameworkTests
         Assert.Equal("React Native", timeline.VersionOf(Package)!.Framework!.Names[0]);
         var text = timeline.DescribeFramework(Package);
         Assert.Contains("Framework: React Native", text, StringComparison.Ordinal);
-        Assert.Contains("use by this screen is not established", text, StringComparison.Ordinal);
+        Assert.Contains("use by any particular screen is not established", text, StringComparison.Ordinal);
         Assert.Contains("APKs read: 1 of 1", text, StringComparison.Ordinal);
     }
 

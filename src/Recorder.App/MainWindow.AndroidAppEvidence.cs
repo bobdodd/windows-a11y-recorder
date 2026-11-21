@@ -1,7 +1,10 @@
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Automation.Peers;
+using System.Windows.Controls;
 using Microsoft.Win32;
 using Recorder.Session;
 
@@ -9,60 +12,128 @@ namespace Recorder.App;
 
 public partial class MainWindow
 {
-    private void ShowAndroidAppEvidence(SessionPlaybackArchive? archive)
+    // Rebuild static evidence only when the open archive changes, never
+    // while seeking, running models or navigating between the tabs.
+    private void BindAndroidAppDetails(SessionPlaybackArchive? archive)
     {
-        var packages = archive?.PhoneScreens.Apps.Select(app => app.Package).ToList() ?? [];
-        if (archive?.Manifest.AndroidPreRecordingTextSizes is { } selected &&
-            !packages.Contains(selected.PackageName, StringComparer.Ordinal))
+        var available = AndroidAppDetailsEvidence.IsAvailable(archive);
+        if (!available && ChecksAppDetailsTab.IsSelected)
         {
-            packages.Add(selected.PackageName);
+            ChecksTabControl.SelectedItem = ChecksFindingsTab;
         }
 
-        AppAccessibilityEvidence.Visibility = packages.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        AppAccessibilityDetails.IsExpanded = false;
-        AppAccessibilityDetails.Visibility = Visibility.Collapsed;
-        AppAccessibilityBody.Text = string.Empty;
+        ChecksAppDetailsTab.Visibility = available ? Visibility.Visible : Visibility.Collapsed;
+        AppDetailsOverview.Children.Clear();
+        AppDetailsApk.Children.Clear();
+        AppDetailsSizes.Children.Clear();
+        AppDetailsForms.Children.Clear();
+        AppDetailsReviews.Children.Clear();
         AppAccessibilityStatus.Text = string.Empty;
         AppAccessibilityStatus.Visibility = Visibility.Collapsed;
-        if (archive is null || packages.Count == 0)
+        if (!available || archive is null)
         {
             return;
         }
 
-        var descriptions = new List<string>();
-        var apkEvidence = AndroidTextSizeChecksEvidence.DescribeApkAccessibility(archive.Manifest);
-        if (apkEvidence is not null)
+        var packages = AndroidAppDetailsEvidence.Packages(archive);
+        if (packages.Count == 0)
         {
-            descriptions.Add(apkEvidence);
+            AddDetail(AppDetailsOverview, "No app package was identified in this recording.");
         }
-        var attached = 0;
+
+        foreach (var package in packages)
+        {
+            AddDetail(AppDetailsOverview, package, AutomationHeadingLevel.Level3);
+            AddDetail(AppDetailsOverview, $"App version at recording stop: {archive.PhoneDevice.DescribeVersion(package)}.");
+            AddDetail(AppDetailsOverview, archive.PhoneDevice.DescribeFramework(package));
+            if (archive.PhoneScreens.Apps.FirstOrDefault(app => app.Package == package) is { } app)
+            {
+                AddDetail(AppDetailsOverview,
+                    $"{Count(app.Screens.Count, "screen")}, {Count(app.Screens.Sum(screen => screen.Visits.Count), "visit")}.");
+            }
+            else if (archive.Manifest.AndroidPreRecordingTextSizes?.PackageName == package)
+            {
+                AddDetail(AppDetailsOverview, "Selected for collection before recording. No recorded visits were identified for this app.");
+            }
+        }
+
+        if (AndroidApkDetails.From(archive.Manifest) is { } apk)
+        {
+            AddDetail(AppDetailsApk, apk.Summary);
+            AddDetail(AppDetailsApk, apk.Context);
+            if (apk.Problem is { } problem)
+            {
+                AddDetail(AppDetailsApk, $"Incomplete: {problem}");
+            }
+            if (apk.Groups.Count == 0)
+            {
+                AddDetail(AppDetailsApk, "No APK accessibility entries were saved.");
+            }
+            foreach (var group in apk.Groups)
+            {
+                AddDetail(AppDetailsApk, $"{group.Topic}: {group.Source}", AutomationHeadingLevel.Level3);
+                AddDetailLines(AppDetailsApk, group.Items);
+            }
+            if (apk.Coverage.Count > 0)
+            {
+                AddDetail(AppDetailsApk, "Readers and limits", AutomationHeadingLevel.Level3);
+                AddDetailLines(AppDetailsApk, apk.Coverage);
+            }
+        }
+        else
+        {
+            AddDetail(AppDetailsApk, "No APK accessibility inventory was saved in this recording.");
+        }
+
+        var sizes = AndroidTextSizeChecksEvidence.Describe(archive.Manifest, CultureInfo.CurrentCulture);
+        AddDetail(AppDetailsSizes, sizes?.Summary ?? "No live text-size snapshot was saved in this recording.");
+        if (sizes is { NodeLines.Count: > 0 })
+        {
+            AddDetail(AppDetailsSizes, "Accessibility nodes", AutomationHeadingLevel.Level3);
+            AddDetailLines(AppDetailsSizes, sizes.NodeLines);
+        }
+        ShowRecordedFormEvidence(archive, null);
+        ShowAndroidAppReviews(archive, packages);
+        AppDetailsScrollViewer.ScrollToTop();
+    }
+
+    private void ShowAndroidAppReviews(SessionPlaybackArchive archive, IReadOnlyList<string> packages)
+    {
+        AppDetailsReviews.Children.Clear();
+        var canAttach = packages.Any(package => archive.PhoneDevice.VersionOf(package) is { Found: true, VersionName.Length: > 0, VersionCode: not null });
+        AttachAppReviewButton.IsEnabled = canAttach;
+        AppDetailsReviewInstructions.Text = canAttach
+            ? "Attach an APK or source review for a package and version saved in this recording. A review is not an observation from a recorded visit."
+            : "A review cannot be attached because no complete package version was saved in this recording.";
+        var attached = false;
         foreach (var package in packages)
         {
             try
             {
                 if (AndroidAppAccessibilityReviews.Attached(archive, package) is { } review)
                 {
-                    attached++;
-                    descriptions.Add($"{review.Package}, version {review.VersionName} (code {review.VersionCode}). " +
-                        $"Reviewed {review.ReviewedUtc:yyyy-MM-dd} (UTC). Method: {review.Method}." +
-                        Environment.NewLine + string.Join(Environment.NewLine + Environment.NewLine,
-                            review.Observations.Select(item => $"{item.Topic}: {item.Evidence} Limit: {item.Limit}")));
+                    attached = true;
+                    AddDetail(AppDetailsReviews, $"{review.Package}, version {review.VersionName} (code {review.VersionCode})",
+                        AutomationHeadingLevel.Level3);
+                    AddDetail(AppDetailsReviews, FormattableString.Invariant($"Reviewed {review.ReviewedUtc.UtcDateTime:yyyy-MM-dd} (UTC). Method: {review.Method}."));
+                    foreach (var item in review.Observations)
+                    {
+                        AddDetail(AppDetailsReviews, item.Topic, AutomationHeadingLevel.Level4);
+                        AddDetail(AppDetailsReviews, item.Evidence);
+                        AddDetail(AppDetailsReviews, $"Limit: {item.Limit}");
+                    }
                 }
             }
             catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or JsonException)
             {
-                descriptions.Add($"{package}: the attached review could not be read or did not match the recorded app version.");
+                AddDetail(AppDetailsReviews, $"{package}: the attached review could not be read or did not match the recorded app version.");
             }
         }
 
-        var reviewSummary = attached == 0
-            ? "App accessibility review: no matching APK or source review attached to this recording."
-            : $"App accessibility review: {attached} of {packages.Count} recorded apps have an attached review. " +
-                "This is app-version evidence, not a measurement from a screen or playback time.";
-        AppAccessibilitySummary.Text = AndroidTextSizeChecksEvidence.SummarizeApkAccessibility(archive.Manifest) +
-            Environment.NewLine + reviewSummary;
-        AppAccessibilityDetails.Visibility = descriptions.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        AppAccessibilityBody.Text = string.Join(Environment.NewLine + Environment.NewLine, descriptions);
+        if (!attached)
+        {
+            AddDetail(AppDetailsReviews, "No matching review is attached to this recording.");
+        }
     }
 
     private void AttachAndroidAppReview_Click(object sender, RoutedEventArgs e)
@@ -78,7 +149,7 @@ public partial class MainWindow
             Filter = "App accessibility review (*.json)|*.json",
             CheckFileExists = true
         };
-        if (picker.ShowDialog(Window.GetWindow(AppAccessibilityEvidence) ?? this) != true ||
+        if (picker.ShowDialog(Window.GetWindow(AttachAppReviewButton) ?? this) != true ||
             !ReferenceEquals(archive, _playbackArchive))
         {
             return;
@@ -88,8 +159,7 @@ public partial class MainWindow
         {
             var review = AndroidAppAccessibilityReviews.Read(picker.FileName);
             AndroidAppAccessibilityReviews.Attach(archive, review);
-            ShowAndroidAppEvidence(archive);
-            AppAccessibilityDetails.IsExpanded = true;
+            ShowAndroidAppReviews(archive, AndroidAppDetailsEvidence.Packages(archive));
             SetAppReviewStatus("Review attached to this recording.");
         }
         catch (InvalidDataException error)
@@ -111,21 +181,69 @@ public partial class MainWindow
         peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
     }
 
-    private void ShowRecordedFormEvidence(bool hasPhoneTrees, PhoneCheckRun? run, bool failed = false)
+    private void ShowRecordedFormEvidence(SessionPlaybackArchive archive, PhoneCheckRun? run, bool failed = false)
     {
-        RecordedForms.Visibility = hasPhoneTrees ? Visibility.Visible : Visibility.Collapsed;
-        if (run is null)
+        var forms = AndroidFormDetails.From(archive, run, failed);
+        AppDetailsForms.Children.Clear();
+        AddDetail(AppDetailsForms, forms.Summary);
+        foreach (var app in forms.Apps)
         {
-            RecordedForms.IsExpanded = false;
+            AddDetail(AppDetailsForms, app.Package, AutomationHeadingLevel.Level3);
+            foreach (var visit in app.Visits)
+            {
+                AddDetail(AppDetailsForms, $"Screen {visit.Screen}: {visit.ScreenLabel}. Visit {visit.Visit}.", AutomationHeadingLevel.Level4);
+                foreach (var tree in visit.Trees)
+                {
+                    AddDetail(AppDetailsForms, $"Tree captured at {tree.TimeLabel}.");
+                    AddDetailLines(AppDetailsForms, tree.Fields);
+                }
+            }
         }
-        var body = run is null ? (failed ? "Recorded trees could not be reviewed." : "Form evidence has not yet been read.") :
-            run.WindowsChecked == 0 ? "No settled application tree was available to read." :
-            run.FormEvidence.Count == 0 ? "No visible editable nodes were published in the settled application trees read." :
-            "Published form evidence in settled application trees. Field values are not shown. A hint is not a label link." +
-            Environment.NewLine + Environment.NewLine + string.Join(Environment.NewLine + Environment.NewLine,
-                run.FormEvidence.Select(form => $"{form.Visit.Package}, screen {form.Visit.Screen.Number}, visit {form.Visit.Number}, " +
-                    $"tree captured at {form.TimeLabel}:" + Environment.NewLine +
-                    string.Join(Environment.NewLine, form.Fields)));
-        RecordedFormsBody.Text = body;
+    }
+
+    private void JumpToAppDetailsSection_Click(object sender, RoutedEventArgs e)
+    {
+        // The panel moves to an owned window, outside the player's XAML namescope.
+        var heading = sender switch
+        {
+            var button when button == AppDetailsOverviewJump => AppDetailsOverviewHeading,
+            var button when button == AppDetailsApkJump => AppDetailsApkHeading,
+            var button when button == AppDetailsSizesJump => AppDetailsSizesHeading,
+            var button when button == AppDetailsFormsJump => AppDetailsFormsHeading,
+            var button when button == AppDetailsReviewsJump => AppDetailsReviewsHeading,
+            _ => null
+        };
+        if (heading is not null)
+        {
+            var top = heading.TranslatePoint(new Point(0, 0), AppDetailsPanel).Y;
+            heading.Focus();
+            AppDetailsScrollViewer.ScrollToVerticalOffset(top);
+        }
+    }
+
+    private static void AddDetail(Panel panel, string text, AutomationHeadingLevel? level = null, double indent = 0)
+    {
+        var entry = new SelectableText
+        {
+            Text = text,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(indent, level is not null ? 9 : 0, 0, 4)
+        };
+        if (level is { } heading)
+        {
+            AutomationProperties.SetHeadingLevel(entry, heading);
+            entry.FontWeight = FontWeights.SemiBold;
+        }
+        panel.Children.Add(entry);
+    }
+
+    private static void AddDetailLines(Panel panel, IEnumerable<string> rows)
+    {
+        // Keep adjacent entries selectable together, but bound individual
+        // text controls for recordings with thousands of APK entries.
+        foreach (var chunk in rows.Chunk(64))
+        {
+            AddDetail(panel, string.Join(Environment.NewLine, chunk), indent: 12);
+        }
     }
 }

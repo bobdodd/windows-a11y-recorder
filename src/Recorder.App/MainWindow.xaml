@@ -1641,8 +1641,8 @@
                 <RowDefinition Height="Auto" />
               </Grid.RowDefinitions>
               <!-- The settings the checks run with, and the button that asks
-                   the project's model, above both tabs, as they change what
-                   both show. The project's models are listed in the Summary
+                   the project's model, above the tabs. They change Findings
+                   and Summary. The project's models are listed in the Summary
                    tab (owner, 2026-11-18: the summary "needs to be its own
                    tab, and formatted for humans to read"). -->
               <WrapPanel Grid.Row="0" Margin="0,0,0,6">
@@ -1719,7 +1719,7 @@
                           BorderBrush="{StaticResource PanelBorder}"
                           Foreground="#CDCCCA"
                           Padding="0"
-                          AutomationProperties.Name="Findings and summary">
+                          AutomationProperties.Name="Recording checks">
                 <TabControl.Resources>
                   <Style TargetType="TabItem" BasedOn="{StaticResource InspectionTab}" />
                 </TabControl.Resources>
@@ -1728,60 +1728,9 @@
                     <Grid.RowDefinitions>
                       <RowDefinition Height="Auto" />
                       <RowDefinition Height="Auto" />
-                      <RowDefinition Height="Auto" />
-                      <RowDefinition Height="Auto" />
                       <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <StackPanel x:Name="AppAccessibilityEvidence" Grid.Row="0"
-                                Margin="0,0,0,6" Visibility="Collapsed">
-                      <local:SelectableText x:Name="AppAccessibilitySummary" TextWrapping="Wrap" />
-                      <Button Content="Attach app _review…" Click="AttachAndroidAppReview_Click"
-                              HorizontalAlignment="Left" MinHeight="44" Padding="12,0" Margin="0,2,0,0" />
-                      <local:SelectableText x:Name="AppAccessibilityStatus" TextWrapping="Wrap"
-                                            Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
-                      <Expander x:Name="AppAccessibilityDetails" HorizontalContentAlignment="Stretch">
-                        <Expander.Header>
-                          <TextBlock Text="APK evidence and app review details" Foreground="#CDCCCA" MinHeight="44" Padding="6,12" />
-                        </Expander.Header>
-                        <TextBox x:Name="AppAccessibilityBody" IsReadOnly="True" IsUndoEnabled="False"
-                                 MaxHeight="150" Padding="6" TextWrapping="Wrap"
-                                 HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
-                                 AutomationProperties.Name="APK declarations, bundled assets, review evidence and limits" />
-                      </Expander>
-                    </StackPanel>
-                    <StackPanel x:Name="RecordingTextSizeEvidence"
-                                Grid.Row="1"
-                                Margin="0,0,0,6"
-                                Visibility="Collapsed">
-                      <local:SelectableText x:Name="RecordingTextSizeSummary" TextWrapping="Wrap" />
-                      <Expander x:Name="RecordingTextSizeDetails"
-                                HorizontalContentAlignment="Stretch"
-                                AutomationProperties.Name="Pre-recording text-size node details">
-                        <Expander.Header>
-                          <TextBlock Text="Node details" Foreground="#CDCCCA" MinHeight="44" Padding="6,12" />
-                        </Expander.Header>
-                        <TextBox x:Name="RecordingTextSizeNodeText"
-                                 IsReadOnly="True"
-                                 IsUndoEnabled="False"
-                                 MaxHeight="150"
-                                 Margin="0,0,0,6"
-                                 Padding="6"
-                                 TextWrapping="Wrap"
-                                 HorizontalScrollBarVisibility="Disabled"
-                                 VerticalScrollBarVisibility="Auto"
-                                 AutomationProperties.Name="Saved text-size readings and availability by accessibility node" />
-                      </Expander>
-                      <Expander x:Name="RecordedForms" HorizontalContentAlignment="Stretch" Visibility="Collapsed">
-                        <Expander.Header>
-                          <TextBlock Text="Form evidence from recorded trees" Foreground="#CDCCCA" MinHeight="44" Padding="6,12" />
-                        </Expander.Header>
-                        <TextBox x:Name="RecordedFormsBody" IsReadOnly="True" IsUndoEnabled="False"
-                                 MaxHeight="120" Padding="6" TextWrapping="Wrap"
-                                 HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
-                                 AutomationProperties.Name="Recorded field labels, hints and states" />
-                      </Expander>
-                    </StackPanel>
-                    <WrapPanel Grid.Row="2" Margin="0,0,0,6">
+                    <WrapPanel Grid.Row="0" Margin="0,0,0,6">
                       <Button x:Name="ShowCurrentVisitButton"
                         MinHeight="44"
                         MinWidth="44"
@@ -1809,12 +1758,12 @@
                         AutomationProperties.HelpText="Moves the playhead to the next time the chosen finding was seen." />
                     </WrapPanel>
                     <local:SelectableText x:Name="ChecksStatusTextBlock"
-                           Grid.Row="3"
+                           Grid.Row="1"
                            Margin="0,0,0,6"
                            TextWrapping="Wrap"
                            Text="Open a recording of a phone to list its apps, screens and visits." />
                     <ListBox x:Name="PhoneScreensListBox"
-                       Grid.Row="4"
+                       Grid.Row="2"
                        MinHeight="70"
                        HorizontalContentAlignment="Stretch"
                        ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -1899,6 +1848,71 @@
                                 AutomationProperties.Name="Summary of the checks">
                     <StackPanel x:Name="ChecksSummaryPanel" MaxWidth="1100" HorizontalAlignment="Left" />
                   </ScrollViewer>
+                </TabItem>
+                <TabItem x:Name="ChecksAppDetailsTab" Header="App details" Visibility="Collapsed">
+                  <TabItem.Resources>
+                    <Style x:Key="AppDetailsHeading" TargetType="{x:Type local:SelectableText}">
+                      <Setter Property="TextWrapping" Value="Wrap" />
+                      <Setter Property="FontWeight" Value="SemiBold" />
+                      <Setter Property="FontSize" Value="17" />
+                      <Setter Property="Margin" Value="0,20,0,4" />
+                      <Setter Property="AutomationProperties.HeadingLevel" Value="Level2" />
+                      <Style.Triggers>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                          <Setter Property="Background" Value="#3D2D5C" />
+                        </Trigger>
+                      </Style.Triggers>
+                    </Style>
+                    <Style x:Key="AppDetailsJumpButton" TargetType="Button" BasedOn="{StaticResource AnalysisButton}">
+                      <Setter Property="Margin" Value="0,0,8,6" />
+                      <Setter Property="AutomationProperties.HelpText" Value="Scrolls to this section without moving the playhead." />
+                    </Style>
+                  </TabItem.Resources>
+                  <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <WrapPanel>
+                      <Button x:Name="AppDetailsOverviewJump" Style="{StaticResource AppDetailsJumpButton}" Content="Overview"
+                              Click="JumpToAppDetailsSection_Click" />
+                      <Button x:Name="AppDetailsApkJump" Style="{StaticResource AppDetailsJumpButton}" Content="APK evidence"
+                              Click="JumpToAppDetailsSection_Click" />
+                      <Button x:Name="AppDetailsSizesJump" Style="{StaticResource AppDetailsJumpButton}" Content="Text sizes"
+                              Click="JumpToAppDetailsSection_Click" />
+                      <Button x:Name="AppDetailsFormsJump" Style="{StaticResource AppDetailsJumpButton}" Content="Forms"
+                              Click="JumpToAppDetailsSection_Click" />
+                      <Button x:Name="AppDetailsReviewsJump" Style="{StaticResource AppDetailsJumpButton}" Content="App reviews"
+                              Click="JumpToAppDetailsSection_Click" />
+                    </WrapPanel>
+                    <ScrollViewer x:Name="AppDetailsScrollViewer" Grid.Row="1"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                  Focusable="True" AutomationProperties.Name="Android app details for this recording">
+                      <StackPanel x:Name="AppDetailsPanel" MaxWidth="1100" HorizontalAlignment="Left">
+                        <local:SelectableText x:Name="AppDetailsOverviewHeading" Style="{StaticResource AppDetailsHeading}"
+                                              Text="Apps in this recording" Margin="0,0,0,4" />
+                        <StackPanel x:Name="AppDetailsOverview" />
+                        <local:SelectableText x:Name="AppDetailsApkHeading" Style="{StaticResource AppDetailsHeading}"
+                                              Text="APK accessibility evidence" />
+                        <StackPanel x:Name="AppDetailsApk" />
+                        <local:SelectableText x:Name="AppDetailsSizesHeading" Style="{StaticResource AppDetailsHeading}"
+                                              Text="Live text sizes before recording" />
+                        <StackPanel x:Name="AppDetailsSizes" />
+                        <local:SelectableText x:Name="AppDetailsFormsHeading" Style="{StaticResource AppDetailsHeading}"
+                                              Text="Form evidence from recorded visits" />
+                        <StackPanel x:Name="AppDetailsForms" />
+                        <local:SelectableText x:Name="AppDetailsReviewsHeading" Style="{StaticResource AppDetailsHeading}"
+                                              Text="Attached app reviews" />
+                        <local:SelectableText x:Name="AppDetailsReviewInstructions" TextWrapping="Wrap" />
+                        <Button x:Name="AttachAppReviewButton" Content="Attach app _review…"
+                                Click="AttachAndroidAppReview_Click" HorizontalAlignment="Left"
+                                Style="{StaticResource AnalysisButton}" Margin="0,6,0,0" />
+                        <local:SelectableText x:Name="AppAccessibilityStatus" TextWrapping="Wrap"
+                                              Margin="0,6,0,0" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
+                        <StackPanel x:Name="AppDetailsReviews" Margin="0,6,0,0" />
+                      </StackPanel>
+                    </ScrollViewer>
+                  </Grid>
                 </TabItem>
               </TabControl>
               <!-- The toast for "Ask the project's model" (owner,

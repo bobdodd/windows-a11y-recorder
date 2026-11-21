@@ -437,11 +437,11 @@ level and the project's models were one paragraph above the list. Built
 2026-11-18 (`PhoneChecksSummary` in `Recorder.Session`,
 `MainWindow.ChecksSummary.cs`).
 
-- The Checks window has two tabs, Findings and Summary. Above both are
-  the settings the checks run with, the audit level and "Phone turned
-  for", and "Ask the project's model", as they change what both tabs
-  show. Where the model cannot be asked, why is said under them, beside
-  the button it disables.
+- The Checks window has Findings and Summary tabs, and an App details
+  tab when the open recording is Android. Above the tabs are the audit
+  level, "Phone turned for" and "Ask the project's model". These govern
+  the results in Findings and Summary. Where the model cannot be asked,
+  the reason is shown under the controls.
 - Findings holds Show current visit, Previous time and Next time, one
   short line, and the list. The line says only what changes with the
   playhead or while the checks run: the apps, screens and visits, the
@@ -476,6 +476,28 @@ level and the project's models were one paragraph above the list. Built
 
 Pushed at 1e7a5fb. On 2026-11-18 the owner checked the Summary tab on the
 target machine: "I have checked the summary tab and it appears correct."
+
+### The App details tab
+
+The App details tab is available for the open Android recording even
+if it contains no saved pre-start snapshot or settled application
+tree. Opening a desktop recording or closing the recording hides the
+tab and returns to Findings if App details was selected.
+
+The tab follows Summary's wrapping, selectable text, heading hierarchy
+and readable line width. It uses a single vertical scroll area and
+section jump buttons instead of expanders. The sections show recorded
+app identities and framework metadata; saved APK evidence and coverage;
+pre-start live text sizes; form labels, hints and states grouped by
+recorded app and visit; and matching attached reviews. Each section
+states when its evidence was not available. See
+[Android app framework metadata](android-framework-metadata.md) for
+provenance and limits.
+
+Reading the tab or using its jump buttons does not seek, query the
+connected phone, re-read an APK or start model checks. Forms populate
+when the existing recorded-tree checks complete. No recording format
+or check changes are needed to reopen older recordings.
 
 ### Toasts for the model checks
 

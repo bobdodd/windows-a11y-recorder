@@ -197,9 +197,7 @@ public partial class MainWindow
             _phoneChecksCancellation?.Dispose();
             _phoneChecksCancellation = null;
             _phoneChecksArchive = _playbackArchive;
-            ShowRecordingTextSizeEvidence(_playbackArchive);
-            ShowAndroidAppEvidence(_playbackArchive);
-            ShowRecordedFormEvidence(_playbackArchive?.PhoneScreens.Recorded == true, null);
+            BindAndroidAppDetails(_playbackArchive);
             _phoneChecks = null;
             _phoneChecksProblem = null;
             _phoneContrast = null;
@@ -268,21 +266,6 @@ public partial class MainWindow
         ShowPhoneScreenRows();
     }
 
-    private void ShowRecordingTextSizeEvidence(SessionPlaybackArchive? archive)
-    {
-        var evidence = archive is null ? null : AndroidTextSizeChecksEvidence.Describe(archive.Manifest, CultureInfo.CurrentCulture);
-        var isPhoneRecording = archive is not null && (archive.PhoneScreens.Recorded || IsPhoneInput(archive));
-        var hasDetails = evidence is { NodeLines.Count: > 0 };
-
-        // Separate from the rows that are rebuilt when checks finish. Neither
-        // the contents nor the open/closed state changes during playback.
-        RecordingTextSizeDetails.IsExpanded = false;
-        RecordingTextSizeDetails.Visibility = hasDetails ? Visibility.Visible : Visibility.Collapsed;
-        RecordingTextSizeNodeText.Text = hasDetails ? string.Join(Environment.NewLine, evidence!.NodeLines) : string.Empty;
-        RecordingTextSizeSummary.Text = evidence?.Summary ?? "Text sizes before recording: no snapshot was saved in this recording.";
-        RecordingTextSizeEvidence.Visibility = evidence is not null || isPhoneRecording ? Visibility.Visible : Visibility.Collapsed;
-    }
-
     // Runs the checks from the tree away from the window's thread, and
     // lists their findings when they are done, if the recording is still
     // open.
@@ -336,12 +319,23 @@ public partial class MainWindow
         }
         while (level != AuditLevel || hold != OrientationHoldSeconds);
 
+        if (!SameRecordedFormEvidence(_phoneChecks, run) || (_phoneChecksProblem is null) != (problem is null))
+        {
+            ShowRecordedFormEvidence(archive, run, failed: problem is not null);
+        }
         _phoneChecks = run;
         _phoneChecksProblem = problem;
-        ShowRecordedFormEvidence(archive.PhoneScreens.Recorded, run, failed: problem is not null);
         ShowPhoneScreenRows();
         return true;
     }
+
+    private static bool SameRecordedFormEvidence(PhoneCheckRun? previous, PhoneCheckRun? current) =>
+        ReferenceEquals(previous, current) || (previous is not null && current is not null &&
+            (previous.WindowsChecked == 0) == (current.WindowsChecked == 0) &&
+            previous.FormEvidence.Count == current.FormEvidence.Count &&
+            previous.FormEvidence.Zip(current.FormEvidence).All(pair =>
+                ReferenceEquals(pair.First.Visit, pair.Second.Visit) && pair.First.TreeTime == pair.Second.TreeTime &&
+                pair.First.Fields.SequenceEqual(pair.Second.Fields, StringComparer.Ordinal)));
 
     // Measures the colours of the text on each settled snapshot's picture,
     // with Windows' OCR finding the text (android-checks.md, steps 4b and
@@ -1486,12 +1480,6 @@ public partial class MainWindow
                 $"App {app.Package}, {device.DescribeVersion(app.Package)}: {Count(app.Screens.Count, "screen")}, {Count(visits, "visit")}",
                 pictures.TimeOf(app.Screens[0].Visits[0]),
                 null));
-            _phoneScreenRows.Add(new PhoneScreenRowView(
-                1,
-                device.DescribeFramework(app.Package),
-                pictures.TimeOf(app.Screens[0].Visits[0]),
-                null) { IsMetadata = true });
-
             // Step 12's warning for an app with no live region in the whole
             // recording, under the app, as it is about all its visits.
             if (_phoneChecks is { } appRun && appRun.AppFindings.Where(finding => finding.Visit.Package == app.Package).ToList() is { Count: > 0 } ofApp)
@@ -2457,10 +2445,7 @@ public sealed class PhoneScreenRowView : INotifyPropertyChanged
     /// <summary>Whether the row heads a check's findings, or says a visit has none or was not checked.</summary>
     public bool IsCheck { get; init; }
 
-    /// <summary>App information, shown as normal text rather than a screen heading.</summary>
-    public bool IsMetadata { get; init; }
-
-    public bool IsHeading => !IsMetadata && (Level < 2 || IsCheck);
+    public bool IsHeading => Level < 2 || IsCheck;
 
     public Thickness Indent => new(Level * 20, 0, 0, 0);
 

@@ -47,7 +47,10 @@ public sealed class AndroidTextSizeManifestTests
                 Assert.Equal(snapshot.Nodes.AsEnumerable(), recorded.Nodes);
                 Assert.Equal(7L, recorded.ApkFonts?.VersionCode);
                 Assert.Equal(["res/font/synthetic.ttf"], recorded.ApkFonts?.FontFiles);
-                Assert.Contains("Bundled font file: res/font/synthetic.ttf", AndroidTextSizeChecksEvidence.DescribeAppFonts(read));
+                var apk = Assert.IsType<AndroidApkDetails>(AndroidApkDetails.From(read));
+                var fontGroup = Assert.Single(apk.Groups);
+                Assert.Equal("Bundled, app-wide", fontGroup.Source);
+                Assert.Equal("res/font/synthetic.ttf", Assert.Single(fontGroup.Items));
                 var evidence = Assert.IsType<AndroidTextSizeChecksEvidence>(
                     AndroidTextSizeChecksEvidence.Describe(read, CultureInfo.InvariantCulture));
                 Assert.Contains("org.example.synthetic", evidence.Summary);
@@ -75,10 +78,16 @@ public sealed class AndroidTextSizeManifestTests
         var now = DateTimeOffset.UtcNow;
         var snapshot = new AndroidTextSizeSnapshot("org.example.synthetic", now, "complete", [])
         {
-            ApkFonts = new(now, "1.0", 7, 1, 1, 0, ["res/font/overflow.ttf"], [], null)
+            ApkFonts = new(now, "1.0", 7, 1, 2, 1, ["res/font/saved.ttf", "res/font/overflow.ttf"],
+                [new("Saved", "fonts/saved.ttf", 400, null), new("Overflow", "fonts/overflow.ttf", 500, "italic")],
+                "One installed split could not be read.")
             {
                 Accessibility = new(1,
-                    [new("declared", "component", "Typography", "base.apk", "res/layout/example.xml / TextView", "18sp")],
+                    [new("declared", "component", "Typography", "base.apk", "res/layout/example.xml / TextView", "18sp"),
+                     new("bundled", "app", "Font file", "base.apk", "res/font/saved.ttf", "res/font/saved.ttf"),
+                     new("declared", "app", "Font family", "base.apk", "assets/FontManifest.json", "Saved; asset fonts/saved.ttf; weight 400"),
+                     new("symbol", "app", "Timing", "base.apk", "classes.dex", "example.Api#delay"),
+                     new("declared", "component", "Form", "base.apk", "res/layout/example.xml", "First\nSecond")],
                     [new("Flutter compiled code", "not decoded", "Compiled Dart code not decoded.")])
             }
         };
@@ -88,14 +97,32 @@ public sealed class AndroidTextSizeManifestTests
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var replay = Assert.IsType<SessionManifest>(JsonSerializer.Deserialize<SessionManifest>(
             JsonSerializer.Serialize(manifest, options), options));
-        Assert.Contains("version 1.0 (code 7): 1 of 1 installed APKs read.", AndroidTextSizeChecksEvidence.SummarizeApkAccessibility(replay));
-        var text = Assert.IsType<string>(AndroidTextSizeChecksEvidence.DescribeApkAccessibility(replay));
-        Assert.Contains("component locator is not a link to a screen visit", text);
-        Assert.Contains("18sp [base.apk: res/layout/example.xml / TextView]", text);
-        Assert.Contains("Flutter compiled code: not decoded", text);
-        Assert.Contains("Bundled font file: res/font/overflow.ttf", text);
+        var apk = Assert.IsType<AndroidApkDetails>(AndroidApkDetails.From(replay));
+        Assert.Contains("version 1.0 (code 7). Read 1 of 2 installed APKs.", apk.Summary);
+        Assert.Equal("One installed split could not be read.", apk.Problem);
+        Assert.Contains("component locator is not a link to a screen visit", apk.Context);
+        Assert.Equal(["Flutter compiled code: not decoded. Compiled Dart code not decoded."], apk.Coverage);
+        Assert.Collection(apk.Groups,
+            files =>
+            {
+                Assert.Equal(("Font file", "Bundled, app-wide"), (files.Topic, files.Source));
+                Assert.Equal(["res/font/saved.ttf [base.apk: res/font/saved.ttf]", "res/font/overflow.ttf"], files.Items);
+            },
+            families =>
+            {
+                Assert.Equal(("Font family", "Declared, app-wide"), (families.Topic, families.Source));
+                Assert.Equal(["Saved; asset fonts/saved.ttf; weight 400 [base.apk: assets/FontManifest.json]",
+                    "Overflow; asset fonts/overflow.ttf; weight 500; style italic"], families.Items);
+            },
+            typography =>
+            {
+                Assert.Equal(("Typography", "Declared, component"), (typography.Topic, typography.Source));
+                Assert.Equal("18sp [base.apk: res/layout/example.xml / TextView]", Assert.Single(typography.Items));
+            },
+            form => Assert.Equal(@"First\u000ASecond [base.apk: res/layout/example.xml]", Assert.Single(form.Items)),
+            symbol => Assert.Equal(("Timing", "API symbol, app-wide"), (symbol.Topic, symbol.Source)));
         Assert.DoesNotContain("18sp", AndroidTextSizeChecksEvidence.Describe(replay, CultureInfo.InvariantCulture)?.Summary);
-        Assert.Null(AndroidTextSizeChecksEvidence.DescribeApkAccessibility(replay with { AndroidPreRecordingTextSizes = null }));
+        Assert.Null(AndroidApkDetails.From(replay with { AndroidPreRecordingTextSizes = null }));
     }
 
     [Fact]

@@ -69,10 +69,10 @@ snapshot of a package being updated concurrently. The recording
 retains this metadata for offline playback; no reinspection is done
 when an old recording opens.
 
-The Checks list shows a wrapping row immediately beneath each app,
-with its framework status, APK coverage, matched names and any problem.
+**Checks > App details > Apps in this recording** shows each app's
+framework status, APK coverage, matched names and any problem.
 Positive wording explicitly says that a bundled library was detected
-at the stop, not that use by this screen was established. Older
+at the stop, not that use by any particular screen was established. Older
 recordings remain valid and show `Framework not recorded.` No manual
 entry or editing flow is added.
 
@@ -212,13 +212,13 @@ complete.
 The optional `androidPreRecordingTextSizes` manifest member contains
 the selected package, host UTC reply time, completion status and size
 evidence. No snapshot member is written with the option off; older
-recordings open without it. **Checks > Findings** shows the open
-recording's snapshot above the app and visit list, even if the selected
-package has no recorded visits. It shows the package, number of nodes
-with a size, any partial status, and the host UTC reply time. Expand
-**Node details** for wrapping, selectable node IDs, pixel sizes, unit
-codes, visibility and missing data. If there is no snapshot, the page
-says so for a phone recording.
+recordings open without it. **Checks > App details > Live text sizes
+before recording** shows the open recording's snapshot, even if the
+selected package has no recorded visits. It shows the package, number
+of nodes with a size, any partial status, and the host UTC reply time.
+The **Accessibility nodes** subsection shows node IDs, pixel sizes, unit
+codes, visibility and missing data without an expander. If there is no
+snapshot, the section says so.
 
 A reply with no size values is still a saved snapshot. Checks says
 `No text sizes available` and distinguishes nodes that did not advertise
@@ -235,17 +235,16 @@ reading.
 
 The snapshot is evidence from one active window before that recording,
 not a reading at the playhead or on later screens. Viewing it does not
-seek or query the phone. Switching recordings replaces the evidence
-and closes the details. Flutter and other framework evidence remains
-under each app. There is no separate menu or viewer, and existing
-recordings with a saved snapshot need no conversion.
+seek or query the phone. Switching recordings replaces the evidence.
+There is no separate menu or viewer, and existing recordings with a
+saved snapshot need no conversion.
 
 The live size snapshot stores no node text, form values, APK files or
-runtime font families. It does not run an accessibility rule or use a model. Windows
-playback showed the evidence in the intended place for a saved snapshot
-with no measured sizes. That confirms playback of the empty result,
-not text-size collection on that screen. The corrected Node details
-contrast still needs a Windows visual check.
+runtime font families. It does not run an accessibility rule or use a
+model. The earlier Findings layout was seen on Windows with a saved
+snapshot that held no measured sizes. That confirms playback of the
+empty result in the earlier layout, not text-size collection or the
+new App details layout.
 
 ### App-wide APK evidence and recorded forms
 
@@ -265,8 +264,11 @@ timestamp, version, split counts, font inventory and Flutter
 uses schema 1, with items identified by kind, scope, topic, split
 basename, locator and value. The sibling coverage list reports what
 each reader read, did not decode, did not identify or could not read
-fully. Older font-only snapshots stay readable. The Checks detail panel
-wraps and permits selection and Ctrl+C.
+fully. Older font-only snapshots stay readable. **APK accessibility
+evidence** groups the entries by topic, kind and scope, with bundled
+fonts and font declarations first. Each structured entry keeps its APK
+basename and source locator. The **Readers and limits** subsection
+shows coverage. Text wraps and permits selection and Ctrl+C.
 
 | Reader | Retained evidence | Limit |
 | --- | --- | --- |
@@ -282,9 +284,9 @@ coverage. A component locator means the source declaration is known,
 not that it appeared on any screen or that it was the effective value.
 Compiled symbols are shown apart from declarations and observed evidence.
 
-The pinned app-wide section distinguishes this inventory from any
-dated APK or source review. To add an existing review, use **Attach
-app review** in **Checks > Findings**. The selected JSON file must
+The **Attached app reviews** section distinguishes this inventory from
+any dated APK or source review. To add an existing review, use **Attach
+app review** in **Checks > App details**. The selected JSON file must
 match a package, version name and version code saved at the stop of
 the open recording. The recorder saves the review as a sidecar inside
 that recording, not globally, and does not overwrite an existing one.
@@ -294,8 +296,8 @@ The review date remains the original date. The schema uses
 `evidence` and `limit` for each entry. The input and saved sidecar
 contain reviewed evidence only, never the APK.
 
-The same pinned area shows **Form evidence from recorded trees** for
-settled app-window trees with visible editable nodes. The evidence
+**Form evidence from recorded visits** shows settled app-window trees
+with visible editable nodes, grouped by app and visit. The evidence
 identifies the screen, visit and tree capture time, and shows label
 links separately from hints, including links outside the captured
 nodes. It also lists published input type, required and invalid

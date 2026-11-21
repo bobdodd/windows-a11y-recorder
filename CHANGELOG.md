@@ -54,6 +54,12 @@ Changes on `main` since 1.1.0, not yet released.
   reader. A component declaration is not linked to a screen visit
   without evidence, and missing compiled-code coverage is explicit.
   This does not add a check, model call or companion protocol change.
+- Android recordings now show **Checks > App details**. The tab shows
+  app versions alongside the framework metadata, bundled fonts and full
+  saved APK inventory, pre-start text sizes, recorded forms, and attached
+  reviews moved from Findings. The always-open sections wrap and support
+  selection and Ctrl+C, with jump buttons and one vertical scroll area.
+  Older recordings remain readable without conversion.
 
 ### Links in an item's text
 
