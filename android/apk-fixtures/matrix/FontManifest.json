@@ -1,0 +1,22 @@
+[
+  {
+    "family": "FixtureFamily",
+    "fonts": [
+      {
+        "asset": "fonts/fixture_block.ttf",
+        "weight": 400,
+        "style": "normal"
+      }
+    ]
+  },
+  {
+    "family": "FixtureDeclarationOnly",
+    "fonts": [
+      {
+        "asset": "fonts/declaration_only.ttf",
+        "weight": 600,
+        "style": "italic"
+      }
+    ]
+  }
+]

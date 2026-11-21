@@ -353,3 +353,18 @@ not each visit. Any later visit-level size capture needs measurements
 from that visit and explicit coverage; it cannot reuse the earlier
 window's sizes, APK resource values or a font declaration. Running
 Compose and React Native screen evidence is still unverified.
+
+### Reusable APK fixtures
+
+The separate [APK evidence fixture app](../../android/apk-fixtures/README.md)
+packages native and local WebView forms, bundled and referenced fonts,
+text-size variants, and declared versus code-only timing examples.
+It is independent of the existing check fixture and recorded tour.
+
+The automated split matrix combines compiled native resources and DEX,
+a synthetic Flutter font manifest, Compose DEX references and real
+Hermes bytecode, with a filename-only bytecode near miss and a failed
+split pull. It runs selected-app preflight with fake ADB, asserts
+temporary-file cleanup and round-trips evidence into App details.
+This is package and playback-data coverage, not a recording of any
+fixture screen or evidence of framework runtime semantics.

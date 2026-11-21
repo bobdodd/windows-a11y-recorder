@@ -33,6 +33,9 @@
     (docs\architecture\android-fixtures.md). It also makes R.java for its
     resource IDs and packs its assets.
 
+    -App apk-fixtures builds the separate APK evidence fixture app with
+    the same pinned tools, generated resource IDs and its own signing key.
+
     Runs on Windows PowerShell 5.1 and on PowerShell 7 on Windows or Linux.
 
     See docs\architecture\android-implementation-plan.md, part 0.
@@ -40,7 +43,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet("companion", "fixtures")] [string] $App = "companion",
+    [ValidateSet("companion", "fixtures", "apk-fixtures")] [string] $App = "companion",
     [string] $WorkFolder = "",
     [string] $DownloadFolder = "",
     [string] $SigningFolder = "",
@@ -75,6 +78,17 @@ $apps = @{
         Key         = "fixtures"
         Title       = "fixture app"
         DisplayName = "Windows A11y Recorder fixtures"
+        MakeR       = $true
+    }
+    "apk-fixtures" = @{
+        Source      = "apk-fixtures"
+        WorkFolder  = "apk-fixture-app"
+        Package     = "io.github.bobdodd.a11yrecorder.apkfixtures"
+        Apk         = "a11yrecorder-apk-fixtures.apk"
+        Info        = "apk-fixtures-app.txt"
+        Key         = "apk-fixtures"
+        Title       = "APK evidence fixture app"
+        DisplayName = "Windows A11y Recorder APK evidence fixtures"
         MakeR       = $true
     }
 }

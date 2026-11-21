@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/apk_form_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+        <TextView
+            android:id="@+id/apk_title"
+            style="@style/ApkFixtureHeading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:accessibilityHeading="true"
+            android:text="@string/apk_title" />
+        <TextView
+            android:id="@+id/apk_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:labelFor="@+id/apk_email"
+            android:text="@string/apk_email_label"
+            android:textSize="14dp" />
+        <EditText
+            android:id="@id/apk_email"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:autofillHints="emailAddress"
+            android:hint="@string/apk_email_hint"
+            android:inputType="textEmailAddress"
+            android:imeOptions="actionNext" />
+        <EditText
+            android:id="@+id/apk_hint_only"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/apk_hint_only"
+            android:inputType="text" />
+        <LinearLayout
+            android:id="@+id/apk_runtime"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+        <TextView
+            android:id="@+id/apk_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:accessibilityLiveRegion="polite"
+            android:text="Timer not started" />
+        <Button
+            android:id="@+id/apk_start"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Start fixture timer" />
+        <Button
+            android:id="@+id/apk_cancel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Cancel fixture timer" />
+        <Button
+            android:id="@+id/apk_web"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Open packaged web form" />
+    </LinearLayout>
+</ScrollView>

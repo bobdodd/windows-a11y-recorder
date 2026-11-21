@@ -27,5 +27,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="TestData\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../android/apk-fixtures/matrix/FontManifest.json"
+          Link="TestData/AndroidApk/FontManifest.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

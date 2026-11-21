@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Packaged web form</title>
+</head>
+<body>
+  <main>
+    <h1 id="web_fixture_heading">Packaged web form</h1>
+    <form>
+      <label for="web_fixture_code">Fixture code</label>
+      <input id="web_fixture_code" type="text" required maxlength="8"
+             placeholder="Enter a code" aria-describedby="web_fixture_help">
+      <p id="web_fixture_help">Use up to eight characters.</p>
+      <input id="web_fixture_hint_only" placeholder="Web hint with no linked label">
+      <input id="web_fixture_hidden" type="hidden" value="hidden-value-sentinel">
+      <p id="web_fixture_status" role="status" aria-live="polite"></p>
+    </form>
+    <img src="badge.svg" alt="Fixture badge">
+  </main>
+  <script>
+    document.body.insertAdjacentHTML("beforeend", "<label>script-generated-sentinel</label>");
+  </script>
+</body>
+</html>

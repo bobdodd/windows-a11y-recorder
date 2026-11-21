@@ -67,6 +67,12 @@ Changes on `main` since 1.1.0, not yet released.
 - Added a recorded-screen baseline for native Views and WebView
   headings from settled fixture trees, independent of the APK inventory.
   No recorder behaviour or check changed.
+- Added a separate APK evidence fixture app for native Views and WebView
+  fonts, text sizes, forms and timing. A generated split matrix tests
+  preflight, evidence provenance, playback and temporary-file cleanup for
+  native, WebView, Flutter, Compose and React Native package evidence.
+  The existing fixture app and tour are unchanged. See
+  `android/apk-fixtures/README.md` for build and coverage details.
 
 ### Links in an item's text
 

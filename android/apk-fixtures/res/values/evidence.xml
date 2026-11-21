@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="apk_title">APK</string>
+    <string name="apk_email_label">Fixture email</string>
+    <string name="apk_email_hint">name@example.invalid</string>
+    <string name="apk_hint_only">Hint with no linked label</string>
+    <string name="apk_unused_string">Unreferenced resource sentinel</string>
+    <item type="id" name="apk_runtime_field" />
+    <item type="id" name="apk_runtime_label" />
+    <style name="ApkFixtureHeading">
+        <item name="android:textSize">18sp</item>
+        <item name="android:fontFamily">@font/apk_family</item>
+    </style>
+</resources>
