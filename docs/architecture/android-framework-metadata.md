@@ -171,10 +171,9 @@ Android text-size unit are separate fields when returned by the
 [rendering information API](https://developer.android.com/reference/kotlin/android/view/accessibility/AccessibilityNodeInfo.ExtraRenderingInfo).
 An unavailable size is not zero; an unavailable unit is not guessed.
 The response contains no node text, field values, font families,
-or copies of APKs. The recorder understands the protocol messages
-but does not request sizes in normal recordings. No picker, checkbox
-or accessibility rule was added. A rebuilt recorder requires the
-matching protocol 9 companion.
+or copies of APKs. The recorder does not request sizes as part of
+its normal capture streams. A rebuilt recorder requires the matching
+protocol 9 companion.
 
 On the physical phone, a temporary instrumentation harness ran the
 production protocol handler and size collector with Android supplying
@@ -188,3 +187,34 @@ invalid package requests returned no node data, and a normal clock
 request still worked. This did not install or validate the release
 companion service or change the installed one. The test APK, build
 files and temporary ADB forward were removed.
+
+### Recording dialog and playback
+
+In Android mode, **Start recording** opens the naming dialog with
+**Visible Android app**, **Refresh visible apps**, and **Collect app
+text sizes before recording**. The picker uses the
+[Android visible-activity diagnostic](https://android.googlesource.com/platform/frameworks/base/+/master/services/core/java/com/android/server/wm/ActivityTaskManagerService.java),
+filtered on the phone to activity package lines. It is not an installed,
+recent or background app inventory. Only the optional snapshot uses
+the selection; it does not launch the app, filter the phone recording
+or save the list. The option starts unchecked each time.
+
+With the option checked, the recorder opens a separate protocol 9
+connection and makes one request after validating the session name,
+before starting the session clock or collectors. The selected app must
+be the active accessibility window, including when more than one app
+is visible. A refusal or timeout keeps the dialog open. Bring the app
+to the foreground and retry, or clear the option to start without a
+snapshot. A partial traversal is labelled rather than presented as
+complete.
+
+The optional `androidPreRecordingTextSizes` manifest member contains
+the selected package, host UTC reply time, completion status and size
+evidence. No snapshot member is written with the option off; older
+recordings open without it. Current session shows the capture summary.
+**Android > Pre-recording text sizes** shows the open recording's
+wrapping, selectable evidence, or says that no snapshot is present.
+The snapshot stores no node text, form values, APK files or font
+families, and does not duplicate the ordinary tree's label and hint
+evidence. It does not run an accessibility rule or use a model. The
+picker and playback still need a Windows/phone acceptance run.

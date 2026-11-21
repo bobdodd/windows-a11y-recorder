@@ -129,6 +129,76 @@ public sealed class AndroidCompanionTests
         Assert.Empty(report.Nodes);
     }
 
+    [Fact]
+    public void Preflight_ListsDistinctVisiblePackagesOnly()
+    {
+        var names = AndroidRecordingPreflight.ReadVisibleApps("""
+            ACTIVITY MANAGER VISIBLE ACTIVITIES (dumpsys activity visible)
+              packageName=org.example.two processName=org.example.two:synthetic
+            unrelated packageName=org.example.not_visible processName=ignored
+                packageName=org.example.one processName=org.example.one
+              packageName=org.example.two processName=org.example.two
+              packageName=org.example.invalid;ignored processName=ignored
+            """);
+        Assert.Equal(["org.example.one", "org.example.two"], names);
+    }
+
+    [Theory]
+    [InlineData("complete")]
+    [InlineData("partial")]
+    public async Task Preflight_RequestsOnlyTheNamedAppAndPreservesEvidence(string status)
+    {
+        const string package = "org.example.synthetic";
+        var token = TestContext.Current.CancellationToken;
+        await using var app = new FakeApp();
+        await using var connection = await app.ConnectAsync();
+        var before = DateTimeOffset.UtcNow;
+        var pending = AndroidRecordingPreflight.ReadTextSizesAsync(connection, package, TimeSpan.FromSeconds(3), token);
+        Assert.Equal(package, await app.TextRenderingAsked.WaitAsync(TimeSpan.FromSeconds(2), token));
+        await app.SendAsync($$"""
+            {"type":"text-rendering","packageName":"{{package}}","status":"{{status}}","nodes":[
+                {"index":0,"viewId":"org.example.synthetic:id/sample","visibleToUser":false,
+                 "status":"available","textSizePx":51.1875,"textSizeUnit":2,"text":"Not retained"},
+                {"index":1,"viewId":null,"visibleToUser":true,"status":"not-advertised"}
+            ]}
+            """.Replace("\r", "").Replace("\n", ""));
+        var snapshot = await pending;
+        Assert.Equal(package, snapshot.PackageName);
+        Assert.Equal(status, snapshot.Status);
+        Assert.InRange(snapshot.ReceivedUtc, before, DateTimeOffset.UtcNow);
+        Assert.Equal(new AndroidTextSizeNode(0, "org.example.synthetic:id/sample", false, "available", 51.1875, 2), snapshot.Nodes[0]);
+        Assert.Null(snapshot.Nodes[1].TextSizePx);
+        Assert.DoesNotContain("Not retained", JsonSerializer.Serialize(snapshot), StringComparison.Ordinal);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AndroidRecordingPreflight.ReadTextSizesAsync(connection, package, TimeSpan.FromSeconds(3), token));
+    }
+
+    [Theory]
+    [InlineData("org.example.synthetic", "not-active", typeof(AndroidTextSizeRefusedException))]
+    [InlineData("org.example.synthetic", "window-changed", typeof(AndroidTextSizeRefusedException))]
+    [InlineData("org.example.different", "complete", typeof(CompanionUnavailableException))]
+    public async Task Preflight_RejectsRefusalsAndRepliesForAnotherApp(string replyPackage, string status, Type exception)
+    {
+        const string package = "org.example.synthetic";
+        var token = TestContext.Current.CancellationToken;
+        await using var app = new FakeApp();
+        await using var connection = await app.ConnectAsync();
+        var pending = AndroidRecordingPreflight.ReadTextSizesAsync(connection, package, TimeSpan.FromSeconds(3), token);
+        Assert.Equal(package, await app.TextRenderingAsked.WaitAsync(TimeSpan.FromSeconds(2), token));
+        await app.SendAsync($$"""{"type":"text-rendering","packageName":"{{replyPackage}}","status":"{{status}}","nodes":[]}""");
+        await Assert.ThrowsAsync(exception, async () => await pending);
+    }
+
+    [Fact]
+    public async Task Preflight_TimesOutWhenAConnectedCompanionDoesNotReply()
+    {
+        var token = TestContext.Current.CancellationToken;
+        await using var app = new FakeApp();
+        await using var connection = await app.ConnectAsync();
+        await Assert.ThrowsAsync<CompanionUnavailableException>(() =>
+            AndroidRecordingPreflight.ReadTextSizesAsync(connection, "org.example.synthetic", TimeSpan.FromMilliseconds(100), token));
+    }
+
     [Theory]
     [InlineData("""{"index":0,"viewId":null,"status":"available","textSizePx":-1}""")]
     [InlineData("""{"index":0,"viewId":null,"status":"available","textSizePx":1,"textSizeUnit":-1}""")]
@@ -925,6 +995,7 @@ public sealed class AndroidCompanionTests
         private readonly TaskCompletionSource _eventsAsked = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _treesAsked = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<string> _settingsAsked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<string> _textRenderingAsked = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private Task? _serving;
 
         public FakeApp(string? greeting = "default", Func<int, string>? volumeReply = null)
@@ -945,6 +1016,8 @@ public sealed class AndroidCompanionTests
 
         /// <summary>Completes with the request when the recorder asks for notices of settings changes.</summary>
         public Task<string> SettingsAsked => _settingsAsked.Task;
+
+        public Task<string> TextRenderingAsked => _textRenderingAsked.Task;
 
         /// <summary>The minimum percents the recorder asked for, in order.</summary>
         public IReadOnlyList<int> VolumeRequests
@@ -1057,6 +1130,12 @@ public sealed class AndroidCompanionTests
                     if (request.RootElement.GetProperty("type").GetString() == "settings")
                     {
                         _settingsAsked.TrySetResult(request.RootElement.GetRawText());
+                        continue;
+                    }
+
+                    if (request.RootElement.GetProperty("type").GetString() == "text-rendering")
+                    {
+                        _textRenderingAsked.TrySetResult(request.RootElement.GetProperty("packageName").GetString()!);
                         continue;
                     }
 

@@ -13,6 +13,9 @@ public sealed record RecordingOptions
     // The recording's readable name, unique within its project, or null to
     // know it by its session key (recording-names.md).
     public string? Name { get; init; }
+
+    public AndroidTextSizeSnapshot? AndroidPreRecordingTextSizes { get; init; }
+
     public bool CaptureKeyboardAndMouse { get; init; } = true;
     public bool CaptureUiAutomation { get; init; } = true;
     public bool CaptureForegroundWindow { get; init; } = true;

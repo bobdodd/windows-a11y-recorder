@@ -254,7 +254,7 @@ public partial class MainWindow : Window
         // 2026-11-14: "Prompt on Start"); it may be left empty, and one
         // another recording in the project has is refused before it starts
         // (recording-names.md).
-        if (AskRecordingName() is not { } naming)
+        if (AskRecordingName(androidSerial) is not { } naming)
         {
             return;
         }
@@ -264,6 +264,7 @@ public partial class MainWindow : Window
         SetConfigurationEnabled(false);
         OpenRecordingButton.IsEnabled = false;
         StatusTextBlock.Text = "Starting recording.";
+        ShowPreRecordingTextSizes(naming.TextSizes);
         _announcedHealthReasons.Clear();
         _talkBack = null;
         var busy = _busy.Begin("Starting recording.");
@@ -278,8 +279,9 @@ public partial class MainWindow : Window
             var status = await _coordinator.StartAsync(new RecordingOptions
             {
                 OutputRoot = OutputRootTextBox.Text,
-                ProjectId = SelectedProjectId,
+                ProjectId = naming.Project,
                 Name = naming.Name,
+                AndroidPreRecordingTextSizes = naming.TextSizes,
                 CaptureKeyboardAndMouse = !android && InputCheckBox.IsChecked == true,
                 CaptureUiAutomation = !android && AutomationCheckBox.IsChecked == true,
                 CaptureForegroundWindow = !android && WindowCheckBox.IsChecked == true,
@@ -301,12 +303,14 @@ public partial class MainWindow : Window
             _statusTimer.Start();
             RefreshStatus();
             busy.Dispose();
-            _busy.AnnounceCompleted(naming.Name is { } named ? $"Recording {named} started." : "Recording started.");
+            var started = naming.Name is { } named ? $"Recording {named} started." : "Recording started.";
+            _busy.AnnounceCompleted(naming.TextSizes is null ? started : $"{PreRecordingTextSizeStatus.Text} {started}");
             StopButton.Focus();
         }
         catch (Exception exception)
         {
             StatusTextBlock.Text = "Recording could not start.";
+            ShowPreRecordingTextSizes(null);
             busy.Dispose();
             MessageBox.Show(
                 this,
@@ -958,6 +962,7 @@ public partial class MainWindow : Window
             CloseAudio();
             CloseRecordingFile();
             _playbackArchive = archive;
+            ShowPreRecordingTextSizes(archive.Manifest.AndroidPreRecordingTextSizes);
             _recordedDocuments = opened.Documents;
             _playbackPositionNanoseconds = 0;
             _displayedFrameIndex = -1;
@@ -1023,6 +1028,7 @@ public partial class MainWindow : Window
         {
             CloseRecordingFile();
             _playbackArchive = null;
+            ShowPreRecordingTextSizes(null);
             ApplyBrowserNavigationFilter();
             BrowserCorrelationTextBox.Text =
                 "The recording could not be opened.";

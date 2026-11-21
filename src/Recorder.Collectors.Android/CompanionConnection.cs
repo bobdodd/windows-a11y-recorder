@@ -69,8 +69,11 @@ public sealed class CompanionConnection : IAsyncDisposable
     private readonly Channel<ReceivedSettingChange> _settings = Channel.CreateUnbounded<ReceivedSettingChange>(
         new UnboundedChannelOptions { SingleReader = true });
     private readonly CancellationTokenSource _closing = new();
+    private readonly TaskCompletionSource<CompanionTextRendering> _textRendering =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task? _readLoop;
     private long _nextId;
+    private int _textRenderingRequested;
     private int _disposed;
 
     private CompanionConnection(Stream stream, Func<long> now, Func<ValueTask>? onDispose)
@@ -295,6 +298,40 @@ public sealed class CompanionConnection : IAsyncDisposable
     public Task RequestSettingChangesAsync(IEnumerable<Recorder.Contracts.AndroidSetting> settings, CancellationToken cancellation) =>
         SendAsync(CompanionProtocol.SettingsRequest(settings), cancellation);
 
+    /// <summary>One request on a separate pre-recording connection, not part of the live capture streams.</summary>
+    internal async Task<CompanionTextRendering> ReadTextRenderingAsync(
+        string package, TimeSpan timeout, CancellationToken cancellation)
+    {
+        if (Interlocked.Exchange(ref _textRenderingRequested, 1) != 0)
+        {
+            throw new InvalidOperationException("The connection already requested one text-size snapshot.");
+        }
+
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        limit.CancelAfter(timeout);
+        try
+        {
+            await SendAsync(CompanionProtocol.TextRenderingRequest(package), limit.Token).ConfigureAwait(false);
+            var completed = await Task.WhenAny(_textRendering.Task, Closed).WaitAsync(limit.Token).ConfigureAwait(false);
+            if (completed == Closed && !_textRendering.Task.IsCompletedSuccessfully)
+            {
+                throw new CompanionUnavailableException(await Closed.ConfigureAwait(false));
+            }
+
+            var reply = await _textRendering.Task.ConfigureAwait(false);
+            if (!string.Equals(reply.PackageName, package, StringComparison.Ordinal))
+            {
+                throw new CompanionUnavailableException("The companion answered for a different app.");
+            }
+
+            return reply;
+        }
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+        {
+            throw new CompanionUnavailableException("The companion did not answer the text-size request in time.");
+        }
+    }
+
     private async Task SendAsync(string line, CancellationToken cancellation)
     {
         var bytes = Encoding.UTF8.GetBytes(line);
@@ -371,6 +408,9 @@ public sealed class CompanionConnection : IAsyncDisposable
                         break;
                     case CompanionSettingChanged setting:
                         _settings.Writer.TryWrite(new ReceivedSettingChange(setting, at));
+                        break;
+                    case CompanionTextRendering rendering when Volatile.Read(ref _textRenderingRequested) != 0:
+                        _textRendering.TrySetResult(rendering);
                         break;
                     case CompanionError error:
                         LastAppError = error.Message;
@@ -509,6 +549,12 @@ public static class CompanionLink
             client.Dispose();
             await RemoveForwardAsync().ConfigureAwait(false);
             throw new CompanionUnavailableException($"The recorder could not connect to adb's forwarded port {port}: {ex.Message}", ex);
+        }
+        catch (OperationCanceledException)
+        {
+            client.Dispose();
+            await RemoveForwardAsync().ConfigureAwait(false);
+            throw;
         }
 
         return await CompanionConnection.ConnectAsync(

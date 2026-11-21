@@ -348,6 +348,9 @@
                 Style="{StaticResource AnalysisMenuItem}"
                 Header="Set _up Android recording..."
                 Click="AndroidSetupMenuItem_Click" />
+      <MenuItem Style="{StaticResource AnalysisMenuItem}"
+                Header="Pre-recording _text sizes..."
+                Click="AndroidTextSizesMenuItem_Click" />
     </MenuItem>
   </Menu>
   <Grid>
@@ -694,6 +697,10 @@
                 <local:SelectableText x:Name="DurationTextBlock"
                            Margin="0,6,0,0"
                            Text="Duration: 00:00:00" />
+                <local:SelectableText x:Name="PreRecordingTextSizeStatus"
+                           Margin="0,4,0,0"
+                           TextWrapping="Wrap"
+                           Visibility="Collapsed" />
                 <local:SelectableText x:Name="EvidenceTextBlock"
                            Margin="0,4,0,0"
                            Text="Events: 0 accepted, 0 dropped" />

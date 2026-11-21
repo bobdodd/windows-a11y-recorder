@@ -6,6 +6,8 @@ using System.Windows.Controls;
 using Npgsql;
 using Recorder.Analysis;
 using Recorder.Analysis.Android;
+using Recorder.Collectors.Android;
+using Recorder.Contracts;
 using Recorder.Database;
 using Recorder.Session;
 
@@ -170,7 +172,7 @@ public partial class MainWindow
 
     // Asks for the name of the recording about to start, in the project
     // chosen for it; null when the auditor cancels, so it does not start.
-    private (string? Name, Guid Project)? AskRecordingName()
+    private (string? Name, Guid Project, AndroidTextSizeSnapshot? TextSizes)? AskRecordingName(string? androidSerial)
     {
         if (_database is not { } database)
         {
@@ -186,8 +188,11 @@ public partial class MainWindow
                 "No two recordings in a project can have the same name. You can rename it later, from the Project menu or in Projects and recordings.",
             "",
             "_Start recording",
-            name => database.Store.RecordingNameTakenAsync(project, name));
-        return dialog.ShowDialog() == true ? (dialog.RecordingName, project) : null;
+            name => database.Store.RecordingNameTakenAsync(project, name),
+            androidSerial is not null
+                ? new AndroidRecordingPreflight(new AdbProcess(AndroidTools.Adb(AndroidTools.DataFolder)), androidSerial)
+                : null);
+        return dialog.ShowDialog() == true ? (dialog.RecordingName, project, dialog.TextSizes) : null;
     }
 
     // Renames the open recording (recording-names.md), from the Project menu.

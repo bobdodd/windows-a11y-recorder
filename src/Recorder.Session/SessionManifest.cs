@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using Recorder.Contracts;
 
 namespace Recorder.Session;
 
@@ -19,7 +21,9 @@ public sealed record SessionManifest(
     IReadOnlyList<SessionArtifact> Artifacts,
     long AcceptedEventCount,
     long DroppedEventCount,
-    string? Failure);
+    string? Failure,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    AndroidTextSizeSnapshot? AndroidPreRecordingTextSizes = null);
 
 public sealed record SessionRecordingConfiguration(
     bool CaptureKeyboardAndMouse,

@@ -1,8 +1,12 @@
+using System.ComponentModel;
+using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using Npgsql;
+using Recorder.Collectors.Android;
+using Recorder.Contracts;
 using Recorder.Database;
 
 namespace Recorder.App;
@@ -22,10 +26,20 @@ internal sealed class RecordingNameDialog : Window
     private readonly SelectableText _problem;
     private readonly Button _confirm;
     private readonly Func<string?, Task<bool>> _taken;
+    private readonly AndroidRecordingOptions? _android;
+    private readonly CancellationToken _dialogToken;
 
     /// <param name="taken">Whether a name is already used in the project, for another recording.</param>
-    public RecordingNameDialog(Window owner, string title, string introduction, string? current, string confirm, Func<string?, Task<bool>> taken)
+    public RecordingNameDialog(Window owner, string title, string introduction, string? current, string confirm,
+        Func<string?, Task<bool>> taken, AndroidRecordingPreflight? android = null)
     {
+        var closed = new CancellationTokenSource();
+        _dialogToken = closed.Token;
+        Closed += (_, _) =>
+        {
+            closed.Cancel();
+            closed.Dispose();
+        };
         _taken = taken;
         Owner = owner;
         Title = title;
@@ -42,10 +56,15 @@ internal sealed class RecordingNameDialog : Window
         AutomationProperties.SetName(_name, "Recording name");
         root.Children.Add(new Label { Content = "Recording _name, or empty for none:", Target = _name, Padding = new Thickness(0) });
         root.Children.Add(_name);
+        if (android is not null)
+        {
+            _android = new AndroidRecordingOptions(android, _dialogToken);
+            root.Children.Add(_android);
+        }
 
-        // Why the name was refused, spoken as it appears.
+        // Why recording or renaming was refused, spoken as it appears.
         _problem = new SelectableText { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8), Visibility = Visibility.Collapsed };
-        AutomationProperties.SetName(_problem, "Problem with the name");
+        AutomationProperties.SetName(_problem, "Problem");
         root.Children.Add(_problem);
 
         var buttons = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
@@ -54,7 +73,13 @@ internal sealed class RecordingNameDialog : Window
         buttons.Children.Add(_confirm);
         buttons.Children.Add(new Button { Content = "Cancel", MinWidth = 88, MinHeight = 44, IsCancel = true });
         root.Children.Add(buttons);
-        Content = root;
+        MaxHeight = SystemParameters.WorkArea.Height;
+        Content = new ScrollViewer
+        {
+            Content = root,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
         Loaded += (_, _) =>
         {
             _name.Focus();
@@ -64,40 +89,95 @@ internal sealed class RecordingNameDialog : Window
 
     /// <summary>The name typed, with spaces at either end removed, or null when it was left empty.</summary>
     public string? RecordingName { get; private set; }
+    public AndroidTextSizeSnapshot? TextSizes { get; private set; }
 
     private async Task ConfirmAsync()
     {
         var name = RecordingNames.Normalize(_name.Text);
         _confirm.IsEnabled = false;
+        _problem.Visibility = Visibility.Collapsed;
+        _name.IsReadOnly = true;
+        if (_android is not null)
+        {
+            _android.IsEnabled = false;
+        }
+
         try
         {
-            if (await _taken(name))
+            var taken = await _taken(name);
+            _dialogToken.ThrowIfCancellationRequested();
+            if (taken)
             {
                 Refuse($"A recording named {name} is already in this project. Give this recording another name, or leave it empty.");
                 return;
             }
+
+            if (_android is not null)
+            {
+                TextSizes = await _android.CollectAsync(_dialogToken);
+                _dialogToken.ThrowIfCancellationRequested();
+            }
+        }
+        catch (OperationCanceledException) when (_dialogToken.IsCancellationRequested)
+        {
+            return;
         }
         catch (NpgsqlException exception)
         {
-            Refuse("Whether the name is free could not be checked: " + exception.Message);
+            if (!_dialogToken.IsCancellationRequested)
+            {
+                Refuse("Whether the name is free could not be checked: " + exception.Message);
+            }
+
+            return;
+        }
+        catch (AndroidTextSizeRefusedException exception)
+        {
+            if (!_dialogToken.IsCancellationRequested)
+            {
+                Refuse(exception.Message + " Retry or clear the text sizes checkbox to record without a snapshot.", focusName: false);
+            }
+
+            return;
+        }
+        catch (Exception exception) when (exception is IOException or Win32Exception)
+        {
+            if (!_dialogToken.IsCancellationRequested)
+            {
+                Refuse("Text sizes could not be read. Check the Android connection and companion in Android device checks, " +
+                    "then retry or clear the checkbox.", focusName: false);
+            }
+
             return;
         }
         finally
         {
             _confirm.IsEnabled = true;
+            _name.IsReadOnly = false;
+            if (_android is not null)
+            {
+                _android.IsEnabled = true;
+            }
         }
 
         RecordingName = name;
         DialogResult = true;
     }
 
-    private void Refuse(string text)
+    private void Refuse(string text, bool focusName = true)
     {
         _problem.Text = text;
         _problem.Visibility = Visibility.Visible;
         var peer = UIElementAutomationPeer.FromElement(_problem) ?? UIElementAutomationPeer.CreatePeerForElement(_problem);
         peer?.RaiseNotificationEvent(AutomationNotificationKind.Other, AutomationNotificationProcessing.ImportantAll, text, "recording-name");
-        _name.Focus();
-        _name.SelectAll();
+        if (focusName)
+        {
+            _name.Focus();
+            _name.SelectAll();
+        }
+        else
+        {
+            _problem.Focus();
+        }
     }
 }

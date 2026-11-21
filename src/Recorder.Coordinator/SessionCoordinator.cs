@@ -540,7 +540,8 @@ public sealed class SessionCoordinator : IAsyncDisposable
             artifacts,
             AcceptedCount(),
             DroppedCount(),
-            failure);
+            failure,
+            _options.AndroidPreRecordingTextSizes);
         await SessionManifestWriter.WriteAsync(
             Path.Combine(_sessionDirectory, "manifest.json"),
             manifest,

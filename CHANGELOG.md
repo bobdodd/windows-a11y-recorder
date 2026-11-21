@@ -24,9 +24,14 @@ Changes on `main` since 1.1.0, not yet released.
   active app's text sizes. It keeps pixel size, unit, Android's
   visibility flag and availability separate and does not return any
   text values. A physical-phone test of the request and collector
-  matched all six synthetic results. The recorder does not request
-  this during normal capture, and no checkbox or check was added.
-  A rebuilt recorder needs the matching protocol 9 companion.
+  matched all six synthetic results. A rebuilt recorder needs the
+  matching protocol 9 companion.
+- The Android recording dialog lists apps with visible activities on the
+  connected phone and offers an unchecked option to collect text sizes
+  before recording. It keeps one snapshot for the selected active app in
+  the session manifest, viewable from the Android menu. Normal recording
+  does not request sizes with the option off. This adds evidence, not a
+  check, and does not copy or inspect an APK.
 
 ### Links in an item's text
 
