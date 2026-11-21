@@ -70,6 +70,35 @@ public sealed class AndroidTextSizeManifestTests
     }
 
     [Fact]
+    public void StructuredApkEvidenceRemainsRecordingLocalAndSeparateFromLiveSizes()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = new AndroidTextSizeSnapshot("org.example.synthetic", now, "complete", [])
+        {
+            ApkFonts = new(now, "1.0", 7, 1, 1, 0, ["res/font/overflow.ttf"], [], null)
+            {
+                Accessibility = new(1,
+                    [new("declared", "component", "Typography", "base.apk", "res/layout/example.xml / TextView", "18sp")],
+                    [new("Flutter compiled code", "not decoded", "Compiled Dart code not decoded.")])
+            }
+        };
+        var manifest = new SessionManifest(SessionSchemaVersions.Manifest, "synthetic", "completed", now.AddSeconds(1),
+            now.AddSeconds(2), 1_000_000_000, 100, 0, "test", "test", "test",
+            new(false, false, false, false, 0, false, false), [], [], 0, 0, null, snapshot);
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var replay = Assert.IsType<SessionManifest>(JsonSerializer.Deserialize<SessionManifest>(
+            JsonSerializer.Serialize(manifest, options), options));
+        Assert.Contains("version 1.0 (code 7): 1 of 1 installed APKs read.", AndroidTextSizeChecksEvidence.SummarizeApkAccessibility(replay));
+        var text = Assert.IsType<string>(AndroidTextSizeChecksEvidence.DescribeApkAccessibility(replay));
+        Assert.Contains("component locator is not a link to a screen visit", text);
+        Assert.Contains("18sp [base.apk: res/layout/example.xml / TextView]", text);
+        Assert.Contains("Flutter compiled code: not decoded", text);
+        Assert.Contains("Bundled font file: res/font/overflow.ttf", text);
+        Assert.DoesNotContain("18sp", AndroidTextSizeChecksEvidence.Describe(replay, CultureInfo.InvariantCulture)?.Summary);
+        Assert.Null(AndroidTextSizeChecksEvidence.DescribeApkAccessibility(replay with { AndroidPreRecordingTextSizes = null }));
+    }
+
+    [Fact]
     public void ChecksEvidenceDoesNotGuessMissingUnitsOrCarryOverToAnotherRecording()
     {
         var receipt = new DateTimeOffset(2026, 1, 1, 13, 0, 0, TimeSpan.FromHours(1));

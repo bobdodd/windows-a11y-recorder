@@ -250,14 +250,37 @@ contrast still needs a Windows visual check.
 ### App-wide APK evidence and recorded forms
 
 The opt-in read pulls only the selected package's installed base and
-split APKs. It lists bundled font files and reads bounded Flutter
-`FontManifest.json` declarations from the ZIPs. The APKs are deleted
-individually on success, error or cancellation; no APK is decompiled,
-and no extracted file is kept. The recording holds the attempted
-read's timestamp, version, coverage, font declarations and any limits.
-If the installed version cannot be verified across the read, the
-inventory is not attributed to it. Library identification at the
-recording stop remains separate and unchanged.
+split APKs. It runs all applicable readers on each APK without choosing
+one framework for the package. Each APK is deleted after reading,
+including on error or cancellation. The readers open archive entries
+in memory and do not execute app code or create extracted files. If
+cleanup fails, recording preflight refuses to start. If the installed
+version or last update time cannot be verified across the read, the
+inventory is discarded. Library identification at recording stop
+remains separate and unchanged.
+
+The existing `androidPreRecordingTextSizes.apkFonts` member retains its
+timestamp, version, split counts, font inventory and Flutter
+`FontManifest.json` declarations. Its optional `accessibility` member
+uses schema 1, with items identified by kind, scope, topic, split
+basename, locator and value. The sibling coverage list reports what
+each reader read, did not decode, did not identify or could not read
+fully. Older font-only snapshots stay readable. The Checks detail panel
+wraps and permits selection and Ctrl+C.
+
+| Reader | Retained evidence | Limit |
+| --- | --- | --- |
+| ZIP and Flutter font declarations | Font paths and declarations of family, asset, weight and style; framework and bundle markers | Bundling does not prove use. Flutter AOT styles, scaling, forms, timers and semantic call paths are not decoded. |
+| Android compiled XML and resource tables | Allowlisted manifest/layout/font attributes, explicit label declarations, direct Android style entries and their configuration variants, plus directly referenced fonts, dimensions, IDs and accessibility strings | Resource IDs remain explicit. It does not calculate inherited themes, arbitrary reference chains or the device's effective resources. |
+| Android DEX | Allowlisted View, Compose semantics and timing API symbols | It does not establish a call, its arguments, runtime use, a route, or the behaviour of a timer. |
+| React Native bundle | Bundle location and, when recognized, Hermes header signature | Bundled JavaScript and Hermes declarations and calls are not decoded. |
+| Local HTML and SVG | Allowlisted semantics, component/form markup, label associations, and numeric HTML refresh declarations | No scripts, network, CSS cascade, live DOM, entered values or redirect URL. |
+
+The compiled resource structures follow the [Android resource format](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/libs/androidfw/include/androidfw/ResourceTypes.h).
+Readers cap document sizes, item sizes and counts and disclose incomplete
+coverage. A component locator means the source declaration is known,
+not that it appeared on any screen or that it was the effective value.
+Compiled symbols are shown apart from declarations and observed evidence.
 
 The pinned app-wide section distinguishes this inventory from any
 dated APK or source review. To add an existing review, use **Attach
@@ -280,7 +303,7 @@ states and whether descriptions or error text existed. It does not
 repeat entered field values, assume adjacent text is a label, or
 interpret missing evidence as a conformance result.
 
-The automated APK inventory does not recover native style resolution,
-runtime typefaces, Flutter compiled text scaling or application form
-logic. An attached review and the recorded tree can supply independent
-evidence without turning either into a per-screen style measurement.
+The attached review and recorded tree can supply additional independent
+evidence, without turning either into a per-screen style measurement.
+No APK-derived item is assigned to a recorded screen or visit by this
+inventory. No new conformance rule or model is run.

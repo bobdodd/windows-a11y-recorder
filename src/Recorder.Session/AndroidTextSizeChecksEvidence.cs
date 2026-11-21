@@ -6,6 +6,66 @@ namespace Recorder.Session;
 /// <summary>Display-only evidence for the open recording, with no playback position.</summary>
 public sealed record AndroidTextSizeChecksEvidence(string Summary, IReadOnlyList<string> NodeLines)
 {
+    public static string SummarizeApkAccessibility(SessionManifest manifest)
+    {
+        if (manifest.AndroidPreRecordingTextSizes is not { ApkFonts: { } apk } snapshot)
+        {
+            return "APK accessibility evidence: not collected.";
+        }
+
+        var version = apk.VersionName is { } name && apk.VersionCode is { } code
+            ? $", version {name} (code {code})" : ", version unavailable";
+        var detail = apk.Accessibility is { SchemaVersion: 1 } evidence
+            ? $" {evidence.Items.Count} source entries saved."
+            : " Font-only inventory.";
+        return $"APK accessibility evidence for {snapshot.PackageName}{version}: " +
+            $"{apk.ApksRead} of {apk.ApksTotal} installed APKs read." +
+            (apk.ApksRead > 0 ? detail : " No APK evidence available.");
+    }
+
+    public static string? DescribeApkAccessibility(SessionManifest manifest)
+    {
+        if (manifest.AndroidPreRecordingTextSizes is not { ApkFonts: { Accessibility: { SchemaVersion: 1 } evidence } apk } snapshot)
+        {
+            return DescribeAppFonts(manifest);
+        }
+
+        var version = apk.VersionName is { } name && apk.VersionCode is { } code
+            ? $"version {name} (code {code})" : "version unavailable";
+        var lines = new List<string>
+        {
+            $"APK accessibility evidence for {snapshot.PackageName}, {version}. " +
+            $"Read before recording ({apk.ReadUtc.UtcDateTime:yyyy-MM-dd HH:mm:ss 'UTC'}). " +
+            "These are package artifacts and declarations, not observations from a recorded window. " +
+            "A component locator is not a link to a screen visit."
+        };
+        if (apk.Problem is { } problem)
+        {
+            lines.Add($"Incomplete: {problem}");
+        }
+        lines.Add("");
+        lines.Add("Coverage");
+        lines.AddRange(evidence.Coverage.Select(item => $"{item.Reader}: {item.Status}. {item.Detail}"));
+        foreach (var group in evidence.Items.GroupBy(item => (item.Kind, item.Scope, item.Category))
+            .OrderBy(group => group.Key.Kind, StringComparer.Ordinal).ThenBy(group => group.Key.Category, StringComparer.Ordinal))
+        {
+            var scope = group.Key.Scope == "app" ? "app-wide" : "component";
+            lines.Add("");
+            lines.Add($"{group.Key.Category} ({group.Key.Kind}, {scope})");
+            lines.AddRange(group.Select(item => $"{ShowValue(item.Value)} [{item.Split}: {item.Locator}]"));
+        }
+        // The legacy font lists are still available if the larger structured
+        // inventory could not retain a particular entry.
+        var savedFontPaths = evidence.Items.Where(item => item.Category == "Font file")
+            .Select(item => item.Value).ToHashSet(StringComparer.Ordinal);
+        lines.AddRange(apk.FontFiles.Where(path => !savedFontPaths.Contains(path)).Select(path => $"Bundled font file: {path}"));
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string ShowValue(string value) => value.Any(char.IsControl)
+        ? string.Concat(value.Select(character => char.IsControl(character) ? $"\\u{(int)character:X4}" : character.ToString()))
+        : value;
+
     public static string? DescribeAppFonts(SessionManifest manifest)
     {
         if (manifest.AndroidPreRecordingTextSizes is not { ApkFonts: { } fonts } snapshot)

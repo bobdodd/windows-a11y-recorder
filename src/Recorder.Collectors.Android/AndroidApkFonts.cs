@@ -5,7 +5,7 @@ using Recorder.Contracts;
 
 namespace Recorder.Collectors.Android;
 
-/// <summary>Reads only supported font metadata from the selected app's installed APKs.</summary>
+/// <summary>Reads allowlisted accessibility metadata from the selected app's installed APKs.</summary>
 internal static class AndroidApkFonts
 {
     private const string FlutterManifest = "assets/flutter_assets/FontManifest.json";
@@ -28,6 +28,7 @@ internal static class AndroidApkFonts
         var paths = Array.Empty<string>();
         var files = new SortedSet<string>(StringComparer.Ordinal);
         var families = new HashSet<AndroidApkFontFamily>();
+        var inventory = new AndroidApkAccessibilityInventory();
         var problems = new SortedSet<string>(StringComparer.Ordinal);
         var read = 0;
         var manifests = 0;
@@ -49,7 +50,7 @@ internal static class AndroidApkFonts
                     problems.Add("The installed package exceeded the 64-APK collection limit.");
                 }
 
-                foreach (var remote in paths.Take(64))
+                foreach (var remote in paths.OrderBy(path => Path.GetFileName(path) != "base.apk").Take(64))
                 {
                     token.ThrowIfCancellationRequested();
                     // apk files are never unpacked into loose files, opened as
@@ -69,6 +70,8 @@ internal static class AndroidApkFonts
                         var found = Inspect(archive, token);
                         files.UnionWith(found.Files);
                         families.UnionWith(found.Families);
+                        inventory.Inspect(archive, Path.GetFileName(remote), found.Files, found.Families,
+                            found.ManifestRead && !found.Incomplete, token);
                         read++;
                         manifests += found.ManifestRead ? 1 : 0;
                         if (found.Incomplete)
@@ -78,7 +81,6 @@ internal static class AndroidApkFonts
                         if (files.Count > MaxEvidenceItems || families.Count > MaxEvidenceItems)
                         {
                             problems.Add("The recording's font evidence exceeded its collection limit.");
-                            break;
                         }
                     }
                     catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception)
@@ -104,12 +106,12 @@ internal static class AndroidApkFonts
         }
         catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
         {
-            problems.Add("The APK font read reached its 90-second time limit.");
+            problems.Add("The APK accessibility read reached its 90-second time limit.");
         }
         catch (Exception error) when (error is not AndroidTextSizeRefusedException &&
             error is IOException or UnauthorizedAccessException or Win32Exception)
         {
-            problems.Add("The APK font read could not finish.");
+            problems.Add("The APK accessibility read could not finish.");
         }
 
         cancellation.ThrowIfCancellationRequested();
@@ -134,6 +136,7 @@ internal static class AndroidApkFonts
             {
                 files.Clear();
                 families.Clear();
+                inventory = new();
                 manifests = 0;
                 read = 0;
                 problems.Add("The installed version was not stable or could not be verified across the APK read.");
@@ -144,7 +147,10 @@ internal static class AndroidApkFonts
             files.Take(MaxEvidenceItems).ToArray(), families.OrderBy(item => item.Family, StringComparer.Ordinal)
                 .ThenBy(item => item.Asset, StringComparer.Ordinal).ThenBy(item => item.Weight)
                 .ThenBy(item => item.Style, StringComparer.Ordinal).Take(MaxEvidenceItems).ToArray(),
-            problems.Count == 0 ? null : string.Join(' ', problems));
+            problems.Count == 0 ? null : string.Join(' ', problems))
+        {
+            Accessibility = (read == 0 ? new AndroidApkAccessibilityInventory() : inventory).Build(read, paths.Length)
+        };
     }
 
     private static async Task<AndroidAppVersion?> VersionAsync(IAdb adb, string serial, string package, CancellationToken token)

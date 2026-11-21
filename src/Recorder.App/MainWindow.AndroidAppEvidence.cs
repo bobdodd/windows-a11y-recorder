@@ -30,10 +30,10 @@ public partial class MainWindow
         }
 
         var descriptions = new List<string>();
-        var fontEvidence = AndroidTextSizeChecksEvidence.DescribeAppFonts(archive.Manifest);
-        if (fontEvidence is not null)
+        var apkEvidence = AndroidTextSizeChecksEvidence.DescribeApkAccessibility(archive.Manifest);
+        if (apkEvidence is not null)
         {
-            descriptions.Add(fontEvidence);
+            descriptions.Add(apkEvidence);
         }
         var attached = 0;
         foreach (var package in packages)
@@ -59,8 +59,8 @@ public partial class MainWindow
             ? "App accessibility review: no matching APK or source review attached to this recording."
             : $"App accessibility review: {attached} of {packages.Count} recorded apps have an attached review. " +
                 "This is app-version evidence, not a measurement from a screen or playback time.";
-        AppAccessibilitySummary.Text = (fontEvidence is null ? "App-wide APK font inventory: not collected. " :
-            "App-wide APK font inventory: an attempt was saved before recording. ") + reviewSummary;
+        AppAccessibilitySummary.Text = AndroidTextSizeChecksEvidence.SummarizeApkAccessibility(archive.Manifest) +
+            Environment.NewLine + reviewSummary;
         AppAccessibilityDetails.Visibility = descriptions.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         AppAccessibilityBody.Text = string.Join(Environment.NewLine + Environment.NewLine, descriptions);
     }

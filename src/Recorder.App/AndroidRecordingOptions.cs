@@ -40,7 +40,8 @@ internal sealed class AndroidRecordingOptions : StackPanel
         Children.Add(new SelectableText
         {
             Text = "Optional. Bring the selected app to the foreground on the phone. " +
-                "The recorder checks its APKs for bundled font declarations, deletes the temporary copies, then reads live text sizes without text or entered values. " +
+                "The recorder reads accessibility declarations and bundled fonts from its APKs, deletes the temporary copies, " +
+                "then reads live text sizes without text or entered values. " +
                 "Leaving this off records the phone as usual.",
             TextWrapping = TextWrapping.Wrap
         });
@@ -60,7 +61,7 @@ internal sealed class AndroidRecordingOptions : StackPanel
             throw new AndroidTextSizeRefusedException("Select a visible Android app before requesting accessibility evidence.");
         }
 
-        SetStatus("Reading app-wide font declarations from the selected app's installed APKs.");
+        SetStatus("Reading accessibility evidence from the selected app's installed APKs.");
         try
         {
             var fonts = await _phone.ReadApkFontsAsync(package, cancellation);

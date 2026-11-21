@@ -21,6 +21,10 @@ public sealed record AndroidTextSizeNode(
 public sealed record AndroidApkFontSnapshot(
     DateTimeOffset ReadUtc, string? VersionName, long? VersionCode,
     int ApksRead, int ApksTotal, int FlutterManifestsRead,
-    IReadOnlyList<string> FontFiles, IReadOnlyList<AndroidApkFontFamily> FlutterFamilies, string? Problem);
+    IReadOnlyList<string> FontFiles, IReadOnlyList<AndroidApkFontFamily> FlutterFamilies, string? Problem)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AndroidApkAccessibilityEvidence? Accessibility { get; init; }
+}
 
 public sealed record AndroidApkFontFamily(string Family, string? Asset, int? Weight, string? Style);

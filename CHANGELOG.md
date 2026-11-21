@@ -46,6 +46,14 @@ Changes on `main` since 1.1.0, not yet released.
   repeating entered values. A dated, existing APK review can be attached
   locally to a recording that captured the same package and app version.
   No rule or model is added.
+- The APK opt-in now saves structured evidence from the selected app's
+  installed splits at the top of **Checks > Findings**. It keeps bundled
+  fonts, Flutter font declarations, Android layout and style properties,
+  direct resource targets, HTML and SVG accessibility markup, and
+  allowlisted DEX symbols distinct. Mixed packages run every applicable
+  reader. A component declaration is not linked to a screen visit
+  without evidence, and missing compiled-code coverage is explicit.
+  This does not add a check, model call or companion protocol change.
 
 ### Links in an item's text
 

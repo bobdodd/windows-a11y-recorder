@@ -67,6 +67,10 @@ public sealed class AndroidAppAccessibilityEvidenceTests
                 Assert.Equal(["res/font/synthetic.ttf"], result.FontFiles);
                 Assert.Equal(new AndroidApkFontFamily("Synthetic", "fonts/synthetic.ttf", 500, "italic"), Assert.Single(result.FlutterFamilies));
                 Assert.Null(result.Problem);
+                var evidence = Assert.IsType<AndroidApkAccessibilityEvidence>(result.Accessibility);
+                Assert.Contains(evidence.Items, item => item.Kind == "bundled" && item.Locator == "res/font/synthetic.ttf");
+                Assert.Contains(evidence.Items, item => item.Kind == "declared" && item.Value.Contains("weight 500; style italic", StringComparison.Ordinal));
+                Assert.Contains(evidence.Coverage, item => item.Reader == "Android layout and font XML" && item.Status == "partial");
             }
             else
             {
@@ -74,6 +78,7 @@ public sealed class AndroidAppAccessibilityEvidenceTests
                 Assert.Empty(result.FontFiles);
                 Assert.Empty(result.FlutterFamilies);
                 Assert.NotNull(result.Problem);
+                Assert.Empty(Assert.IsType<AndroidApkAccessibilityEvidence>(result.Accessibility).Items);
             }
         }
         Assert.False(File.Exists(Assert.Single(paths)));

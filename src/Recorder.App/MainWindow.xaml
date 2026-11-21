@@ -1741,12 +1741,12 @@
                                             Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
                       <Expander x:Name="AppAccessibilityDetails" HorizontalContentAlignment="Stretch">
                         <Expander.Header>
-                          <TextBlock Text="App-wide APK and review details" Foreground="#CDCCCA" MinHeight="44" Padding="6,12" />
+                          <TextBlock Text="APK evidence and app review details" Foreground="#CDCCCA" MinHeight="44" Padding="6,12" />
                         </Expander.Header>
                         <TextBox x:Name="AppAccessibilityBody" IsReadOnly="True" IsUndoEnabled="False"
                                  MaxHeight="150" Padding="6" TextWrapping="Wrap"
                                  HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
-                                 AutomationProperties.Name="App-version review evidence and limits" />
+                                 AutomationProperties.Name="APK declarations, bundled assets, review evidence and limits" />
                       </Expander>
                     </StackPanel>
                     <StackPanel x:Name="RecordingTextSizeEvidence"
