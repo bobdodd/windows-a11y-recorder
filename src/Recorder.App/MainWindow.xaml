@@ -1740,7 +1740,7 @@
                                 HorizontalContentAlignment="Stretch"
                                 AutomationProperties.Name="Pre-recording text-size node details">
                         <Expander.Header>
-                          <TextBlock Text="Node details" MinHeight="44" Padding="6,12" />
+                          <TextBlock Text="Node details" Foreground="#CDCCCA" MinHeight="44" Padding="6,12" />
                         </Expander.Header>
                         <TextBox x:Name="RecordingTextSizeNodeText"
                                  IsReadOnly="True"
@@ -1751,7 +1751,7 @@
                                  TextWrapping="Wrap"
                                  HorizontalScrollBarVisibility="Disabled"
                                  VerticalScrollBarVisibility="Auto"
-                                 AutomationProperties.Name="Saved text sizes by accessibility node" />
+                                 AutomationProperties.Name="Saved text-size readings and availability by accessibility node" />
                       </Expander>
                     </StackPanel>
                     <WrapPanel Grid.Row="1" Margin="0,0,0,6">

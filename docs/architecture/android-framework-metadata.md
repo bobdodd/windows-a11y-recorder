@@ -219,6 +219,19 @@ with a size, any partial status, and the host UTC reply time. Expand
 codes, visibility and missing data. If there is no snapshot, the page
 says so for a phone recording.
 
+A reply with no size values is still a saved snapshot. Checks says
+`No text sizes available` and distinguishes nodes that did not advertise
+size data from nodes whose size could not be read. It never substitutes a
+zero size, a guessed font or a value from another screen. Android documents
+this size and unit extra for `TextView`
+([Android rendering extra](https://developer.android.com/reference/android/view/accessibility/AccessibilityNodeInfo#EXTRA_DATA_RENDERING_INFO_KEY)).
+Flutter's Android bridge can represent Flutter semantics as virtual views
+that look like Android controls
+([Flutter AccessibilityBridge](https://api.flutter.dev/javadoc/io/flutter/view/AccessibilityBridge.html)).
+A bundled Flutter marker does not establish that Flutter made every node
+in the snapshot, or by itself explain the availability of any individual
+reading.
+
 The snapshot is evidence from one active window before that recording,
 not a reading at the playhead or on later screens. Viewing it does not
 seek or query the phone. Switching recordings replaces the evidence
@@ -228,5 +241,8 @@ recordings with a saved snapshot need no conversion.
 
 The snapshot stores no node text, form values, APK files or font
 families, and does not duplicate the ordinary tree's label and hint
-evidence. It does not run an accessibility rule or use a model. The
-updated placement still needs a Windows playback acceptance run.
+evidence. It does not run an accessibility rule or use a model. Windows
+playback showed the evidence in the intended place for a saved snapshot
+with no measured sizes. That confirms playback of the empty result,
+not text-size collection on that screen. The corrected Node details
+contrast still needs a Windows visual check.

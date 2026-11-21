@@ -34,6 +34,10 @@ Changes on `main` since 1.1.0, not yet released.
   expandable node details. It does not read the current phone or move
   the playhead. Normal recording does not request sizes with the option
   off. This adds evidence, not a check, and does not copy or inspect an APK.
+- Checks distinguishes a saved snapshot with no available measurements from
+  a recording without a snapshot. It explains if size data was not
+  advertised or could not be read, and the Node details label uses the
+  light text colour of the Checks panel.
 
 ### Links in an item's text
 

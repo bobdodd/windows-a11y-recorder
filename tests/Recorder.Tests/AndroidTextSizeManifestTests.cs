@@ -84,4 +84,28 @@ public sealed class AndroidTextSizeManifestTests
         Assert.Null(AndroidTextSizeChecksEvidence.Describe(
             manifest with { SessionId = "another-synthetic", AndroidPreRecordingTextSizes = null }, CultureInfo.InvariantCulture));
     }
+
+    [Theory]
+    [InlineData(0, 0, "The saved snapshot contains no nodes.")]
+    [InlineData(2, 0, "No saved node advertised text-size data (2 checked).")]
+    [InlineData(0, 2, "No size could be read from the 2 saved nodes.")]
+    [InlineData(1, 1, "Of 2 saved nodes, 1 did not advertise text-size data and no size could be read from the other 1.")]
+    public void ChecksEvidenceExplainsWhyAStoredSnapshotHasNoSizes(int notAdvertised, int unavailable, string expectedReason)
+    {
+        var receipt = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        var nodes = Enumerable.Range(0, notAdvertised + unavailable)
+            .Select(index => new AndroidTextSizeNode(index, null, true,
+                index < notAdvertised ? "not-advertised" : "unavailable", null, null))
+            .ToArray();
+        var snapshot = new AndroidTextSizeSnapshot("org.example.synthetic", receipt, "complete", nodes);
+        var manifest = new SessionManifest(SessionSchemaVersions.Manifest, "synthetic", "completed", receipt.AddSeconds(1),
+            receipt.AddSeconds(2), 1_000_000_000, 100, 0, "test", "test", "test",
+            new(false, false, false, false, 0, false, false), [], [], 0, 0, null, snapshot);
+
+        var evidence = Assert.IsType<AndroidTextSizeChecksEvidence>(
+            AndroidTextSizeChecksEvidence.Describe(manifest, CultureInfo.InvariantCulture));
+        Assert.Contains($"No text sizes available. {expectedReason}", evidence.Summary);
+        Assert.Contains("Reply received at 2026-01-01 12:00:00.000 UTC", evidence.Summary);
+        Assert.Equal(nodes.Length, evidence.NodeLines.Count);
+    }
 }
