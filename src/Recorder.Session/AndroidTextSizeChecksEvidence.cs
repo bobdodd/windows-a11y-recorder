@@ -6,6 +6,26 @@ namespace Recorder.Session;
 /// <summary>Display-only evidence for the open recording, with no playback position.</summary>
 public sealed record AndroidTextSizeChecksEvidence(string Summary, IReadOnlyList<string> NodeLines)
 {
+    public static string? DescribeAppFonts(SessionManifest manifest)
+    {
+        if (manifest.AndroidPreRecordingTextSizes is not { ApkFonts: { } fonts } snapshot)
+        {
+            return null;
+        }
+
+        var version = fonts.VersionName is { } name && fonts.VersionCode is { } code
+            ? $"version {name} (code {code})" : "version unavailable";
+        var header = $"APK font inventory for {snapshot.PackageName}, {version}. Read {fonts.ApksRead} of {fonts.ApksTotal} installed APKs " +
+            $"before recording ({fonts.ReadUtc.UtcDateTime:yyyy-MM-dd HH:mm:ss 'UTC'}); Flutter font manifests read: {fonts.FlutterManifestsRead}.";
+        var files = fonts.FontFiles.Select(item => $"Bundled font file: {item}");
+        var families = fonts.FlutterFamilies.Select(item => $"Flutter font declaration: {item.Family}; asset {item.Asset}" +
+            (item.Weight is { } weight ? $"; weight {weight}" : "") + (item.Style is { } style ? $"; style {style}" : ""));
+        return string.Join(Environment.NewLine, new[] { header }.Concat(files).Concat(families)
+            .Concat(fonts.Problem is { } problem ? [$"Incomplete: {problem}"] : [])
+            .Append("These are app-wide files and declarations. They do not establish the font or size used by any screen. " +
+                "This inventory does not inspect native styles, compiled framework code or form layouts."));
+    }
+
     public static AndroidTextSizeChecksEvidence? Describe(SessionManifest manifest, CultureInfo culture)
     {
         if (manifest.AndroidPreRecordingTextSizes is not { } snapshot)

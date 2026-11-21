@@ -38,6 +38,14 @@ Changes on `main` since 1.1.0, not yet released.
   a recording without a snapshot. It explains if size data was not
   advertised or could not be read, and the Node details label uses the
   light text colour of the Checks panel.
+- **Checks > Findings** now separates app-wide APK font evidence, live
+  pre-start sizes, and form evidence from settled recorded trees. The
+  opt-in checkbox inventories font files and Flutter font declarations
+  in the selected app's installed APKs and deletes the temporary copies.
+  The panel exposes published label links, hints and field states without
+  repeating entered values. A dated, existing APK review can be attached
+  locally to a recording that captured the same package and app version.
+  No rule or model is added.
 
 ### Links in an item's text
 

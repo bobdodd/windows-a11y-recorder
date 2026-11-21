@@ -135,7 +135,7 @@ internal sealed class RecordingNameDialog : Window
         {
             if (!_dialogToken.IsCancellationRequested)
             {
-                Refuse(exception.Message + " Retry or clear the text sizes checkbox to record without a snapshot.", focusName: false);
+                Refuse(exception.Message + " Retry or clear the accessibility evidence checkbox to record without a snapshot.", focusName: false);
             }
 
             return;

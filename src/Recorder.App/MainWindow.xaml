@@ -1729,10 +1729,28 @@
                       <RowDefinition Height="Auto" />
                       <RowDefinition Height="Auto" />
                       <RowDefinition Height="Auto" />
+                      <RowDefinition Height="Auto" />
                       <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
+                    <StackPanel x:Name="AppAccessibilityEvidence" Grid.Row="0"
+                                Margin="0,0,0,6" Visibility="Collapsed">
+                      <local:SelectableText x:Name="AppAccessibilitySummary" TextWrapping="Wrap" />
+                      <Button Content="Attach app _review…" Click="AttachAndroidAppReview_Click"
+                              HorizontalAlignment="Left" MinHeight="44" Padding="12,0" Margin="0,2,0,0" />
+                      <local:SelectableText x:Name="AppAccessibilityStatus" TextWrapping="Wrap"
+                                            Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
+                      <Expander x:Name="AppAccessibilityDetails" HorizontalContentAlignment="Stretch">
+                        <Expander.Header>
+                          <TextBlock Text="App-wide APK and review details" Foreground="#CDCCCA" MinHeight="44" Padding="6,12" />
+                        </Expander.Header>
+                        <TextBox x:Name="AppAccessibilityBody" IsReadOnly="True" IsUndoEnabled="False"
+                                 MaxHeight="150" Padding="6" TextWrapping="Wrap"
+                                 HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                                 AutomationProperties.Name="App-version review evidence and limits" />
+                      </Expander>
+                    </StackPanel>
                     <StackPanel x:Name="RecordingTextSizeEvidence"
-                                Grid.Row="0"
+                                Grid.Row="1"
                                 Margin="0,0,0,6"
                                 Visibility="Collapsed">
                       <local:SelectableText x:Name="RecordingTextSizeSummary" TextWrapping="Wrap" />
@@ -1753,8 +1771,17 @@
                                  VerticalScrollBarVisibility="Auto"
                                  AutomationProperties.Name="Saved text-size readings and availability by accessibility node" />
                       </Expander>
+                      <Expander x:Name="RecordedForms" HorizontalContentAlignment="Stretch" Visibility="Collapsed">
+                        <Expander.Header>
+                          <TextBlock Text="Form evidence from recorded trees" Foreground="#CDCCCA" MinHeight="44" Padding="6,12" />
+                        </Expander.Header>
+                        <TextBox x:Name="RecordedFormsBody" IsReadOnly="True" IsUndoEnabled="False"
+                                 MaxHeight="120" Padding="6" TextWrapping="Wrap"
+                                 HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                                 AutomationProperties.Name="Recorded field labels, hints and states" />
+                      </Expander>
                     </StackPanel>
-                    <WrapPanel Grid.Row="1" Margin="0,0,0,6">
+                    <WrapPanel Grid.Row="2" Margin="0,0,0,6">
                       <Button x:Name="ShowCurrentVisitButton"
                         MinHeight="44"
                         MinWidth="44"
@@ -1782,12 +1809,12 @@
                         AutomationProperties.HelpText="Moves the playhead to the next time the chosen finding was seen." />
                     </WrapPanel>
                     <local:SelectableText x:Name="ChecksStatusTextBlock"
-                           Grid.Row="2"
+                           Grid.Row="3"
                            Margin="0,0,0,6"
                            TextWrapping="Wrap"
                            Text="Open a recording of a phone to list its apps, screens and visits." />
                     <ListBox x:Name="PhoneScreensListBox"
-                       Grid.Row="3"
+                       Grid.Row="4"
                        MinHeight="70"
                        HorizontalContentAlignment="Stretch"
                        ScrollViewer.HorizontalScrollBarVisibility="Disabled"

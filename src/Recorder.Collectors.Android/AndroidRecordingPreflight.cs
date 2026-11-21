@@ -34,6 +34,9 @@ public sealed partial class AndroidRecordingPreflight(IAdb adb, string serial)
 
     internal static bool IsPackageName(string package) => package.Length <= 255 && PackageName().IsMatch(package);
 
+    public Task<AndroidApkFontSnapshot> ReadApkFontsAsync(string package, CancellationToken cancellation) =>
+        AndroidApkFonts.ReadAsync(adb, serial, package, cancellation);
+
     public async Task<AndroidTextSizeSnapshot> ReadTextSizesAsync(string package, CancellationToken cancellation)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(package);

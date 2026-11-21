@@ -192,16 +192,17 @@ files and temporary ADB forward were removed.
 
 In Android mode, **Start recording** opens the naming dialog with
 **Visible Android app**, **Refresh visible apps**, and **Collect app
-text sizes before recording**. The picker uses the
+accessibility evidence before recording**. The picker uses the
 [Android visible-activity diagnostic](https://android.googlesource.com/platform/frameworks/base/+/master/services/core/java/com/android/server/wm/ActivityTaskManagerService.java),
 filtered on the phone to activity package lines. It is not an installed,
 recent or background app inventory. Only the optional snapshot uses
 the selection; it does not launch the app, filter the phone recording
 or save the list. The option starts unchecked each time.
 
-With the option checked, the recorder opens a separate protocol 9
-connection and makes one request after validating the session name,
-before starting the session clock or collectors. The selected app must
+With the option checked, the recorder inventories the selected app's
+installed APKs as described below, then opens a separate protocol 9
+connection and makes one live request before starting the session clock
+or collectors. The selected app must
 be the active accessibility window, including when more than one app
 is visible. A refusal or timeout keeps the dialog open. Bring the app
 to the foreground and retry, or clear the option to start without a
@@ -239,10 +240,47 @@ and closes the details. Flutter and other framework evidence remains
 under each app. There is no separate menu or viewer, and existing
 recordings with a saved snapshot need no conversion.
 
-The snapshot stores no node text, form values, APK files or font
-families, and does not duplicate the ordinary tree's label and hint
-evidence. It does not run an accessibility rule or use a model. Windows
+The live size snapshot stores no node text, form values, APK files or
+runtime font families. It does not run an accessibility rule or use a model. Windows
 playback showed the evidence in the intended place for a saved snapshot
 with no measured sizes. That confirms playback of the empty result,
 not text-size collection on that screen. The corrected Node details
 contrast still needs a Windows visual check.
+
+### App-wide APK evidence and recorded forms
+
+The opt-in read pulls only the selected package's installed base and
+split APKs. It lists bundled font files and reads bounded Flutter
+`FontManifest.json` declarations from the ZIPs. The APKs are deleted
+individually on success, error or cancellation; no APK is decompiled,
+and no extracted file is kept. The recording holds the attempted
+read's timestamp, version, coverage, font declarations and any limits.
+If the installed version cannot be verified across the read, the
+inventory is not attributed to it. Library identification at the
+recording stop remains separate and unchanged.
+
+The pinned app-wide section distinguishes this inventory from any
+dated APK or source review. To add an existing review, use **Attach
+app review** in **Checks > Findings**. The selected JSON file must
+match a package, version name and version code saved at the stop of
+the open recording. The recorder saves the review as a sidecar inside
+that recording, not globally, and does not overwrite an existing one.
+The review date remains the original date. The schema uses
+`schemaVersion: 1`, `package`, `versionName`, `versionCode`,
+`reviewedUtc`, `method`, and an `observations` array with `topic`,
+`evidence` and `limit` for each entry. The input and saved sidecar
+contain reviewed evidence only, never the APK.
+
+The same pinned area shows **Form evidence from recorded trees** for
+settled app-window trees with visible editable nodes. The evidence
+identifies the screen, visit and tree capture time, and shows label
+links separately from hints, including links outside the captured
+nodes. It also lists published input type, required and invalid
+states and whether descriptions or error text existed. It does not
+repeat entered field values, assume adjacent text is a label, or
+interpret missing evidence as a conformance result.
+
+The automated APK inventory does not recover native style resolution,
+runtime typefaces, Flutter compiled text scaling or application form
+logic. An attached review and the recorded tree can supply independent
+evidence without turning either into a per-screen style measurement.

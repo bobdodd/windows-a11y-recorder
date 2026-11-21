@@ -155,6 +155,9 @@ public sealed class PhoneCheckRun
     /// <summary>The shown fields (editable items) the field checks looked at, once for each distinct sight of them.</summary>
     public int Fields { get; private set; }
 
+    private readonly List<PhoneFormEvidence> _formEvidence = [];
+    public IReadOnlyList<PhoneFormEvidence> FormEvidence => _formEvidence;
+
     /// <summary>The shown items marked invalid, once for each distinct sight of them.</summary>
     public int Invalid { get; private set; }
 
@@ -425,6 +428,10 @@ public sealed class PhoneCheckRun
                 if (fieldsByTaking.TryGetValue(key, out var fieldCounts))
                 {
                     run.Fields += fieldCounts.Fields;
+                    if (fieldCounts.Fields > 0 && PhoneFormEvidence.Describe(done.Window) is { Count: > 0 } fieldEvidence)
+                    {
+                        run._formEvidence.Add(new PhoneFormEvidence(visit, taking.MonotonicNanoseconds, fieldEvidence));
+                    }
                     run.Invalid += fieldCounts.Invalid;
                     run.Expandable += fieldCounts.Expandable;
                     run.ExpandableNotRecorded += fieldCounts.ExpandableNotRecorded;

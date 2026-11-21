@@ -198,6 +198,8 @@ public partial class MainWindow
             _phoneChecksCancellation = null;
             _phoneChecksArchive = _playbackArchive;
             ShowRecordingTextSizeEvidence(_playbackArchive);
+            ShowAndroidAppEvidence(_playbackArchive);
+            ShowRecordedFormEvidence(_playbackArchive?.PhoneScreens.Recorded == true, null);
             _phoneChecks = null;
             _phoneChecksProblem = null;
             _phoneContrast = null;
@@ -336,6 +338,7 @@ public partial class MainWindow
 
         _phoneChecks = run;
         _phoneChecksProblem = problem;
+        ShowRecordedFormEvidence(archive.PhoneScreens.Recorded, run, failed: problem is not null);
         ShowPhoneScreenRows();
         return true;
     }

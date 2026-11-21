@@ -16,7 +16,7 @@ internal sealed class AndroidRecordingOptions : StackPanel
     private readonly ComboBox _apps = new() { MinHeight = 44, MaxDropDownHeight = 240 };
     private readonly CheckBox _collect = new()
     {
-        Content = "Collect app _text sizes before recording", IsChecked = false,
+        Content = "Collect app _accessibility evidence before recording", IsChecked = false,
         MinHeight = 44, VerticalContentAlignment = VerticalAlignment.Center
     };
     private readonly Button _refresh = new()
@@ -40,7 +40,8 @@ internal sealed class AndroidRecordingOptions : StackPanel
         Children.Add(new SelectableText
         {
             Text = "Optional. Bring the selected app to the foreground on the phone. " +
-                "The snapshot includes text sizes, not text or entered values. Leaving this off records the phone as usual.",
+                "The recorder checks its APKs for bundled font declarations, deletes the temporary copies, then reads live text sizes without text or entered values. " +
+                "Leaving this off records the phone as usual.",
             TextWrapping = TextWrapping.Wrap
         });
         Loaded += async (_, _) => await RefreshAsync(cancellation);
@@ -56,13 +57,16 @@ internal sealed class AndroidRecordingOptions : StackPanel
 
         if (_apps.SelectedItem is not string package)
         {
-            throw new AndroidTextSizeRefusedException("Select a visible Android app before requesting text sizes.");
+            throw new AndroidTextSizeRefusedException("Select a visible Android app before requesting accessibility evidence.");
         }
 
-        SetStatus("Reading text sizes from the selected app before recording.");
+        SetStatus("Reading app-wide font declarations from the selected app's installed APKs.");
         try
         {
-            return await _phone.ReadTextSizesAsync(package, cancellation);
+            var fonts = await _phone.ReadApkFontsAsync(package, cancellation);
+            SetStatus("Reading live text sizes from the selected app's active window.");
+            var sizes = await _phone.ReadTextSizesAsync(package, cancellation);
+            return sizes with { ApkFonts = fonts };
         }
         finally
         {
@@ -89,7 +93,7 @@ internal sealed class AndroidRecordingOptions : StackPanel
             _apps.SelectedItem = selected;
             SetStatus(apps.Count == 0
                 ? "No visible apps were found. Open the app on the unlocked phone and refresh."
-                : "Choose the app by package name if you want a text-size snapshot.");
+                : "Choose the app by package name if you want pre-recording accessibility evidence.");
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {

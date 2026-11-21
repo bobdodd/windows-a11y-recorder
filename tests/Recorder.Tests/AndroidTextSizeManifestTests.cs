@@ -18,6 +18,9 @@ public sealed class AndroidTextSizeManifestTests
         var snapshot = collect
             ? new AndroidTextSizeSnapshot("org.example.synthetic", clock.AddSeconds(-1), "partial",
                 [new(0, null, false, "available", 34, 1), new(1, null, true, "not-advertised", null, null)])
+            {
+                ApkFonts = new(clock.AddSeconds(-2), "1.0", 7, 1, 1, 0, ["res/font/synthetic.ttf"], [], null)
+            }
             : null;
         var manifest = new SessionManifest(SessionSchemaVersions.Manifest, "synthetic", "completed", clock,
             clock.AddSeconds(1), 1_000_000_000, 100, 0, "test", "test", "test",
@@ -42,6 +45,9 @@ public sealed class AndroidTextSizeManifestTests
                 Assert.Equal(snapshot.ReceivedUtc, recorded.ReceivedUtc);
                 Assert.True(recorded.ReceivedUtc < read.StartedUtc);
                 Assert.Equal(snapshot.Nodes.AsEnumerable(), recorded.Nodes);
+                Assert.Equal(7L, recorded.ApkFonts?.VersionCode);
+                Assert.Equal(["res/font/synthetic.ttf"], recorded.ApkFonts?.FontFiles);
+                Assert.Contains("Bundled font file: res/font/synthetic.ttf", AndroidTextSizeChecksEvidence.DescribeAppFonts(read));
                 var evidence = Assert.IsType<AndroidTextSizeChecksEvidence>(
                     AndroidTextSizeChecksEvidence.Describe(read, CultureInfo.InvariantCulture));
                 Assert.Contains("org.example.synthetic", evidence.Summary);

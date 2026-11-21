@@ -43,7 +43,7 @@ public static partial class AndroidFrameworkDetector
             var lines = located.Output.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
             foreach (var line in lines)
             {
-                if (!line.StartsWith("package:", StringComparison.Ordinal) || !ApkPath().IsMatch(line[8..]))
+                if (!IsApkPathLine(line))
                 {
                     // Do not pass shell metacharacters or diagnostics to unzip.
                     return Unavailable("The APK path listing was not recognised or contained an unsafe path.");
@@ -124,6 +124,9 @@ public static partial class AndroidFrameworkDetector
             .Where(match => match.Success).Select(match => match.Groups["name"].Value).ToArray();
 
     private static string ApkName(string path) => path[(path.LastIndexOf('/') + 1)..];
+
+    internal static bool IsApkPathLine(string line) =>
+        line.StartsWith("package:", StringComparison.Ordinal) && ApkPath().IsMatch(line[8..]);
 
     [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*$", RegexOptions.CultureInvariant)]
     private static partial Regex PackageName();
