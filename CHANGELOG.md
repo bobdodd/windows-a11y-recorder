@@ -60,6 +60,10 @@ Changes on `main` since 1.1.0, not yet released.
   reviews moved from Findings. The always-open sections wrap and support
   selection and Ctrl+C, with jump buttons and one vertical scroll area.
   Older recordings remain readable without conversion.
+- Validated the reader against the built Views and WebView fixture,
+  real Compose DEX symbols and a compiled React Native Hermes input.
+  Added a regression test for split coverage and provenance. This validates
+  APK evidence only, not runtime behaviour.
 
 ### Links in an item's text
 

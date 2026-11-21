@@ -309,3 +309,28 @@ The attached review and recorded tree can supply additional independent
 evidence, without turning either into a per-screen style measurement.
 No APK-derived item is assigned to a recorded screen or visit by this
 inventory. No new conformance rule or model is run.
+
+### Cross-framework package validation
+
+After the Flutter inventory pass, the same reader was run on the built
+Views and WebView fixture APK, on AndroidX Compose UI 1.7.8 classes
+converted to DEX by D8, and on the React Native 0.76.9 Android release
+library with synthetic JavaScript compiled by its bundled Hermes
+compiler. The Compose and React Native inputs were package layers for
+inspection, not installed or launched apps. See the [Compose release
+notes](https://developer.android.com/jetpack/androidx/releases/compose-ui)
+and [React Native Hermes documentation](https://reactnative.dev/docs/hermes/).
+
+| Input | Confirmed | Not established |
+| --- | --- | --- |
+| Native Views | The reader identified `TextView.setTextSize` and an accessibility heading API as symbols in the fixture's DEX. | Call arguments, effective text size and screen assignment. |
+| WebView assets | The fixture's packaged `h1` and `h2` were found with their element locators. | CSS, remote content and the running WebView's DOM or accessibility tree. |
+| Compose | Real AndroidX package metadata and DEX symbols for heading and error semantics were retained. | Whether particular calls are invoked and what Compose publishes for a screen. |
+| React Native | The release native library and compiled Hermes bundle were identified. | JavaScript accessibility properties, use of the library at runtime and the Android accessibility tree. |
+
+Seventeen assertions also covered the mixed case, where all three input
+archives produced 52 entries with source split names and no invented
+screen or runtime attribution. The permanent split regression test
+checks that provenance survives, a missing split is reported as partial,
+and an unrecognized JavaScript bundle is not called Hermes. The probe
+used no client material, phone, model or new accessibility check.

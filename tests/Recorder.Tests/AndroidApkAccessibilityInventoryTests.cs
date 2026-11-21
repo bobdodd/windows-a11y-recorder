@@ -67,6 +67,68 @@ public sealed class AndroidApkAccessibilityInventoryTests
     }
 
     [Fact]
+    public void SplitInventoryKeepsEachSourceAndDoesNotUpgradeSymbolsToObservations()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var inventory = new AndroidApkAccessibilityInventory();
+        Inspect("base.apk", zip =>
+        {
+            Entry(zip, "classes.dex", Dex());
+            Entry(zip, "res/layout/synthetic.xml", CompiledLayout());
+        });
+        Inspect("compose.apk", zip =>
+        {
+            zip.CreateEntry("META-INF/androidx.compose.ui_ui.version");
+            Entry(zip, "classes2.dex", Dex());
+        });
+        Inspect("web_and_react.apk", zip =>
+        {
+            zip.CreateEntry("lib/arm64-v8a/libreactnative.so");
+            Entry(zip, "assets/index.android.bundle", "not a recognized bytecode header"u8);
+            Entry(zip, "assets/synthetic.html", "<h1 id=title>Synthetic heading</h1>"u8);
+        });
+
+        var evidence = inventory.Build(3, 4);
+        Assert.Contains(evidence.Coverage, row => row.Reader == "APK inventory" && row.Status == "partial" &&
+            row.Detail == "3 of 4 installed APKs read.");
+        Assert.Contains(evidence.Coverage, row => row.Reader == "Flutter compiled code" && row.Status == "not identified");
+        Assert.Contains(evidence.Coverage, row => row.Reader == "Jetpack Compose compiled code" && row.Status == "not decoded");
+        Assert.Contains(evidence.Coverage, row => row.Reader == "React Native / JavaScript" && row.Status == "not decoded");
+        Assert.Contains(evidence.Items, item => item is { Kind: "declared", Scope: "component", Split: "base.apk", Value: "18sp" });
+        Assert.Contains(evidence.Items, item => item is
+        {
+            Kind: "declared", Scope: "component", Split: "web_and_react.apk", Category: "Web component", Value: "h1"
+        });
+        Assert.Contains(evidence.Items, item => item is
+        {
+            Kind: "bundled", Scope: "app", Split: "web_and_react.apk", Locator: "assets/index.android.bundle",
+            Value: "Bundle present; payload format not established"
+        });
+        Assert.Equal([("base.apk", "classes.dex"), ("compose.apk", "classes2.dex")],
+            evidence.Items.Where(item => item is
+            {
+                Kind: "symbol", Scope: "app", Value: "androidx.compose.ui.semantics.SemanticsPropertiesKt.heading"
+            }).Select(item => (item.Split, item.Locator)));
+        Assert.All(evidence.Items, item =>
+        {
+            Assert.True(item.Kind is "bundled" or "declared" or "symbol");
+            Assert.True(item.Scope is "app" or "component");
+        });
+
+        void Inspect(string split, Action<ZipArchive> populate)
+        {
+            using var bytes = new MemoryStream();
+            using (var zip = new ZipArchive(bytes, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                populate(zip);
+            }
+            bytes.Position = 0;
+            using var archive = new ZipArchive(bytes, ZipArchiveMode.Read);
+            inventory.Inspect(archive, split, [], [], false, token);
+        }
+    }
+
+    [Fact]
     public void TruncatedBinaryXmlMakesCoverageIncompleteWithoutInventingDeclarations()
     {
         var good = CompiledLayout();
