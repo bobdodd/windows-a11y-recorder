@@ -264,7 +264,6 @@ public partial class MainWindow : Window
         SetConfigurationEnabled(false);
         OpenRecordingButton.IsEnabled = false;
         StatusTextBlock.Text = "Starting recording.";
-        ShowPreRecordingTextSizes(naming.TextSizes);
         _announcedHealthReasons.Clear();
         _talkBack = null;
         var busy = _busy.Begin("Starting recording.");
@@ -304,13 +303,12 @@ public partial class MainWindow : Window
             RefreshStatus();
             busy.Dispose();
             var started = naming.Name is { } named ? $"Recording {named} started." : "Recording started.";
-            _busy.AnnounceCompleted(naming.TextSizes is null ? started : $"{PreRecordingTextSizeStatus.Text} {started}");
+            _busy.AnnounceCompleted(naming.TextSizes is null ? started : $"Text-size snapshot collected for this recording. {started}");
             StopButton.Focus();
         }
         catch (Exception exception)
         {
             StatusTextBlock.Text = "Recording could not start.";
-            ShowPreRecordingTextSizes(null);
             busy.Dispose();
             MessageBox.Show(
                 this,
@@ -962,7 +960,6 @@ public partial class MainWindow : Window
             CloseAudio();
             CloseRecordingFile();
             _playbackArchive = archive;
-            ShowPreRecordingTextSizes(archive.Manifest.AndroidPreRecordingTextSizes);
             _recordedDocuments = opened.Documents;
             _playbackPositionNanoseconds = 0;
             _displayedFrameIndex = -1;
@@ -1028,7 +1025,6 @@ public partial class MainWindow : Window
         {
             CloseRecordingFile();
             _playbackArchive = null;
-            ShowPreRecordingTextSizes(null);
             ApplyBrowserNavigationFilter();
             BrowserCorrelationTextBox.Text =
                 "The recording could not be opened.";

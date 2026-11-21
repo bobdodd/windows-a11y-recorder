@@ -14,7 +14,8 @@ using Recorder.Session;
 namespace Recorder.App;
 
 // The Checks tab (android-checks.md, "The player", steps 1 and 2): a phone
-// recording's display density, then its apps with their versions, then
+// recording's optional pre-start text sizes above the findings list, then
+// its display density and apps with their versions, then
 // each app's screens with how each was named, then each screen's visits
 // with their states. A density, visit or state row moves the playhead to
 // its start; a screen's or app's row to its first visit. The
@@ -196,6 +197,7 @@ public partial class MainWindow
             _phoneChecksCancellation?.Dispose();
             _phoneChecksCancellation = null;
             _phoneChecksArchive = _playbackArchive;
+            ShowRecordingTextSizeEvidence(_playbackArchive);
             _phoneChecks = null;
             _phoneChecksProblem = null;
             _phoneContrast = null;
@@ -262,6 +264,21 @@ public partial class MainWindow
         }
 
         ShowPhoneScreenRows();
+    }
+
+    private void ShowRecordingTextSizeEvidence(SessionPlaybackArchive? archive)
+    {
+        var evidence = archive is null ? null : AndroidTextSizeChecksEvidence.Describe(archive.Manifest, CultureInfo.CurrentCulture);
+        var isPhoneRecording = archive is not null && (archive.PhoneScreens.Recorded || IsPhoneInput(archive));
+        var hasDetails = evidence is { NodeLines.Count: > 0 };
+
+        // Separate from the rows that are rebuilt when checks finish. Neither
+        // the contents nor the open/closed state changes during playback.
+        RecordingTextSizeDetails.IsExpanded = false;
+        RecordingTextSizeDetails.Visibility = hasDetails ? Visibility.Visible : Visibility.Collapsed;
+        RecordingTextSizeNodeText.Text = hasDetails ? string.Join(Environment.NewLine, evidence!.NodeLines) : string.Empty;
+        RecordingTextSizeSummary.Text = evidence?.Summary ?? "Text sizes before recording: no snapshot was saved in this recording.";
+        RecordingTextSizeEvidence.Visibility = evidence is not null || isPhoneRecording ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // Runs the checks from the tree away from the window's thread, and
@@ -1429,7 +1446,7 @@ public partial class MainWindow
         var pictures = _playbackArchive is { } archive ? PhoneSnapshotPictures.Of(archive) : PhoneSnapshotPictures.Empty;
         TimelineControl.SetPhoneVisits(screens.Visits);
 
-        // The density first (android-checks.md, step 2): the checks turn
+        // The density first in the list (android-checks.md, step 2): the checks turn
         // pixels into dp with it.
         if (screens.Recorded || device.Densities.Count > 0)
         {

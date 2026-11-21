@@ -29,9 +29,11 @@ Changes on `main` since 1.1.0, not yet released.
 - The Android recording dialog lists apps with visible activities on the
   connected phone and offers an unchecked option to collect text sizes
   before recording. It keeps one snapshot for the selected active app in
-  the session manifest, viewable from the Android menu. Normal recording
-  does not request sizes with the option off. This adds evidence, not a
-  check, and does not copy or inspect an APK.
+  the session manifest. **Checks > Findings** shows that recording's
+  pre-start evidence at the top, with the reply time, coverage and
+  expandable node details. It does not read the current phone or move
+  the playhead. Normal recording does not request sizes with the option
+  off. This adds evidence, not a check, and does not copy or inspect an APK.
 
 ### Links in an item's text
 

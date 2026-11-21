@@ -211,10 +211,22 @@ complete.
 The optional `androidPreRecordingTextSizes` manifest member contains
 the selected package, host UTC reply time, completion status and size
 evidence. No snapshot member is written with the option off; older
-recordings open without it. Current session shows the capture summary.
-**Android > Pre-recording text sizes** shows the open recording's
-wrapping, selectable evidence, or says that no snapshot is present.
+recordings open without it. **Checks > Findings** shows the open
+recording's snapshot above the app and visit list, even if the selected
+package has no recorded visits. It shows the package, number of nodes
+with a size, any partial status, and the host UTC reply time. Expand
+**Node details** for wrapping, selectable node IDs, pixel sizes, unit
+codes, visibility and missing data. If there is no snapshot, the page
+says so for a phone recording.
+
+The snapshot is evidence from one active window before that recording,
+not a reading at the playhead or on later screens. Viewing it does not
+seek or query the phone. Switching recordings replaces the evidence
+and closes the details. Flutter and other framework evidence remains
+under each app. There is no separate menu or viewer, and existing
+recordings with a saved snapshot need no conversion.
+
 The snapshot stores no node text, form values, APK files or font
 families, and does not duplicate the ordinary tree's label and hint
 evidence. It does not run an accessibility rule or use a model. The
-picker and playback still need a Windows/phone acceptance run.
+updated placement still needs a Windows playback acceptance run.

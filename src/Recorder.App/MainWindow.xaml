@@ -348,9 +348,6 @@
                 Style="{StaticResource AnalysisMenuItem}"
                 Header="Set _up Android recording..."
                 Click="AndroidSetupMenuItem_Click" />
-      <MenuItem Style="{StaticResource AnalysisMenuItem}"
-                Header="Pre-recording _text sizes..."
-                Click="AndroidTextSizesMenuItem_Click" />
     </MenuItem>
   </Menu>
   <Grid>
@@ -697,10 +694,6 @@
                 <local:SelectableText x:Name="DurationTextBlock"
                            Margin="0,6,0,0"
                            Text="Duration: 00:00:00" />
-                <local:SelectableText x:Name="PreRecordingTextSizeStatus"
-                           Margin="0,4,0,0"
-                           TextWrapping="Wrap"
-                           Visibility="Collapsed" />
                 <local:SelectableText x:Name="EvidenceTextBlock"
                            Margin="0,4,0,0"
                            Text="Events: 0 accepted, 0 dropped" />
@@ -1735,9 +1728,33 @@
                     <Grid.RowDefinitions>
                       <RowDefinition Height="Auto" />
                       <RowDefinition Height="Auto" />
+                      <RowDefinition Height="Auto" />
                       <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <WrapPanel Grid.Row="0" Margin="0,0,0,6">
+                    <StackPanel x:Name="RecordingTextSizeEvidence"
+                                Grid.Row="0"
+                                Margin="0,0,0,6"
+                                Visibility="Collapsed">
+                      <local:SelectableText x:Name="RecordingTextSizeSummary" TextWrapping="Wrap" />
+                      <Expander x:Name="RecordingTextSizeDetails"
+                                HorizontalContentAlignment="Stretch"
+                                AutomationProperties.Name="Pre-recording text-size node details">
+                        <Expander.Header>
+                          <TextBlock Text="Node details" MinHeight="44" Padding="6,12" />
+                        </Expander.Header>
+                        <TextBox x:Name="RecordingTextSizeNodeText"
+                                 IsReadOnly="True"
+                                 IsUndoEnabled="False"
+                                 MaxHeight="150"
+                                 Margin="0,0,0,6"
+                                 Padding="6"
+                                 TextWrapping="Wrap"
+                                 HorizontalScrollBarVisibility="Disabled"
+                                 VerticalScrollBarVisibility="Auto"
+                                 AutomationProperties.Name="Saved text sizes by accessibility node" />
+                      </Expander>
+                    </StackPanel>
+                    <WrapPanel Grid.Row="1" Margin="0,0,0,6">
                       <Button x:Name="ShowCurrentVisitButton"
                         MinHeight="44"
                         MinWidth="44"
@@ -1765,12 +1782,12 @@
                         AutomationProperties.HelpText="Moves the playhead to the next time the chosen finding was seen." />
                     </WrapPanel>
                     <local:SelectableText x:Name="ChecksStatusTextBlock"
-                           Grid.Row="1"
+                           Grid.Row="2"
                            Margin="0,0,0,6"
                            TextWrapping="Wrap"
                            Text="Open a recording of a phone to list its apps, screens and visits." />
                     <ListBox x:Name="PhoneScreensListBox"
-                       Grid.Row="2"
+                       Grid.Row="3"
                        MinHeight="70"
                        HorizontalContentAlignment="Stretch"
                        ScrollViewer.HorizontalScrollBarVisibility="Disabled"
