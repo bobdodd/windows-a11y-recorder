@@ -64,6 +64,9 @@ Changes on `main` since 1.1.0, not yet released.
   real Compose DEX symbols and a compiled React Native Hermes input.
   Added a regression test for split coverage and provenance. This validates
   APK evidence only, not runtime behaviour.
+- Added a recorded-screen baseline for native Views and WebView
+  headings from settled fixture trees, independent of the APK inventory.
+  No recorder behaviour or check changed.
 
 ### Links in an item's text
 

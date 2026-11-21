@@ -17,6 +17,45 @@ public sealed class AndroidFixtureRecordingTests
         "No recording of the fixture app has been extracted to tests/fixtures/android/ yet (docs/architecture/android-fixtures.md).";
 
     [Fact]
+    public async Task TheTourShowsHeadingsFromSettledTreesWithoutAnApkInventory()
+    {
+        var folder = RepositoryPath("tests", "fixtures", "android", "tour");
+        var path = Path.Combine(folder, AndroidFixtureFiles.Recording);
+        Assert.SkipWhen(!File.Exists(path), NoFixture);
+        var token = TestContext.Current.CancellationToken;
+        var archive = (await RecordingFilePlayback.OpenAsync(folder, path, token)).Archive;
+        using var timeline = archive.Timeline as IDisposable;
+        var source = archive.RecordSource ?? throw new InvalidDataException("The tour has no playback record source.");
+
+        Assert.Null(archive.Manifest.AndroidPreRecordingTextSizes);
+        CheckHeadings("Points", id => id?.EndsWith(":id/heading_good", StringComparison.Ordinal) == true,
+            id => id?.EndsWith(":id/heading_value", StringComparison.Ordinal) == true,
+            "Points can be spent when paying.");
+        CheckHeadings("Opening hours", id => id == "web_heading", id => id == "web_value",
+            "On Sundays it opens at eleven.");
+
+        var run = PhoneCheckRun.Run(archive.PhoneScreens, archive.PhoneAccessibility, archive.PhoneDevice, source,
+            cancellationToken: token);
+        Assert.True(run.WindowsChecked > 0);
+        var forms = AndroidFormDetails.From(archive, run);
+        Assert.Empty(forms.Apps);
+        Assert.Contains("No visible editable nodes were published in the settled application trees read", forms.Summary);
+
+        void CheckHeadings(string title, Func<string?, bool> titleId, Func<string?, bool> valueId, string body)
+        {
+            var visit = Assert.Single(archive.PhoneScreens.Visits, v => v.Screen.Title == title);
+            var taking = archive.PhoneAccessibility.TakenBy(Assert.Single(visit.SettledSnapshots), visit.WindowId)
+                ?? throw new InvalidDataException($"The fixture visit for {title} has no recorded items.");
+            Assert.InRange(taking.MonotonicNanoseconds, visit.Start, visit.End - 1);
+            var window = Assert.IsType<PhoneCheckWindow>(PhoneCheckRun.ReadWindow(source, taking, visit.WindowId));
+            var visible = window.Items.Select(item => item.Node).Where(node => node.VisibleToUser).ToArray();
+            Assert.Contains(visible, node => node.Heading && titleId(node.ViewId));
+            Assert.Contains(visible, node => node.Heading && valueId(node.ViewId));
+            Assert.Contains(visible, node => !node.Heading && node.Text == body);
+        }
+    }
+
+    [Fact]
     public async Task TheRulesFindWhatTheyFoundOnThePc()
     {
         var folders = Folders();

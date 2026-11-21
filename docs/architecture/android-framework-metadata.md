@@ -334,3 +334,22 @@ screen or runtime attribution. The permanent split regression test
 checks that provenance survives, a missing split is reported as partial,
 and an unrecognized JavaScript bundle is not called Hermes. The probe
 used no client material, phone, model or new accessibility check.
+
+### Recorded-screen evidence baseline
+
+The next pass starts with saved Android evidence rather than attempting
+to infer a visit from an APK. Replaying the sanitised native Views and
+WebView tour read nine distinct settled app-window trees across seven
+visits. The two known headings on each example screen were published
+as headings, including the values styled like body text. The tree
+capture times fell within the respective visits. The replay regression
+uses the recorded nodes and their IDs, not OCR, APK items or a model.
+
+The tour contains no pre-recording size snapshot, no font or text-size
+fields in the replayed trees and no visible editable nodes. This does
+not test form labels or establish typography availability across apps.
+The current size request measures one active window before recording,
+not each visit. Any later visit-level size capture needs measurements
+from that visit and explicit coverage; it cannot reuse the earlier
+window's sizes, APK resource values or a font declaration. Running
+Compose and React Native screen evidence is still unverified.
