@@ -73,6 +73,14 @@ Changes on `main` since 1.1.0, not yet released.
   native, WebView, Flutter, Compose and React Native package evidence.
   The existing fixture app and tour are unchanged. See
   `android/apk-fixtures/README.md` for build and coverage details.
+- The existing Android recording opt-in now saves bounded DEX call sites
+  alongside APK declarations and symbols. **Checks > App details**
+  distinguishes method-level code evidence from observed visits. Where
+  resolvable, it shows native sizing, typeface and label arguments,
+  semantics flags, countdown arguments and exact packaged WebView targets.
+  Supported Dart AOT export layouts are shown as bundled evidence, not
+  decoded widgets. The temporary APKs are still deleted. No model,
+  automatic check or companion update is required.
 
 ### Links in an item's text
 

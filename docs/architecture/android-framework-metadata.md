@@ -274,7 +274,9 @@ shows coverage. Text wraps and permits selection and Ctrl+C.
 | --- | --- | --- |
 | ZIP and Flutter font declarations | Font paths and declarations of family, asset, weight and style; framework and bundle markers | Bundling does not prove use. Flutter AOT styles, scaling, forms, timers and semantic call paths are not decoded. |
 | Android compiled XML and resource tables | Allowlisted manifest/layout/font attributes, explicit label declarations, direct Android style entries and their configuration variants, plus directly referenced fonts, dimensions, IDs and accessibility strings | Resource IDs remain explicit. It does not calculate inherited themes, arbitrary reference chains or the device's effective resources. |
-| Android DEX | Allowlisted View, Compose semantics and timing API symbols | It does not establish a call, its arguments, runtime use, a route, or the behaviour of a timer. |
+| Android DEX symbols | Allowlisted View, Compose semantics, WebView and timing API symbols | An identifier alone does not establish a call, runtime use or a route. |
+| Android DEX call sites | Allowlisted direct calls in the selected app's class namespace, with method, instruction offset and traceable arguments | No general reconstruction of control flow, effective values, timer behaviour or screen visits. |
+| Dart AOT ELF exports | Exact legacy or newer snapshot export layout in `libapp.so` | Bundled snapshot structure only. Dart widgets, strings, routes and callbacks are not decoded. |
 | React Native bundle | Bundle location and, when recognized, Hermes header signature | Bundled JavaScript and Hermes declarations and calls are not decoded. |
 | Local HTML and SVG | Allowlisted semantics, component/form markup, label associations, and numeric HTML refresh declarations | No scripts, network, CSS cascade, live DOM, entered values or redirect URL. |
 
@@ -283,6 +285,71 @@ Readers cap document sizes, item sizes and counts and disclose incomplete
 coverage. A component locator means the source declaration is known,
 not that it appeared on any screen or that it was the effective value.
 Compiled symbols are shown apart from declarations and observed evidence.
+
+### Direct compiled-code evidence
+
+The method pass follows the [DEX format](https://source.android.com/docs/core/runtime/dex-format) and
+[Dalvik instruction formats](https://source.android.com/docs/core/runtime/instruction-formats).
+It reads method bodies at decoded instruction boundaries and matches
+supported API owners and full signatures. This pass is narrower than
+the APK-wide symbol scan: it only inspects classes whose descriptors
+start with the selected package's namespace. An app can place code in a
+different namespace, and a library can be inside that namespace. A
+completed pass is not a complete app-code inventory or proof of code
+ownership. The saved locator gives the split, DEX entry, caller and
+16-bit code-unit offset.
+
+- **Typography and forms:** For the supported native APIs, retain
+  traceable text size and unit, typeface or style references, label
+  target IDs, and receiver IDs where recoverable. Some hint and
+  semantics setters can be identified even when their arguments cannot
+  be resolved. Arbitrary DEX text and entered field values are not saved.
+- **Semantics:** Exact calls can show declared-in-code heading,
+  screen-reader focus, accessibility importance and live-region values.
+  A negative flag is a review candidate, not a failed accessibility
+  check or a claim that a recorded node was hidden.
+- **Timing:** Keep known base milliseconds and
+  [recommended-timeout content flags](https://developer.android.com/reference/android/view/accessibility/AccessibilityManager#getRecommendedTimeoutMillis(int,int)),
+  plus traceable countdown constructor arguments and direct start or
+  cancel calls. A same-DEX constructor is described as forwarding only
+  when it passes the unchanged parameters to the platform constructor.
+  An argument derived from the timeout API is not the user's effective
+  timeout, an inactivity timer, or proof a timer reached its finish.
+- **WebView:** A safe local HTML literal is linked only if it exactly
+  matches an entry in the same APK. An unmatched load call is reported
+  without its URL. Neither kind proves rendering, script execution or
+  use during a recorded visit.
+
+Argument tracing is limited to straight-line method bodies without
+exception handlers. Unknown register effects discard trace facts.
+Incomplete passes are reported separately from the symbol scan. The
+limits include 16 MiB per DEX, 65,536 code units per body, two million
+code units per DEX, and at most 1,024 call rows per DEX or 2,048 per
+recording, subject to the inventory's overall limit. No external
+decompiler, executable app content, model call or new automatic check is
+involved. The existing opt-in, version check, temporary APK cleanup,
+and playback of older recordings are unchanged.
+
+For bundled Flutter AOT, the reader checks the dynamic symbol section
+of supported little-endian ELF32/ELF64 `libapp.so` entries up to 64 MiB.
+It recognizes the
+[legacy four exports](https://flutter.googlesource.com/mirrors/engine/+/a8b3d1af55b6b505ebf472210ef46d4a9ee6514e/runtime/dart_snapshot.cc)
+and the [newer data and text exports](https://github.com/dart-lang/sdk/commit/d36adbacaf).
+It does not look for loose substrings. A filename-only candidate stays
+visible even if its exports are not recognized or the table cannot be
+read. Flutter Dart, Compose semantics dataflow, React Native JavaScript
+and Hermes, and the live WebView DOM remain outside this pass.
+
+The automated native/WebView fixture validates the `21sp` call, the
+code-created label's target ID, the `8000 ms` text-content recommendation
+flowing to a timer with a `1000 ms` interval, and the packaged form load.
+It keeps the separate `12 seconds` HTML refresh as a declaration with
+no matching load in the fixture. Negative tests preserve symbols when
+a method is malformed, withhold values for branching methods, and
+reject substring and undefined ELF symbols. This is package evidence,
+not a Windows installer or target-device replay test.
+
+### Recorded and attached evidence
 
 The **Attached app reviews** section distinguishes this inventory from
 any dated APK or source review. To add an existing review, use **Attach

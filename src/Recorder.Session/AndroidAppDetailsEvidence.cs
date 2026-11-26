@@ -26,8 +26,8 @@ public sealed record AndroidApkDetails(
               $"Flutter font manifests read: {apk.FlutterManifestsRead}. " +
               "Bundled files and font declarations do not establish the font or size used by a screen. " +
               "The font-only inventory does not inspect native styles, compiled code or form layouts."
-            : $"{evidence.Items.Count} structured entries saved. These are bundled files, declarations and API symbols, not observations from a recorded window. " +
-              "A component locator is not a link to a screen visit.";
+            : $"{evidence.Items.Count} structured entries saved. Bundled files, declarations, API symbols and static call sites are package evidence, not observations from a recorded window. " +
+              "A component locator is not a link to a screen visit. A method locator identifies compiled code, not a recorded execution.";
 
         var items = evidence?.Items ?? [];
         var groups = items.GroupBy(item => (item.Category, item.Kind, item.Scope))
@@ -76,8 +76,9 @@ public sealed record AndroidApkDetails(
         "bundled" => "Bundled",
         "declared" => "Declared",
         "symbol" => "API symbol",
+        "call" => "Static call site",
         _ => kind
-    }) + (scope switch { "app" => ", app-wide", "component" => ", component", _ => $", {scope}" });
+    }) + (scope switch { "app" => ", app-wide", "component" => ", component", "method" => ", method", _ => $", {scope}" });
 
     private static string ShowValue(string value) => value.Any(char.IsControl)
         ? string.Concat(value.Select(character => char.IsControl(character) ? $"\\u{(int)character:X4}" : character.ToString()))

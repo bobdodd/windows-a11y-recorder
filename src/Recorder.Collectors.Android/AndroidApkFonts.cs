@@ -28,7 +28,7 @@ internal static class AndroidApkFonts
         var paths = Array.Empty<string>();
         var files = new SortedSet<string>(StringComparer.Ordinal);
         var families = new HashSet<AndroidApkFontFamily>();
-        var inventory = new AndroidApkAccessibilityInventory();
+        var inventory = new AndroidApkAccessibilityInventory(package);
         var problems = new SortedSet<string>(StringComparer.Ordinal);
         var read = 0;
         var manifests = 0;

@@ -5,19 +5,26 @@ using Recorder.Contracts;
 namespace Recorder.Collectors.Android;
 
 /// <summary>Inspects every applicable package layer without assigning a framework to a screen.</summary>
-internal sealed class AndroidApkAccessibilityInventory
+internal sealed class AndroidApkAccessibilityInventory(string? selectedPackage = null)
 {
     private const string AndroidNamespace = "http://schemas.android.com/apk/res/android";
     private const int MaxDocumentBytes = 1024 * 1024;
     private const int MaxBinaryBytes = 16 * 1024 * 1024;
+    private const int MaxElfBytes = 64 * 1024 * 1024;
     private const int MaxDocuments = 1024;
     private const int MaxItems = 8192;
+    private const int MaxCallRows = 2048;
+    private const string DexCalls = "Android DEX call sites";
     private readonly List<AndroidApkAccessibilityItem> _items = [];
+    private readonly List<(string Split, string Entry, AndroidDexAccessibilityCalls.Site Site)> _calls = [];
     private readonly Dictionary<string, (int Seen, int Read)> _files = new(StringComparer.Ordinal);
     private readonly HashSet<string> _found = new(StringComparer.Ordinal);
     private readonly HashSet<string> _resourceReferences = new(StringComparer.Ordinal);
     private readonly List<(string Split, string Locator, string Id, string Value)> _resourceTargets = [];
     private bool _itemLimit;
+    private bool _callLimit;
+    private int _callMethods;
+    private int _linearMethods;
     private int _documentsRead;
 
     private static readonly Dictionary<string, string> LayoutProperties = new(StringComparer.Ordinal)
@@ -83,8 +90,11 @@ internal sealed class AndroidApkAccessibilityInventory
                 name.EndsWith(".dex", StringComparison.Ordinal) && name[7..^4].Length > 0 &&
                 name[7..^4].All(char.IsAsciiDigit))
             {
-                ReadDocument(entry, "Android DEX accessibility symbols", () => ReadDex(entry, split, cancellation),
+                var complete = false;
+                ReadDocument(entry, "Android DEX accessibility symbols", () =>
+                    complete = ReadDex(entry, split, archive, cancellation),
                     cancellation, MaxBinaryBytes);
+                if (selectedPackage is not null) Document(DexCalls, complete);
             }
             else if (IsNativeLibrary(name))
             {
@@ -105,6 +115,14 @@ internal sealed class AndroidApkAccessibilityInventory
                     _found.Add("Flutter code candidate");
                     Add("bundled", "app", "Compiled library candidate", split, name,
                         "libapp.so; contents not decoded");
+                    ReadDocument(entry, "Dart AOT export table", () =>
+                    {
+                        var layout = AndroidDartSnapshotExports.Read(ReadBytes(entry, cancellation), cancellation);
+                        if (layout is not null)
+                        {
+                            Add("bundled", "app", "Dart AOT snapshot exports", split, name, layout);
+                        }
+                    }, cancellation, MaxElfBytes);
                 }
             }
             else if (name.StartsWith("META-INF/androidx.compose.", StringComparison.Ordinal) &&
@@ -180,18 +198,36 @@ internal sealed class AndroidApkAccessibilityInventory
                 Add("declared", "component", "Resource reference target", target.Split, target.Locator, target.Value);
             }
         }
+        foreach (var (split, entry, site) in _calls)
+        {
+            if (_items.Count >= MaxItems) { _callLimit = true; break; }
+            Add("call", "method", site.Category, split, $"{entry} / {site.Locator}", site.Value);
+        }
         var coverage = _files.OrderBy(file => file.Key, StringComparer.Ordinal).Select(file =>
-            new AndroidApkAccessibilityCoverage(file.Key, file.Value.Read == file.Value.Seen ? "read" : "partial",
-                $"{file.Value.Read} of {file.Value.Seen} identified documents read.")).ToList();
+            file.Key == DexCalls
+                ? new AndroidApkAccessibilityCoverage(file.Key,
+                    file.Value.Read == file.Value.Seen && !_callLimit ? "read" : "partial",
+                    $"{file.Value.Read} of {file.Value.Seen} DEX files completed the bounded pass. " +
+                    $"{_callMethods} method bodies inspected; {_linearMethods} eligible for straight-line value tracing. " +
+                    "Only callers in the selected package's class namespace were scanned for allowlisted direct calls. " +
+                    "Other namespaces, including relocated or obfuscated callers, are not covered by this pass. " +
+                    (_callLimit ? "The saved call-site limit was reached. " : "") +
+                    "No execution, full call paths or screen visits were established.")
+                : new AndroidApkAccessibilityCoverage(file.Key, file.Value.Read == file.Value.Seen ? "read" : "partial",
+                    $"{file.Value.Read} of {file.Value.Seen} identified documents read.")).ToList();
         coverage.Add(new("APK inventory", apksRead == 0 ? "unavailable" : apksRead < apksTotal || _itemLimit ? "partial" : "read",
             $"{apksRead} of {apksTotal} installed APKs read." + (_itemLimit ? " Some declarations exceeded an item, field or resource limit." : "")));
         AddCoverage("Android resource resolution", _files.ContainsKey("Android resource styles"),
             "Direct style entries and referenced IDs, fonts, dimensions and accessibility strings are shown where recovered. " +
             "Inheritance, full reference chains and Android's active resource configuration were not calculated.");
-        AddCoverage("Android DEX call paths", _files.ContainsKey("Android DEX accessibility symbols"),
-            "Allowlisted method symbols identify API surface only. Call arguments, field construction, timers and semantics behavior were not reconstructed.");
+        if (!_files.ContainsKey(DexCalls))
+        {
+            AddCoverage(DexCalls, _files.ContainsKey("Android DEX accessibility symbols"),
+                "No selected package namespace was available for the bounded pass; API symbols are separate.");
+        }
         AddCoverage("Flutter compiled code", _found.Contains("Flutter") || _found.Contains("Flutter code candidate"),
-            "Compiled Dart code was not decoded by this collector. Flutter font manifest declarations are reported separately.");
+            "Exact Dart AOT ELF exports can identify a snapshot layout, not widget code or screen use. " +
+            "Compiled Dart was not decoded. Flutter font manifest declarations are reported separately.");
         AddCoverage("Jetpack Compose compiled code", _found.Contains("Jetpack Compose"),
             "Compose declaration, modifier and semantics code was not decoded.");
         AddCoverage("React Native / JavaScript", _found.Contains("React Native") || _found.Contains("Android JavaScript bundle"),
@@ -214,7 +250,7 @@ internal sealed class AndroidApkAccessibilityInventory
 
     private void ReadStyles(ZipArchiveEntry entry, string split, CancellationToken token)
     {
-        var bytes = ReadBytes(entry);
+        var bytes = ReadBytes(entry, token);
         AndroidCompiledStyles.Read(bytes, (locator, property, value, isResourceReference) =>
         {
             if (property.StartsWith("reference:", StringComparison.Ordinal))
@@ -239,10 +275,35 @@ internal sealed class AndroidApkAccessibilityInventory
         }, _resourceReferences.Contains, token);
     }
 
-    private void ReadDex(ZipArchiveEntry entry, string split, CancellationToken token)
+    private bool ReadDex(ZipArchiveEntry entry, string split, ZipArchive archive, CancellationToken token)
     {
-        AndroidDexAccessibilitySymbols.Read(ReadBytes(entry), (category, reference) =>
+        var bytes = ReadBytes(entry, token);
+        AndroidDexAccessibilitySymbols.Read(bytes, (category, reference) =>
             Add("symbol", "app", category, split, entry.FullName, reference), token);
+        if (selectedPackage is null) return false;
+        try
+        {
+            var result = new AndroidDexAccessibilityCalls(bytes, selectedPackage, token)
+                .Read(path => archive.GetEntry(path) is not null);
+            _callMethods += result.Methods;
+            _linearMethods += result.LinearMethods;
+            foreach (var site in result.Sites)
+            {
+                if (_calls.Count >= MaxCallRows)
+                {
+                    _callLimit = true;
+                    break;
+                }
+                _calls.Add((split, entry.FullName, site));
+                foreach (var id in site.Resources)
+                    if (_resourceReferences.Count < MaxItems) _resourceReferences.Add(id);
+            }
+            return !result.Partial;
+        }
+        catch (InvalidDataException)
+        {
+            return false; // A malformed code item must not remove valid symbol evidence.
+        }
     }
 
     private void ReadLayout(ZipArchiveEntry entry, string split, bool manifest)
@@ -318,11 +379,16 @@ internal sealed class AndroidApkAccessibilityInventory
         }
     }
 
-    private static byte[] ReadBytes(ZipArchiveEntry entry)
+    private static byte[] ReadBytes(ZipArchiveEntry entry, CancellationToken token = default)
     {
         using var content = entry.Open();
         var bytes = new byte[(int)entry.Length];
-        content.ReadExactly(bytes);
+        const int blockSize = 128 * 1024;
+        for (var at = 0; at < bytes.Length; at += blockSize)
+        {
+            token.ThrowIfCancellationRequested();
+            content.ReadExactly(bytes.AsSpan(at, Math.Min(blockSize, bytes.Length - at)));
+        }
         return bytes;
     }
 

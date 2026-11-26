@@ -9,12 +9,12 @@ public sealed record AndroidApkAccessibilityEvidence(
     IReadOnlyList<AndroidApkAccessibilityItem> Items,
     IReadOnlyList<AndroidApkAccessibilityCoverage> Coverage);
 
-/// <param name="Kind">bundled, declared, or symbol. Runtime observations have a separate recording source.</param>
-/// <param name="Scope">app or component. The latter does not imply a match to a screen visit.</param>
+/// <param name="Kind">bundled, declared, symbol, or call. Runtime observations have a separate recording source.</param>
+/// <param name="Scope">app, component, or method. Neither components nor methods are links to screen visits.</param>
 /// <param name="Category">The accessibility topic, independent of framework.</param>
 /// <param name="Split">APK basename only, never the installation path.</param>
-/// <param name="Locator">Archive entry and, where known, element or property.</param>
-/// <param name="Value">The declared or bundled value, not an inference.</param>
+/// <param name="Locator">Archive entry and, where known, element, property, or method and instruction offset.</param>
+/// <param name="Value">Saved package evidence, including statically traceable call arguments when available.</param>
 public sealed record AndroidApkAccessibilityItem(
     string Kind, string Scope, string Category, string Split, string Locator, string Value);
 

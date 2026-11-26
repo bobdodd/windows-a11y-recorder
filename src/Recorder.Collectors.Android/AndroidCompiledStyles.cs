@@ -156,7 +156,7 @@ internal static class AndroidCompiledStyles
                 {
                     emit(locator, "style", styleAlias, isResourceReference);
                 }
-                else if (type is "id" or "font" or "dimen" or "string")
+                else if (type is "id" or "font" or "dimen" or "string" or "layout")
                 {
                     // Defer unrelated resource entries. Only targets referenced
                     // by retained accessibility declarations reach the recording.

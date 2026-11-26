@@ -35,12 +35,7 @@ internal static class AndroidDexAccessibilitySymbols
 
     public static void Read(ReadOnlySpan<byte> dex, Action<string, string> emit, CancellationToken token)
     {
-        if (dex.Length < 112 || !dex[..4].SequenceEqual("dex\n"u8) ||
-            !(dex[4] == '0' && dex[5] is >= (byte)'3' and <= (byte)'4' && dex[6] is >= (byte)'0' and <= (byte)'9') ||
-            dex[7] != 0 || U32(dex, 32) != dex.Length || U32(dex, 36) != 112 || U32(dex, 40) != 0x12345678)
-        {
-            throw Invalid();
-        }
+        Validate(dex);
         var strings = Table(dex, 56, 4, 1_048_576);
         var types = Table(dex, 64, 4, 65536);
         var methods = Table(dex, 88, 8, 65536);
@@ -65,12 +60,24 @@ internal static class AndroidDexAccessibilitySymbols
         }
     }
 
+    internal static void Validate(ReadOnlySpan<byte> dex)
+    {
+        if (dex.Length < 112 || !dex[..4].SequenceEqual("dex\n"u8) ||
+            !(dex[4] == '0' && dex[5] is >= (byte)'3' and <= (byte)'4' && dex[6] is >= (byte)'0' and <= (byte)'9') ||
+            dex[7] != 0 || U32(dex, 32) != dex.Length || U32(dex, 36) != 112 || U32(dex, 40) != 0x12345678)
+        {
+            throw Invalid();
+        }
+    }
+
     private static bool IsSupportedOwner(string owner) => owner.EndsWith(';') &&
         (owner.StartsWith("Landroid/view/", StringComparison.Ordinal) ||
          owner.StartsWith("Landroid/widget/", StringComparison.Ordinal) ||
          owner.StartsWith("Landroidx/core/view/", StringComparison.Ordinal) ||
          owner.StartsWith("Landroidx/compose/ui/semantics/", StringComparison.Ordinal) ||
-         owner is "Landroid/os/CountDownTimer;" or "Landroid/view/accessibility/AccessibilityManager;");
+         owner is "Landroid/os/CountDownTimer;" or "Landroid/view/accessibility/AccessibilityManager;" or
+             "Landroid/app/Activity;" or "Landroid/webkit/WebView;" or "Landroid/content/res/Resources;" or
+             "Landroidx/core/content/res/ResourcesCompat;");
 
     private static string? Category(string owner, string method)
     {
@@ -83,10 +90,16 @@ internal static class AndroidDexAccessibilitySymbols
         {
             return "Timing API symbol";
         }
+        if (owner is "Landroid/content/res/Resources;" or "Landroidx/core/content/res/ResourcesCompat;" && method == "getFont")
+            return "Typography API symbol";
+        if (owner == "Landroid/app/Activity;" && method == "setContentView")
+            return "Layout API symbol";
+        if (owner == "Landroid/webkit/WebView;" && method == "loadUrl")
+            return "WebView API symbol";
         return ViewMethods.GetValueOrDefault(method);
     }
 
-    private static ReadOnlySpan<byte> Table(ReadOnlySpan<byte> dex, int field, int width, int maxEntries)
+    internal static ReadOnlySpan<byte> Table(ReadOnlySpan<byte> dex, int field, int width, int maxEntries)
     {
         var count = U32(dex, field);
         var offset = U32(dex, field + 4);
@@ -95,7 +108,8 @@ internal static class AndroidDexAccessibilitySymbols
             ? dex.Slice((int)offset, (int)count * width) : throw Invalid();
     }
 
-    private static string? ReadName(ReadOnlySpan<byte> dex, ReadOnlySpan<byte> strings, uint index)
+    internal static string? ReadName(ReadOnlySpan<byte> dex, ReadOnlySpan<byte> strings, uint index,
+        bool allowSpaces = false)
     {
         if (index >= strings.Length / 4)
         {
@@ -129,7 +143,7 @@ internal static class AndroidDexAccessibilitySymbols
             var text = data.Slice(prefix, size);
             foreach (var character in text)
             {
-                if (character < 33 || character > 126)
+                if (character < (allowSpaces ? 32 : 33) || character > 126)
                 {
                     return null;
                 }
@@ -139,5 +153,5 @@ internal static class AndroidDexAccessibilitySymbols
         throw Invalid();
     }
 
-    private static InvalidDataException Invalid() => new("Invalid or unsupported Android DEX file.");
+    internal static InvalidDataException Invalid() => new("Invalid or unsupported Android DEX file.");
 }

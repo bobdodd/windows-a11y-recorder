@@ -46,6 +46,19 @@ public sealed class AndroidApkGeneratedFixtureTests
         Has(evidence, "symbol", "app", "Form API symbol", Base, "classes.dex", "android.widget.TextView.setLabelFor");
         Has(evidence, "symbol", "app", "Timing API symbol", Base, "classes.dex", "android.os.CountDownTimer.start");
         Has(evidence, "symbol", "app", "Timing API symbol", Base, "classes.dex", "android.view.accessibility.AccessibilityManager.getRecommendedTimeoutMillis");
+        Has(evidence, "call", "method", "Native text-size call", Base, ".onCreate(Landroid/os/Bundle;)V +0x2E",
+            "android.widget.TextView.setTextSize: text size 21sp; receiver ID set or looked up as @0x7F020007 earlier in this method.");
+        Has(evidence, "call", "method", "Native label-association call", Base, ".onCreate(Landroid/os/Bundle;)V +0x34",
+            "android.widget.TextView.setLabelFor: label target @0x7F020006; receiver ID set or looked up as @0x7F020007 earlier in this method.");
+        Has(evidence, "declared", "component", "Resource reference target", Base, "@0x7F020006", "id/apk_runtime_field");
+        Has(evidence, "call", "method", "Native timer call", Base, " +0xE",
+            "android.view.accessibility.AccessibilityManager.getRecommendedTimeoutMillis: 8000 ms base; content flags 2 (text).");
+        Has(evidence, "call", "method", "Native timer call", Base, " +0x1E",
+            "Constructor forwards to CountDownTimer: duration from getRecommendedTimeoutMillis at +0xE; tick interval argument 1000 ms.");
+        Has(evidence, "call", "method", "Packaged WebView load call", Base, " +0x25",
+            "WebView.loadUrl refers to bundled assets/web/form.html.");
+        Assert.DoesNotContain(evidence.Items, item => item.Kind == "call" && item.Value.Contains("timing.html", StringComparison.Ordinal));
+        Assert.Contains(evidence.Coverage, row => row.Reader == "Android DEX call sites" && row.Status == "read");
 
         Has(evidence, "declared", "component", "Web component", Base, "id: web_fixture_heading)", "h1");
         Has(evidence, "declared", "component", "Form association", Base, "assets/web/form.html", "web_fixture_code");
@@ -61,6 +74,66 @@ public sealed class AndroidApkGeneratedFixtureTests
             item.Kind != "bundled" && item.Value.Contains("apk_unused.ttf", StringComparison.Ordinal) ||
             item.Value.Contains("sentinel", StringComparison.Ordinal));
         Assert.Contains(evidence.Coverage, row => row.Reader == "Web CSS, scripts and live DOM" && row.Status == "not decoded");
+    }
+
+    [Fact]
+    public void CallsStayWithinTheSelectedNamespaceAndRequireAPresentWebAsset()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var code = FixtureDex();
+        var scan = new AndroidDexAccessibilityCalls(code, Package, token).Read(_ => false);
+        Assert.Contains(scan.Sites, row => row.Category == "WebView load call");
+        Assert.DoesNotContain(scan.Sites, row => row.Category == "Packaged WebView load call" ||
+            row.Value.Contains("file://", StringComparison.Ordinal));
+        var unrelated = new AndroidDexAccessibilityCalls(code, Package[..^1], token).Read(_ => true);
+        Assert.Empty(unrelated.Sites);
+        Assert.Equal(0, unrelated.Methods);
+        Assert.False(unrelated.Partial);
+    }
+
+    [Fact]
+    public void BranchesWithholdArgumentsAndMalformedCodeLeavesSymbolsIntact()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var code = FixtureDex();
+        var at = code.AsSpan().IndexOf(new byte[] { 0x12, 0x21, 0x15, 0x02, 0xa8, 0x41, 0x6e, 0x30 });
+        Assert.True(at >= 0);
+        // The 21sp bytes remain in a const operand. A preceding branch means
+        // our straight-line reader cannot assert even an apparently immediate value.
+        code[at] = 0x28;
+        code[at + 1] = 0x01;
+        var branch = new AndroidDexAccessibilityCalls(code, Package, token).Read(_ => true);
+        Assert.Contains(branch.Sites, row => row.Category == "Native text-size call" &&
+            row.Value == "android.widget.TextView.setTextSize: argument not resolved.");
+        Assert.DoesNotContain(branch.Sites, row => row.Value.Contains("21sp", StringComparison.Ordinal));
+
+        // An undefined opcode in onCreate must not hide the DEX symbol or
+        // confirmed calls in other methods. These are in-memory reader inputs.
+        code[at] = 0x3e;
+        using var buffer = new MemoryStream();
+        using (var apk = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            using var output = apk.CreateEntry("classes.dex").Open();
+            output.Write(code);
+        }
+        using var archive = new ZipArchive(buffer, ZipArchiveMode.Read);
+        var inventory = new AndroidApkAccessibilityInventory(Package);
+        inventory.Inspect(archive, Base, [], [], false, token);
+        var evidence = inventory.Build(1, 1);
+        Has(evidence, "symbol", "app", "Typography API symbol", Base, "classes.dex", "android.widget.TextView.setTextSize");
+        Assert.DoesNotContain(evidence.Items, row => row.Category == "Native text-size call");
+        Assert.Contains(evidence.Items, row => row.Kind == "call" && row.Value.Contains("8000 ms base", StringComparison.Ordinal));
+        Assert.Contains(evidence.Coverage, row => row.Reader == "Android DEX call sites" && row.Status == "partial");
+        Assert.Contains(evidence.Coverage, row => row.Reader == "Android DEX accessibility symbols" && row.Status == "read");
+    }
+
+    private static byte[] FixtureDex()
+    {
+        using var apk = ZipFile.OpenRead(Input("native-web.zip"));
+        using var input = apk.GetEntry("classes.dex")!.Open();
+        using var buffer = new MemoryStream();
+        input.CopyTo(buffer);
+        return buffer.ToArray();
     }
 
     [Fact]
@@ -85,8 +158,8 @@ public sealed class AndroidApkGeneratedFixtureTests
         Has(evidence, "bundled", "app", "JavaScript bundle candidate", Unknown, "separate.hbc", "Bundle present; payload format not established");
         Assert.All(evidence.Items, item =>
         {
-            Assert.True(item.Kind is "bundled" or "declared" or "symbol");
-            Assert.True(item.Scope is "app" or "component");
+            Assert.True(item.Kind is "bundled" or "declared" or "symbol" or "call");
+            Assert.True(item.Kind == "call" ? item.Scope == "method" : item.Scope is "app" or "component");
             Assert.DoesNotContain("sentinel", item.Value, StringComparison.Ordinal);
             Assert.False(item.Split == Missing);
         });
@@ -107,6 +180,8 @@ public sealed class AndroidApkGeneratedFixtureTests
         Assert.Contains(details.Groups, group => group is { Topic: "Font family", Source: "Declared, app-wide" } &&
             group.Items.Any(item => item.Contains($"[{Flutter}: assets/flutter_assets/FontManifest.json]", StringComparison.Ordinal)));
         Assert.Contains(details.Groups, group => group is { Topic: "Compose semantics symbol", Source: "API symbol, app-wide" });
+        Assert.Contains(details.Groups, group => group is { Topic: "Native text-size call", Source: "Static call site, method" } &&
+            group.Items.Any(item => item.Contains("21sp", StringComparison.Ordinal)));
         Assert.Contains("A component locator is not a link to a screen visit.", details.Context);
         Assert.Contains(details.Coverage, line => line.Contains("5 of 6 installed APKs read.", StringComparison.Ordinal));
     }
