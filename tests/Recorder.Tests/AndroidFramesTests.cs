@@ -178,11 +178,13 @@ public sealed class AndroidFramesTests : IDisposable
         var config = stream.Add([9, 9, 9], config: true);
         var first = stream.Add([1]);
         var repeat = stream.Add([1]);
-        var changed = stream.Add([2]);
+        var changed = stream.Add([126]);
         var made = new List<FakeDecoder>();
         var written = new List<WrittenFrame>();
         var failures = new List<string>();
         var hashes = new ArtifactHashRegistry();
+        var preview = new AndroidLivePreview();
+        preview.BeginSession(1);
         using var frames = new PhoneFrames(
             _folder,
             stream.Path,
@@ -191,7 +193,8 @@ public sealed class AndroidFramesTests : IDisposable
             () => 42,
             written.Add,
             failures.Add,
-            workers: 2);
+            workers: 2,
+            preview);
 
         frames.Session(6, 4);
         frames.Packet(config);
@@ -205,7 +208,7 @@ public sealed class AndroidFramesTests : IDisposable
         Assert.Equal((6, 4), (decoder.Width, decoder.Height));
         // The parameter sets go to the decoder with the picture after them.
         Assert.Equal([9, 9, 9, 1], decoder.AccessUnits[0]);
-        Assert.Equal([[1], [2]], decoder.AccessUnits.Skip(1));
+        Assert.Equal([[1], [126]], decoder.AccessUnits.Skip(1));
         Assert.True(decoder.Disposed);
 
         Assert.Equal(2, frames.Written);
@@ -231,6 +234,10 @@ public sealed class AndroidFramesTests : IDisposable
         Assert.Equal(Convert.ToHexString(SHA256.HashData(png)).ToLowerInvariant(), hash);
         // Luma 1 in limited range is below black, so the frame is black.
         Assert.All(Unfilter(Inflate(Chunks(png)[1].Data), 6, 4), value => Assert.Equal(0, value));
+        var latest = Assert.IsType<AndroidLivePreviewFrame>(preview.Current.Frame);
+        Assert.Equal((2UL, 6, 4), (latest.Sequence, latest.Width, latest.Height));
+        var latestPng = File.ReadAllBytes(Path.Combine(_folder, written[1].Frame.Path));
+        Assert.Equal(latest.Rgb.ToArray(), Unfilter(Inflate(Chunks(latestPng)[1].Data), 6, 4));
         Assert.Empty(Directory.GetFiles(Path.Combine(_folder, "frames", "android"), "*.tmp"));
     }
 

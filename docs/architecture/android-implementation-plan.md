@@ -440,6 +440,22 @@ slice's full test goes into a validation plan,
   any limit is considered. If decoding falls behind, the stream is still
   complete, and the frames it did not reach are taken from it after
   Stop, before the recording is completed.
+- **Live Android preview.** During an Android recording, the recording
+  controls and Android menu open one resizable, view-only window on the
+  PC. It shows the phone's picture fitted to the window without changing
+  its shape. `PhoneFrames` publishes the RGB buffer before PNG encoding
+  to an in-memory slot shared with the preview. Only the newest decoded
+  frame of the current scrcpy capture session is kept. An older PNG
+  worker cannot replace that frame or display a picture from before
+  rotation. The window checks for an update at most about 30 times per
+  second, skips unchanged frames, and can lag if decoding falls behind.
+  Neither its display rate nor its open/closed state limits archived PNGs.
+  A stream or frame failure clears the picture and reports the reason
+  category. Closing the window leaves capture running; stopping capture
+  closes the window. There is no extra stream, phone configuration or
+  input, audio playback path, or change to the companion's separate
+  screenshots. Windows display and physical-device latency still need
+  [target validation](../validation/android-recording-plan.md#live-android-preview).
 - **Player.** The phone's frame takes the desktop's place, fitted to the
   height of the frame area.
 - **MP4 export.** Uses the phone's frames as the picture. The export

@@ -298,6 +298,7 @@ public partial class MainWindow : Window
             StopButton.IsEnabled = true;
             MarkerButton.IsEnabled = true;
             OpenFolderButton.IsEnabled = true;
+            EnableAndroidLivePreview();
             ApplyLayout();
             _statusTimer.Start();
             RefreshStatus();
@@ -308,6 +309,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
+            CloseAndroidLivePreview();
             StatusTextBlock.Text = "Recording could not start.";
             busy.Dispose();
             MessageBox.Show(
@@ -363,6 +365,7 @@ public partial class MainWindow : Window
             accessibilityVolumePercent: AndroidCompanionCollector.AccessibilityVolumePercent);
         var server = Path.Combine(AndroidTools.BundledFolder(AppContext.BaseDirectory), AndroidTools.ScrcpyServer.Name);
         var screen = new AndroidScreenCollector(adb, serial, server, companion);
+        _androidLivePreview = screen.LivePreview;
         _talkBack = new AndroidTalkBackCollector(adb, serial, companion);
         var trees = new AndroidAccessibilityTreeCollector(serial, companion, companion);
         return
@@ -867,6 +870,7 @@ public partial class MainWindow : Window
         }
 
         _transitioning = true;
+        CloseAndroidLivePreview();
         _statusTimer.Stop();
         StopButton.IsEnabled = false;
         MarkerButton.IsEnabled = false;
@@ -2181,6 +2185,7 @@ public partial class MainWindow : Window
 
     private async Task DisposeCoordinatorAsync()
     {
+        CloseAndroidLivePreview();
         if (_coordinator is not null)
         {
             await _coordinator.DisposeAsync();

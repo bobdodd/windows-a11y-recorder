@@ -344,6 +344,11 @@
               BorderThickness="1"
               FontWeight="SemiBold"
               Foreground="#CDCCCA">
+      <MenuItem x:Name="AndroidLivePreviewMenuItem"
+                Style="{StaticResource AnalysisMenuItem}"
+                Header="_Live Android preview..."
+                IsEnabled="False"
+                Click="AndroidLivePreview_Click" />
       <MenuItem x:Name="AndroidSetupMenuItem"
                 Style="{StaticResource AnalysisMenuItem}"
                 Header="Set _up Android recording..."
@@ -721,6 +726,10 @@
         </ScrollViewer>
 
         <Grid Grid.Row="2" Margin="0,14,0,0">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="*" />
@@ -736,6 +745,15 @@
                   Content="S_top recording"
                   IsEnabled="False"
                   Click="StopButton_Click" />
+          <Button x:Name="AndroidLivePreviewButton"
+                  Grid.Row="1"
+                  Grid.ColumnSpan="2"
+                  Margin="0,8,0,0"
+                  MinHeight="44"
+                  Visibility="Collapsed"
+                  Content="_Live Android preview..."
+                  AutomationProperties.HelpText="Shows the phone's screen without controlling it."
+                  Click="AndroidLivePreview_Click" />
         </Grid>
       </Grid>
     </Border>

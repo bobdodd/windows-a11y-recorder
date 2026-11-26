@@ -3392,3 +3392,37 @@ and the "android.touch" line counts touches. In step 4, the first line
 under "Current session" reads "Recording completed and stored.", and
 the player shows the phone's screen. Send both screenshots. Then run
 test 8 of the Windows installer plan.
+
+## Live Android preview
+
+The synthetic tests check that the feed retains the newest picture,
+clears on rotation or loss, rejects stale frames, and matches PNG
+evidence. The tests below are for the Windows window and a USB phone.
+
+### Test 83: view the phone without controlling it
+
+1. Start an Android recording with an unlocked, USB-connected phone.
+2. Choose **Live Android preview...** below the recording controls.
+3. Scroll on the phone, then rotate it in an app that allows rotation.
+4. Resize the preview. Click inside the picture and press an arrow key
+   on the PC.
+5. Choose **Stop recording** in the main recorder.
+
+**On screen:** the phone's changes appear in the preview, portrait and
+landscape fit without stretching, and PC input does not change the phone.
+The preview closes at Stop, and the saved recording opens in the player.
+
+### Test 84: close and reopen the preview during recording
+
+1. During an Android recording, open **Android > Live Android preview...**
+   and leave the phone on a still screen.
+2. Press Escape in the preview. Confirm the main window still shows an
+   active recording.
+3. Reopen the preview without touching the phone.
+4. Unplug the USB cable and look at both windows.
+
+**On screen:** reopening shows the last live image without requiring
+another change on the phone. After disconnect, the old picture clears
+and a status message reports that the screen stream is unavailable.
+The recorder does not stop the recording when the preview closes or
+when the screen stream is lost.

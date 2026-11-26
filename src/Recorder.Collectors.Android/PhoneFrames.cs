@@ -50,6 +50,7 @@ public sealed class PhoneFrames : IDisposable
     private readonly Func<long> _now;
     private readonly Action<WrittenFrame> _written;
     private readonly Action<string> _failed;
+    private readonly AndroidLivePreview? _preview;
     private readonly BlockingCollection<object> _queue = [];
     private readonly BlockingCollection<Task<WrittenFrame?>> _ordered;
     private readonly SemaphoreSlim _slots;
@@ -76,6 +77,7 @@ public sealed class PhoneFrames : IDisposable
     /// <param name="written">Called in order, from one thread, for each frame written.</param>
     /// <param name="failed">Called once, with the reason, if frames stop being made.</param>
     /// <param name="workers">How many frames are converted and written at once.</param>
+    /// <param name="preview">Optional latest-frame feed using the same pixels as the PNG encoder.</param>
     public PhoneFrames(
         string sessionDirectory,
         string streamPath,
@@ -84,7 +86,8 @@ public sealed class PhoneFrames : IDisposable
         Func<long> now,
         Action<WrittenFrame> written,
         Action<string> failed,
-        int workers)
+        int workers,
+        AndroidLivePreview? preview = null)
     {
         _sessionDirectory = sessionDirectory;
         _streamPath = streamPath;
@@ -93,6 +96,7 @@ public sealed class PhoneFrames : IDisposable
         _now = now;
         _written = written;
         _failed = failed;
+        _preview = preview;
         workers = Math.Max(1, workers);
         // Each frame in hand holds a picture of about 4 MB and its RGB of
         // about 8 MB, so the frames in hand are bounded.
@@ -283,7 +287,9 @@ public sealed class PhoneFrames : IDisposable
             flags.Add(AndroidFrameRecords.ColourAssumedFlag);
         }
 
-        var png = PngWriter.Encode(picture.Width, picture.Height, picture.ToRgb(matrix, fullRange));
+        var rgb = picture.ToRgb(matrix, fullRange);
+        _preview?.Publish(packet.Session, sequence, picture.Width, picture.Height, rgb);
+        var png = PngWriter.Encode(picture.Width, picture.Height, rgb);
         var relative = AndroidFrameRecords.FramePath(sequence);
         var path = Path.Combine(_sessionDirectory, relative.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

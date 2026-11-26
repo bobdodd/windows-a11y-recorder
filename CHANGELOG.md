@@ -8,6 +8,15 @@ from the product version.
 
 Changes on `main` since 1.1.0, not yet released.
 
+### Live Android preview
+
+- During an Android recording, open **Live Android preview...** beside
+  the recording controls or in the **Android** menu. The resizable,
+  view-only window uses the existing video-derived frame pipeline.
+  Close and reopen it without interrupting the recording. It follows
+  rotation, clears on stream loss, and closes at Stop. There is no
+  second stream, phone control, or change to saved evidence.
+
 ### Native Android accessibility preflight research
 
 - Measured a standalone synthetic native screen on a physical Android

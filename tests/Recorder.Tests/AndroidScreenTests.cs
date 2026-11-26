@@ -321,13 +321,6 @@ public sealed class AndroidScreenTests : IDisposable
     public async Task Collector_Rotation_StartsACaptureSession()
     {
         var phoneStart = PhoneOffset + 2_000_000_000;
-        byte[] stream =
-        [
-            .. ScrcpyProtocol.SessionHeader(1080, 2404),
-            .. ScrcpyProtocol.PacketHeader(phoneStart / 1000, true, 10), .. Bytes(10, 1),
-            .. ScrcpyProtocol.SessionHeader(2404, 1080),
-            .. ScrcpyProtocol.PacketHeader(phoneStart / 1000 + 500_000, true, 20), .. Bytes(20, 2)
-        ];
         await using var phone = await PhoneSocket.OpenAsync();
         var sink = new ListSink();
         var clock = new SessionClock();
@@ -335,9 +328,25 @@ public sealed class AndroidScreenTests : IDisposable
         await collector.InitializeAsync(new CollectorInitializationContext("session-1", _folder, clock, sink), CancellationToken.None);
 
         await collector.StartAsync(new SessionBoundary(0, DateTimeOffset.UtcNow), CancellationToken.None);
-        await phone.WriteAsync(stream);
-        await WaitUntilAsync(() => sink.Records.Count(record => record.EventType == AndroidScreenRecords.PacketEventType) == 2);
+        Assert.Equal(AndroidLivePreviewState.WaitingForFrame, collector.LivePreview.Current.State);
+        await phone.WriteAsync([
+            .. ScrcpyProtocol.SessionHeader(1080, 2404),
+            .. ScrcpyProtocol.PacketHeader(phoneStart / 1000, true, 10), .. Bytes(10, 1)]);
+        await WaitUntilAsync(() => collector.LivePreview.Current.Frame is not null);
+        var portrait = collector.LivePreview.Current;
+        Assert.Equal((1080, 2404), (portrait.Frame!.Width, portrait.Frame.Height));
+        Assert.Same(portrait, collector.LivePreview.Current);
+
+        await phone.WriteAsync(ScrcpyProtocol.SessionHeader(2404, 1080));
+        await WaitUntilAsync(() => collector.LivePreview.Current.StreamSession == 2);
+        Assert.Equal(new AndroidLivePreviewSnapshot(AndroidLivePreviewState.WaitingForFrame, 2, null), collector.LivePreview.Current);
+        await phone.WriteAsync([
+            .. ScrcpyProtocol.PacketHeader(phoneStart / 1000 + 500_000, true, 20), .. Bytes(20, 2)]);
+        await WaitUntilAsync(() => collector.LivePreview.Current.Frame is not null);
+        var landscape = collector.LivePreview.Current.Frame!;
+        Assert.Equal((2404, 1080), (landscape.Width, landscape.Height));
         await collector.StopAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
+        Assert.Equal(new AndroidLivePreviewSnapshot(AndroidLivePreviewState.Stopped, 2, null), collector.LivePreview.Current);
 
         var sessions = sink.Records.Where(record => record.EventType == AndroidScreenRecords.SessionEventType).ToList();
         Assert.Equal([1, 2], sessions.Select(record => record.Payload.GetProperty("session").GetInt32()));
@@ -373,6 +382,7 @@ public sealed class AndroidScreenTests : IDisposable
         await collector.StartAsync(new SessionBoundary(0, DateTimeOffset.UtcNow), CancellationToken.None);
         await phone.WriteAsync(stream);
         await WaitUntilAsync(() => collector.HealthState == CollectorHealthState.Degraded);
+        Assert.Equal(new AndroidLivePreviewSnapshot(AndroidLivePreviewState.FramesUnavailable, 1, null), collector.LivePreview.Current);
         await collector.StopAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
 
         Assert.Equal(
@@ -443,6 +453,29 @@ public sealed class AndroidScreenTests : IDisposable
     }
 
     [Fact]
+    public async Task Collector_StreamEnds_ClearsTheLastPreviewImage()
+    {
+        await using var phone = await PhoneSocket.OpenAsync();
+        var sink = new ListSink();
+        var clock = new SessionClock();
+        await using var collector = new AndroidScreenCollector(new ServerAdb(_ => { }), Serial, "unused", new FakePhoneClock(true), (_, _) => phone.ConnectAsync(), Decoders);
+        await collector.InitializeAsync(new CollectorInitializationContext("session-1", _folder, clock, sink), CancellationToken.None);
+        await collector.StartAsync(new SessionBoundary(0, DateTimeOffset.UtcNow), CancellationToken.None);
+        await phone.WriteAsync([
+            .. ScrcpyProtocol.SessionHeader(6, 4),
+            .. ScrcpyProtocol.PacketHeader((PhoneOffset + 1_000_000_000) / 1000, true, 1), 126]);
+        await WaitUntilAsync(() => collector.LivePreview.Current.Frame is not null);
+
+        await phone.CloseAsync();
+        await WaitUntilAsync(() => collector.LivePreview.Current.State == AndroidLivePreviewState.StreamUnavailable);
+        Assert.Equal(new AndroidLivePreviewSnapshot(AndroidLivePreviewState.StreamUnavailable, 1, null), collector.LivePreview.Current);
+        await collector.StopAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
+
+        Assert.Single(sink.Records, record => record.EventType == AndroidScreenRecords.PacketEventType);
+        Assert.Single(sink.Records, record => record.EventType == AndroidFrameRecords.FrameEventType);
+    }
+
+    [Fact]
     public async Task Collector_ScreenUnavailable_RecordsWhyAndGoesOn()
     {
         var sink = new ListSink();
@@ -457,6 +490,7 @@ public sealed class AndroidScreenTests : IDisposable
         await collector.InitializeAsync(new CollectorInitializationContext("session-1", _folder, clock, sink), CancellationToken.None);
 
         var started = await collector.StartAsync(new SessionBoundary(0, DateTimeOffset.UtcNow), CancellationToken.None);
+        Assert.Equal(new AndroidLivePreviewSnapshot(AndroidLivePreviewState.StreamUnavailable, 0, null), collector.LivePreview.Current);
         var stopped = await collector.StopAsync(new SessionBoundary(clock.GetElapsedNanoseconds(), DateTimeOffset.UtcNow), CancellationToken.None);
 
         Assert.True(started.Accepted);

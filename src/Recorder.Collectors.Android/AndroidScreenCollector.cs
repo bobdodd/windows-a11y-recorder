@@ -111,6 +111,9 @@ public sealed class AndroidScreenCollector : ICaptureCollector
     /// </summary>
     public Task<PhoneSoundSource> Sound => _sound.Task;
 
+    /// <summary>The current preview image or reason it cannot be shown. No additional connection is opened.</summary>
+    public AndroidLivePreview LivePreview { get; } = new();
+
     public string? Summary
     {
         get
@@ -228,6 +231,7 @@ public sealed class AndroidScreenCollector : ICaptureCollector
         catch (Exception exception)
         {
             _sound.TrySetResult(new PhoneSoundSource(null, "the phone's screen stream did not start: " + exception.Message));
+            LivePreview.StreamUnavailable();
             throw;
         }
 
@@ -250,11 +254,25 @@ public sealed class AndroidScreenCollector : ICaptureCollector
             context.Clock.GetElapsedNanoseconds,
             FrameWritten,
             FramesFailed,
-            Math.Clamp(Environment.ProcessorCount / 2, 1, 4));
+            Math.Clamp(Environment.ProcessorCount / 2, 1, 4),
+            LivePreview);
         _running = new CancellationTokenSource();
         var token = _running.Token;
         var connection = _connection;
-        _reading = Task.Run(() => ReadAsync(connection, streamPath, token), CancellationToken.None);
+        _reading = Task.Run(async () =>
+        {
+            try
+            {
+                await ReadAsync(connection, streamPath, token).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Stop clears the preview first. On other read failures no
+                // finished PNG job should be able to revive a stale image.
+                LivePreview.StreamUnavailable();
+                throw;
+            }
+        }, CancellationToken.None);
         return CollectorTransitionResult.Success(LifecycleState);
     }
 
@@ -307,6 +325,7 @@ public sealed class AndroidScreenCollector : ICaptureCollector
         // Closing the socket ends the server on the phone and the read. The
         // sound collector has closed the audio socket already, as it stops
         // first; closing it again does nothing.
+        LivePreview.Stop();
         _running?.Cancel();
         if (_audio is not null)
         {
@@ -378,6 +397,7 @@ public sealed class AndroidScreenCollector : ICaptureCollector
                     session++;
                     Interlocked.Increment(ref _sessions);
                     _size = string.Create(CultureInfo.InvariantCulture, $"{started.Width} by {started.Height}");
+                    LivePreview.BeginSession(session);
                     _frames?.Session(started.Width, started.Height);
                     pending.Add(new Pending(
                         AndroidScreenRecords.SessionEventType,
@@ -429,6 +449,9 @@ public sealed class AndroidScreenCollector : ICaptureCollector
                 var placed = EmitPicture(record, pts * 1000, receivedAt, ready, pending);
                 _frames?.Packet(placed);
             }
+
+            // Do not show a frozen picture while finishing the stream artifact.
+            LivePreview.StreamUnavailable();
 
             // What came before a picture that never arrived is placed at its receipt.
             foreach (var item in pending)
@@ -527,6 +550,7 @@ public sealed class AndroidScreenCollector : ICaptureCollector
 
     private void FramesFailed(string reason)
     {
+        LivePreview.FramesUnavailable();
         var text = $"The phone's frames stopped being made: {reason} The phone's screen is still recorded as a video stream.";
         HealthState = CollectorHealthState.Degraded;
         HealthReason = text;
@@ -576,6 +600,7 @@ public sealed class AndroidScreenCollector : ICaptureCollector
 
     private void Unavailable(string reason, bool connectionLost)
     {
+        LivePreview.StreamUnavailable();
         var text = connectionLost
             ? $"The phone's screen stopped being recorded during the recording. {reason} The recording goes on without it."
             : $"The phone's screen could not be recorded: {reason} The recording goes on without it.";
