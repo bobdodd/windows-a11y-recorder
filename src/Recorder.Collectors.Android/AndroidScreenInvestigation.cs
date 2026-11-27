@@ -7,6 +7,7 @@ namespace Recorder.Collectors.Android;
 public sealed record AndroidInvestigationCandidate(AndroidInteractionCandidate Item, bool SampleByTouch, bool Tap)
 {
     public string? VisionLabel { get; init; }
+    public string? DuplicateTapRestriction { get; init; }
 }
 
 public sealed record AndroidInvestigationInventory(IReadOnlyList<AndroidInvestigationCandidate> Candidates, string Coverage);
@@ -307,9 +308,16 @@ public sealed partial class AndroidInteractionExploration
                     }
                     var before = Verify(viewport, phase.Cursor);
                     var at = Center(box);
-                    if (rows.Any(row => row.Candidate.Item.Enabled == false &&
-                        row.Candidate.Item.Boxes.Any(bounds => at.X >= bounds.Left && at.X < bounds.Right &&
-                            at.Y >= bounds.Top && at.Y < bounds.Bottom)))
+                    var overlapping = rows.Where(row => row.Candidate.Item.Boxes.Any(bounds =>
+                        at.X >= bounds.Left && at.X < bounds.Right && at.Y >= bounds.Top && at.Y < bounds.Bottom));
+                    if (overlapping.Select(row => row.Candidate.DuplicateTapRestriction).FirstOrDefault(reason => reason is not null)
+                        is { } restriction)
+                    {
+                        skipped++;
+                        Note(targets, AndroidInvestigationInput.Tap, $"Not tapped: {restriction}.");
+                        continue;
+                    }
+                    if (overlapping.Any(row => row.Candidate.Item.Enabled == false))
                     {
                         skipped++;
                         Note(targets, AndroidInvestigationInput.Tap, "Not tapped: the location overlaps a disabled Android item.");

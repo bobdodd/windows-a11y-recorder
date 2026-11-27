@@ -4,7 +4,7 @@ using Recorder.Contracts;
 namespace Recorder.Collectors.Android;
 
 public sealed record AndroidVisionMapping(IReadOnlyList<AndroidInvestigationCandidate> Candidates,
-    int Matched, int ModelOnly, int TreeOnly, int NotUsed);
+    int Matched, int ModelOnly, int TreeOnly, int NotUsed, int Duplicates);
 
 public static class AndroidInvestigationCandidates
 {
@@ -81,75 +81,108 @@ public static class AndroidInvestigationCandidates
                     .Select(name => Normalized(name!)).Where(name => name.Length > 0).ToHashSet(StringComparer.Ordinal));
             }).ToArray();
         var protectedAreas = snapshot.Occluders.Concat(nodes.Values.Where(node => node.Password).Select(node => node.Bounds)).ToArray();
-        var used = new HashSet<AndroidInvestigationCandidate>();
-        var accepted = new List<(AndroidNodeBounds Box, string Name)>();
-        var selected = new List<AndroidInvestigationCandidate>();
-        var matched = 0;
-        var modelOnly = 0;
-        var notUsed = 0;
+        var eligible = new List<VisionProposal>();
+        var omitted = Math.Max(0, proposals.Count - ProposalLimit);
         foreach (var (box, label) in proposals.Take(ProposalLimit))
         {
-            var name = Normalized(label);
             if (!snapshot.HasScreenCoordinates || snapshot.Frame is not { } frame ||
                 box.Right - box.Left < 10 || box.Bottom - box.Top < 10 ||
                 Area(box) > Area(snapshot.App.Window.Bounds) / 3 ||
                 !AndroidInteractionInventory.Contains(snapshot.App.Window.Bounds, box) ||
                 !AndroidInteractionInventory.Contains(new(0, 0, frame.Width, frame.Height), box) ||
-                protectedAreas.Any(other => AndroidInteractionInventory.Intersection(other, box) is not null) ||
-                accepted.Any(previous => Duplicate(box, name, previous.Box, previous.Name)))
+                protectedAreas.Any(other => AndroidInteractionInventory.Intersection(other, box) is not null))
             {
-                notUsed++;
+                omitted++;
                 continue;
             }
-            var ranked = comparable.Select(entry => (entry.Row, Score: entry.Row.Item.Boxes
-                    .Select(bounds => MatchScore(box, bounds, entry.Names.Contains(name), entry.Row.Tap))
-                    .DefaultIfEmpty(0).Max()))
-                .Where(entry => entry.Score > 0).OrderByDescending(entry => entry.Score).ToArray();
-            var nearDisabled = ranked.Any(entry => entry.Row.Item.Enabled == false);
-            if (ranked.Length == 1 || (ranked.Length > 1 && ranked[0].Score - ranked[1].Score >= .12))
-            {
-                var row = ranked[0].Row;
-                if (!used.Add(row))
+            var name = Normalized(label);
+            var ranked = comparable.Select(entry =>
                 {
-                    // A repeated proposal for the same uniquely matched node
-                    // is never tested a second time.
-                    notUsed++;
-                    continue;
-                }
+                    var best = entry.Row.Item.Boxes.Select(bounds =>
+                            (Bounds: bounds, Score: MatchScore(box, bounds, entry.Names.Contains(name), entry.Row.Tap)))
+                        .OrderByDescending(part => part.Score).FirstOrDefault();
+                    return (entry.Row, best.Bounds, best.Score);
+                })
+                .Where(entry => entry.Score > 0).OrderByDescending(entry => entry.Score).ToArray();
+            var match = ranked.Length == 1 || (ranked.Length > 1 && ranked[0].Score - ranked[1].Score >= .12)
+                ? new TreeMatch(ranked[0].Row, ranked[0].Bounds!, ranked[0].Score) : null;
+            eligible.Add(new(box, label, name, match, ranked.Length > 0 && match is null, ranked.Any(entry => entry.Row.Item.Enabled == false)));
+        }
+
+        var accepted = new List<KeptProposal>();
+        var duplicates = 0;
+        // The best supported whole control should not lose to a fragment just
+        // because the model happened to list the fragment first.
+        foreach (var proposal in eligible.OrderByDescending(entry => entry.Match?.Row.Tap == true)
+            .ThenByDescending(entry => Area(entry.Box)).ThenByDescending(entry => entry.Match?.Score ?? 0))
+        {
+            // Route an alias to its own known control before considering overlap
+            // with any other retained rectangle.
+            var duplicate = proposal.Match is { } match
+                ? accepted.FirstOrDefault(entry => entry.Choice.Match?.Row == match.Row) : null;
+            duplicate ??= accepted.FirstOrDefault(entry => SharesTargetGeometry(entry.Choice, proposal));
+            if (duplicate is null)
+            {
+                accepted.Add(new(proposal));
+                continue;
+            }
+            duplicates++;
+            duplicate.DisabledAlias |= proposal.NearDisabled;
+            duplicate.ConsequentialAlias |= AndroidInteractionExploration.SensitiveAction(proposal.Label) ||
+                (proposal.Match is { } alias && AndroidInteractionExploration.SensitiveAction(alias.Row.Item.Label));
+        }
+
+        var used = new HashSet<AndroidInvestigationCandidate>();
+        var selected = new List<AndroidInvestigationCandidate>();
+        var matched = 0;
+        var modelOnly = 0;
+        foreach (var entry in accepted)
+        {
+            var (box, label, _, match, ambiguous, nearDisabled) = entry.Choice;
+            var restriction = entry.DisabledAlias ? "an overlapping model suggestion could map to a disabled Android item" :
+                entry.ConsequentialAlias ? "an overlapping model suggestion indicates a potentially consequential action" : null;
+            var restrictionText = restriction is null ? "" : $"; not tapped because {restriction}";
+            if (match is not null)
+            {
+                var row = match.Row;
+                used.Add(row);
                 var hasAction = declaredSet.Contains(row);
-                var target = row.Item.Boxes.Select(bounds => AndroidInteractionInventory.Intersection(box, bounds))
-                    .OfType<AndroidNodeBounds>().OrderByDescending(Area).First();
+                var target = AndroidInteractionInventory.Intersection(box, match.Bounds)!;
                 selected.Add(row with
                 {
                     Item = row.Item with
                     {
                         Evidence = $"Model suggestion \"{label}\" matched to Android; {row.Item.Evidence}" +
-                            (nearDisabled && row.Item.Enabled != false ? "; nearby plausible tree match is disabled" : ""),
+                            (nearDisabled && row.Item.Enabled != false ? "; nearby plausible tree match is disabled" : "") + restrictionText,
                         Boxes = [target]
                     },
                     VisionLabel = label,
+                    DuplicateTapRestriction = restriction,
                     // An explicit scroll/long-press-only declaration is not a declaration of a tap.
-                    Tap = (row.Tap || !hasAction) && (!nearDisabled || row.Item.Enabled == false)
+                    Tap = restriction is null && (row.Tap || !hasAction) && (!nearDisabled || row.Item.Enabled == false)
                 });
                 matched++;
             }
             else
             {
-                var evidence = ranked.Length > 0 ? "Model suggestion; Android tree match was ambiguous" :
+                var evidence = ambiguous ? "Model suggestion; Android tree match was ambiguous" :
                     "Model suggestion; no matching Android tree node";
                 if (nearDisabled)
                 {
                     evidence += "; a plausible Android match is disabled";
                 }
-                selected.Add(new(new(label, evidence, [box], null, null), true, !nearDisabled) { VisionLabel = label });
+                selected.Add(new(new(label, evidence + restrictionText, [box], null, null), true, !nearDisabled && restriction is null)
+                {
+                    VisionLabel = label,
+                    DuplicateTapRestriction = restriction
+                });
                 modelOnly++;
             }
-            accepted.Add((box, name));
         }
         var treeOnly = declaredRows.Where(row => !used.Contains(row)).Select(row =>
             row with { Item = row.Item with { Evidence = $"Android tree only; {row.Item.Evidence}" } }).ToArray();
         selected.AddRange(treeOnly);
-        return new(selected, matched, modelOnly, treeOnly.Length, notUsed + Math.Max(0, proposals.Count - ProposalLimit));
+        return new(selected, matched, modelOnly, treeOnly.Length, omitted + duplicates, duplicates);
     }
 
     private static string Normalized(string label) => AndroidInteractionInventory.Normalized(label);
@@ -176,14 +209,49 @@ public static class AndroidInvestigationCandidates
         return iou + (actionable ? .12 : 0);
     }
 
-    private static bool Duplicate(AndroidNodeBounds first, string firstName, AndroidNodeBounds second, string secondName)
+    private static bool SharesTargetGeometry(VisionProposal first, VisionProposal second)
     {
-        if (AndroidInteractionInventory.Intersection(first, second) is not { } intersection)
+        // Keep independently actionable Android targets with distinguishable
+        // hit locations, including a small button on a tappable surface.
+        if (first.Match is { } a && second.Match is { } b && a.Row.Tap && b.Row.Tap &&
+            (!ContainsCenter(a.Bounds, b.Bounds) || !ContainsCenter(b.Bounds, a.Bounds)))
         {
             return false;
         }
-        var area = Area(intersection);
-        return (double)area / (Area(first) + Area(second) - area) >= (firstName == secondName ? .65 : .88);
+        if (AndroidInteractionInventory.Intersection(first.Box, second.Box) is not { } intersection)
+        {
+            return false;
+        }
+        var overlap = Area(intersection);
+        var aArea = Area(first.Box);
+        var bArea = Area(second.Box);
+        var smaller = Math.Min(aArea, bArea);
+        var larger = Math.Max(aArea, bArea);
+        var sameName = first.Name == second.Name;
+        var outer = aArea >= bArea ? first.Box : second.Box;
+        var inner = aArea >= bArea ? second.Box : first.Box;
+        var outerCenter = AndroidInteractionExploration.Center(outer);
+        var innerCenter = AndroidInteractionExploration.Center(inner);
+        var centersAligned = Math.Abs(outerCenter.X - innerCenter.X) <= .20 * (outer.Right - outer.Left) &&
+            Math.Abs(outerCenter.Y - innerCenter.Y) <= .20 * (outer.Bottom - outer.Top);
+        return (double)overlap / (aArea + bArea - overlap) >= (sameName ? .50 : .65) ||
+            (overlap >= .90 * smaller && (smaller >= .12 * larger ||
+                ((sameName || centersAligned) && smaller >= .035 * larger)));
+    }
+
+    private static bool ContainsCenter(AndroidNodeBounds outer, AndroidNodeBounds inner)
+    {
+        var at = AndroidInteractionExploration.Center(inner);
+        return at.X >= outer.Left && at.X < outer.Right && at.Y >= outer.Top && at.Y < outer.Bottom;
+    }
+
+    private sealed record TreeMatch(AndroidInvestigationCandidate Row, AndroidNodeBounds Bounds, double Score);
+    private sealed record VisionProposal(AndroidNodeBounds Box, string Label, string Name, TreeMatch? Match, bool Ambiguous, bool NearDisabled);
+    private sealed class KeptProposal(VisionProposal choice)
+    {
+        public VisionProposal Choice { get; } = choice;
+        public bool DisabledAlias { get; set; }
+        public bool ConsequentialAlias { get; set; }
     }
 
     private static long Area(AndroidNodeBounds box) => (long)(box.Right - box.Left) * (box.Bottom - box.Top);

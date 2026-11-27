@@ -517,15 +517,21 @@ slice's full test goes into a validation plan,
 - **Live screen investigation.** The preview's **Investigate this screen**
   command starts one bounded run on the current test viewport with no
   per-target prompts. The picture itself remains view-only. The recording
-  project's simple vision-based checks model reads one frozen app viewport
-  before candidate discovery from the tree; overlay windows are masked.
+  project's explicitly selected model for complex vision-based checks reads
+  one frozen app viewport before candidate discovery from the tree; overlay
+  windows are masked. The simple model is not used as an inherited fallback.
   The model reads visible labels itself. The recorder does not run standalone
   OCR or promote contrast shapes, image fragments, or static text on its own.
-  The model returns at most 40 labelled rectangles. Strict validation,
-  duplicate removal and scope checks precede matching by bounds and label
-  to the starting Android nodes and inline links. The report distinguishes
-  matched, model-only, and independently tree-declared controls. A model
-  suggestion, with or without a match, is not proof of activation.
+  The model returns at most 40 labelled rectangles. It is asked to treat the
+  visual parts of a single control as one target and review nested and
+  overlapping proposals for reuse of the same content. Valid, in-scope
+  rectangles are matched by bounds and label to Android nodes and inline
+  links. The recorder prefers a supported whole-control proposal over a
+  fragment and removes duplicates without merging distinct declared hit
+  locations. A removed alias cannot strip a direct-tap safeguard. The report
+  counts removed duplicates and distinguishes matched, model-only, and
+  independently tree-declared controls. A model suggestion, with or without
+  a match, is not proof of activation.
   The selected model follows the project's normal local, LAN, or opt-in
   Anthropic route and uses the provider's response format. A managed local
   model can start cold if the analysis worker does not hold the server;

@@ -94,13 +94,8 @@ public partial class MainWindow
         {
             var models = project is { } id && catalog is not null
                 ? await catalog.ProjectModelsAsync(id, cancellation).ConfigureAwait(false) : null;
-            if (models?.VisionChecks is not { } selection)
-            {
-                return (null, null, null);
-            }
-            var choices = models.Choices(settings);
-            return ProjectModels.Problem(choices, ModelUses.VisionChecks, selection) is { } problem
-                ? (null, null, problem) : (choices.Profile(selection), settings.LocalServer, null);
+            var (profile, problem) = AndroidInteractionVision.SelectProfile(models, settings);
+            return (profile, settings.LocalServer, problem);
         }
     }
 }

@@ -5,14 +5,35 @@ namespace Recorder.Tests;
 
 public sealed class AndroidInteractionVisionTests
 {
+    [Fact]
+    public void LiveDiscoveryUsesOnlyAnExplicitComplexVisionProfile()
+    {
+        var simple = VisionProfile("Simple fixture");
+        var complex = VisionProfile("Complex fixture");
+        var textOnly = VisionProfile("Text fixture") with { Capabilities = [ModelCapabilities.Text] };
+        var settings = AnalysisSettings.Empty with { Profiles = [simple, complex, textOnly] };
+        var models = ProjectModels.None.With(ModelUses.VisionChecks, simple.Name);
+        var (profile, problem) = AndroidInteractionVision.SelectProfile(models, settings);
+        Assert.Null(profile);
+        Assert.Contains("simple model was not used", problem);
+        Assert.Null(AndroidInteractionVision.SelectProfile(models.With(ModelUses.ComplexVisionChecks, ProjectModels.NoModel), settings).Profile);
+        Assert.Contains("not offered", AndroidInteractionVision.SelectProfile(
+            models.With(ModelUses.ComplexVisionChecks, "Missing fixture"), settings).Problem);
+        Assert.Contains("cannot take images", AndroidInteractionVision.SelectProfile(
+            models.With(ModelUses.ComplexVisionChecks, textOnly.Name), settings).Problem);
+
+        var selected = AndroidInteractionVision.SelectProfile(models.With(ModelUses.ComplexVisionChecks, complex.Name), settings);
+        Assert.Equal(complex, selected.Profile);
+        Assert.Null(selected.Problem);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void RequestContainsOnePictureNoTreeAndProviderSpecificStructuredOutput(bool anthropic)
     {
         var profile = anthropic ? AnthropicSettings.ProjectProfile(AnthropicSettings.Models[0], "fixture") :
-            new ModelProfile("Fixture vision", new("http://127.0.0.1:8100"), "fixture-vision",
-                [ModelCapabilities.Image], new(null, null, null, null), null, GenerationSettings.Default, null);
+            VisionProfile("Fixture vision");
         var request = JsonNode.Parse(AndroidInteractionVision.Build(profile, [1, 2, 3], 40))!;
         Assert.Equal(profile.Model, request["model"]!.GetValue<string>());
         var messages = request["messages"]!.AsArray();
@@ -38,6 +59,10 @@ public sealed class AndroidInteractionVisionTests
         Assert.Equal("targets", schema["required"]![0]!.GetValue<string>());
         Assert.Equal("integer", schema["properties"]!["targets"]!["items"]!["properties"]!["box"]!["items"]!["type"]!.GetValue<string>());
         Assert.DoesNotContain("known rectangles", request.ToJsonString(), StringComparison.OrdinalIgnoreCase);
+        var instructions = (anthropic ? request["system"] : messages[0]!["content"])!.GetValue<string>();
+        Assert.Contains("Count controls, not visual parts", instructions, StringComparison.Ordinal);
+        Assert.Contains("compare your boxes for nesting and shared pixels", instructions, StringComparison.Ordinal);
+        Assert.Contains("different rows at different locations", instructions, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -69,4 +94,7 @@ public sealed class AndroidInteractionVisionTests
             directory.Delete(recursive: true);
         }
     }
+
+    private static ModelProfile VisionProfile(string name) => new(name, new("http://127.0.0.1:8100"), "fixture-vision",
+        [ModelCapabilities.Image], new(null, null, null, null), null, GenerationSettings.Default, null);
 }

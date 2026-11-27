@@ -38,14 +38,14 @@ internal static class AndroidInteractionScan
             try
             {
                 var (profile, server, problem) = await selection(timeout.Token).ConfigureAwait(false);
-                vision = problem ?? "No model is selected for vision-based checks.";
+                vision = problem ?? "No model is selected for complex vision-based checks.";
                 if (profile is not null)
                 {
-                    progress.Report($"Reading the app screenshot with {profile.Name}. No phone input has been sent.");
+                    progress.Report($"Reading the app screenshot with the complex vision model, {profile.Name}. No phone input has been sent.");
                     proposals = await Task.Run(() => ProposeAsync(snapshot, crop, profile, server, timeout.Token), timeout.Token)
                         .ConfigureAwait(false);
                     vision = proposals is null ? $"{profile.Name} did not return a usable control list." :
-                        $"{profile.Name} suggested {proposals.Count} possible controls from the screenshot.";
+                        $"{profile.Name} returned {proposals.Count} screenshot suggestions.";
                 }
             }
             catch (OperationCanceledException) when (!token.IsCancellationRequested)
@@ -71,9 +71,11 @@ internal static class AndroidInteractionScan
             "Matching screenshot suggestions to the starting Android tree.");
         var mapping = await Task.Run(() => AndroidInvestigationCandidates.Map(snapshot, proposals ?? []), token)
             .ConfigureAwait(false);
+        var omitted = mapping.NotUsed - mapping.Duplicates;
         var coverage = (proposals is null ? $"Visual discovery not assessed. {vision}" : vision) +
             $" {mapping.Matched} matched to the tree, {mapping.ModelOnly} model-only, {mapping.TreeOnly} tree-only." +
-            (mapping.NotUsed > 0 ? $" {mapping.NotUsed} model suggestions were duplicates, covered, sensitive, or outside usable bounds." : "") +
+            (mapping.Duplicates > 0 ? $" Duplicate model suggestions removed: {mapping.Duplicates}." : "") +
+            (omitted > 0 ? $" Other model suggestions omitted (covered, sensitive, or outside usable bounds): {omitted}." : "") +
             (proposals?.Count == AndroidInvestigationCandidates.ProposalLimit ? " The screenshot proposal limit was reached." : "") +
             (appTree.Truncated || appTree.MissingChildren > 0 ? " Android reported an incomplete tree." : "");
         return new(mapping.Candidates.OrderBy(item => item.Item.Boxes.FirstOrDefault()?.Top ?? int.MaxValue)

@@ -3546,7 +3546,8 @@ companion, with Google TalkBack installed and previously set up, and the
 **TalkBack Navigation Fixture** in **APK Evidence Fixtures**. The older
 directional swipe result does not validate these input modes.
 For Tests 91 and 92, the recording project must have an available image model
-selected for **Model for vision-based checks** to identify the canvas target.
+explicitly selected for **Model for vision-based checks, complex questions**
+to identify the canvas target.
 
 ### Test 91: one automatically run investigation
 
@@ -3573,12 +3574,18 @@ A starting outline does not imply an observed focus stop or activation.
 
 ### Test 93: match screenshot suggestions to the live tree
 
-1. With an image model selected for **Model for vision-based checks**, start Android recording on **TalkBack Navigation Fixture**.
-2. Choose **Investigate this screen** once in **Live Android preview...**. Check that the model is named before the input passes, then leave the phone untouched.
+1. With a different image model selected for **Model for vision-based checks, complex questions** than for simple questions, start Android recording on **TalkBack Navigation Fixture**.
+2. Choose **Investigate this screen** once in **Live Android preview...**. Check that progress names the complex model before the input passes, then leave the phone untouched.
 3. In the report, check that the native action is matched to Android, the canvas action is model-only, and the static status is not proposed as a direct-tap target. The candidate's source must be separate from any observed result.
 
 ### Test 94: disclose visual discovery that was not run
 
-1. With no model selected for **Model for vision-based checks**, start Android recording on **TalkBack Navigation Fixture**.
+1. With an image model selected for simple vision-based checks but no separate model for **Model for vision-based checks, complex questions**, start Android recording on **TalkBack Navigation Fixture**.
 2. Choose **Investigate this screen** once in **Live Android preview...**. Leave the phone untouched until it finishes.
 3. Check that the report says **Visual discovery not assessed**, keeps Android declarations and any verified input results, and does not create a canvas candidate from pixels or text alone.
+
+### Test 95: list a composite control once
+
+1. With the complex vision model selected, start Android recording on a test screen with an icon and label on one button, plus a similar control in a different location.
+2. Choose **Investigate this screen** once and leave the phone untouched.
+3. Check that the icon, label, and button outline are not three candidates for the same action, and that the separate control has its own row and close-up. If the model proposed duplicate boxes, the report counts the ones removed.

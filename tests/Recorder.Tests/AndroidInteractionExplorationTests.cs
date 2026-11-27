@@ -232,12 +232,15 @@ public sealed class AndroidInteractionExplorationTests
         var run = service.InvestigateAsync(async (snapshot, token) =>
         {
             var suggestions = await model.Task.WaitAsync(token);
-            return new(AndroidInvestigationCandidates.Map(snapshot, suggestions).Candidates, "Fixture image model.");
+            var mapping = AndroidInvestigationCandidates.Map(snapshot, suggestions);
+            Assert.Equal(2, mapping.Duplicates);
+            return new(mapping.Candidates, "Fixture image model.");
         }, rig.Marker, null, TestContext.Current.CancellationToken);
         Assert.Single(rig.Markers);
         Assert.Empty(modes.Changes);
         Assert.Equal((0, 0, 0, 0), (touchTests, tabs, nativeTaps, canvasTaps));
-        model.SetResult([(control.Bounds, "Fixture control"), (Canvas, "Canvas target")]);
+        model.SetResult([(new(77, 148, 101, 175), "Canvas icon"), (new(20, 42, 55, 70), "Native icon"),
+            (control.Bounds, "Fixture control"), (Canvas, "Canvas target")]);
         var result = await run;
 
         Assert.Equal("Investigation finished on the selected viewport.", result.Status);
@@ -403,6 +406,7 @@ public sealed class AndroidInteractionExplorationTests
             (link, "help"), (new(126, 94, 205, 120), "Settings"), (Viewport, "Container"),
             (new(12, 320, 15, 325), "Too small")]);
         Assert.Equal((3, 1, 2, 3), (scan.Matched, scan.ModelOnly, scan.TreeOnly, scan.NotUsed));
+        Assert.Equal(1, scan.Duplicates);
         var candidate = Assert.Single(scan.Candidates, row => row.Item.Label == "Canvas control");
         Assert.True(candidate.Tap);
         Assert.Null(candidate.Item.NodeIndex);
@@ -415,6 +419,62 @@ public sealed class AndroidInteractionExplorationTests
         var unavailable = AndroidInvestigationCandidates.Map(baseline, []);
         Assert.Equal((0, 0, 4), (unavailable.Matched, unavailable.ModelOnly, unavailable.TreeOnly));
         Assert.All(unavailable.Candidates, row => Assert.Contains("Android tree only", row.Item.Evidence));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NestedAndShiftedProposalsUseOneWholeTargetButKeepRepeatedControlsAtDifferentLocations(bool reverse)
+    {
+        var rig = new Rig();
+        var whole = new AndroidNodeBounds(60, 150, 180, 210);
+        var repeated = new AndroidNodeBounds(60, 250, 180, 310);
+        (AndroidNodeBounds, string)[] proposals =
+        [
+            (new(70, 158, 106, 190), "Illustration detail"),
+            (new(112, 172, 128, 188), "Small center symbol"),
+            (new(66, 154, 177, 212), "Alternate thumbnail"),
+            (whole, "Thumbnail"),
+            (repeated, "Thumbnail")
+        ];
+        var snapshot = rig.Service(() => throw new InvalidOperationException()).Capture()!;
+        var map = AndroidInvestigationCandidates.Map(snapshot, reverse ? proposals.Reverse().ToArray() : proposals);
+        Assert.Equal((0, 2, 0, 3), (map.Matched, map.ModelOnly, map.TreeOnly, map.Duplicates));
+        Assert.All(map.Candidates, row => Assert.Equal("Thumbnail", row.Item.Label));
+        Assert.Equal(new[] { whole, repeated }, map.Candidates.SelectMany(row => row.Item.Boxes).OrderBy(box => box.Top));
+    }
+
+    [Fact]
+    public void IndependentlyDeclaredMenuAndSurfaceKeepTheirDistinctTapLocations()
+    {
+        var rig = new Rig();
+        var surface = new AndroidNodeBounds(40, 125, 176, 210);
+        var menu = new AndroidNodeBounds(146, 132, 175, 182);
+        rig.Publish(3, nodes:
+        [
+            Node(0, Viewport) with { ChildCount = 2 },
+            Node(1, surface) with { Clickable = true, Text = "Image" },
+            Node(2, menu) with { Clickable = true, Text = "Menu" }
+        ]);
+        var snapshot = rig.Service(() => throw new InvalidOperationException()).Capture()!;
+        var map = AndroidInvestigationCandidates.Map(snapshot, [(menu, "Menu"), (surface, "Image")]);
+        Assert.Equal((2, 0, 0, 0), (map.Matched, map.ModelOnly, map.TreeOnly, map.Duplicates));
+        Assert.Equal(new int?[] { 1, 2 }, map.Candidates.Select(row => row.Item.NodeIndex).Order());
+        Assert.All(map.Candidates, row => Assert.True(row.Tap));
+    }
+
+    [Fact]
+    public void SuppressedAliasDoesNotHideConsequentialActionFromTheTapGuard()
+    {
+        var rig = new Rig();
+        var icon = new AndroidNodeBounds(90, 150, 132, 177);
+        var snapshot = rig.Service(() => throw new InvalidOperationException()).Capture()!;
+        var map = AndroidInvestigationCandidates.Map(snapshot, [(icon, "Send"), (Canvas, "Paper plane control")]);
+        var row = Assert.Single(map.Candidates);
+        Assert.Equal(1, map.Duplicates);
+        Assert.Equal("Paper plane control", row.Item.Label);
+        Assert.False(row.Tap);
+        Assert.Contains("potentially consequential", row.DuplicateTapRestriction);
     }
 
     [Fact]
