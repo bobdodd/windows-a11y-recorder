@@ -95,6 +95,7 @@ public sealed class AndroidTalkBackExploration
     private readonly Func<bool, AndroidTalkBackScope, CancellationToken, Task<CompanionNavigationReply>> _navigate;
     private readonly TimeProvider _time;
     private int _running;
+    private ReachedViewport? _lastReached;
 
     public AndroidTalkBackExploration(AndroidLivePreview preview, AndroidLiveTree tree,
         AndroidAccessibilityCollector events, AndroidTouchCollector touch, AndroidCompanionCollector companion)
@@ -125,7 +126,10 @@ public sealed class AndroidTalkBackExploration
 
         var stops = new List<AndroidTalkBackStop>();
         AndroidLiveTreeItems? baseline = null;
-        var reached = new HashSet<NodeKey>();
+        var reached = new Dictionary<NodeKey, AndroidTalkBackStop>();
+        AndroidTalkBackScope? initialScope = null;
+        AndroidLivePreviewSnapshot? initialView = null;
+        long inputVersion = 0;
         NodeKey? starting = null;
         var attempts = 0;
         var both = false;
@@ -162,6 +166,9 @@ public sealed class AndroidTalkBackExploration
                 starting = NodeKey.Of(initial);
                 var scope = new AndroidTalkBackScope(active.Window, package);
                 var viewport = new Viewport(items);
+                initialScope = scope;
+                initialView = view;
+                inputVersion = input.Version;
                 var passTag = Guid.NewGuid().ToString("N")[..8];
                 if (!recordMarker($"Recorder TalkBack exploration {passTag}: started (automated {(singleSwipe ? "verification" : "navigation")})."))
                 {
@@ -220,9 +227,10 @@ public sealed class AndroidTalkBackExploration
                         if (move.Node is { } node)
                         {
                             current = NodeKey.Of(node);
-                            reached.Add(current);
-                            stops.Add(new(attempts, next ? "Next" : "Previous", ItemLabel(node),
-                                move.EventIndex, move.SnapshotIndex));
+                            var stop = new AndroidTalkBackStop(attempts, next ? "Next" : "Previous", ItemLabel(node),
+                                move.EventIndex, move.SnapshotIndex);
+                            reached.TryAdd(current, stop);
+                            stops.Add(stop);
                         }
                         if (singleSwipe)
                         {
@@ -273,23 +281,53 @@ public sealed class AndroidTalkBackExploration
             {
                 reason += " The end marker could not be saved.";
             }
+            Volatile.Write(ref _lastReached, reached.Count > 0 && baseline is not null &&
+                initialScope is not null && initialView is { Frame: { } firstFrame }
+                    ? new ReachedViewport(initialScope, initialView.StreamSession, firstFrame.Width,
+                        firstFrame.Height, inputVersion, Viewport.Fingerprint(baseline), reached)
+                    : null);
             Volatile.Write(ref _running, 0);
         }
         var keys = baseline?.Nodes.Where(node => node.VisibleToUser).ToLookup(NodeKey.Of);
         var candidates = baseline?.Nodes.Where(node => IsCandidate(node) || (node.VisibleToUser &&
-            (reached.Contains(NodeKey.Of(node)) || NodeKey.Of(node) == starting)))
+            (reached.ContainsKey(NodeKey.Of(node)) || NodeKey.Of(node) == starting)))
             .ToArray() ?? [];
         return new(reason, attempts, stops, candidates.Take(MaxCandidates).Select(node =>
         {
             var key = NodeKey.Of(node);
             var observation = keys![key].Count() != 1 ? "Unknown: indistinguishable tree nodes"
-                : reached.Contains(key) ? "Reached"
+                : reached.ContainsKey(key) ? "Reached"
                 : key == starting ? "Starting focus only"
                 : finishedSweep ? "Exposed but not reached in this pass"
                 : "Unknown: not observed in this partial pass";
             return new AndroidTalkBackCandidate(node.Index, ItemLabel(node), observation);
         }).ToArray(), baseline?.SnapshotIndex, Math.Max(0, candidates.Length - MaxCandidates), both,
             baseline is not null && SingleFocused(baseline) is { } start ? ItemLabel(start) : null);
+    }
+
+    public IReadOnlyDictionary<int, AndroidTalkBackStop> MatchedStops(AndroidInteractionSnapshot snapshot) =>
+        MatchedStops(snapshot.Tree, snapshot.Preview, snapshot.Input.Version);
+
+    internal IReadOnlyDictionary<int, AndroidTalkBackStop> MatchedStops(
+        AndroidLiveTreeSnapshot tree, AndroidLivePreviewSnapshot preview, long inputVersion)
+    {
+        var previous = Volatile.Read(ref _lastReached);
+        var active = AndroidTalkBackScope.ActiveApp(tree);
+        if (Volatile.Read(ref _running) != 0 || previous is null || previous.InputVersion != inputVersion ||
+            tree.State != AndroidLiveTreeState.Observed || tree.EarlierUpdateMissing ||
+            active?.Items is not { Truncated: false, MissingChildren: 0 } items ||
+            preview.Frame is not { } frame || previous.StreamSession != preview.StreamSession ||
+            previous.Width != frame.Width || previous.Height != frame.Height ||
+            previous.Scope.Window.Id != active.Window.Id || previous.Scope.Window.Bounds != active.Window.Bounds ||
+            previous.Scope.Window.TransitionTimeMilliseconds != active.Window.TransitionTimeMilliseconds ||
+            previous.Scope.PackageName != items.Nodes.FirstOrDefault(node => node.Depth == 0)?.PackageName ||
+            !previous.Fingerprint.SequenceEqual(Viewport.Fingerprint(items)))
+        {
+            return new Dictionary<int, AndroidTalkBackStop>();
+        }
+        return items.Nodes.Where(node => node.VisibleToUser).GroupBy(NodeKey.Of)
+            .Where(group => group.Count() == 1 && previous.Stops.ContainsKey(group.Key))
+            .ToDictionary(group => group.First().Index, group => previous.Stops[group.Key]);
     }
 
     private async Task<Move> ObserveMoveAsync(AndroidLivePreviewSnapshot view, AndroidTalkBackScope scope,
@@ -432,7 +470,7 @@ public sealed class AndroidTalkBackExploration
             return _lastMatched;
         }
 
-        private static NodeKey[] Fingerprint(AndroidLiveTreeItems items) => items.Nodes
+        public static NodeKey[] Fingerprint(AndroidLiveTreeItems items) => items.Nodes
             .Where(node => node.VisibleToUser).Select(NodeKey.Of).ToArray();
     }
 
@@ -468,6 +506,9 @@ public sealed class AndroidTalkBackExploration
 
     private sealed record Move(long Cursor, AndroidTreeNode? Node = null, long EventIndex = 0,
         long SnapshotIndex = 0, string? Problem = null);
+
+    private sealed record ReachedViewport(AndroidTalkBackScope Scope, int StreamSession, int Width, int Height,
+        long InputVersion, NodeKey[] Fingerprint, IReadOnlyDictionary<NodeKey, AndroidTalkBackStop> Stops);
 
     private sealed record NodeKey(int WindowId, string? Package, string? Class, string? UniqueId, string? ViewId,
         AndroidNodeBounds Bounds, string? Text, string? Description, string? Hint, bool Password)

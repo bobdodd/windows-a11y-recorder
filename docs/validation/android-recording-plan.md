@@ -3538,3 +3538,34 @@ For a full pass, look for `started (automated navigation)` and `ended`
 notes with the same pass ID. A single-swipe run uses `automated
 verification` in its start note. The full-pass stop count and reason
 were not supplied for this result.
+
+## Live interaction exploration
+
+The following target tests are pending. Use a recorder and companion that
+both support protocol 11 and the synthetic **TalkBack Navigation Fixture**
+activity in **APK Evidence Fixtures**. The fixture already has distinct
+native button and canvas-only behaviours; no separate screen is required.
+
+### Test 91: discover a canvas control without running TalkBack
+
+1. With TalkBack touch exploration off, open the fixture and start an Android recording.
+2. Open **Live Android preview...**, then **Explore interactions...**.
+3. Check the report and select a line to copy with Ctrl+C.
+
+**On screen:** **First fixture action** and **Last fixture action** are in
+the Android-declared section. **Canvas-only action** appears as an unverified
+visual candidate, not a declared action. **No fixture action activated**
+remains visible. Static text appearing as a visual candidate is not a failing
+activation test.
+
+### Test 92: test a canvas point without a matched Android click
+
+1. On the settled fixture screen, use **Scan again** if the picture has changed.
+2. Select **Canvas-only action** in the target selector and check the marker on the frozen picture.
+3. Choose **Test tap...** and confirm the one tap. Leave the phone untouched until it completes.
+4. Check the fixture text and the test result. In playback, the test tap has paired **Markers**.
+
+**On screen:** the fixture changes the canvas label to **Canvas-only action
+activated**. The report identifies a later local picture change without a
+matched Android click. A refusal, no picture change, or an ambiguous outcome is
+not a pass for this test.

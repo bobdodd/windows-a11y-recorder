@@ -333,15 +333,22 @@ public sealed class CompanionConnection : IAsyncDisposable
         }
     }
 
-    internal async Task<CompanionNavigationReply> NavigateTalkBackAsync(
-        bool next, AndroidTalkBackScope scope, CancellationToken cancellation)
+    internal Task<CompanionNavigationReply> NavigateTalkBackAsync(
+        bool next, AndroidTalkBackScope scope, CancellationToken cancellation) =>
+        SendGestureAsync(id => CompanionProtocol.TalkBackNavigationRequest(id, next, scope), cancellation);
+
+    internal Task<CompanionNavigationReply> ProbeInteractionAsync(
+        AndroidTalkBackScope scope, AndroidInteractionPoint point, CancellationToken cancellation) =>
+        SendGestureAsync(id => CompanionProtocol.InteractionProbeRequest(id, scope, point), cancellation);
+
+    private async Task<CompanionNavigationReply> SendGestureAsync(Func<long, string> request, CancellationToken cancellation)
     {
         var id = Interlocked.Increment(ref _nextId);
         var reply = new TaskCompletionSource<CompanionNavigationReply>(TaskCreationOptions.RunContinuationsAsynchronously);
         _navigation.TryAdd(id, reply);
         try
         {
-            await SendAsync(CompanionProtocol.TalkBackNavigationRequest(id, next, scope), cancellation).ConfigureAwait(false);
+            await SendAsync(request(id), cancellation).ConfigureAwait(false);
             var completed = await Task.WhenAny(reply.Task, Closed).WaitAsync(cancellation).ConfigureAwait(false);
             if (completed == Closed && !reply.Task.IsCompletedSuccessfully)
             {

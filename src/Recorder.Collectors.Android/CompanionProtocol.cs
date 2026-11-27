@@ -24,10 +24,12 @@ public static class CompanionProtocol
     /// from android-checks.md, step 29, which added the links in an item's
     /// text and where they are on the screen; 9 adds a one-shot request
     /// for the selected active app's text rendering evidence; 10 adds
-    /// explicitly requested TalkBack navigation swipes.
+    /// explicitly requested TalkBack navigation swipes; 11 adds a
+    /// separately confirmed single-point interaction probe and logical display size.
     /// </summary>
-    public const int Version = 10;
+    public const int Version = 11;
     internal const int NavigationVersion = 10;
+    internal const int InteractionProbeVersion = 11;
 
     /// <summary>The companion app's socket, in Linux's abstract namespace.</summary>
     public const string SocketName = "a11yrecorder_companion";
@@ -79,6 +81,13 @@ public static class CompanionProtocol
         {
             type = "talkback-navigation", id, direction = next ? "next" : "previous",
             windowId = scope.Window.Id, packageName = scope.PackageName, bounds = scope.Window.Bounds
+        }, EventOptions) + "\n";
+
+    internal static string InteractionProbeRequest(long id, AndroidTalkBackScope scope, AndroidInteractionPoint point) =>
+        JsonSerializer.Serialize(new
+        {
+            type = "interaction-probe", id, windowId = scope.Window.Id, packageName = scope.PackageName,
+            bounds = scope.Window.Bounds, point.X, point.Y, point.Width, point.Height, point.Rotation
         }, EventOptions) + "\n";
 
     /// <summary>
@@ -159,7 +168,11 @@ public static class CompanionProtocol
                     Int(root, "rotation"),
                     Int(root, "modeWidth"),
                     Int(root, "modeHeight"),
-                    Long(root, "time")),
+                    Long(root, "time"))
+                {
+                    ShownWidth = OptionalInt(root, "shownWidth"),
+                    ShownHeight = OptionalInt(root, "shownHeight")
+                },
                 "orientation" => new CompanionOrientation(
                     String(root, "reason"),
                     Int(root, "orientation"),
@@ -183,7 +196,7 @@ public static class CompanionProtocol
                 // are timed as they are read.
                 "accessibility-tree" => new CompanionAccessibilityTreeLine(line),
                 "text-rendering" => ReadTextRendering(root),
-                "talkback-navigation" => new CompanionNavigationReply(
+                "talkback-navigation" or "interaction-probe" => new CompanionNavigationReply(
                     Long(root, "id"), String(root, "status"), Long(root, "started")),
                 // Read later, off the connection's reading, by
                 // ReadScreenshot, as for a snapshot: a screenshot is large.
@@ -412,7 +425,11 @@ public sealed record CompanionDisplay(
     int Rotation,
     int ModeWidth,
     int ModeHeight,
-    long Time) : CompanionMessage;
+    long Time) : CompanionMessage
+{
+    public int? ShownWidth { get; init; }
+    public int? ShownHeight { get; init; }
+}
 
 /// <summary>
 /// How the phone itself is held, from its accelerometer, sent to a

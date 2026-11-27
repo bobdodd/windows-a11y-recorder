@@ -384,15 +384,17 @@ public sealed class AndroidCompanionCollector :
         {
             // Kept at once for the touch collector, which turns positions by
             // the rotation at each touch's phone time (slice 5).
-            _displayHistory.Add(
-                received.Display.Time,
-                new AndroidDisplayState(received.Display.Reason, received.Display.Rotation, received.Display.ModeWidth, received.Display.ModeHeight));
+            var display = received.Display;
+            var payload = new AndroidDisplayState(display.Reason, display.Rotation, display.ModeWidth, display.ModeHeight)
+            {
+                ShownWidth = display.ShownWidth,
+                ShownHeight = display.ShownHeight
+            };
+            _displayHistory.Add(display.Time, payload);
 
             // The first display arrives with the greeting, before the first
             // clock sample, so it waits for one.
             var mapped = await _firstSample.Task.ConfigureAwait(false) ? _mapper.Map(received.Display.Time) : null;
-            var display = received.Display;
-            var payload = new AndroidDisplayState(display.Reason, display.Rotation, display.ModeWidth, display.ModeHeight);
             _lastDisplay = string.Create(
                 CultureInfo.InvariantCulture,
                 $"screen rotated {display.Rotation} degrees, {display.ModeWidth} by {display.ModeHeight}");
@@ -551,6 +553,19 @@ public sealed class AndroidCompanionCollector :
 
         return connection.Hello.Protocol >= CompanionProtocol.NavigationVersion
             ? connection.NavigateTalkBackAsync(next, scope, cancellation)
+            : Task.FromResult(new CompanionNavigationReply(0, "companion-update-required", 0));
+    }
+
+    internal Task<CompanionNavigationReply> ProbeInteractionAsync(
+        AndroidTalkBackScope scope, AndroidInteractionPoint point, CancellationToken cancellation)
+    {
+        cancellation.ThrowIfCancellationRequested();
+        if (_connection is not { } connection || connection.Closed.IsCompleted || _stopping)
+        {
+            return Task.FromResult(new CompanionNavigationReply(0, "connection-lost", 0));
+        }
+        return connection.Hello.Protocol >= CompanionProtocol.InteractionProbeVersion
+            ? connection.ProbeInteractionAsync(scope, point, cancellation)
             : Task.FromResult(new CompanionNavigationReply(0, "companion-update-required", 0));
     }
 

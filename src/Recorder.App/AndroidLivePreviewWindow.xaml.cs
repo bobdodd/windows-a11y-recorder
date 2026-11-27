@@ -16,11 +16,13 @@ public partial class AndroidLivePreviewWindow : Window
     private readonly AndroidLivePreview _preview;
     private readonly AndroidLiveTree _liveTree;
     private readonly AndroidTalkBackExploration _exploration;
+    private readonly AndroidInteractionExploration _interactions;
     private readonly Func<string, bool> _recordMarker;
     private readonly Action<Task> _trackExploration;
     private readonly DispatcherTimer _timer;
     private AndroidLiveTreeWindow? _treeWindow;
     private AndroidTalkBackExplorationWindow? _explorationWindow;
+    private AndroidInteractionWindow? _interactionsWindow;
     private WriteableBitmap? _bitmap;
     private AndroidLivePreviewState? _state;
     private int _streamSession;
@@ -28,11 +30,13 @@ public partial class AndroidLivePreviewWindow : Window
     private bool _renderFailed;
 
     public AndroidLivePreviewWindow(AndroidLivePreview preview, AndroidLiveTree liveTree,
-        AndroidTalkBackExploration exploration, Func<string, bool> recordMarker, Action<Task> trackExploration)
+        AndroidTalkBackExploration exploration, AndroidInteractionExploration interactions,
+        Func<string, bool> recordMarker, Action<Task> trackExploration)
     {
         _preview = preview;
         _liveTree = liveTree;
         _exploration = exploration;
+        _interactions = interactions;
         _recordMarker = recordMarker;
         _trackExploration = trackExploration;
         InitializeComponent();
@@ -55,7 +59,11 @@ public partial class AndroidLivePreviewWindow : Window
         };
     }
 
-    internal void StopExploration() => _explorationWindow?.StopExploration();
+    internal void StopExploration()
+    {
+        _explorationWindow?.StopExploration();
+        _interactionsWindow?.Stop();
+    }
 
     private void RefreshFrame()
     {
@@ -187,6 +195,34 @@ public partial class AndroidLivePreviewWindow : Window
                 if (IsActive && IsVisible)
                 {
                     ExploreButton.Focus();
+                }
+            }));
+        };
+        window.Show();
+    }
+
+    private void InteractionsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_interactionsWindow is { } open)
+        {
+            if (open.WindowState == WindowState.Minimized)
+            {
+                open.WindowState = WindowState.Normal;
+            }
+            open.Activate();
+            return;
+        }
+        var window = new AndroidInteractionWindow(_interactions, _exploration, _recordMarker, _trackExploration) { Owner = this };
+        PlaceTreeWindow(window);
+        _interactionsWindow = window;
+        window.Closed += (_, _) =>
+        {
+            _interactionsWindow = null;
+            Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+            {
+                if (IsActive && IsVisible)
+                {
+                    InteractionsButton.Focus();
                 }
             }));
         };

@@ -373,6 +373,8 @@ public partial class MainWindow : Window
         var accessibility = new AndroidAccessibilityCollector(serial, companion, companion);
         _androidExploration = new AndroidTalkBackExploration(screen.LivePreview, trees.LiveTree,
             accessibility, touch, companion);
+        _androidInteractions = new AndroidInteractionExploration(screen.LivePreview, trees.LiveTree,
+            accessibility, touch, companion);
         return
         [
             companion,

@@ -288,7 +288,7 @@ public sealed class PhoneFrames : IDisposable
         }
 
         var rgb = picture.ToRgb(matrix, fullRange);
-        _preview?.Publish(packet.Session, sequence, picture.Width, picture.Height, rgb);
+        _preview?.Publish(packet.Session, sequence, picture.Width, picture.Height, rgb, packet.NativeNanoseconds);
         var png = PngWriter.Encode(picture.Width, picture.Height, rgb);
         var relative = AndroidFrameRecords.FramePath(sequence);
         var path = Path.Combine(_sessionDirectory, relative.Replace('/', Path.DirectorySeparatorChar));

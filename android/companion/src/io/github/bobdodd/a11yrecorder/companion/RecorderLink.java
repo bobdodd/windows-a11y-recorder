@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.database.ContentObserver;
+import android.graphics.Point;
 import android.hardware.display.DisplayManager;
 import android.net.Uri;
 import android.net.Credentials;
@@ -93,7 +94,7 @@ import java.util.concurrent.RejectedExecutionException;
  */
 final class RecorderLink {
     static final String SOCKET_NAME = "a11yrecorder_companion";
-    static final int PROTOCOL = 10;
+    static final int PROTOCOL = 11;
     private static final String TAG = "A11yRecorderCompanion";
 
     private final Context context;
@@ -416,7 +417,10 @@ final class RecorderLink {
             return "";
         }
         Display.Mode mode = display.getMode();
-        return degrees(display.getRotation()) + ":" + mode.getPhysicalWidth() + "x" + mode.getPhysicalHeight();
+        Point shown = new Point();
+        display.getRealSize(shown);
+        return degrees(display.getRotation()) + ":" + mode.getPhysicalWidth() + "x" + mode.getPhysicalHeight()
+                + ":" + shown.x + "x" + shown.y;
     }
 
     private Display defaultDisplay() {
@@ -470,6 +474,10 @@ final class RecorderLink {
         message.put("rotation", degrees(display.getRotation()));
         message.put("modeWidth", mode.getPhysicalWidth());
         message.put("modeHeight", mode.getPhysicalHeight());
+        Point shown = new Point();
+        display.getRealSize(shown);
+        message.put("shownWidth", shown.x);
+        message.put("shownHeight", shown.y);
         message.put("time", System.nanoTime());
         return message;
     }
@@ -613,23 +621,32 @@ final class RecorderLink {
                 }
                 // On this client's reader thread, not the service or the regular sender.
                 send(rendering.read((String) packageName));
-            } else if ("talkback-navigation".equals(type)) {
+            } else if ("talkback-navigation".equals(type) || "interaction-probe".equals(type)) {
                 long id = request.optLong("id");
+                boolean probe = "interaction-probe".equals(type);
                 String direction = request.optString("direction");
                 Object target = request.opt("packageName");
                 JSONObject bounds = request.optJSONObject("bounds");
                 TalkBackNavigation navigation = talkBackNavigation;
                 if (navigation == null || !eventsWanted || !treesWanted || id <= 0 ||
-                        !("next".equals(direction) || "previous".equals(direction)) ||
+                        (!probe && !("next".equals(direction) || "previous".equals(direction))) ||
                         !TextRendering.validPackage(target) || bounds == null) {
-                    navigationReply(id, "gesture-refused", 0);
+                    navigationReply(type, id, "gesture-refused", 0);
                     return;
                 }
                 android.graphics.Rect rect = new android.graphics.Rect(bounds.getInt("left"), bounds.getInt("top"),
                         bounds.getInt("right"), bounds.getInt("bottom"));
-                navigation.request("next".equals(direction), request.getInt("windowId"), (String)target, rect,
-                        received, () -> !closed && !stopping,
-                        (status, started) -> navigationReply(id, status, started));
+                int windowId = request.getInt("windowId");
+                if (probe) {
+                    navigation.probe(windowId, (String)target, rect, request.getInt("x"), request.getInt("y"),
+                            request.getInt("width"), request.getInt("height"), request.getInt("rotation"),
+                            received, () -> !closed && !stopping,
+                            (status, started) -> navigationReply(type, id, status, started));
+                } else {
+                    navigation.request("next".equals(direction), windowId, (String)target, rect,
+                            received, () -> !closed && !stopping,
+                            (status, started) -> navigationReply(type, id, status, started));
+                }
             } else if ("screenshots".equals(type)) {
                 screenshotsWanted = true;
                 Runnable requests = screenshotRequests;
@@ -657,13 +674,13 @@ final class RecorderLink {
             }
         }
 
-        private void navigationReply(long id, String status, long started) {
+        private void navigationReply(String type, long id, String status, long started) {
             // Never write to the connection on Android's gesture thread.
             try {
                 sender.execute(() -> {
                     try {
                         JSONObject reply = new JSONObject();
-                        reply.put("type", "talkback-navigation");
+                        reply.put("type", type);
                         reply.put("id", id);
                         reply.put("status", status);
                         reply.put("started", started);

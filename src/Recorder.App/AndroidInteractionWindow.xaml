@@ -1,0 +1,61 @@
+<Window x:Class="Recorder.App.AndroidInteractionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Recorder.App"
+        Title="Explore screen interactions" Width="850" Height="720" MinWidth="460" MinHeight="500"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+        Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+        PreviewKeyDown="Window_PreviewKeyDown">
+  <Grid Margin="12">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+    <StackPanel Margin="0,0,0,8">
+      <local:SelectableText TextWrapping="Wrap" IsTabStop="True"
+        Text="The scan compares what Android publishes with what is visible in the picture. It does not send input. To test a point, select a target and confirm one real tap. Turn off TalkBack touch exploration before scanning for a direct-touch test." />
+      <local:SelectableText x:Name="ScanStatus" Margin="0,6,0,0" TextWrapping="Wrap" IsTabStop="True"
+                            FontWeight="SemiBold" AutomationProperties.LiveSetting="Polite" />
+    </StackPanel>
+    <Grid Grid.Row="1">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="3*" />
+        <ColumnDefinition Width="2*" />
+      </Grid.ColumnDefinitions>
+      <DockPanel Margin="0,0,8,0">
+        <Label DockPanel.Dock="Top" Padding="0,0,0,4" Target="{Binding ElementName=Report}" Content="Interaction _report" />
+        <TextBox x:Name="Report" IsReadOnly="True" IsUndoEnabled="False" TextWrapping="Wrap"
+                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="6"
+                 AutomationProperties.Name="Interaction report" />
+      </DockPanel>
+      <DockPanel Grid.Column="1">
+        <TextBlock DockPanel.Dock="Top" Text="Scanned picture and test point" TextWrapping="Wrap" Margin="0,0,0,4" />
+        <Viewbox Stretch="Uniform" x:Name="ScannedPicture" IsHitTestVisible="False">
+          <Grid x:Name="PictureLayout">
+            <Image x:Name="Picture" AutomationProperties.Name="Frozen phone picture from the scan" />
+            <Canvas x:Name="Pin" />
+          </Grid>
+        </Viewbox>
+      </DockPanel>
+    </Grid>
+    <StackPanel Grid.Row="2" Margin="0,8,0,0">
+      <Label Padding="0,0,0,4" Target="{Binding ElementName=Targets}" Content="_Target for one test tap" />
+      <ComboBox x:Name="Targets" MinHeight="36" MaxDropDownHeight="300" TextSearch.TextPath="Name"
+                ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                SelectionChanged="Targets_SelectionChanged" AutomationProperties.Name="Target for one test tap">
+        <ComboBox.ItemTemplate>
+          <DataTemplate><TextBlock Text="{Binding Name}" TextWrapping="Wrap" /></DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+      <WrapPanel Margin="0,8,0,0" HorizontalAlignment="Right">
+        <Button x:Name="Refresh" MinHeight="44" Padding="12,0" Margin="0,0,8,0"
+                Content="Scan a_gain" Click="Refresh_Click" />
+        <Button x:Name="Tap" MinHeight="44" Padding="12,0" Margin="0,0,8,0"
+                Content="_Test tap..." Click="Tap_Click" IsEnabled="False" />
+        <Button MinHeight="44" Padding="12,0" Content="_Close" Click="Close_Click" />
+      </WrapPanel>
+    </StackPanel>
+  </Grid>
+</Window>

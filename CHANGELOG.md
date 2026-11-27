@@ -38,6 +38,14 @@ Changes on `main` since 1.1.0, not yet released.
 - The tester confirmed the one-swipe comparison and full exploration
   on a physical phone using the native fixture. The tester also found
   the exploration annotations in playback.
+- **Explore interactions...** scans the current app viewport independently of
+  TalkBack. Its copyable report separates Android-declared actions and inline
+  links from unverified visual candidates found by Windows OCR or contrast
+  outlines. Matched stops from a preceding TalkBack pass are shown only
+  for the same viewport. No input is sent by scanning. One confirmed test tap can look
+  for an Android click event or a local picture change and add evidence
+  markers to the recording. A silent result is unknown, not inactive.
+  The matching companion uses protocol 11; target-device validation is pending.
 
 ### Native Android accessibility preflight research
 

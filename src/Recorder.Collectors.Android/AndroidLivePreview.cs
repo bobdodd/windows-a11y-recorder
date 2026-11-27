@@ -10,7 +10,10 @@ public enum AndroidLivePreviewState
 }
 
 /// <summary>Pixels also used by the recording's PNG encoder. Treat the shared buffer as read-only.</summary>
-public sealed record AndroidLivePreviewFrame(ulong Sequence, int Width, int Height, ReadOnlyMemory<byte> Rgb);
+public sealed record AndroidLivePreviewFrame(ulong Sequence, int Width, int Height, ReadOnlyMemory<byte> Rgb)
+{
+    public long? PhoneNanoseconds { get; init; }
+}
 
 public sealed record AndroidLivePreviewSnapshot(AndroidLivePreviewState State, int StreamSession, AndroidLivePreviewFrame? Frame);
 
@@ -37,7 +40,7 @@ public sealed class AndroidLivePreview
         }
     }
 
-    internal void Publish(int session, ulong sequence, int width, int height, byte[] rgb)
+    internal void Publish(int session, ulong sequence, int width, int height, byte[] rgb, long? phoneNanoseconds = null)
     {
         lock (_gate)
         {
@@ -45,7 +48,7 @@ public sealed class AndroidLivePreview
                 (_current.Frame is null || sequence > _current.Frame.Sequence))
             {
                 Volatile.Write(ref _current, new(AndroidLivePreviewState.ShowingFrames, session,
-                    new AndroidLivePreviewFrame(sequence, width, height, rgb)));
+                    new AndroidLivePreviewFrame(sequence, width, height, rgb) { PhoneNanoseconds = phoneNanoseconds }));
             }
         }
     }

@@ -4,6 +4,7 @@ using Recorder.Session;
 using Windows.Graphics.Imaging;
 using Windows.Media.Ocr;
 using Windows.Storage;
+using Windows.Storage.Streams;
 
 namespace Recorder.Analysis;
 
@@ -84,6 +85,57 @@ public sealed class WindowsPhoneTextReader : IPhoneTextReader
     public string? Unavailable { get; }
 
     public string Engine { get; }
+
+    /// <summary>Read RGB24 pixels in memory and map word bounds back to the source picture.</summary>
+    public PhoneOcrReading ReadRgb(int width, int height, ReadOnlyMemory<byte> rgb)
+    {
+        if (_engine is null)
+        {
+            throw new InvalidOperationException(Unavailable);
+        }
+        if (width <= 0 || height <= 0 || rgb.Length != (long)width * height * 3)
+        {
+            throw new InvalidDataException("The live OCR picture does not contain packed RGB pixels.");
+        }
+        var scale = Math.Min(1, (double)OcrEngine.MaxImageDimension / Math.Max(width, height));
+        var w = Math.Max(1, (int)Math.Floor(width * scale));
+        var h = Math.Max(1, (int)Math.Floor(height * scale));
+        var pixels = new byte[checked(w * h * 4)];
+        var source = rgb.Span;
+        for (var y = 0; y < h; y++)
+        {
+            var row = (int)((long)y * height / h) * width;
+            for (var x = 0; x < w; x++)
+            {
+                var from = (row + (int)((long)x * width / w)) * 3;
+                var to = (y * w + x) * 4;
+                pixels[to] = source[from + 2];
+                pixels[to + 1] = source[from + 1];
+                pixels[to + 2] = source[from];
+                pixels[to + 3] = 255;
+            }
+        }
+        try
+        {
+            using var writer = new DataWriter();
+            writer.WriteBytes(pixels);
+            using var bitmap = SoftwareBitmap.CreateCopyFromBuffer(writer.DetachBuffer(), BitmapPixelFormat.Bgra8,
+                w, h, BitmapAlphaMode.Ignore);
+            var result = _engine.RecognizeAsync(bitmap).AsTask().GetAwaiter().GetResult();
+            return new(result.Lines.SelectMany((line, i) => line.Words.Select(word =>
+            {
+                var box = word.BoundingRect;
+                return new PhoneOcrWord(word.Text,
+                    new PhoneBounds((int)Math.Floor(box.X * width / w), (int)Math.Floor(box.Y * height / h),
+                        (int)Math.Ceiling((box.X + box.Width) * width / w),
+                        (int)Math.Ceiling((box.Y + box.Height) * height / h)), i);
+            })).ToArray(), Engine);
+        }
+        catch (COMException exception)
+        {
+            throw new IOException("Windows OCR could not read the live picture: " + exception.Message, exception);
+        }
+    }
 
     public PhoneOcrReading Read(string path)
     {

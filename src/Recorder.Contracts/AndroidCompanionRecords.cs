@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Recorder.Contracts;
 
 /// <summary>
@@ -100,7 +102,14 @@ public sealed record AndroidClockSample(
     long ErrorBoundNanoseconds);
 
 /// <summary>The phone display's rotation, in degrees, and its display mode's size in pixels.</summary>
-public sealed record AndroidDisplayState(string Reason, int Rotation, int ModeWidth, int ModeHeight);
+public sealed record AndroidDisplayState(string Reason, int Rotation, int ModeWidth, int ModeHeight)
+{
+    // Live-only logical size from protocol 11. Preserve the archived display-state payload.
+    [JsonIgnore]
+    public int? ShownWidth { get; init; }
+    [JsonIgnore]
+    public int? ShownHeight { get; init; }
+}
 
 /// <summary>
 /// How the phone itself is held, from its accelerometer, as the companion

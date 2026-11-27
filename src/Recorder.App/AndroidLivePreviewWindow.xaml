@@ -38,7 +38,7 @@
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
     <StackPanel Margin="0,0,0,10">
-      <local:SelectableText Text="The picture does not send input. To investigate TalkBack navigation, open Explore with TalkBack. The preview may lag when capture is busy." />
+      <local:SelectableText Text="The picture does not send input. Explore interactions scans the current app; Explore with TalkBack tests screen-reader navigation separately. The preview may lag when capture is busy." />
       <local:SelectableText x:Name="PreviewStatus"
                             Margin="0,6,0,0" FontWeight="SemiBold"
                             AutomationProperties.LiveSetting="Polite" />
@@ -51,6 +51,9 @@
       <Button x:Name="TreeButton" MinHeight="44" Padding="12,0" Margin="0,0,8,0"
               Content="_Accessibility tree..." Click="TreeButton_Click"
               AutomationProperties.HelpText="Opens the Android accessibility tree observed during recording." />
+      <Button x:Name="InteractionsButton" MinHeight="44" Padding="12,0" Margin="0,0,8,0"
+              Content="Explore _interactions..." Click="InteractionsButton_Click"
+              AutomationProperties.HelpText="Scans Android-declared actions and visible candidates in the current app." />
       <Button x:Name="ExploreButton" MinHeight="44" Padding="12,0" Margin="0,0,8,0"
               Content="_Explore with TalkBack..." Click="ExploreButton_Click"
               AutomationProperties.HelpText="Opens the setup and results for scanning the current app screen with TalkBack." />

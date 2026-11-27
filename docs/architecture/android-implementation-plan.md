@@ -514,6 +514,36 @@ slice's full test goes into a validation plan,
   the automation; they do not label each accessibility event individually.
   The result does not establish activation, grouping speech, visual-only
   elements or reachability by other navigation modes. No model is used.
+- **Live interaction exploration.** The preview's **Explore interactions...**
+  button opens a copyable, viewport-scoped inventory and automatically scans
+  without sending input. It lists Android-reported action flags, standard
+  and custom actions, and inline links. It also inspects the independently
+  recorded frame with local Windows OCR and a bounded contrast-outline pass.
+  A visual candidate can be an unexposed control, static text or decoration.
+  A scroll container does not explain away visual candidates inside it.
+  No generative model or external service is called. No claim is made about
+  controls outside the viewport, controls without visible or published
+  evidence, untested gestures, or screen-reader activation.
+  Verified focus stops from a preceding TalkBack pass may be shown when
+  the display session, window, visible tree and physical input version
+  still match. This comparison checks unique node identity rather than
+  carrying snapshot-local indices across snapshots. Missing stops are not
+  failures, and a stop on a text node does not verify its inline links.
+  The operator can select a point, see it on the frozen picture and
+  explicitly confirm one tap. The PC requires a consistent frame, window,
+  tree, accessibility feed and physical touch monitor. Protocol 11 reports
+  the logical display dimensions independently of the physical display mode.
+  The companion checks foreground package, window, bounds, display size
+  and rotation, overlays, touch exploration and magnification, then sends
+  one tap or refuses. It serializes this with the separate TalkBack
+  navigation requests. Scrcpy remains view-only.
+  A scoped and timed Android click event must name a source covering the
+  point. If none matches, the recorder can report a local pixel change
+  in a comparable later frame without attributing it to activation.
+  No corroboration, event loss, competing physical input or a changed
+  viewport does not certify inactivity. Start/end markers bracket test
+  taps, while the live report retains test outcomes until its window closes
+  and is not automatically filed under playback Checks.
 - **Player.** The phone's frame takes the desktop's place, fitted to the
   height of the frame area.
 - **MP4 export.** Uses the phone's frames as the picture. The export

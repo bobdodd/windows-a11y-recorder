@@ -51,6 +51,27 @@ public sealed class AndroidTalkBackExplorationTests
         Assert.DoesNotContain(result.Candidates, item => item.Observation.StartsWith("Exposed but not reached"));
     }
 
+    [Fact]
+    public async Task InteractionReportReusesOnlyReachedNodesOnTheMatchingViewport()
+    {
+        var rig = new Rig();
+        var result = await rig.Run((_, _) =>
+        {
+            rig.Focus(3);
+            return Rig.Dispatched;
+        }, single: true, cancellation: TestContext.Current.CancellationToken);
+        var observed = Assert.Single(result.Stops);
+        var match = Assert.Single(rig.MatchedStops());
+        Assert.Equal(13, match.Key);
+        Assert.Equal(observed, match.Value);
+
+        rig.Input = new(1, 0, false);
+        Assert.Empty(rig.MatchedStops());
+        rig.Input = default;
+        rig.Publish(3, changed: true);
+        Assert.Empty(rig.MatchedStops());
+    }
+
     [Theory]
     [InlineData("scroll", "scrolled")]
     [InlineData("window", "window or app interaction")]
@@ -243,6 +264,7 @@ public sealed class AndroidTalkBackExplorationTests
         private readonly bool _password;
         private long _snapshot;
         private long _event;
+        private AndroidTalkBackExploration? _exploration;
 
         internal Rig(int start = 1, bool duplicates = false, bool password = false)
         {
@@ -254,17 +276,23 @@ public sealed class AndroidTalkBackExplorationTests
         }
 
         internal Task<AndroidTalkBackExplorationResult> Run(Func<bool, AndroidTalkBackScope, CompanionNavigationReply> navigate,
-            bool single = false, bool acceptMarker = true, CancellationToken cancellation = default) =>
-            new AndroidTalkBackExploration(Preview, _tree, Signals, () => Available, () => Input,
+            bool single = false, bool acceptMarker = true, CancellationToken cancellation = default)
+        {
+            _exploration = new AndroidTalkBackExploration(Preview, _tree, Signals, () => Available, () => Input,
                 (next, scope, _) =>
                 {
                     Directions.Add(next);
                     return Task.FromResult(navigate(next, scope));
-                }, TimeProvider.System).RunAsync(marker =>
-                {
-                    Markers.Add(marker);
-                    return acceptMarker;
-                }, single, cancellation);
+                }, TimeProvider.System);
+            return _exploration.RunAsync(marker =>
+            {
+                Markers.Add(marker);
+                return acceptMarker;
+            }, single, cancellation);
+        }
+
+        internal IReadOnlyDictionary<int, AndroidTalkBackStop> MatchedStops() =>
+            _exploration!.MatchedStops(_tree.Current, Preview.Current, Input.Version);
 
         internal void Focus(int index)
         {
