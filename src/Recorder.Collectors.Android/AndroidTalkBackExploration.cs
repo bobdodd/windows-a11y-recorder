@@ -36,7 +36,8 @@ internal sealed class AndroidTalkBackSignals
                 Keep(null);
             }
             _index = item?.Index ?? 0;
-            if (item is not null && (item.EventTypeName is Focus or "TYPE_VIEW_SCROLLED" or
+            if (item is not null && (item.EventTypeName is Focus or "TYPE_VIEW_FOCUSED" or "TYPE_VIEW_HOVER_ENTER" or
+                "TYPE_TOUCH_EXPLORATION_GESTURE_START" or "TYPE_TOUCH_EXPLORATION_GESTURE_END" or "TYPE_VIEW_SCROLLED" or
                 AndroidAccessibilityRecords.WindowStateChangedName or "TYPE_VIEW_CLICKED" or "TYPE_VIEW_LONG_CLICKED" or
                 "TYPE_VIEW_TEXT_CHANGED" or "TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED" ||
                 // Window accessibility focus alone is an expected TalkBack response.
@@ -479,7 +480,7 @@ public sealed class AndroidTalkBackExploration
          node.Editable || node.Heading || !string.IsNullOrWhiteSpace(node.Text) ||
          !string.IsNullOrWhiteSpace(node.ContentDescription) || !string.IsNullOrWhiteSpace(node.Hint));
 
-    private static string ItemLabel(AndroidAccessibilityNode node)
+    internal static string ItemLabel(AndroidAccessibilityNode node)
     {
         var role = node.ClassName?.Split('.').LastOrDefault() is { Length: > 0 } name ? name : "item";
         if (node.Password)
@@ -510,7 +511,7 @@ public sealed class AndroidTalkBackExploration
     private sealed record ReachedViewport(AndroidTalkBackScope Scope, int StreamSession, int Width, int Height,
         long InputVersion, NodeKey[] Fingerprint, IReadOnlyDictionary<NodeKey, AndroidTalkBackStop> Stops);
 
-    private sealed record NodeKey(int WindowId, string? Package, string? Class, string? UniqueId, string? ViewId,
+    internal sealed record NodeKey(int WindowId, string? Package, string? Class, string? UniqueId, string? ViewId,
         AndroidNodeBounds Bounds, string? Text, string? Description, string? Hint, bool Password)
     {
         public static NodeKey Of(AndroidAccessibilityNode node) => new(node.WindowId, node.PackageName, node.ClassName,

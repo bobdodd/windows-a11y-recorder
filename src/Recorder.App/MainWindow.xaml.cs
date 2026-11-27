@@ -272,7 +272,7 @@ public partial class MainWindow : Window
         {
             _coordinator = android
                 ? new SessionCoordinator(
-                    _ => AndroidCollectors(androidSerial!),
+                    _ => AndroidCollectors(androidSerial!, naming.Project),
                     _database)
                 : new SessionCoordinator(WindowsCollectorFactory.Create, _database);
             var status = await _coordinator.StartAsync(new RecordingOptions
@@ -356,7 +356,7 @@ public partial class MainWindow : Window
     // so stops after it. The screenshot collector asks the companion app for
     // a screenshot at the start and each time a window settles, and writes
     // each as a PNG (android-checks.md, step 4a).
-    private Recorder.Contracts.ICaptureCollector[] AndroidCollectors(string serial)
+    private Recorder.Contracts.ICaptureCollector[] AndroidCollectors(string serial, Guid project)
     {
         var adb = new AdbProcess(AndroidTools.Adb(AndroidTools.DataFolder));
         var companion = new AndroidCompanionCollector(
@@ -371,10 +371,9 @@ public partial class MainWindow : Window
         _androidLiveTree = trees.LiveTree;
         var touch = new AndroidTouchCollector(adb, serial, companion, companion);
         var accessibility = new AndroidAccessibilityCollector(serial, companion, companion);
-        _androidExploration = new AndroidTalkBackExploration(screen.LivePreview, trees.LiveTree,
-            accessibility, touch, companion);
         _androidInteractions = new AndroidInteractionExploration(screen.LivePreview, trees.LiveTree,
-            accessibility, touch, companion);
+            accessibility, touch, companion, adb, serial);
+        _androidInvestigationProject = project;
         return
         [
             companion,

@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using Recorder.Analysis;
 using Recorder.Collectors.Android;
 
 namespace Recorder.App;
@@ -15,13 +16,12 @@ public partial class AndroidLivePreviewWindow : Window
     private static readonly Duration NoWait = new(TimeSpan.Zero);
     private readonly AndroidLivePreview _preview;
     private readonly AndroidLiveTree _liveTree;
-    private readonly AndroidTalkBackExploration _exploration;
     private readonly AndroidInteractionExploration _interactions;
+    private readonly Func<CancellationToken, Task<ModelProfile?>> _visionProfile;
     private readonly Func<string, bool> _recordMarker;
     private readonly Action<Task> _trackExploration;
     private readonly DispatcherTimer _timer;
     private AndroidLiveTreeWindow? _treeWindow;
-    private AndroidTalkBackExplorationWindow? _explorationWindow;
     private AndroidInteractionWindow? _interactionsWindow;
     private WriteableBitmap? _bitmap;
     private AndroidLivePreviewState? _state;
@@ -30,13 +30,13 @@ public partial class AndroidLivePreviewWindow : Window
     private bool _renderFailed;
 
     public AndroidLivePreviewWindow(AndroidLivePreview preview, AndroidLiveTree liveTree,
-        AndroidTalkBackExploration exploration, AndroidInteractionExploration interactions,
+        AndroidInteractionExploration interactions, Func<CancellationToken, Task<ModelProfile?>> visionProfile,
         Func<string, bool> recordMarker, Action<Task> trackExploration)
     {
         _preview = preview;
         _liveTree = liveTree;
-        _exploration = exploration;
         _interactions = interactions;
+        _visionProfile = visionProfile;
         _recordMarker = recordMarker;
         _trackExploration = trackExploration;
         InitializeComponent();
@@ -61,7 +61,6 @@ public partial class AndroidLivePreviewWindow : Window
 
     internal void StopExploration()
     {
-        _explorationWindow?.StopExploration();
         _interactionsWindow?.Stop();
     }
 
@@ -172,35 +171,6 @@ public partial class AndroidLivePreviewWindow : Window
         Close();
     }
 
-    private void ExploreButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_explorationWindow is { } open)
-        {
-            if (open.WindowState == WindowState.Minimized)
-            {
-                open.WindowState = WindowState.Normal;
-            }
-            open.Activate();
-            return;
-        }
-
-        var window = new AndroidTalkBackExplorationWindow(_exploration, _recordMarker, _trackExploration) { Owner = this };
-        PlaceTreeWindow(window);
-        _explorationWindow = window;
-        window.Closed += (_, _) =>
-        {
-            _explorationWindow = null;
-            Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
-            {
-                if (IsActive && IsVisible)
-                {
-                    ExploreButton.Focus();
-                }
-            }));
-        };
-        window.Show();
-    }
-
     private void InteractionsButton_Click(object sender, RoutedEventArgs e)
     {
         if (_interactionsWindow is { } open)
@@ -212,7 +182,7 @@ public partial class AndroidLivePreviewWindow : Window
             open.Activate();
             return;
         }
-        var window = new AndroidInteractionWindow(_interactions, _exploration, _recordMarker, _trackExploration) { Owner = this };
+        var window = new AndroidInteractionWindow(_interactions, _visionProfile, _recordMarker, _trackExploration) { Owner = this };
         PlaceTreeWindow(window);
         _interactionsWindow = window;
         window.Closed += (_, _) =>

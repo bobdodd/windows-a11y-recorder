@@ -3489,10 +3489,10 @@ Neither marker gives a PC row keyboard focus or selection.
 
 ## Live TalkBack exploration
 
-These are optional target tests. Use the matching protocol 10 companion,
+These historical tests used the protocol 10 recorder and companion,
 default TalkBack left/right navigation gestures and the synthetic **TalkBack
-Navigation Fixture** activity. Do not start on a production workflow. Choose
-the physical comparison before trying a longer automated pass.
+Navigation Fixture** activity. The separate controls are no longer in the
+live preview. The current test uses **Investigate this screen** below.
 
 ### Test 89: compare one automated swipe with one physical swipe
 
@@ -3539,33 +3539,22 @@ notes with the same pass ID. A single-swipe run uses `automated
 verification` in its start note. The full-pass stop count and reason
 were not supplied for this result.
 
-## Live interaction exploration
+## Live screen investigation
 
-The following target tests are pending. Use a recorder and companion that
-both support protocol 11 and the synthetic **TalkBack Navigation Fixture**
-activity in **APK Evidence Fixtures**. The fixture already has distinct
-native button and canvas-only behaviours; no separate screen is required.
+The following physical test is pending. Use the protocol 12 recorder and
+companion, with Google TalkBack installed and previously set up, and the
+**TalkBack Navigation Fixture** in **APK Evidence Fixtures**. The older
+directional swipe result does not validate these input modes.
 
-### Test 91: discover a canvas control without running TalkBack
+### Test 91: one automatically run investigation
 
-1. With TalkBack touch exploration off, open the fixture and start an Android recording.
-2. Open **Live Android preview...**, then **Explore interactions...**.
-3. Check the report and select a line to copy with Ctrl+C.
+1. With TalkBack off, open the fixture and start Android recording.
+2. Open **Live Android preview...** and choose **Investigate this screen** once. Leave the phone untouched until the report finishes.
+3. In the report, check that a native control has distinct TalkBack touch and Tab observations, the group is not reported as an activated button, and the native click and canvas picture-change results are distinguished.
+4. Check that the fixture shows **Canvas-only action activated** and that TalkBack is off in the phone's accessibility settings. Select part of the report and Ctrl+C to verify that normal copying works.
+5. Stop and open the recording. In **Markers**, check the investigation's start and end share the same ID.
 
-**On screen:** **First fixture action** and **Last fixture action** are in
-the Android-declared section. **Canvas-only action** appears as an unverified
-visual candidate, not a declared action. **No fixture action activated**
-remains visible. Static text appearing as a visual candidate is not a failing
-activation test.
-
-### Test 92: test a canvas point without a matched Android click
-
-1. On the settled fixture screen, use **Scan again** if the picture has changed.
-2. Select **Canvas-only action** in the target selector and check the marker on the frozen picture.
-3. Choose **Test tap...** and confirm the one tap. Leave the phone untouched until it completes.
-4. Check the fixture text and the test result. In playback, the test tap has paired **Markers**.
-
-**On screen:** the fixture changes the canvas label to **Canvas-only action
-activated**. The report identifies a later local picture change without a
-matched Android click. A refusal, no picture change, or an ambiguous outcome is
-not a pass for this test.
+A TalkBack swipe observation is not a substitute for an Explore by Touch
+result. A Tab key with no corroborated input focus, a missing canvas
+candidate, or an unresolved restoration warning is not a pass. Verification
+of a deliberate navigation/interruption belongs to a separate test.

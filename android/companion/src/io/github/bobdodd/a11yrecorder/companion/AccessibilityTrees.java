@@ -89,6 +89,7 @@ final class AccessibilityTrees {
         } else if (type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
             add("content-change", false, event.getWindowId(), event.getEventTime());
         } else if (type == AccessibilityEvent.TYPE_VIEW_FOCUSED
+                || type == AccessibilityEvent.TYPE_VIEW_HOVER_ENTER
                 || type == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED
                 || type == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED) {
             int windowId = event.getWindowId();

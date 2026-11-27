@@ -21,9 +21,10 @@ import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 
-/** Serializes fixed TalkBack navigation and separately approved app-window probe taps. */
+/** Serializes scoped companion touch requests and checks ordinary keyboard routing. */
 final class TalkBackNavigation {
     private static final String TALKBACK = "com.google.android.marvin.talkback";
+    private static final String TALKBACK_CLASS = TALKBACK + ".TalkBackService";
     private static final long MAX_REQUEST_AGE_NS = 750_000_000L;
     private static final long SWIPE_MS = 180;
     private final AccessibilityService service;
@@ -54,7 +55,7 @@ final class TalkBackNavigation {
                 float x2 = bounds.left + bounds.width() * .72f;
                 float y = bounds.exactCenterY();
                 if (bounds.left < 0 || bounds.top < 0 || bounds.width() < 200 || bounds.height() < 160 ||
-                        !clearPath(windowId, bounds, new Rect((int)x1, (int)y, (int)x2 + 1, (int)y + 1), true)) {
+                        !clearPath(windowId, bounds, new Rect((int)x1, (int)y, (int)x2 + 1, (int)y + 1), true, false)) {
                     finish.accept("scope-changed", 0L);
                     return;
                 }
@@ -69,7 +70,7 @@ final class TalkBackNavigation {
         });
     }
 
-    void probe(int windowId, String packageName, Rect bounds, int x, int y,
+    void probe(String type, int windowId, String packageName, Rect bounds, int x, int y,
             int width, int height, int rotation, long received, BooleanSupplier connected,
             BiConsumer<String, Long> finish) {
         main.post(() -> {
@@ -78,9 +79,12 @@ final class TalkBackNavigation {
                 return;
             }
             try {
+                boolean explore = "interaction-explore".equals(type);
+                boolean keyboard = "interaction-tab-guard".equals(type);
                 AccessibilityManager manager = service.getSystemService(AccessibilityManager.class);
-                if (manager == null || manager.isTouchExplorationEnabled() || !unmagnified()) {
-                    finish.accept("direct-touch-unavailable", 0L);
+                if (manager == null || !unmagnified() ||
+                        (explore ? !talkBackReady() : manager.isTouchExplorationEnabled())) {
+                    finish.accept(explore ? "talkback-unavailable" : "direct-touch-unavailable", 0L);
                     return;
                 }
                 DisplayManager displays = service.getSystemService(DisplayManager.class);
@@ -94,13 +98,17 @@ final class TalkBackNavigation {
                         x < 2 || y < 2 || x >= width - 2 || y >= height - 2 ||
                         !bounds.contains(x - 1, y - 1) || !bounds.contains(x + 1, y + 1) ||
                         !activeAppMatches(windowId, packageName) ||
-                        !clearPath(windowId, bounds, new Rect(x - 1, y - 1, x + 2, y + 2), false)) {
+                        !clearPath(windowId, bounds, new Rect(x - 1, y - 1, x + 2, y + 2), false, keyboard)) {
                     finish.accept("scope-changed", 0L);
+                    return;
+                }
+                if (keyboard) {
+                    finish.accept("ready", System.nanoTime());
                     return;
                 }
                 Path path = new Path();
                 path.moveTo(x, y);
-                dispatch(path, 55, received, connected, finish);
+                dispatch(path, explore ? 380 : 55, received, connected, finish);
             } catch (RuntimeException exception) {
                 inFlight = false;
                 finish.accept("gesture-refused", 0L);
@@ -157,7 +165,7 @@ final class TalkBackNavigation {
             if (component == null) {
                 return false;
             }
-            if (TALKBACK.equals(component.getPackageName())) {
+            if (TALKBACK.equals(component.getPackageName()) && TALKBACK_CLASS.equals(component.getClassName())) {
                 found = true;
             } else if (!service.getPackageName().equals(component.getPackageName())) {
                 // Another service could handle the same gesture.
@@ -180,7 +188,7 @@ final class TalkBackNavigation {
         }
     }
 
-    private boolean clearPath(int windowId, Rect expected, Rect path, boolean requireAccessibilityFocus) {
+    private boolean clearPath(int windowId, Rect expected, Rect path, boolean requireAccessibilityFocus, boolean keyboard) {
         // getWindows() returns windows on the default display, where the gesture is dispatched.
         List<AccessibilityWindowInfo> windows = service.getWindows();
         try {
@@ -188,6 +196,7 @@ final class TalkBackNavigation {
             for (AccessibilityWindowInfo window : windows) {
                 if (window.getId() == windowId && window.getType() == AccessibilityWindowInfo.TYPE_APPLICATION
                         && window.isActive() && (!requireAccessibilityFocus || window.isAccessibilityFocused())
+                        && (!keyboard || window.isFocused())
                         && !window.isInPictureInPictureMode()) {
                     app = window;
                     break;
@@ -202,7 +211,7 @@ final class TalkBackNavigation {
                 return false;
             }
             for (AccessibilityWindowInfo window : windows) {
-                if (window.getLayer() > app.getLayer()) {
+                if (window.getLayer() > app.getLayer() && !keyboard) {
                     window.getBoundsInScreen(actual);
                     if (Rect.intersects(actual, path)) {
                         return false;

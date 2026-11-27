@@ -341,6 +341,10 @@ public sealed class CompanionConnection : IAsyncDisposable
         AndroidTalkBackScope scope, AndroidInteractionPoint point, CancellationToken cancellation) =>
         SendGestureAsync(id => CompanionProtocol.InteractionProbeRequest(id, scope, point), cancellation);
 
+    internal Task<CompanionNavigationReply> CheckInvestigationInputAsync(
+        AndroidTalkBackScope scope, AndroidInteractionPoint point, AndroidInvestigationInput input, CancellationToken cancellation) =>
+        SendGestureAsync(id => CompanionProtocol.InteractionProbeRequest(id, scope, point, input), cancellation);
+
     private async Task<CompanionNavigationReply> SendGestureAsync(Func<long, string> request, CancellationToken cancellation)
     {
         var id = Interlocked.Increment(ref _nextId);

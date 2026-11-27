@@ -13,7 +13,7 @@
   - canTakeScreenshot, so the service can take screenshots of the display
     for measuring colours (docs/architecture/android-checks.md, step 4a).
 
-  Gesture dispatch is used only for explicit TalkBack exploration requests.
+  Gesture dispatch is used for explicitly started accessibility investigations.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/service_description"

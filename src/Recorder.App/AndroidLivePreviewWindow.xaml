@@ -38,7 +38,7 @@
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
     <StackPanel Margin="0,0,0,10">
-      <local:SelectableText Text="The picture does not send input. Explore interactions scans the current app; Explore with TalkBack tests screen-reader navigation separately. The preview may lag when capture is busy." />
+      <local:SelectableText Text="The picture does not send input. Investigate this screen temporarily switches TalkBack, presses Tab and taps controls. Use only a test screen where controls can be activated safely. Leave the phone untouched during the run." />
       <local:SelectableText x:Name="PreviewStatus"
                             Margin="0,6,0,0" FontWeight="SemiBold"
                             AutomationProperties.LiveSetting="Polite" />
@@ -52,11 +52,8 @@
               Content="_Accessibility tree..." Click="TreeButton_Click"
               AutomationProperties.HelpText="Opens the Android accessibility tree observed during recording." />
       <Button x:Name="InteractionsButton" MinHeight="44" Padding="12,0" Margin="0,0,8,0"
-              Content="Explore _interactions..." Click="InteractionsButton_Click"
-              AutomationProperties.HelpText="Scans Android-declared actions and visible candidates in the current app." />
-      <Button x:Name="ExploreButton" MinHeight="44" Padding="12,0" Margin="0,0,8,0"
-              Content="_Explore with TalkBack..." Click="ExploreButton_Click"
-              AutomationProperties.HelpText="Opens the setup and results for scanning the current app screen with TalkBack." />
+              Content="_Investigate this screen" Click="InteractionsButton_Click"
+              AutomationProperties.HelpText="Starts one investigation of the current app viewport. The recorder temporarily changes TalkBack mode, sends Tab keys and may activate controls by tapping them." />
       <Button x:Name="CloseButton" MinHeight="44" MinWidth="110"
               Content="_Close preview" Click="CloseButton_Click" />
     </WrapPanel>

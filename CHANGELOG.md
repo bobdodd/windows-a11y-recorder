@@ -27,25 +27,21 @@ Changes on `main` since 1.1.0, not yet released.
   markers, independently of selection. The companion refreshes the affected
   window when Android sends focus events, including accessibility focus
   clearing, even if the layout has not changed.
-- **Explore with TalkBack...** opens a one-swipe verification and a
-  bounded next/previous scan for the current app viewport. It matches
-  accessibility focus events to fresh trees, lists observed stops in
-  order, and keeps unmatched or missing coverage separate. The scan
-  uses explicit horizontal companion gestures and records start and
-  end markers tagged as recorder automation. It requires the updated
-  protocol 10 companion. Scrcpy remains view-only. A standalone
-  native navigation activity in APK Evidence Fixtures provides test cases.
-- The tester confirmed the one-swipe comparison and full exploration
-  on a physical phone using the native fixture. The tester also found
-  the exploration annotations in playback.
-- **Explore interactions...** scans the current app viewport independently of
-  TalkBack. Its copyable report separates Android-declared actions and inline
-  links from unverified visual candidates found by Windows OCR or contrast
-  outlines. Matched stops from a preceding TalkBack pass are shown only
-  for the same viewport. No input is sent by scanning. One confirmed test tap can look
-  for an Android click event or a local picture change and add evidence
-  markers to the recording. A silent result is unknown, not inactive.
-  The matching companion uses protocol 11; target-device validation is pending.
+- **Investigate this screen** replaces the separate TalkBack swipe and
+  manual tap tools in the preview. One run inventories the current
+  viewport, samples TalkBack Explore by Touch, sends real keyboard Tabs
+  without TalkBack interception, and directly taps apparent controls.
+  The copyable report separates Android declarations, accessibility and
+  input focus, matched Android clicks, local picture changes, and untested
+  targets. Windows OCR and outlines run first; an eligible local vision
+  model can propose additional targets where discovery leaves gaps. Nothing
+  is sent to a LAN or cloud model.
+- The recorder stops input if the viewport or required evidence changes.
+  It restores the original TalkBack service setting where it can verify
+  a safe restoration, and adds paired investigation markers to the
+  recording. This requires companion protocol 12. The earlier directional
+  swipe check passed on a phone; the new end-to-end investigation still
+  needs physical-device validation.
 
 ### Native Android accessibility preflight research
 

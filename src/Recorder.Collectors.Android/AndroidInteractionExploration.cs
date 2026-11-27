@@ -40,7 +40,7 @@ public sealed class AndroidInteractionSnapshot
 public sealed record AndroidInteractionTapResult(string Evidence, long? ClickEvent = null, ulong? AfterFrame = null);
 
 /// <summary>Reads a live viewport independently of TalkBack and optionally tests one confirmed point.</summary>
-public sealed class AndroidInteractionExploration
+public sealed partial class AndroidInteractionExploration
 {
     private readonly AndroidLivePreview _preview;
     private readonly AndroidLiveTree _tree;
@@ -53,11 +53,17 @@ public sealed class AndroidInteractionExploration
     private int _probing;
 
     public AndroidInteractionExploration(AndroidLivePreview preview, AndroidLiveTree tree,
-        AndroidAccessibilityCollector events, AndroidTouchCollector touch, AndroidCompanionCollector companion)
+        AndroidAccessibilityCollector events, AndroidTouchCollector touch, AndroidCompanionCollector companion,
+        IAdb adb, string serial)
         : this(preview, tree, events.LiveSignals,
             () => events.ExplorationEventsAvailable && touch.ExplorationInputAvailable,
             () => touch.ExplorationInput, companion.DisplayAt, companion.ProbeInteractionAsync,
-            cancellation => Task.Delay(1100, cancellation)) { }
+            cancellation => Task.Delay(1100, cancellation))
+    {
+        _investigationDispatch = companion.CheckInvestigationInputAsync;
+        _investigationModes = () => new AndroidInvestigationModes(adb, serial);
+        _investigationSupported = () => companion.SupportsScreenInvestigation;
+    }
 
     internal AndroidInteractionExploration(AndroidLivePreview preview, AndroidLiveTree tree, AndroidTalkBackSignals signals,
         Func<bool> ready, Func<AndroidTalkBackInput> input, Func<long, AndroidDisplayState?> displayAt,

@@ -8,8 +8,8 @@ public partial class MainWindow
 {
     private AndroidLivePreview? _androidLivePreview;
     private AndroidLiveTree? _androidLiveTree;
-    private AndroidTalkBackExploration? _androidExploration;
     private AndroidInteractionExploration? _androidInteractions;
+    private Guid? _androidInvestigationProject;
     private AndroidLivePreviewWindow? _androidLivePreviewWindow;
     private Task _androidExplorationCompletion = Task.CompletedTask;
 
@@ -24,8 +24,8 @@ public partial class MainWindow
     {
         _androidLivePreview = null;
         _androidLiveTree = null;
-        _androidExploration = null;
         _androidInteractions = null;
+        _androidInvestigationProject = null;
         AndroidLivePreviewMenuItem.IsEnabled = false;
         AndroidLivePreviewButton.Visibility = Visibility.Collapsed;
         _androidLivePreviewWindow?.StopExploration();
@@ -37,7 +37,7 @@ public partial class MainWindow
     {
         if (_transitioning || _coordinator?.State != RecordingSessionState.Recording ||
             _androidLivePreview is not { } preview || _androidLiveTree is not { } tree ||
-            _androidExploration is not { } exploration || _androidInteractions is not { } interactions)
+            _androidInteractions is not { } interactions)
         {
             return;
         }
@@ -53,7 +53,8 @@ public partial class MainWindow
         }
 
         var coordinator = _coordinator;
-        var window = new AndroidLivePreviewWindow(preview, tree, exploration, interactions, coordinator.AddMarker, task =>
+        var window = new AndroidLivePreviewWindow(preview, tree, interactions, InvestigationVisionProfileAsync,
+            coordinator.AddMarker, task =>
         {
             // If the preview was just reopened, keep waiting for any previous
             // scan's pending gesture/end marker as well.
@@ -78,5 +79,20 @@ public partial class MainWindow
             }
         };
         window.Show();
+    }
+
+    private Task<Recorder.Analysis.ModelProfile?> InvestigationVisionProfileAsync(CancellationToken cancellation)
+    {
+        var settings = _analysisSettings;
+        var project = _androidInvestigationProject;
+        var catalog = AnalysisCatalogOrNull;
+        return ReadProfileAsync();
+
+        async Task<Recorder.Analysis.ModelProfile?> ReadProfileAsync()
+        {
+            var models = project is { } id && catalog is not null
+                ? await catalog.ProjectModelsAsync(id, cancellation).ConfigureAwait(false) : null;
+            return models?.VisionChecks is { } selection ? settings.Profile(selection) : null;
+        }
     }
 }

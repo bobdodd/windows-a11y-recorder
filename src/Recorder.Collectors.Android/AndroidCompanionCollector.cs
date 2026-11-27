@@ -569,6 +569,22 @@ public sealed class AndroidCompanionCollector :
             : Task.FromResult(new CompanionNavigationReply(0, "companion-update-required", 0));
     }
 
+    internal Task<CompanionNavigationReply> CheckInvestigationInputAsync(AndroidTalkBackScope scope,
+        AndroidInteractionPoint point, AndroidInvestigationInput input, CancellationToken cancellation)
+    {
+        cancellation.ThrowIfCancellationRequested();
+        if (_connection is not { Closed.IsCompleted: false } connection || _stopping)
+        {
+            return Task.FromResult(new CompanionNavigationReply(0, "connection-lost", 0));
+        }
+        return connection.Hello.Protocol >= CompanionProtocol.InvestigationVersion
+            ? connection.CheckInvestigationInputAsync(scope, point, input, cancellation)
+            : Task.FromResult(new CompanionNavigationReply(0, "companion-update-required", 0));
+    }
+
+    internal bool SupportsScreenInvestigation => !_stopping &&
+        _connection is { Closed.IsCompleted: false, Hello.Protocol: >= CompanionProtocol.InvestigationVersion };
+
     public async Task<ChannelReader<ReceivedAccessibilityTree>?> RequestAccessibilityTreesAsync(CancellationToken cancellation)
     {
         if (_connection is not { } connection || connection.Closed.IsCompleted || _stopping)

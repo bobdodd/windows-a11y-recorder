@@ -25,11 +25,13 @@ public static class CompanionProtocol
     /// text and where they are on the screen; 9 adds a one-shot request
     /// for the selected active app's text rendering evidence; 10 adds
     /// explicitly requested TalkBack navigation swipes; 11 adds a
-    /// separately confirmed single-point interaction probe and logical display size.
+    /// separately confirmed single-point interaction probe and logical display size;
+    /// 12 adds TalkBack Explore by Touch and a guard for real keyboard input.
     /// </summary>
-    public const int Version = 11;
+    public const int Version = 12;
     internal const int NavigationVersion = 10;
     internal const int InteractionProbeVersion = 11;
+    internal const int InvestigationVersion = 12;
 
     /// <summary>The companion app's socket, in Linux's abstract namespace.</summary>
     public const string SocketName = "a11yrecorder_companion";
@@ -83,10 +85,17 @@ public static class CompanionProtocol
             windowId = scope.Window.Id, packageName = scope.PackageName, bounds = scope.Window.Bounds
         }, EventOptions) + "\n";
 
-    internal static string InteractionProbeRequest(long id, AndroidTalkBackScope scope, AndroidInteractionPoint point) =>
+    internal static string InteractionProbeRequest(long id, AndroidTalkBackScope scope, AndroidInteractionPoint point,
+        AndroidInvestigationInput input = AndroidInvestigationInput.Tap) =>
         JsonSerializer.Serialize(new
         {
-            type = "interaction-probe", id, windowId = scope.Window.Id, packageName = scope.PackageName,
+            type = input switch
+            {
+                AndroidInvestigationInput.Explore => "interaction-explore",
+                AndroidInvestigationInput.Tab => "interaction-tab-guard",
+                _ => "interaction-probe",
+            },
+            id, windowId = scope.Window.Id, packageName = scope.PackageName,
             bounds = scope.Window.Bounds, point.X, point.Y, point.Width, point.Height, point.Rotation
         }, EventOptions) + "\n";
 
@@ -196,7 +205,7 @@ public static class CompanionProtocol
                 // are timed as they are read.
                 "accessibility-tree" => new CompanionAccessibilityTreeLine(line),
                 "text-rendering" => ReadTextRendering(root),
-                "talkback-navigation" or "interaction-probe" => new CompanionNavigationReply(
+                "talkback-navigation" or "interaction-probe" or "interaction-explore" or "interaction-tab-guard" => new CompanionNavigationReply(
                     Long(root, "id"), String(root, "status"), Long(root, "started")),
                 // Read later, off the connection's reading, by
                 // ReadScreenshot, as for a snapshot: a screenshot is large.

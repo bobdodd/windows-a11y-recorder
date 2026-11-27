@@ -94,7 +94,7 @@ import java.util.concurrent.RejectedExecutionException;
  */
 final class RecorderLink {
     static final String SOCKET_NAME = "a11yrecorder_companion";
-    static final int PROTOCOL = 11;
+    static final int PROTOCOL = 12;
     private static final String TAG = "A11yRecorderCompanion";
 
     private final Context context;
@@ -621,9 +621,10 @@ final class RecorderLink {
                 }
                 // On this client's reader thread, not the service or the regular sender.
                 send(rendering.read((String) packageName));
-            } else if ("talkback-navigation".equals(type) || "interaction-probe".equals(type)) {
+            } else if ("talkback-navigation".equals(type) || "interaction-probe".equals(type)
+                    || "interaction-explore".equals(type) || "interaction-tab-guard".equals(type)) {
                 long id = request.optLong("id");
-                boolean probe = "interaction-probe".equals(type);
+                boolean probe = !"talkback-navigation".equals(type);
                 String direction = request.optString("direction");
                 Object target = request.opt("packageName");
                 JSONObject bounds = request.optJSONObject("bounds");
@@ -638,7 +639,7 @@ final class RecorderLink {
                         bounds.getInt("right"), bounds.getInt("bottom"));
                 int windowId = request.getInt("windowId");
                 if (probe) {
-                    navigation.probe(windowId, (String)target, rect, request.getInt("x"), request.getInt("y"),
+                    navigation.probe(type, windowId, (String)target, rect, request.getInt("x"), request.getInt("y"),
                             request.getInt("width"), request.getInt("height"), request.getInt("rotation"),
                             received, () -> !closed && !stopping,
                             (status, started) -> navigationReply(type, id, status, started));

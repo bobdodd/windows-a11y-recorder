@@ -66,8 +66,8 @@ public static class AndroidInteractionShapes
             }
             var dx = right - left + 1;
             var dy = bottom - top + 1;
-            if (dx < 4 || dy < 4 || dx > 8 * dy || dy > 8 * dx || dx * stride < 18 || dy * stride < 18 ||
-                dx > w * .90 || dy > h * .35 || count < 10 || count > (dx + dy) * 7)
+            if (dx < 4 || dy < 4 || dx > 24 * dy || dy > 8 * dx || dx * stride < 18 || dy * stride < 18 ||
+                dx > w * .97 || dy > h * .35 || count < 10 || count > (dx + dy) * 7)
             {
                 continue;
             }

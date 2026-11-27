@@ -198,6 +198,229 @@ public sealed class AndroidInteractionExplorationTests
         Assert.False(archive.RootElement.TryGetProperty("shownHeight", out _));
     }
 
+    [Theory]
+    [InlineData("Explore", "interaction-explore", "dispatched")]
+    [InlineData("Tab", "interaction-tab-guard", "ready")]
+    public void InvestigationProtocolUsesDistinctRequests(string kind, string type, string status)
+    {
+        using var request = JsonDocument.Parse(CompanionProtocol.InteractionProbeRequest(5, new(App, PackageName),
+            new(45, 75, 300, 500, 0), Enum.Parse<AndroidInvestigationInput>(kind)));
+        Assert.Equal(type, request.RootElement.GetProperty("type").GetString());
+        Assert.False(request.RootElement.TryGetProperty("direction", out _));
+        Assert.Equal(new CompanionNavigationReply(5, status, 2),
+            CompanionProtocol.Parse(JsonSerializer.Serialize(new { type, id = 5, status, started = 2 })));
+    }
+
+    [Fact]
+    public async Task OneInvestigationSeparatesThreeInputsAndRestoresTalkBack()
+    {
+        var rig = new Rig();
+        var control = Node(1, new(15, 35, 120, 85)) with { ClassName = "android.widget.Button", Clickable = true, Focusable = true, Text = "Fixture control" };
+        int picture = 1, nativeTaps = 0, canvasTaps = 0, touchTests = 0, tabs = 0, tree = 2;
+        long started = Started;
+        rig.Publish(tree, nodes: [Node(0, Viewport), control], accessibilityFocused: true);
+        var modes = new ModeRig
+        {
+            OnTab = () =>
+            {
+                if (++tabs == 1)
+                {
+                    rig.Event(AndroidInteractionExploration.InputFocus, control, started);
+                    rig.Publish(++tree, nodes: [Node(0, Viewport), control with { Focused = true }], at: started + 70_000_000);
+                }
+                else if (tabs == 2)
+                {
+                    // A fresh accessibility focus event during a real Tab is not input-focus evidence.
+                    rig.Event(AndroidTalkBackSignals.Focus, control, started);
+                    rig.Publish(++tree, nodes: [Node(0, Viewport), control with { AccessibilityFocused = true, Focused = true }],
+                        at: started + 70_000_000, accessibilityFocused: true);
+                }
+            }
+        };
+        var service = rig.Service(() => throw new InvalidOperationException());
+        service.ConfigureInvestigation((_, point, action, _) =>
+        {
+            started += 2_000_000_000;
+            if (action == AndroidInvestigationInput.Explore)
+            {
+                rig.Event(AndroidInteractionExploration.ExploreStart, null, started);
+                if (++touchTests == 1)
+                {
+                    rig.Event(AndroidTalkBackSignals.Focus, control, started);
+                    rig.Publish(++tree, nodes: [Node(0, Viewport), control with { AccessibilityFocused = true }],
+                        at: started + 70_000_000, accessibilityFocused: true);
+                }
+                rig.Event(AndroidInteractionExploration.ExploreEnd, null, started);
+            }
+            else if (action == AndroidInvestigationInput.Tap)
+            {
+                if (point.Y < 100)
+                {
+                    nativeTaps++;
+                    rig.Event("TYPE_VIEW_CLICKED", control, started);
+                }
+                else
+                {
+                    canvasTaps++;
+                    rig.Preview.Publish(1, (ulong)++picture, 300, 500, Paint(Canvas), started + 80_000_000);
+                }
+            }
+            return Task.FromResult(new CompanionNavigationReply(1, action == AndroidInvestigationInput.Tab ? "ready" : "dispatched", started));
+        }, () => modes, _ => Task.CompletedTask);
+        var result = await service.InvestigateAsync((_, _) => Task.FromResult(new AndroidInvestigationInventory(
+            [new(new("Fixture control", "Activate", [control.Bounds], true, 1), true, true),
+                new(new("Canvas target", "Outline", [Canvas], null, null), true, true)], "Deterministic.")),
+            rig.Marker, null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("Investigation finished on the selected viewport.", result.Status);
+        Assert.Equal(new[] { "on", "off", "restored" }, modes.Changes);
+        Assert.Equal((2, 3, 1, 1), (touchTests, tabs, nativeTaps, canvasTaps));
+        Assert.Contains("2 corroborated as touch exploration", result.TalkBack);
+        Assert.Contains("1 items verified", result.Tab);
+        Assert.Contains("1 matched clicks; 1 local visual changes", result.DirectTouch);
+        Assert.Contains("Reached at", Assert.Single(result.Findings[0].ExploreByTouch));
+        Assert.Contains("input focus", Assert.Single(result.Findings[0].Tab));
+        Assert.Contains("Android click source", Assert.Single(result.Findings[0].DirectTouch));
+        Assert.Contains("no app item focus was verified", Assert.Single(result.Findings[1].ExploreByTouch));
+        Assert.Contains("Not verified by Tab", Assert.Single(result.Findings[1].Tab));
+        Assert.Contains("no Android click was matched", Assert.Single(result.Findings[1].DirectTouch));
+        Assert.Equal(2, rig.Markers.Count);
+        Assert.Equal(rig.Markers[0].Split(' ')[3], rig.Markers[1].Split(' ')[3]);
+    }
+
+    [Theory]
+    [InlineData("navigation")]
+    [InlineData("physical input")]
+    [InlineData("no exploration events")]
+    [InlineData("cancel")]
+    public async Task InvestigationDoesNotSubstituteOrContinueOnLostScope(string failure)
+    {
+        var rig = new Rig();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var dispatched = new List<AndroidInvestigationInput>();
+        var modes = new ModeRig();
+        var service = rig.Service(() => throw new InvalidOperationException());
+        service.ConfigureInvestigation((_, _, kind, _) =>
+        {
+            dispatched.Add(kind);
+            if (kind == AndroidInvestigationInput.Explore)
+            {
+                switch (failure)
+                {
+                    case "navigation": rig.Event(AndroidAccessibilityRecords.WindowStateChangedName, null); break;
+                    case "physical input": rig.Input = new(1, 0, true); break;
+                    case "cancel": cancellation.Cancel(); break;
+                }
+            }
+            return Task.FromResult(new CompanionNavigationReply(1, kind == AndroidInvestigationInput.Tab ?
+                "direct-touch-unavailable" : "dispatched", Started));
+        }, () => modes, token => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; });
+        var result = await service.InvestigateAsync((_, _) => Task.FromResult(new AndroidInvestigationInventory(
+            [new(new("Canvas target", "Outline", [Canvas], null, null), true, true)], "")),
+            rig.Marker, null, cancellation.Token);
+        Assert.Equal("restored", modes.Changes[^1]);
+        Assert.Equal(2, rig.Markers.Count);
+        if (failure == "no exploration events")
+        {
+            Assert.Contains("touch-exploration events were not verified", Assert.Single(result.Findings[0].ExploreByTouch));
+            Assert.Equal(AndroidInvestigationInput.Explore, dispatched[0]);
+        }
+        else
+        {
+            Assert.Equal(new[] { AndroidInvestigationInput.Explore }, dispatched);
+            Assert.Equal("Not run.", result.Tab);
+            Assert.Equal("Not run.", result.DirectTouch);
+        }
+    }
+
+    [Fact]
+    public void VisualDiscoveryPairsAWideCanvasControlWithItsLabelWithoutTreatingTextAloneAsActionable()
+    {
+        var rig = new Rig();
+        var canvas = new AndroidNodeBounds(10, 130, 290, 176);
+        rig.Preview.Publish(1, 2, 300, 500, Paint(canvas), Started);
+        var baseline = rig.Service(() => throw new InvalidOperationException()).Capture()!;
+        var scan = AndroidInvestigationCandidates.Find(baseline,
+            [new("Canvas control", new(18, 145, 122, 159), 1), new("Status", new(20, 208, 91, 230), 2)]);
+        var candidate = Assert.Single(scan.Candidates, row => row.Item.Label == "Canvas control");
+        Assert.True(candidate.Tap);
+        Assert.Null(candidate.Item.NodeIndex);
+        Assert.Equal("Status", Assert.Single(scan.UnresolvedText).Label);
+        Assert.True(scan.NeedsVision);
+        var proposed = scan.WithProposals(baseline,
+            [(canvas, "Duplicate canvas"), (new(196, 200, 222, 231), "Custom icon"), (Viewport, "Bad bounds")]);
+        Assert.Equal(scan.Candidates.Count + 1, proposed.Count);
+        Assert.Contains(proposed, entry => entry.Item.Label == "Custom icon" && entry.Tap);
+    }
+
+    [Fact]
+    public void VisionParsesStrictLocationsAndNeverAcceptsModelActionCommands()
+    {
+        var proposed = AndroidInvestigationCandidates.ParseProposals(
+            """{"targets":[{"label":"Tool","box":[200,100,900,400]}]}""", new(25, 50, 225, 450));
+        Assert.Equal((new AndroidNodeBounds(65, 90, 205, 210), "Tool"), Assert.Single(proposed!));
+        Assert.Null(AndroidInvestigationCandidates.ParseProposals(
+            """{"targets":[{"label":"Tool","box":[200,100,900,400],"command":"tap"}]}""", Viewport));
+        Assert.Null(AndroidInvestigationCandidates.ParseProposals(
+            """{"targets":[{"label":"Tool","box":[200,100,1001,400]}]}""", Viewport));
+    }
+
+    [Fact]
+    public void LargeUnexplainedPictureChangeStopsRemainingTapTargets()
+    {
+        var before = new AndroidLivePreviewFrame(1, 300, 500, Paint());
+        Assert.True(AndroidInteractionExploration.FrameChangedOutside(before,
+            new(2, 300, 500, Paint(new(0, 260, 300, 500))), Viewport, Canvas));
+        Assert.False(AndroidInteractionExploration.FrameChangedOutside(before,
+            new(2, 300, 500, Paint(Canvas)), Viewport, Canvas));
+    }
+
+    [Fact]
+    public async Task ModesUseRealTabAndOnlyChangeTheKnownTalkBackComponentForTheSelectedUser()
+    {
+        var adb = new SettingsAdb();
+        var original = adb.Services;
+        var modes = new AndroidInvestigationModes(adb, "fixture");
+        var token = TestContext.Current.CancellationToken;
+        Assert.Null(await modes.SetTalkBackAsync(true, token));
+        Assert.Equal(original + ":" + SettingsAdb.TalkBack, adb.Services);
+        Assert.Null(await modes.SetTalkBackAsync(false, token));
+        Assert.Equal(original, adb.Services);
+        Assert.Null(await modes.TabAsync(token));
+        Assert.Null(await modes.RestoreAsync());
+        Assert.Single(adb.Commands, command => command.EndsWith("input -d 0 keyevent KEYCODE_TAB", StringComparison.Ordinal));
+        Assert.All(adb.Commands.Where(command => command.Contains("settings", StringComparison.Ordinal)), command =>
+            Assert.Contains("settings --user 10", command));
+        Assert.DoesNotContain(adb.Commands, command => command.Contains(" secure accessibility_enabled", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RestorationDoesNotClobberAnIndependentServiceChange(bool changed)
+    {
+        var adb = new SettingsAdb();
+        var original = adb.Services = SettingsAdb.TalkBack + ":" + adb.Services;
+        var modes = new AndroidInvestigationModes(adb, "fixture");
+        Assert.Null(await modes.SetTalkBackAsync(false, TestContext.Current.CancellationToken));
+        if (changed)
+        {
+            adb.Services += ":org.example.synthetic/.OtherService";
+        }
+        var before = adb.Services;
+        var restored = await modes.RestoreAsync();
+        if (changed)
+        {
+            Assert.Contains("without overwriting a separate change", restored);
+            Assert.Equal(before, adb.Services);
+        }
+        else
+        {
+            Assert.Null(restored);
+            Assert.Equal(original, adb.Services);
+        }
+    }
+
     private static AndroidLiveWindowSnapshot Window(params AndroidTreeNode[] nodes) =>
         new(App, new(1, 0, nodes, false, 0, Started - 30_000_000));
 
@@ -235,6 +458,7 @@ public sealed class AndroidInteractionExplorationTests
         internal AndroidDisplayState Display = new("start", 0, 300, 500) { ShownWidth = 300, ShownHeight = 500 };
         internal int Dispatched;
         internal bool Ready = true;
+        private long _eventIndex;
         private readonly AndroidLiveTree _tree = new();
 
         internal Rig()
@@ -254,22 +478,23 @@ public sealed class AndroidInteractionExplorationTests
                 return Task.FromResult(dispatch());
             }, _ => Task.CompletedTask);
 
-        internal void Publish(long index, bool overlay = false)
+        internal void Publish(long index, bool overlay = false, IReadOnlyList<AndroidTreeNode>? nodes = null,
+            long at = Started - 30_000_000, bool accessibilityFocused = false)
         {
-            var app = App with { Items = [Node(0, Viewport)] };
+            var app = App with { Items = nodes ?? [Node(0, Viewport)], Focused = true, AccessibilityFocused = accessibilityFocused };
             _tree.Publish(new AndroidAccessibilityTree
             {
-                Index = index, EveryWindow = true, StartedPhoneNanoseconds = Started - 30_000_000,
-                FinishedPhoneNanoseconds = Started - 20_000_000, Windows = overlay
+                Index = index, EveryWindow = true, StartedPhoneNanoseconds = at,
+                FinishedPhoneNanoseconds = at + 10_000_000, Windows = overlay
                     ? [app, App with { Id = 12, Layer = 1, Active = false, Bounds = Canvas }]
                     : [app]
             });
         }
 
-        internal void Event(string name, AndroidAccessibilityNode? source) => Signals.Observe(new()
+        internal void Event(string name, AndroidAccessibilityNode? source, long started = Started) => Signals.Observe(new()
         {
-            Index = 1, EventType = 1, EventTypeName = name, EventTimeMilliseconds = 2060,
-            ReceivedPhoneNanoseconds = Started + 61_000_000, HandledPhoneNanoseconds = Started + 63_000_000,
+            Index = ++_eventIndex, EventType = 1, EventTypeName = name, EventTimeMilliseconds = started / 1_000_000 + 60,
+            ReceivedPhoneNanoseconds = started + 61_000_000, HandledPhoneNanoseconds = started + 63_000_000,
             WindowId = App.Id, DisplayId = 0, PackageName = PackageName, Source = source
         });
 
@@ -278,5 +503,68 @@ public sealed class AndroidInteractionExplorationTests
             Markers.Add(marker);
             return true;
         }
+    }
+
+    private sealed class ModeRig : IAndroidInvestigationModes
+    {
+        public Action? OnTab { get; init; }
+        public List<string> Changes { get; } = [];
+
+        public Task<string?> SetTalkBackAsync(bool on, CancellationToken cancellation)
+        {
+            Changes.Add(on ? "on" : "off");
+            return Task.FromResult<string?>(null);
+        }
+
+        public Task<string?> TabAsync(CancellationToken cancellation)
+        {
+            OnTab?.Invoke();
+            return Task.FromResult<string?>(null);
+        }
+
+        public Task<string?> RestoreAsync()
+        {
+            Changes.Add("restored");
+            return Task.FromResult<string?>(null);
+        }
+    }
+
+    private sealed class SettingsAdb : IAdb
+    {
+        public const string TalkBack = AndroidDeviceChecks.TalkBackPackage + "/.TalkBackService";
+        private const string SuiteSibling = AndroidDeviceChecks.TalkBackPackage + "/.AnotherService";
+        public string Services { get; set; } = CompanionProtocol.ServiceComponent + ":" + SuiteSibling;
+        public List<string> Commands { get; } = [];
+        public string Path => "fixture-adb";
+
+        public Task<AdbResult> RunAsync(IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellation)
+        {
+            var command = arguments[3];
+            Commands.Add(command);
+            var result = command switch
+            {
+                "am get-current-user" => new AdbResult(0, "10\n", ""),
+                "settings --user 10 get secure enabled_accessibility_services" => new(0, Services + "\n", ""),
+                _ when command.StartsWith("cmd package query-services --user 10", StringComparison.Ordinal) =>
+                    new(0, SuiteSibling + "\n" + TalkBack + "\n", ""),
+                _ when command.Contains("settings --user 10 put secure", StringComparison.Ordinal) => Write(command),
+                _ when command == """[ "$(am get-current-user)" = '10' ] && input -d 0 keyevent KEYCODE_TAB""" => new(0, "", ""),
+                _ => throw new InvalidOperationException()
+            };
+            return Task.FromResult(result);
+        }
+
+        private AdbResult Write(string command)
+        {
+            var fields = command.Split('\'');
+            if (fields[1] != Services)
+            {
+                return new(1, "", "");
+            }
+            Services = fields[3];
+            return new(0, "", "");
+        }
+
+        public Task<int> StartServerAsync(TimeSpan timeout, CancellationToken cancellation) => throw new InvalidOperationException();
     }
 }
