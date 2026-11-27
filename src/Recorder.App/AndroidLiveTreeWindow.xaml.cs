@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -26,6 +27,8 @@ public partial class AndroidLiveTreeWindow : Window
     private AndroidLiveTreeSnapshot? _shown;
     private AndroidLiveWindowSnapshot? _selectedWindow;
     private IReadOnlyList<WindowChoice> _choices = [];
+    private readonly List<TreeRow> _focusRows = [];
+    private AndroidLiveFocus _focus;
     private bool _selectedFromLatest;
     private bool _paused;
     private bool _updating;
@@ -145,26 +148,31 @@ public partial class AndroidLiveTreeWindow : Window
         var key = (WindowPicker.SelectedItem as WindowChoice)?.Key;
         var window = _shown?.Windows.FirstOrDefault(entry => KeyOf(entry.Window) == key);
         var fromLatest = window?.Items is { } observed && observed.SnapshotIndex == _shown?.Index;
-        if (window == _selectedWindow)
-        {
-            if (fromLatest != _selectedFromLatest || NodeDetails.Text.Length == 0)
-            {
-                _selectedFromLatest = fromLatest;
-                ShowDetails();
-            }
-            return;
-        }
-
+        var focus = _shown?.FocusFor(window) ?? default;
+        var refreshDetails = window != _selectedWindow || fromLatest != _selectedFromLatest ||
+            NodeDetails.Text.Length == 0;
         var replaceRows = KeyOf(window?.Window) != KeyOf(_selectedWindow?.Window) || window?.Items != _selectedWindow?.Items;
         _selectedWindow = window;
         _selectedFromLatest = fromLatest;
         if (replaceRows)
         {
+            _focusRows.Clear();
             // Indices belong to one snapshot. Do not silently select a new
             // node by reusing an index from a previous version of this window.
-            NodeTree.ItemsSource = window?.Items is { } items ? RowsOf(items.Nodes) : Array.Empty<TreeRow>();
+            NodeTree.ItemsSource = window?.Items is { } items ? RowsOf(items.Nodes, focus) : Array.Empty<TreeRow>();
         }
-        ShowDetails();
+        else if (focus != _focus)
+        {
+            foreach (var row in _focusRows)
+            {
+                row.ApplyFocus(focus);
+            }
+        }
+        _focus = focus;
+        if (refreshDetails)
+        {
+            ShowDetails();
+        }
     }
 
     private void ShowDetails()
@@ -254,7 +262,7 @@ public partial class AndroidLiveTreeWindow : Window
         return details.ToString().TrimEnd();
     }
 
-    private static IReadOnlyList<TreeRow> RowsOf(IReadOnlyList<AndroidTreeNode> nodes)
+    private IReadOnlyList<TreeRow> RowsOf(IReadOnlyList<AndroidTreeNode> nodes, AndroidLiveFocus focus)
     {
         var roots = new List<TreeRow>();
         var seen = new Dictionary<int, TreeRow>(nodes.Count);
@@ -263,6 +271,7 @@ public partial class AndroidLiveTreeWindow : Window
             var row = new TreeRow(node);
             if (node.Parent is { } parent && seen.TryGetValue(parent, out var ancestor))
             {
+                row.Parent = ancestor;
                 ancestor.Children.Add(row);
             }
             else
@@ -271,6 +280,20 @@ public partial class AndroidLiveTreeWindow : Window
                 roots.Add(row);
             }
             seen.TryAdd(node.Index, row);
+            if (node.Focused || node.AccessibilityFocused)
+            {
+                _focusRows.Add(row);
+                row.ApplyFocus(focus);
+                if (row.HasPhoneFocus && !focus.FromEarlierSnapshot)
+                {
+                    // Show the branch without selecting the row, taking
+                    // keyboard focus, or scrolling the tester away.
+                    for (var ancestorRow = row.Parent; ancestorRow is not null; ancestorRow = ancestorRow.Parent)
+                    {
+                        ancestorRow.Expanded = true;
+                    }
+                }
+            }
         }
         return roots;
     }
@@ -326,15 +349,43 @@ public partial class AndroidLiveTreeWindow : Window
 
     private sealed record WindowChoice((int Display, int Id)? Key, string Caption);
 
-    private sealed class TreeRow(AndroidTreeNode node)
+    private sealed class TreeRow(AndroidTreeNode node) : INotifyPropertyChanged
     {
+        private string? _focusLabel;
+
         public AndroidTreeNode Node { get; } = node;
         public string Caption { get; } =
             (node.Password ? "Password field" :
                 Short(node.ContentDescription) ?? Short(node.Text) ?? Short(node.Hint) ??
                 node.ClassName?.Split('.').Last() ?? "Unnamed node") +
-            $" (node {node.Index}{(node.Heading ? ", heading" : "")}{(node.AccessibilityFocused ? ", accessibility focus" : "")})";
+            $" (node {node.Index}{(node.Heading ? ", heading" : "")})";
+        public string DisplayCaption => _focusLabel is { } label ? Caption + "\n" + label : Caption;
+        public bool HasPhoneFocus => _focusLabel is not null;
+        public TreeRow? Parent { get; set; }
         public List<TreeRow> Children { get; } = [];
         public bool Expanded { get; set; }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        public void ApplyFocus(AndroidLiveFocus focus)
+        {
+            var kind = focus.ForNode(Node);
+            var label = (kind, focus.FromEarlierSnapshot) switch
+            {
+                (AndroidLiveFocusKind.Accessibility, false) => "Accessibility focus",
+                (AndroidLiveFocusKind.Input, false) => "Input focus",
+                (AndroidLiveFocusKind.Accessibility | AndroidLiveFocusKind.Input, false) => "Accessibility and input focus",
+                (AndroidLiveFocusKind.Accessibility, true) => "Last observed accessibility focus",
+                (AndroidLiveFocusKind.Input, true) => "Last observed input focus",
+                (AndroidLiveFocusKind.Accessibility | AndroidLiveFocusKind.Input, true) => "Last observed accessibility and input focus",
+                _ => null
+            };
+            if (_focusLabel != label)
+            {
+                _focusLabel = label;
+                PropertyChanged?.Invoke(this, new(nameof(DisplayCaption)));
+                PropertyChanged?.Invoke(this, new(nameof(HasPhoneFocus)));
+            }
+        }
     }
 }

@@ -2487,7 +2487,7 @@ internal static class EventPayloadValidator
                 issues,
                 "android-accessibility-tree-reason-unknown",
                 "#/payload/reasons",
-                "A snapshot's reasons are \"requested\", \"window-change\" or \"content-change\".");
+                "A snapshot's reasons are \"requested\", \"window-change\", \"content-change\" or \"focus-change\".");
         }
 
         if (!payload.TryGetProperty("windows", out var windows) || windows.ValueKind != JsonValueKind.Array)

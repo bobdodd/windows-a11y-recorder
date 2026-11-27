@@ -12,7 +12,38 @@ public sealed record AndroidLiveWindowSnapshot(AndroidAccessibilityWindow Window
 
 public sealed record AndroidLiveTreeSnapshot(
     AndroidLiveTreeState State, long? Index, long ReceivedAtNanoseconds,
-    IReadOnlyList<AndroidLiveWindowSnapshot> Windows, string? Problem, bool EarlierUpdateMissing);
+    IReadOnlyList<AndroidLiveWindowSnapshot> Windows, string? Problem, bool EarlierUpdateMissing)
+{
+    public AndroidLiveFocus FocusFor(AndroidLiveWindowSnapshot? window)
+    {
+        if (State != AndroidLiveTreeState.Observed || window?.Items is not { } items)
+        {
+            return default;
+        }
+
+        if (items.SnapshotIndex == Index)
+        {
+            return new(AndroidLiveFocusKind.Input | AndroidLiveFocusKind.Accessibility, FromEarlierSnapshot: false);
+        }
+
+        // The window flags can disqualify older node focus but cannot tell
+        // whether the very same node still has it. Label it as older evidence.
+        var kinds = AndroidLiveFocus.KindsOf(window.Window.Focused, window.Window.AccessibilityFocused);
+        return new(kinds, FromEarlierSnapshot: true);
+    }
+}
+
+[Flags]
+public enum AndroidLiveFocusKind { None = 0, Input = 1, Accessibility = 2 }
+
+public readonly record struct AndroidLiveFocus(AndroidLiveFocusKind Allowed, bool FromEarlierSnapshot)
+{
+    public AndroidLiveFocusKind ForNode(AndroidTreeNode node) => KindsOf(node.Focused, node.AccessibilityFocused) & Allowed;
+
+    internal static AndroidLiveFocusKind KindsOf(bool input, bool accessibility) =>
+        (input ? AndroidLiveFocusKind.Input : AndroidLiveFocusKind.None) |
+        (accessibility ? AndroidLiveFocusKind.Accessibility : AndroidLiveFocusKind.None);
+}
 
 /// <summary>
 /// Read-only view of the latest reported windows and the last nodes taken

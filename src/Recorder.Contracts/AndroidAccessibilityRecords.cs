@@ -48,7 +48,7 @@ public static class AndroidAccessibilityRecords
     public const int MaxTreeItems = 10_000;
 
     /// <summary>Why a snapshot was taken (AccessibilityTrees.java).</summary>
-    public static IReadOnlyList<string> TreeReasons { get; } = ["requested", "window-change", "content-change"];
+    public static IReadOnlyList<string> TreeReasons { get; } = ["requested", "window-change", "content-change", "focus-change"];
 
     /// <summary>The record's time is the event's time, as Android set it.</summary>
     public const string PhoneEventTimeFlag = "phone-event-time";
@@ -478,7 +478,7 @@ public sealed record AndroidAccessibilityUnavailable(string Serial, string Reaso
 /// <see cref="Windows"/> is every window <c>getWindows()</c> gave. When
 /// <see cref="EveryWindow"/> is true, as when the recording starts and on a
 /// window change, each holds its items; otherwise only the windows whose
-/// content changed do, and the others' <see cref="AndroidAccessibilityWindow.Items"/>
+/// content or focus changed do, and the others' <see cref="AndroidAccessibilityWindow.Items"/>
 /// is null. The latest items of a window are those of the latest snapshot
 /// that holds them.
 /// </summary>
@@ -493,7 +493,7 @@ public sealed record AndroidAccessibilityTree
     /// <summary>True when every window's items were taken.</summary>
     public bool EveryWindow { get; init; }
 
-    /// <summary>The window and content changes the snapshot covers, all those since the last snapshot began.</summary>
+    /// <summary>The window, content and focus changes the snapshot covers, all those since the last snapshot began.</summary>
     public int Changes { get; init; }
 
     /// <summary>The <c>getEventTime()</c> of the first change it covers, or null for none.</summary>

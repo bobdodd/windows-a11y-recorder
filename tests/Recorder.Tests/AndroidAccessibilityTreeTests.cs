@@ -529,6 +529,18 @@ public sealed class AndroidAccessibilityTreeTests
     }
 
     [Fact]
+    public void Validator_AcceptsAFocusOnlySnapshot()
+    {
+        var line = TreeLine(index: 2, everyWindow: false, reason: "focus-change");
+        var (tree, problem) = CompanionProtocol.ReadTree(line);
+        Assert.Null(problem);
+        Assert.NotNull(tree);
+        Assert.Equal(["focus-change"], tree.Reasons);
+        Assert.False(tree.EveryWindow);
+        Assert.Empty(Validate(PayloadOf(tree)));
+    }
+
+    [Fact]
     public void Validator_ReportsOnlyTheFirstItemOutOfPlace()
     {
         var payload = Payload();

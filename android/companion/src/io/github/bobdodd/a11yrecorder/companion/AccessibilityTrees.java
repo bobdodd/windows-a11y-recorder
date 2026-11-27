@@ -31,12 +31,12 @@ import java.util.concurrent.RejectedExecutionException;
  *
  * While a connection wants them, a snapshot is taken when the connection
  * asks, on every window change (TYPE_WINDOWS_CHANGED and
- * TYPE_WINDOW_STATE_CHANGED) and on every content change
- * (TYPE_WINDOW_CONTENT_CHANGED). Each snapshot lists every window, as
- * getWindows() gives them; a snapshot taken when asked or on a window
- * change holds the tree of every window, and one taken on a content change
- * holds the tree of each window that changed. So the latest tree of a
- * window is that of the latest snapshot that holds it.
+ * TYPE_WINDOW_STATE_CHANGED) and on content and focus events. Each
+ * snapshot lists every window, as getWindows() gives them. A snapshot
+ * taken when asked or on a window change holds the tree of every window.
+ * One taken on a content or focus event normally holds the tree of each
+ * affected window. The latest tree of a window is that of the latest
+ * snapshot that holds it.
  *
  * Snapshots are taken one at a time on their own thread, so the service's
  * events are not held up. A change that arrives while one is being taken
@@ -88,6 +88,13 @@ final class AccessibilityTrees {
             add("window-change", true, -1, event.getEventTime());
         } else if (type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
             add("content-change", false, event.getWindowId(), event.getEventTime());
+        } else if (type == AccessibilityEvent.TYPE_VIEW_FOCUSED
+                || type == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED
+                || type == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED) {
+            int windowId = event.getWindowId();
+            // A clear matters even when nothing else receives focus. Read
+            // the flags from the next snapshot, not the event's source.
+            add("focus-change", windowId < 0, windowId, event.getEventTime());
         }
     }
 

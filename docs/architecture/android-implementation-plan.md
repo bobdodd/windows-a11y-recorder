@@ -472,7 +472,16 @@ slice's full test goes into a validation plan,
   to one window in one snapshot. The inspector neither requests fresh
   phone data nor sends actions, and its snapshots are not synchronized
   to individual video frames. Password text is not displayed in the
-  inspector; archival capture is unchanged.
+  inspector; opening the inspector does not change what is archived.
+- **Phone focus in the live tree.** A bold row with a border and text
+  identifies accessibility focus, input focus, or both, in the selected
+  phone window. The inspector expands the ancestors of a focused node
+  in a fresh snapshot, without selecting it, moving PC keyboard focus
+  to it, or forcing a scroll. On carried nodes, matching window-level
+  focus can keep a **Last observed** marker, but does not verify that
+  the same node is still focused. Unreadable snapshots suppress the
+  markers. Pausing freezes the view and its markers. This uses Android’s
+  reported node flags, not text or coordinates.
 - **Player.** The phone's frame takes the desktop's place, fitted to the
   height of the frame area.
 - **MP4 export.** Uses the phone's frames as the picture. The export
@@ -1466,11 +1475,12 @@ slice's full test goes into a validation plan,
     `TYPE_WINDOW_STATE_CHANGED` (`window-change`); and, on each
     `TYPE_WINDOW_CONTENT_CHANGED` (`content-change`), a snapshot whose
     window list is complete but which holds the items only of the window
-    that changed. This differs from the plan above, which named every
-    window's tree for content changes too: a content change names its
-    window (`getWindowId()`), so taking the others again would add size
-    without adding evidence. The latest items of a window are those of
-    the latest snapshot that holds them.
+    that changed. The same applies to `TYPE_VIEW_FOCUSED`,
+    `TYPE_VIEW_ACCESSIBILITY_FOCUSED`, and
+    `TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED` (`focus-change`). A focus
+    event with no window id requests every window. Focus changes can
+    be taken together with content or window changes. The latest items
+    of a window are those of the latest snapshot that holds them.
   - **No change missed, no limit.** Snapshots are taken one at a time on
     their own thread, so the service's events are not held up. A change
     that arrives while one is being taken is covered by the next, which

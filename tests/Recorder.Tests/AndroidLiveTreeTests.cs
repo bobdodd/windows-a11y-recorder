@@ -103,6 +103,54 @@ public sealed class AndroidLiveTreeTests
         Assert.Empty(feed.Current.Windows);
     }
 
+    [Fact]
+    public void Focus_FollowsBothKindsIndependently_AndClearsAfterFocusLeaves()
+    {
+        var feed = new AndroidLiveTree();
+        var textField = Node("Text field") with { Focused = true };
+        var label = Node("Label") with { AccessibilityFocused = true, Index = 1 };
+        var other = Node("Submit") with { Focusable = true, Selected = true, Index = 2 };
+        feed.Publish(Snapshot(1, true, Window(1, [textField, label, other])));
+        var focus = feed.Current.FocusFor(feed.Current.Windows[0]);
+        Assert.False(focus.FromEarlierSnapshot);
+        Assert.Equal(AndroidLiveFocusKind.Input, focus.ForNode(textField));
+        Assert.Equal(AndroidLiveFocusKind.Accessibility, focus.ForNode(label));
+        Assert.Equal(AndroidLiveFocusKind.None, focus.ForNode(other));
+
+        feed.Publish(Snapshot(2, false, Window(1, [textField with { AccessibilityFocused = true }, label with { AccessibilityFocused = false }, other])));
+        var current = feed.Current.Windows[0];
+        focus = feed.Current.FocusFor(current);
+        Assert.Equal(AndroidLiveFocusKind.Input | AndroidLiveFocusKind.Accessibility, focus.ForNode(current.Items!.Nodes[0]));
+        Assert.Equal(AndroidLiveFocusKind.None, focus.ForNode(current.Items.Nodes[1]));
+
+        feed.Publish(Snapshot(3, false, Window(1, [textField with { Focused = false }, label with { AccessibilityFocused = false }, other])));
+        current = feed.Current.Windows[0];
+        focus = feed.Current.FocusFor(current);
+        Assert.All(current.Items!.Nodes, node => Assert.Equal(AndroidLiveFocusKind.None, focus.ForNode(node)));
+    }
+
+    [Fact]
+    public void Focus_OnCarriedNodes_IsHistoricalAndOnlyMarkedForMatchingWindowFocus()
+    {
+        var feed = new AndroidLiveTree();
+        var node = Node("Text field") with { Focused = true, AccessibilityFocused = true };
+        feed.Publish(Snapshot(1, true, Window(1, [node]), Window(2)));
+
+        feed.Publish(Snapshot(2, false, Window(1) with { Focused = true }, Window(2, [])));
+        var focus = feed.Current.FocusFor(feed.Current.Windows[0]);
+        Assert.True(focus.FromEarlierSnapshot);
+        Assert.Equal(AndroidLiveFocusKind.Input, focus.ForNode(node));
+
+        feed.Publish(Snapshot(3, false, Window(1), Window(2) with { Focused = true }));
+        Assert.Equal(AndroidLiveFocusKind.None, feed.Current.FocusFor(feed.Current.Windows[0]).ForNode(node));
+
+        feed.Publish(Snapshot(4, false, Window(1, [node])));
+        feed.Unreadable();
+        Assert.Equal(AndroidLiveFocusKind.None, feed.Current.FocusFor(feed.Current.Windows[0]).ForNode(node));
+        feed.Unavailable("Companion disconnected.");
+        Assert.Equal(AndroidLiveFocusKind.None, feed.Current.FocusFor(null).ForNode(node));
+    }
+
     private static AndroidAccessibilityTree Snapshot(long index, bool everyWindow, params AndroidAccessibilityWindow[] windows) =>
         new()
         {

@@ -3455,3 +3455,33 @@ Closing the inspector leaves the video and recording running.
 **On screen:** the inspector clears the paused tree and reports the
 companion connection as unavailable. Stopping the recording closes
 both the preview and the inspector.
+
+### Test 87: follow Android accessibility focus on an unchanged screen
+
+1. With the updated companion, record a phone running TalkBack and open
+   the live tree for the current app window.
+2. Move TalkBack focus between two visible controls without activating
+   them or scrolling.
+3. Choose **Pause updates** and move TalkBack focus again.
+4. Choose **Resume updates**.
+
+**On screen:** the labelled accessibility-focus highlight moves to
+the reported node even when the preview layout does not change. Its
+branch opens without selecting that node on the PC. The highlight
+stays on the paused node and moves to the newly focused node on resume.
+
+### Test 88: distinguish input focus from accessibility focus
+
+1. With the updated companion, open the live tree while recording an
+   app with a text field and a separate labelled control.
+2. Focus the text field on the phone. In the tree choose the app
+   window if the phone keyboard is also listed.
+3. With TalkBack on, move accessibility focus to the other control
+   without activating it. Then move it away from the app window.
+
+**On screen:** input focus is labelled on the text field. If Android
+reports simultaneous accessibility focus, the second label appears on
+the other control, or both labels appear together when the flags
+describe the same node. When the app loses accessibility focus, its
+current accessibility-focus mark clears. No PC row acquires keyboard
+focus or selection as a result of those markers.
