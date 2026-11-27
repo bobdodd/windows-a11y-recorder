@@ -35,6 +35,9 @@ Changes on `main` since 1.1.0, not yet released.
   end markers tagged as recorder automation. It requires the updated
   protocol 10 companion. Scrcpy remains view-only. A standalone
   native navigation activity in APK Evidence Fixtures provides test cases.
+- The tester confirmed the one-swipe comparison and full exploration
+  on a physical phone using the native fixture. The tester also found
+  the exploration annotations in playback.
 
 ### Native Android accessibility preflight research
 

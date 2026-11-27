@@ -3525,3 +3525,16 @@ not clicks or the order in which the tree lists its nodes. The summary
 does not claim separate stops for every grouped child or classify
 **Canvas-only action** as an inaccessible node. No fixture action turns
 on. Any interruption is stated, and automation is marked in the recording.
+
+### Physical fixture result
+
+On 2026-11-27, the tester reported that the single-swipe comparison and
+the full fixture pass both passed on a physical phone. In the saved
+recording, the tester confirmed seeing the two exploration annotations.
+For playback verification, open **Settings > Playback event filters**,
+clear the other filters and enable **Markers**. With **Details** on,
+select the bottom timeline lane and inspect **Selected event values**.
+For a full pass, look for `started (automated navigation)` and `ended`
+notes with the same pass ID. A single-swipe run uses `automated
+verification` in its start note. The full-pass stop count and reason
+were not supplied for this result.
