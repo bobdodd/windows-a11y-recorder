@@ -8,7 +8,9 @@ public partial class MainWindow
 {
     private AndroidLivePreview? _androidLivePreview;
     private AndroidLiveTree? _androidLiveTree;
+    private AndroidTalkBackExploration? _androidExploration;
     private AndroidLivePreviewWindow? _androidLivePreviewWindow;
+    private Task _androidExplorationCompletion = Task.CompletedTask;
 
     private void EnableAndroidLivePreview()
     {
@@ -17,19 +19,23 @@ public partial class MainWindow
         AndroidLivePreviewButton.Visibility = available ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void CloseAndroidLivePreview()
+    private async Task CloseAndroidLivePreviewAsync()
     {
         _androidLivePreview = null;
         _androidLiveTree = null;
+        _androidExploration = null;
         AndroidLivePreviewMenuItem.IsEnabled = false;
         AndroidLivePreviewButton.Visibility = Visibility.Collapsed;
+        _androidLivePreviewWindow?.StopExploration();
         _androidLivePreviewWindow?.Close();
+        await _androidExplorationCompletion;
     }
 
     private void AndroidLivePreview_Click(object sender, RoutedEventArgs e)
     {
         if (_transitioning || _coordinator?.State != RecordingSessionState.Recording ||
-            _androidLivePreview is not { } preview || _androidLiveTree is not { } tree)
+            _androidLivePreview is not { } preview || _androidLiveTree is not { } tree ||
+            _androidExploration is not { } exploration)
         {
             return;
         }
@@ -44,7 +50,14 @@ public partial class MainWindow
             return;
         }
 
-        var window = new AndroidLivePreviewWindow(preview, tree) { Owner = this };
+        var coordinator = _coordinator;
+        var window = new AndroidLivePreviewWindow(preview, tree, exploration, coordinator.AddMarker, task =>
+        {
+            // If the preview was just reopened, keep waiting for any previous
+            // scan's pending gesture/end marker as well.
+            _androidExplorationCompletion = _androidExplorationCompletion.IsCompleted
+                ? task : Task.WhenAll(_androidExplorationCompletion, task);
+        }) { Owner = this };
         _androidLivePreviewWindow = window;
         window.Closed += (_, _) =>
         {

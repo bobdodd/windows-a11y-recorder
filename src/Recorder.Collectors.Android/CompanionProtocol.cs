@@ -23,9 +23,11 @@ public static class CompanionProtocol
     /// android-checks.md, step 15, which added how the phone is held; 8
     /// from android-checks.md, step 29, which added the links in an item's
     /// text and where they are on the screen; 9 adds a one-shot request
-    /// for the selected active app's text rendering evidence.
+    /// for the selected active app's text rendering evidence; 10 adds
+    /// explicitly requested TalkBack navigation swipes.
     /// </summary>
-    public const int Version = 9;
+    public const int Version = 10;
+    internal const int NavigationVersion = 10;
 
     /// <summary>The companion app's socket, in Linux's abstract namespace.</summary>
     public const string SocketName = "a11yrecorder_companion";
@@ -71,6 +73,13 @@ public static class CompanionProtocol
         ArgumentException.ThrowIfNullOrWhiteSpace(packageName);
         return JsonSerializer.Serialize(new { type = "text-rendering", packageName }) + "\n";
     }
+
+    internal static string TalkBackNavigationRequest(long id, bool next, AndroidTalkBackScope scope) =>
+        JsonSerializer.Serialize(new
+        {
+            type = "talkback-navigation", id, direction = next ? "next" : "previous",
+            windowId = scope.Window.Id, packageName = scope.PackageName, bounds = scope.Window.Bounds
+        }, EventOptions) + "\n";
 
     /// <summary>
     /// Asks the app for a screenshot of the display now, and another each
@@ -174,6 +183,8 @@ public static class CompanionProtocol
                 // are timed as they are read.
                 "accessibility-tree" => new CompanionAccessibilityTreeLine(line),
                 "text-rendering" => ReadTextRendering(root),
+                "talkback-navigation" => new CompanionNavigationReply(
+                    Long(root, "id"), String(root, "status"), Long(root, "started")),
                 // Read later, off the connection's reading, by
                 // ReadScreenshot, as for a snapshot: a screenshot is large.
                 "screenshot" or "screenshot-failed" => new CompanionScreenshotLine(line),
@@ -465,6 +476,8 @@ public sealed record CompanionAccessibilityTreeLine(string Line) : CompanionMess
 /// <summary>A one-shot report from the selected active package, with no text values.</summary>
 public sealed record CompanionTextRendering(
     string PackageName, string Status, IReadOnlyList<CompanionTextSize> Nodes) : CompanionMessage;
+
+internal sealed record CompanionNavigationReply(long Id, string Status, long Started) : CompanionMessage;
 
 /// <summary>A node's Android visibility flag, pixel size and unit code, kept separately.</summary>
 public sealed record CompanionTextSize(

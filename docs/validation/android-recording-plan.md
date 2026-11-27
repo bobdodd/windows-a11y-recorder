@@ -3486,3 +3486,42 @@ label. If both flags describe the same node, both markers and labels
 are on that row. The legend explains both shapes. When the app loses
 accessibility focus, its current accessibility-focus marker clears.
 Neither marker gives a PC row keyboard focus or selection.
+
+## Live TalkBack exploration
+
+These are optional target tests. Use the matching protocol 10 companion,
+default TalkBack left/right navigation gestures and the synthetic **TalkBack
+Navigation Fixture** activity. Do not start on a production workflow. Choose
+the physical comparison before trying a longer automated pass.
+
+### Test 89: compare one automated swipe with one physical swipe
+
+1. During an Android recording, open **TalkBack Navigation Fixture** and
+   move TalkBack focus to **First fixture action** without activating it.
+2. Swipe right once on the phone. Check the next on-screen focus outline.
+   Swipe left to return to **First fixture action**.
+3. In the live preview open **Explore with TalkBack...** and select the
+   checkbox confirming right moves to the next item and left to the
+   previous item.
+4. Leave the phone untouched and choose **Verify one swipe**.
+
+**On screen:** the focus outline lands on the same fixture group as
+the physical swipe. Results show one matching **Next** stop with an
+event and snapshot index. The fixture still shows **No fixture action
+activated**. A refusal or no match is not a passing physical comparison.
+
+### Test 90: distinguish reached and unassessed items
+
+1. With the comparison passed, set TalkBack focus on the first fixture
+   action again without activating it.
+2. In the exploration window choose **Start exploration** and leave
+   the phone untouched until results appear.
+3. Check the ordered stops, starting-tree candidates and the stop reason.
+   Select a result using the keyboard and copy with Ctrl+C.
+4. Stop the recording. Check the start and end markers in the player.
+
+**On screen:** the navigation order is based on matched focus events,
+not clicks or the order in which the tree lists its nodes. The summary
+does not claim separate stops for every grouped child or classify
+**Canvas-only action** as an inaccessible node. No fixture action turns
+on. Any interruption is stated, and automation is marked in the recording.

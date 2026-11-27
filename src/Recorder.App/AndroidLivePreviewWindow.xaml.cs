@@ -15,18 +15,26 @@ public partial class AndroidLivePreviewWindow : Window
     private static readonly Duration NoWait = new(TimeSpan.Zero);
     private readonly AndroidLivePreview _preview;
     private readonly AndroidLiveTree _liveTree;
+    private readonly AndroidTalkBackExploration _exploration;
+    private readonly Func<string, bool> _recordMarker;
+    private readonly Action<Task> _trackExploration;
     private readonly DispatcherTimer _timer;
     private AndroidLiveTreeWindow? _treeWindow;
+    private AndroidTalkBackExplorationWindow? _explorationWindow;
     private WriteableBitmap? _bitmap;
     private AndroidLivePreviewState? _state;
     private int _streamSession;
     private ulong? _sequence;
     private bool _renderFailed;
 
-    public AndroidLivePreviewWindow(AndroidLivePreview preview, AndroidLiveTree liveTree)
+    public AndroidLivePreviewWindow(AndroidLivePreview preview, AndroidLiveTree liveTree,
+        AndroidTalkBackExploration exploration, Func<string, bool> recordMarker, Action<Task> trackExploration)
     {
         _preview = preview;
         _liveTree = liveTree;
+        _exploration = exploration;
+        _recordMarker = recordMarker;
+        _trackExploration = trackExploration;
         InitializeComponent();
         _timer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
         {
@@ -41,10 +49,13 @@ public partial class AndroidLivePreviewWindow : Window
         };
         Closed += (_, _) =>
         {
+            StopExploration();
             _timer.Stop();
             ClearImage();
         };
     }
+
+    internal void StopExploration() => _explorationWindow?.StopExploration();
 
     private void RefreshFrame()
     {
@@ -142,11 +153,45 @@ public partial class AndroidLivePreviewWindow : Window
         if (e.Key == Key.Escape)
         {
             e.Handled = true;
+            StopExploration();
             Close();
         }
     }
 
-    private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
+    private void CloseButton_Click(object sender, RoutedEventArgs e)
+    {
+        StopExploration();
+        Close();
+    }
+
+    private void ExploreButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_explorationWindow is { } open)
+        {
+            if (open.WindowState == WindowState.Minimized)
+            {
+                open.WindowState = WindowState.Normal;
+            }
+            open.Activate();
+            return;
+        }
+
+        var window = new AndroidTalkBackExplorationWindow(_exploration, _recordMarker, _trackExploration) { Owner = this };
+        PlaceTreeWindow(window);
+        _explorationWindow = window;
+        window.Closed += (_, _) =>
+        {
+            _explorationWindow = null;
+            Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+            {
+                if (IsActive && IsVisible)
+                {
+                    ExploreButton.Focus();
+                }
+            }));
+        };
+        window.Show();
+    }
 
     private void TreeButton_Click(object sender, RoutedEventArgs e)
     {

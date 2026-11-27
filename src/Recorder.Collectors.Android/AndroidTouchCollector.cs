@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
@@ -73,6 +74,9 @@ public sealed partial class AndroidTouchCollector : ICaptureCollector
     private long _lineCount;
     private bool _stopping;
     private bool _clockless;
+    private long _explorationInputVersion;
+    private long _lastExplorationInput;
+    private volatile bool _physicalTouchDown;
 
     /// <param name="clock">The companion collector's clock fit; null to place every line at its receipt.</param>
     /// <param name="display">The companion collector's display states; null to give positions as if the phone were upright.</param>
@@ -99,6 +103,12 @@ public sealed partial class AndroidTouchCollector : ICaptureCollector
     public CollectorHealthState HealthState { get; private set; } = CollectorHealthState.Unknown;
 
     public string? HealthReason => _unavailable;
+
+    internal bool ExplorationInputAvailable => _reading && _unavailable is null &&
+        _tracker is not null && _getevent is { Exited.IsCompleted: false };
+
+    internal AndroidTalkBackInput ExplorationInput => new(
+        Interlocked.Read(ref _explorationInputVersion), Interlocked.Read(ref _lastExplorationInput), _physicalTouchDown);
 
     public string? Summary
     {
@@ -434,12 +444,15 @@ public sealed partial class AndroidTouchCollector : ICaptureCollector
         if (_tracker is not null && _touchScreen is { } screen && device == screen.Path &&
             _tracker.Add(input) is { } pointers)
         {
+            _physicalTouchDown = pointers.Any(pointer => pointer.Action != AndroidTouchRecords.UpAction);
+            NoteExplorationInput();
             EmitTouch(screen.Path, input, pointers, receivedAt, ready);
         }
 
         if (input.Type == "EV_KEY" && input.Code.StartsWith("KEY_", StringComparison.Ordinal) &&
             input.Value is "DOWN" or "UP" or "REPEAT")
         {
+            NoteExplorationInput();
             EmitKey(device, input, receivedAt, ready);
         }
 
@@ -448,6 +461,12 @@ public sealed partial class AndroidTouchCollector : ICaptureCollector
             _pending.Remove(device);
             EmitLines(input.Device, group, input.PhoneMicroseconds, receivedAt, ready);
         }
+    }
+
+    private void NoteExplorationInput()
+    {
+        Interlocked.Exchange(ref _lastExplorationInput, Stopwatch.GetTimestamp());
+        Interlocked.Increment(ref _explorationInputVersion);
     }
 
     private void Flush(long receivedAt)

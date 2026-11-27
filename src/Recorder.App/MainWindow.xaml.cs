@@ -309,7 +309,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            CloseAndroidLivePreview();
+            await CloseAndroidLivePreviewAsync();
             StatusTextBlock.Text = "Recording could not start.";
             busy.Dispose();
             MessageBox.Show(
@@ -369,14 +369,18 @@ public partial class MainWindow : Window
         _talkBack = new AndroidTalkBackCollector(adb, serial, companion);
         var trees = new AndroidAccessibilityTreeCollector(serial, companion, companion);
         _androidLiveTree = trees.LiveTree;
+        var touch = new AndroidTouchCollector(adb, serial, companion, companion);
+        var accessibility = new AndroidAccessibilityCollector(serial, companion, companion);
+        _androidExploration = new AndroidTalkBackExploration(screen.LivePreview, trees.LiveTree,
+            accessibility, touch, companion);
         return
         [
             companion,
             screen,
             new AndroidSoundCollector(serial, screen, companion, companion.RaiseAccessibilityVolume),
-            new AndroidTouchCollector(adb, serial, companion, companion),
+            touch,
             _talkBack,
-            new AndroidAccessibilityCollector(serial, companion, companion),
+            accessibility,
             new AndroidDeviceCollector(adb, serial, trees),
             trees,
             new AndroidScreenshotCollector(serial, companion, companion),
@@ -871,7 +875,6 @@ public partial class MainWindow : Window
         }
 
         _transitioning = true;
-        CloseAndroidLivePreview();
         _statusTimer.Stop();
         StopButton.IsEnabled = false;
         MarkerButton.IsEnabled = false;
@@ -881,6 +884,7 @@ public partial class MainWindow : Window
 
         try
         {
+            await CloseAndroidLivePreviewAsync();
             var status = await _coordinator.StopAsync();
             completedSession = status.SessionDirectory;
             RefreshStatus(status);
@@ -2186,7 +2190,7 @@ public partial class MainWindow : Window
 
     private async Task DisposeCoordinatorAsync()
     {
-        CloseAndroidLivePreview();
+        await CloseAndroidLivePreviewAsync();
         if (_coordinator is not null)
         {
             await _coordinator.DisposeAsync();

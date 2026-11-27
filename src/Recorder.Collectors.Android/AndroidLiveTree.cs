@@ -6,7 +6,7 @@ public enum AndroidLiveTreeState { Waiting, Observed, Unreadable, Unavailable, S
 
 public sealed record AndroidLiveTreeItems(
     long SnapshotIndex, long ReceivedAtNanoseconds, IReadOnlyList<AndroidTreeNode> Nodes,
-    bool Truncated, int MissingChildren);
+    bool Truncated, int MissingChildren, long StartedPhoneNanoseconds = 0);
 
 public sealed record AndroidLiveWindowSnapshot(AndroidAccessibilityWindow Window, AndroidLiveTreeItems? Items);
 
@@ -84,7 +84,8 @@ public sealed class AndroidLiveTree
                 AndroidLiveTreeItems? items = null;
                 if (window.Items is { } nodes)
                 {
-                    items = new(tree.Index, tree.ReceivedAtNanoseconds, nodes, window.Truncated, window.MissingChildren);
+                    items = new(tree.Index, tree.ReceivedAtNanoseconds, nodes, window.Truncated, window.MissingChildren,
+                        tree.StartedPhoneNanoseconds);
                 }
                 else if (old.TryGetValue((window.DisplayId, window.Id), out var existing) &&
                     existing.Window.Type == window.Type &&

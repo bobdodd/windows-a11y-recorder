@@ -54,6 +54,7 @@ public sealed class CompanionConnection : IAsyncDisposable
     private readonly Func<ValueTask>? _onDispose;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly ConcurrentDictionary<long, TaskCompletionSource<(CompanionClockReply Reply, long At)>> _pending = new();
+    private readonly ConcurrentDictionary<long, TaskCompletionSource<CompanionNavigationReply>> _navigation = new();
     private readonly Channel<ReceivedDisplay> _displays = Channel.CreateUnbounded<ReceivedDisplay>(
         new UnboundedChannelOptions { SingleReader = true });
     private readonly Channel<ReceivedOrientation> _orientations = Channel.CreateUnbounded<ReceivedOrientation>(
@@ -332,6 +333,28 @@ public sealed class CompanionConnection : IAsyncDisposable
         }
     }
 
+    internal async Task<CompanionNavigationReply> NavigateTalkBackAsync(
+        bool next, AndroidTalkBackScope scope, CancellationToken cancellation)
+    {
+        var id = Interlocked.Increment(ref _nextId);
+        var reply = new TaskCompletionSource<CompanionNavigationReply>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _navigation.TryAdd(id, reply);
+        try
+        {
+            await SendAsync(CompanionProtocol.TalkBackNavigationRequest(id, next, scope), cancellation).ConfigureAwait(false);
+            var completed = await Task.WhenAny(reply.Task, Closed).WaitAsync(cancellation).ConfigureAwait(false);
+            if (completed == Closed && !reply.Task.IsCompletedSuccessfully)
+            {
+                return new(id, "connection-lost", 0);
+            }
+            return await reply.Task.ConfigureAwait(false);
+        }
+        finally
+        {
+            _navigation.TryRemove(id, out _);
+        }
+    }
+
     private async Task SendAsync(string line, CancellationToken cancellation)
     {
         var bytes = Encoding.UTF8.GetBytes(line);
@@ -411,6 +434,12 @@ public sealed class CompanionConnection : IAsyncDisposable
                         break;
                     case CompanionTextRendering rendering when Volatile.Read(ref _textRenderingRequested) != 0:
                         _textRendering.TrySetResult(rendering);
+                        break;
+                    case CompanionNavigationReply navigation:
+                        if (_navigation.TryGetValue(navigation.Id, out var request))
+                        {
+                            request.TrySetResult(navigation);
+                        }
                         break;
                     case CompanionError error:
                         LastAppError = error.Message;

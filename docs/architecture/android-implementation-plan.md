@@ -266,8 +266,9 @@ slice's full test goes into a validation plan,
   `flagIncludeNotImportantViews` (each node records whether it is
   important for accessibility, so the player can show TalkBack's view of
   the tree), `isAccessibilityTool="true"` (decided 2026-11-07), and no
-  request for explore by touch. It performs no actions. It has no
-  internet permission and stores nothing on the phone.
+  request for explore by touch. Capture is passive; the explicitly
+  started live TalkBack exploration below can send navigation swipes.
+  It has no internet permission and stores nothing on the phone.
 - **Connection.** The service opens a local socket in Android's abstract
   namespace, `a11yrecorder_companion`, which the recorder reaches with
   `adb forward tcp:0 localabstract:a11yrecorder_companion`, as Chrome's
@@ -453,8 +454,9 @@ slice's full test goes into a validation plan,
   A stream or frame failure clears the picture and reports the reason
   category. Closing the window leaves capture running; stopping capture
   closes the window. There is no extra stream, phone configuration or
-  input, audio playback path, or change to the companion's separate
-  screenshots. The owner confirmed the live playout on Windows.
+  input from the preview picture itself, audio playback path, or change
+  to the companion's separate screenshots. The owner confirmed the live
+  playout on Windows.
   See [target validation](../validation/android-recording-plan.md#live-android-preview).
 - **Live accessibility tree.** The preview's **Accessibility tree...**
   button opens a separate inspector with a phone-window picker, a
@@ -484,6 +486,34 @@ slice's full test goes into a validation plan,
   the same node is still focused. Unreadable snapshots suppress the
   markers. Pausing freezes the view and its markers. This uses Android’s
   reported node flags, not text or coordinates.
+- **Live TalkBack exploration.** During recording the preview's **Explore
+  with TalkBack...** opens a separate window. Opening it sends no input.
+  The operator confirms the default left/right gestures and chooses a
+  one-swipe verification or a next/previous pass scoped to the current
+  active application on the default display. The app must already have
+  TalkBack accessibility focus. No settings, taps, typing or direct node
+  focus actions are sent. A swipe can still scroll or change app state;
+  the recorder does not try to undo it or restore the original focus.
+  Protocol 10 adds only scoped direction requests on the existing companion
+  connection. The companion checks active app/window/bounds, an unobstructed
+  route, and TalkBack with touch exploration and no other enabled
+  accessibility service except itself before dispatching. It rejects stale
+  or overlapping requests and does not queue a next swipe. Scrcpy control
+  stays off; ordinary shell input is not used.
+  The recorder waits for an accessibility focus event after each dispatch
+  and matches its source to one visible focused node in a fresh snapshot.
+  It does not match on cross-snapshot indices, bounds alone or input focus.
+  Readable evidence, stable app tree geometry/identity and physical input
+  monitoring are required. App/viewport change, scrolling, concurrent
+  physical input, ambiguity, missing feeds, cancellation or limits stop
+  the pass. A silent or repeated step can end a direction without proving
+  a traversal boundary. The pass sends at most 60 swipes and stops issuing
+  them after 45 seconds. Stop or close prevents further swipes; a pending
+  swipe may finish. Copyable results show observed order, event/tree indices,
+  starting-tree candidates and uncertainty. Recording markers bracket
+  the automation; they do not label each accessibility event individually.
+  The result does not establish activation, grouping speech, visual-only
+  elements or reachability by other navigation modes. No model is used.
 - **Player.** The phone's frame takes the desktop's place, fitted to the
   height of the frame area.
 - **MP4 export.** Uses the phone's frames as the picture. The export

@@ -15,7 +15,7 @@ Changes on `main` since 1.1.0, not yet released.
   view-only window uses the existing video-derived frame pipeline.
   Close and reopen it without interrupting the recording. It follows
   rotation, clears on stream loss, and closes at Stop. There is no
-  second stream, phone control, or change to saved evidence.
+  second stream or input from the preview picture itself.
 - The preview’s **Accessibility tree...** button opens a read-only
   inspector for the existing live Android snapshots. Pick a phone
   window, browse its nodes and copy their reported fields. Pause
@@ -27,6 +27,14 @@ Changes on `main` since 1.1.0, not yet released.
   markers, independently of selection. The companion refreshes the affected
   window when Android sends focus events, including accessibility focus
   clearing, even if the layout has not changed.
+- **Explore with TalkBack...** opens a one-swipe verification and a
+  bounded next/previous scan for the current app viewport. It matches
+  accessibility focus events to fresh trees, lists observed stops in
+  order, and keeps unmatched or missing coverage separate. The scan
+  uses explicit horizontal companion gestures and records start and
+  end markers tagged as recorder automation. It requires the updated
+  protocol 10 companion. Scrcpy remains view-only. A standalone
+  native navigation activity in APK Evidence Fixtures provides test cases.
 
 ### Native Android accessibility preflight research
 

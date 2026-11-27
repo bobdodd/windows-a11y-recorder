@@ -93,7 +93,7 @@ import java.util.concurrent.RejectedExecutionException;
  */
 final class RecorderLink {
     static final String SOCKET_NAME = "a11yrecorder_companion";
-    static final int PROTOCOL = 9;
+    static final int PROTOCOL = 10;
     private static final String TAG = "A11yRecorderCompanion";
 
     private final Context context;
@@ -111,6 +111,7 @@ final class RecorderLink {
     private volatile Runnable treeRequests;
     // Reads one active package's text sizes only when expressly requested.
     private volatile TextRendering textRendering;
+    private volatile TalkBackNavigation talkBackNavigation;
     // Asks for a screenshot at once; set before start().
     private volatile Runnable screenshotRequests;
     // How the phone is held; set before start().
@@ -252,6 +253,10 @@ final class RecorderLink {
 
     void setTextRendering(TextRendering reader) {
         textRendering = reader;
+    }
+
+    void setTalkBackNavigation(TalkBackNavigation navigation) {
+        talkBackNavigation = navigation;
     }
 
     /** True when a connection has asked for tree snapshots. */
@@ -520,7 +525,7 @@ final class RecorderLink {
         // The settings this connection asked to be told of; used under
         // itself only.
         private final List<ContentObserver> settingObservers = new ArrayList<>();
-        private boolean closed;
+        private volatile boolean closed;
         // Written and used under writeLock only.
         private OutputStream output;
 
@@ -608,6 +613,23 @@ final class RecorderLink {
                 }
                 // On this client's reader thread, not the service or the regular sender.
                 send(rendering.read((String) packageName));
+            } else if ("talkback-navigation".equals(type)) {
+                long id = request.optLong("id");
+                String direction = request.optString("direction");
+                Object target = request.opt("packageName");
+                JSONObject bounds = request.optJSONObject("bounds");
+                TalkBackNavigation navigation = talkBackNavigation;
+                if (navigation == null || !eventsWanted || !treesWanted || id <= 0 ||
+                        !("next".equals(direction) || "previous".equals(direction)) ||
+                        !TextRendering.validPackage(target) || bounds == null) {
+                    navigationReply(id, "gesture-refused", 0);
+                    return;
+                }
+                android.graphics.Rect rect = new android.graphics.Rect(bounds.getInt("left"), bounds.getInt("top"),
+                        bounds.getInt("right"), bounds.getInt("bottom"));
+                navigation.request("next".equals(direction), request.getInt("windowId"), (String)target, rect,
+                        received, () -> !closed && !stopping,
+                        (status, started) -> navigationReply(id, status, started));
             } else if ("screenshots".equals(type)) {
                 screenshotsWanted = true;
                 Runnable requests = screenshotRequests;
@@ -632,6 +654,26 @@ final class RecorderLink {
                 watchSettings(request.optJSONArray("settings"));
             } else {
                 sendError("unknown type: " + type);
+            }
+        }
+
+        private void navigationReply(long id, String status, long started) {
+            // Never write to the connection on Android's gesture thread.
+            try {
+                sender.execute(() -> {
+                    try {
+                        JSONObject reply = new JSONObject();
+                        reply.put("type", "talkback-navigation");
+                        reply.put("id", id);
+                        reply.put("status", status);
+                        reply.put("started", started);
+                        send(reply);
+                    } catch (IOException | JSONException ignored) {
+                        // The recorder may have already closed the socket.
+                    }
+                });
+            } catch (RejectedExecutionException ignored) {
+                // The service is stopping.
             }
         }
 

@@ -22,6 +22,15 @@ The output is `artifacts\apk-fixture-app\output\a11yrecorder-apk-fixtures.apk`. 
 
 The fixture also contains negative controls: an unreferenced resource string, an HTML input value, a script-generated label and a refresh destination. The inventory must not retain them as accessibility declarations.
 
+## TalkBack navigation fixture
+
+The same APK has a separate launcher entry, **TalkBack Navigation
+Fixture**. Its fixed native viewport contains two labelled buttons, a
+summary group and a canvas-drawn tap target whose label and action are
+not exposed as accessibility semantics. An on-screen status shows
+whether a button was activated. This entry does not change the original
+APK evidence screen or its tour.
+
 ## Automated split matrix
 
 `AndroidApkGeneratedFixtureTests` exercises the production selected-app preflight with fake ADB, then checks the persisted evidence and playback groups. The checked-in generated inputs are small, unsigned, and used solely as test data. The test assembles additional archives in temporary storage and asserts that every pulled copy is removed.

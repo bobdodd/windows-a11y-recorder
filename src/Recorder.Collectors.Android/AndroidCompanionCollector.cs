@@ -540,6 +540,20 @@ public sealed class AndroidCompanionCollector :
         return connection.AccessibilityEvents;
     }
 
+    internal Task<CompanionNavigationReply> NavigateTalkBackAsync(
+        bool next, AndroidTalkBackScope scope, CancellationToken cancellation)
+    {
+        cancellation.ThrowIfCancellationRequested();
+        if (_connection is not { } connection || connection.Closed.IsCompleted || _stopping)
+        {
+            return Task.FromResult(new CompanionNavigationReply(0, "connection-lost", 0));
+        }
+
+        return connection.Hello.Protocol >= CompanionProtocol.NavigationVersion
+            ? connection.NavigateTalkBackAsync(next, scope, cancellation)
+            : Task.FromResult(new CompanionNavigationReply(0, "companion-update-required", 0));
+    }
+
     public async Task<ChannelReader<ReceivedAccessibilityTree>?> RequestAccessibilityTreesAsync(CancellationToken cancellation)
     {
         if (_connection is not { } connection || connection.Closed.IsCompleted || _stopping)

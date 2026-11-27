@@ -94,6 +94,9 @@ public sealed class AndroidAccessibilityCollector : ICaptureCollector
 
     public string? HealthReason => _unavailable;
 
+    internal AndroidTalkBackSignals LiveSignals { get; } = new();
+    internal bool ExplorationEventsAvailable => _reading && _unavailable is null && !_closing.IsCancellationRequested;
+
     public string? Summary
     {
         get
@@ -334,11 +337,13 @@ public sealed class AndroidAccessibilityCollector : ICaptureCollector
     {
         if (received.Event is not { } accessibilityEvent)
         {
+            LiveSignals.Observe(null);
             Interlocked.Increment(ref _unreadable);
             Unreadable(received);
             return;
         }
 
+        LiveSignals.Observe(accessibilityEvent);
         // getEventTime() is in milliseconds of the uptime clock; an event
         // without one is placed by the time the service received it.
         var timed = accessibilityEvent.EventTimeMilliseconds > 0;

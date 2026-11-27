@@ -22,8 +22,8 @@ import org.json.JSONObject;
  * step 15, it reads how the phone itself is held, from its accelerometer,
  * for each connection that asked (see {@link PhoneOrientation}).
  *
- * The service performs no actions, has no internet permission and stores
- * nothing on the phone.
+ * The service can dispatch a single navigation swipe on explicit request.
+ * It has no internet permission and stores nothing on the phone.
  */
 public final class RecorderAccessibilityService extends AccessibilityService {
     private static final String TAG = "A11yRecorderCompanion";
@@ -40,6 +40,7 @@ public final class RecorderAccessibilityService extends AccessibilityService {
             trees = new AccessibilityTrees(this, link);
             link.setTreeRequests(trees::requested);
             link.setTextRendering(new TextRendering(this::getRootInActiveWindow));
+            link.setTalkBackNavigation(new TalkBackNavigation(this));
             screenshots = new Screenshots(this, link);
             link.setScreenshotRequests(screenshots::requested);
             RecorderLink started = link;

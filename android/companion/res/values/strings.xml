@@ -2,5 +2,5 @@
 <resources>
     <string name="app_name">A11y Recorder companion</string>
     <string name="service_label">A11y Recorder companion</string>
-    <string name="service_description">Records accessibility evidence for Windows A11y Recorder while a recording runs over USB. It does nothing on the phone and sends nothing over the internet.</string>
+    <string name="service_description">Records accessibility evidence over USB for Windows A11y Recorder. It can send navigation swipes during a TalkBack exploration you explicitly start. It sends nothing over the internet.</string>
 </resources>
