@@ -47,8 +47,12 @@
       <Image x:Name="PhoneImage" Stretch="Uniform" IsHitTestVisible="False"
              AutomationProperties.Name="Live Android phone screen" />
     </Border>
-    <Button x:Name="CloseButton" Grid.Row="2" Margin="0,10,0,0"
-            MinHeight="44" MinWidth="110" HorizontalAlignment="Right"
-            Content="_Close preview" Click="CloseButton_Click" />
+    <WrapPanel Grid.Row="2" Margin="0,10,0,0" HorizontalAlignment="Right">
+      <Button x:Name="TreeButton" MinHeight="44" Padding="12,0" Margin="0,0,8,0"
+              Content="_Accessibility tree..." Click="TreeButton_Click"
+              AutomationProperties.HelpText="Opens the Android accessibility tree observed during recording." />
+      <Button x:Name="CloseButton" MinHeight="44" MinWidth="110"
+              Content="_Close preview" Click="CloseButton_Click" />
+    </WrapPanel>
   </Grid>
 </Window>

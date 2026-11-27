@@ -16,6 +16,12 @@ Changes on `main` since 1.1.0, not yet released.
   Close and reopen it without interrupting the recording. It follows
   rotation, clears on stream loss, and closes at Stop. There is no
   second stream, phone control, or change to saved evidence.
+- The preview’s **Accessibility tree...** button opens a read-only
+  inspector for the existing live Android snapshots. Pick a phone
+  window, browse its nodes and copy their reported fields. Pause
+  updates to inspect a snapshot without stopping capture. The
+  inspector shows when each window’s nodes were received and warns
+  when snapshots or nodes are missing.
 
 ### Native Android accessibility preflight research
 

@@ -337,7 +337,17 @@ public sealed class AndroidAccessibilityTreeTests
             "the app took a median 4.0 ms to take each and at most 6.0 ms, 1 stopped early as the phone changed, " +
             "1 missing, 1 could not be read, median delay from phone to recorder 10.0 ms.";
         await WaitUntilAsync(() => collector.Summary == expected, () => collector.Summary);
+        await WaitUntilAsync(() => collector.LiveTree.Current.State == AndroidLiveTreeState.Unreadable,
+            () => collector.LiveTree.Current.State.ToString());
+        var live = collector.LiveTree.Current;
+        Assert.Equal(5, live.Index);
+        Assert.True(live.EarlierUpdateMissing);
+        Assert.Equal("IllegalStateException: window gone", live.Problem);
+        Assert.Equal(3, live.Windows[0].Items?.Nodes.Count);
+        Assert.Null(live.Windows[1].Items);
         await collector.StopAsync(new SessionBoundary(6 * Second, DateTimeOffset.UtcNow), CancellationToken.None);
+        Assert.Equal(AndroidLiveTreeState.Stopped, collector.LiveTree.Current.State);
+        Assert.Empty(collector.LiveTree.Current.Windows);
 
         Assert.Equal(CollectorHealthState.Healthy, collector.HealthState);
 
@@ -433,8 +443,13 @@ public sealed class AndroidAccessibilityTreeTests
         await trees.Asked.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         trees.Send(Snapshot(1, 2 * Second, 6));
+        await WaitUntilAsync(() => collector.LiveTree.Current.State == AndroidLiveTreeState.Observed,
+            () => collector.LiveTree.Current.State.ToString());
+        Assert.Equal(3, collector.LiveTree.Current.Windows[0].Items?.Nodes.Count);
         trees.End();
         await WaitUntilAsync(() => collector.HealthState == CollectorHealthState.Degraded, () => collector.HealthState.ToString());
+        Assert.Equal(AndroidLiveTreeState.Unavailable, collector.LiveTree.Current.State);
+        Assert.Empty(collector.LiveTree.Current.Windows);
         await collector.StopAsync(new SessionBoundary(6 * Second, DateTimeOffset.UtcNow), CancellationToken.None);
 
         Assert.StartsWith("Accessibility tree snapshots: 1 (at most 1 in one second), 1 of every window,", collector.Summary);

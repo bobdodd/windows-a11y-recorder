@@ -91,6 +91,8 @@ public sealed class AndroidAccessibilityTreeCollector : ICaptureCollector, IPhon
 
     public string? HealthReason => _unavailable;
 
+    public AndroidLiveTree LiveTree { get; } = new();
+
     /// <summary>
     /// The package of each window whose items a snapshot held, in the order
     /// first seen, from the window's first item that names one, for the
@@ -274,6 +276,7 @@ public sealed class AndroidAccessibilityTreeCollector : ICaptureCollector, IPhon
 
     private async Task CloseAsync()
     {
+        LiveTree.Stop();
         try
         {
             _closing.Cancel();
@@ -359,6 +362,7 @@ public sealed class AndroidAccessibilityTreeCollector : ICaptureCollector, IPhon
         if (read is not { } tree)
         {
             Interlocked.Increment(ref _unreadable);
+            LiveTree.Unreadable();
             Unreadable(received.ReceivedAt, problem);
             return;
         }
@@ -401,10 +405,12 @@ public sealed class AndroidAccessibilityTreeCollector : ICaptureCollector, IPhon
 
         Count(tree, taking);
         NotePackages(tree);
+        tree = tree with { ReceivedAtNanoseconds = received.ReceivedAt };
+        LiveTree.Publish(tree);
         Emit(
             Hold(time, ref flags),
             AndroidAccessibilityRecords.TreeEventType,
-            tree with { ReceivedAtNanoseconds = received.ReceivedAt },
+            tree,
             phone,
             uncertainty,
             mapping is null ? null : AndroidCompanionRecords.FittedClockMapping,
@@ -542,6 +548,7 @@ public sealed class AndroidAccessibilityTreeCollector : ICaptureCollector, IPhon
         var text = connectionLost
             ? $"The phone's accessibility tree stopped being recorded during the recording: {reason} The recording goes on without it."
             : $"The phone's accessibility tree could not be recorded: {reason} The recording goes on without it.";
+        LiveTree.Unavailable(reason);
         var at = _context?.Clock.GetElapsedNanoseconds() ?? 0;
         var flags = Array.Empty<string>();
         Emit(

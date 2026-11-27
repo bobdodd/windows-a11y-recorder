@@ -3426,3 +3426,32 @@ another change on the phone. After disconnect, the old picture clears
 and a status message reports that the screen stream is unavailable.
 The recorder does not stop the recording when the preview closes or
 when the screen stream is lost.
+
+### Test 85: inspect the live Android accessibility tree
+
+1. During an Android recording, open **Live Android preview...**, then
+   choose **Accessibility tree...** in that window.
+2. Move to a different screen on the phone. In the inspector choose
+   its phone window, expand a branch, and select a labelled node.
+3. Choose **Pause updates**, then change the phone screen again.
+   Select and copy a property from **Node details** with Ctrl+C.
+4. Choose **Resume updates** and check the tree again.
+5. Close the inspector with Escape. Keep recording, then stop.
+
+**On screen:** the inspector lists reported windows and updates the
+node hierarchy. The selected node’s properties include its reported
+text, content description, state, bounds and actions where available.
+While paused the tree stays put, the video still changes, and the node
+details are selectable. Resuming shows the latest observed tree.
+Closing the inspector leaves the video and recording running.
+
+### Test 86: disconnect while inspecting a paused tree
+
+1. During an Android recording with the inspector open, select a
+   window with nodes and choose **Pause updates**.
+2. Unplug the USB cable.
+3. Check the inspector and stop the recording from the main window.
+
+**On screen:** the inspector clears the paused tree and reports the
+companion connection as unavailable. Stopping the recording closes
+both the preview and the inspector.

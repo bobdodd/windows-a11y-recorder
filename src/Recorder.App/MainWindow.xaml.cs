@@ -368,6 +368,7 @@ public partial class MainWindow : Window
         _androidLivePreview = screen.LivePreview;
         _talkBack = new AndroidTalkBackCollector(adb, serial, companion);
         var trees = new AndroidAccessibilityTreeCollector(serial, companion, companion);
+        _androidLiveTree = trees.LiveTree;
         return
         [
             companion,

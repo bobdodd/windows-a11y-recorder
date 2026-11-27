@@ -14,16 +14,19 @@ public partial class AndroidLivePreviewWindow : Window
 {
     private static readonly Duration NoWait = new(TimeSpan.Zero);
     private readonly AndroidLivePreview _preview;
+    private readonly AndroidLiveTree _liveTree;
     private readonly DispatcherTimer _timer;
+    private AndroidLiveTreeWindow? _treeWindow;
     private WriteableBitmap? _bitmap;
     private AndroidLivePreviewState? _state;
     private int _streamSession;
     private ulong? _sequence;
     private bool _renderFailed;
 
-    public AndroidLivePreviewWindow(AndroidLivePreview preview)
+    public AndroidLivePreviewWindow(AndroidLivePreview preview, AndroidLiveTree liveTree)
     {
         _preview = preview;
+        _liveTree = liveTree;
         InitializeComponent();
         _timer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
         {
@@ -144,4 +147,59 @@ public partial class AndroidLivePreviewWindow : Window
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void TreeButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_treeWindow is { } open)
+        {
+            if (open.WindowState == WindowState.Minimized)
+            {
+                open.WindowState = WindowState.Normal;
+            }
+            open.Activate();
+            return;
+        }
+
+        var window = new AndroidLiveTreeWindow(_liveTree) { Owner = this };
+        PlaceTreeWindow(window);
+        _treeWindow = window;
+        window.Closed += (_, _) =>
+        {
+            _treeWindow = null;
+            Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+            {
+                if (IsActive && IsVisible)
+                {
+                    TreeButton.Focus();
+                }
+            }));
+        };
+        window.Show();
+    }
+
+    private void PlaceTreeWindow(Window window)
+    {
+        // Put both views on screen when the preview is on the primary
+        // display and there is room. Otherwise use the normal owned-window
+        // placement so a preview on another display keeps its inspector there.
+        var area = SystemParameters.WorkArea;
+        if (!area.Contains(Left, Top) || Left + ActualWidth > area.Right)
+        {
+            return;
+        }
+
+        const double gap = 8;
+        var right = area.Right - Left - ActualWidth - gap;
+        var left = Left - area.Left - gap;
+        var room = Math.Max(right, left);
+        if (room < window.MinWidth || area.Height < window.MinHeight)
+        {
+            return;
+        }
+        window.WindowStartupLocation = WindowStartupLocation.Manual;
+        window.Width = Math.Min(window.Width, room);
+        window.Height = Math.Min(window.Height, area.Height);
+        window.Left = right >= left ? Left + ActualWidth + gap : Left - gap - window.Width;
+        window.Top = Math.Clamp(Top, area.Top, area.Bottom - window.Height);
+    }
 }

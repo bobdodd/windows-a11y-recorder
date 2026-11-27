@@ -454,8 +454,25 @@ slice's full test goes into a validation plan,
   category. Closing the window leaves capture running; stopping capture
   closes the window. There is no extra stream, phone configuration or
   input, audio playback path, or change to the companion's separate
-  screenshots. Windows display and physical-device latency still need
-  [target validation](../validation/android-recording-plan.md#live-android-preview).
+  screenshots. The owner confirmed the live playout on Windows.
+  See [target validation](../validation/android-recording-plan.md#live-android-preview).
+- **Live accessibility tree.** The preview's **Accessibility tree...**
+  button opens a separate inspector with a phone-window picker, a
+  hierarchical node list, and copyable reported properties. It uses
+  only the existing companion tree snapshots (slice 7). The collector
+  keeps only the latest list of reported windows and the last node list
+  for each still-reported window. Partial updates can reuse a window's
+  last node list, with its original snapshot index and receipt time; a
+  missing or unreadable update invalidates reuse on the next update.
+  Removed windows and replaced node lists are discarded. At most four
+  UI refreshes per second show live updates, and **Pause updates** holds
+  the displayed tree without pausing capture or video. On companion
+  loss the inspector clears, even when paused. Closing the preview or
+  stopping the recording closes the inspector. Node indices only refer
+  to one window in one snapshot. The inspector neither requests fresh
+  phone data nor sends actions, and its snapshots are not synchronized
+  to individual video frames. Password text is not displayed in the
+  inspector; archival capture is unchanged.
 - **Player.** The phone's frame takes the desktop's place, fitted to the
   height of the frame area.
 - **MP4 export.** Uses the phone's frames as the picture. The export

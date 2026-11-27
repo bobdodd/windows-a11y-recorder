@@ -7,6 +7,7 @@ namespace Recorder.App;
 public partial class MainWindow
 {
     private AndroidLivePreview? _androidLivePreview;
+    private AndroidLiveTree? _androidLiveTree;
     private AndroidLivePreviewWindow? _androidLivePreviewWindow;
 
     private void EnableAndroidLivePreview()
@@ -19,6 +20,7 @@ public partial class MainWindow
     private void CloseAndroidLivePreview()
     {
         _androidLivePreview = null;
+        _androidLiveTree = null;
         AndroidLivePreviewMenuItem.IsEnabled = false;
         AndroidLivePreviewButton.Visibility = Visibility.Collapsed;
         _androidLivePreviewWindow?.Close();
@@ -27,7 +29,7 @@ public partial class MainWindow
     private void AndroidLivePreview_Click(object sender, RoutedEventArgs e)
     {
         if (_transitioning || _coordinator?.State != RecordingSessionState.Recording ||
-            _androidLivePreview is not { } preview)
+            _androidLivePreview is not { } preview || _androidLiveTree is not { } tree)
         {
             return;
         }
@@ -42,7 +44,7 @@ public partial class MainWindow
             return;
         }
 
-        var window = new AndroidLivePreviewWindow(preview) { Owner = this };
+        var window = new AndroidLivePreviewWindow(preview, tree) { Owner = this };
         _androidLivePreviewWindow = window;
         window.Closed += (_, _) =>
         {
