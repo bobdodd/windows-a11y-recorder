@@ -3558,3 +3558,13 @@ A TalkBack swipe observation is not a substitute for an Explore by Touch
 result. A Tab key with no corroborated input focus, a missing canvas
 candidate, or an unresolved restoration warning is not a pass. Verification
 of a deliberate navigation/interruption belongs to a separate test.
+
+### Test 92: read the highlighted report screenshots
+
+1. Start Android recording with **TalkBack Navigation Fixture** open.
+2. In **Live Android preview...**, choose **Investigate this screen** once and wait for the report.
+3. Check that the native button and canvas-only target get separate starting close-ups with the outline on the matching control, leaving the label visible.
+4. Find the canvas target's local picture change. Check that the before and after close-ups show the same outlined region, different frames, and the visible change. Narrow the report and verify that the captions wrap and can still be selected and copied with Ctrl+C.
+
+**On screen:** starting close-ups and tap crops are labelled separately.
+A starting outline does not imply an observed focus stop or activation.

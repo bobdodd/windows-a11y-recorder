@@ -36,6 +36,11 @@ Changes on `main` since 1.1.0, not yet released.
   targets. Windows OCR and outlines run first; an eligible local vision
   model can propose additional targets where discovery leaves gaps. Nothing
   is sent to a LAN or cloud model.
+- The screen investigation report shows outlined close-ups of recorded
+  targets next to their findings. For corroborated local picture changes,
+  it shows matching before and after tap crops when the screen still maps.
+  Captions identify the frames and bounds; the outline is not evidence of
+  focus or activation. The images are live report content, not new files.
 - The recorder stops input if the viewport or required evidence changes.
   It restores the original TalkBack service setting where it can verify
   a safe restoration, and adds paired investigation markers to the

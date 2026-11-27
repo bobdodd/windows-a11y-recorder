@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text;
 using System.Windows;
 using System.Windows.Automation.Peers;
 using System.Windows.Input;
@@ -50,7 +49,7 @@ public partial class AndroidInteractionWindow : Window
                 var result = await task;
                 if (!_isClosed)
                 {
-                    Report.Text = Format(result);
+                    Report.Document = AndroidInteractionReportDocument.Create(result);
                     ShowStatus(result.Restoration is null ? result.Status : result.Status + " " + result.Restoration);
                 }
             }
@@ -99,47 +98,33 @@ public partial class AndroidInteractionWindow : Window
         }
     }
 
+    private void Report_PreviewExecuted(object sender, ExecutedRoutedEventArgs e)
+    {
+        if (e.Command != ApplicationCommands.Copy)
+        {
+            return;
+        }
+        // The report still copies selected text and captions, not WPF rich data
+        // that could carry the original frame behind a clipped drawing.
+        e.Handled = true;
+        var text = Report.Selection.Text;
+        if (!string.IsNullOrEmpty(text))
+        {
+            try
+            {
+                Clipboard.SetText(text);
+            }
+            catch (System.Runtime.InteropServices.ExternalException)
+            {
+                Trace.TraceWarning("The clipboard was unavailable when copying the Android investigation report.");
+            }
+        }
+    }
+
     private void ShowStatus(string text)
     {
         RunStatus.Text = text;
         var peer = UIElementAutomationPeer.FromElement(RunStatus) ?? UIElementAutomationPeer.CreatePeerForElement(RunStatus);
         peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
-    }
-
-    private static string Format(AndroidInvestigationReport report)
-    {
-        var text = new StringBuilder();
-        if (report.Tree is { } tree)
-        {
-            text.AppendLine($"Current viewport: Android tree {tree}; " +
-                (report.Frame is { } frame ? $"recorded picture {frame}." : "no mapped recorded picture."));
-        }
-        if (!string.IsNullOrWhiteSpace(report.Coverage))
-        {
-            text.AppendLine(report.Coverage);
-        }
-        text.AppendLine().AppendLine($"TalkBack Explore by Touch: {report.TalkBack}")
-            .AppendLine($"Keyboard Tab: {report.Tab}").AppendLine($"Direct touch: {report.DirectTouch}");
-        if (report.Restoration is { } warning)
-        {
-            text.AppendLine(warning);
-        }
-        text.AppendLine().AppendLine("An Android declaration is not proof of activation. A local picture change is separate from an Android click. " +
-            "Not found or not tested does not mean inaccessible. This is one viewport; off-screen and gesture-only targets may be missed.");
-        if (report.Findings.Count == 0)
-        {
-            return text.AppendLine().AppendLine("No candidates were reported.").ToString();
-        }
-        var number = 0;
-        foreach (var finding in report.Findings)
-        {
-            text.AppendLine().AppendLine($"{++number}. {finding.Item.Label}");
-            var declared = finding.Item.NodeIndex is { } index ? $" (tree item {index})" : "";
-            text.AppendLine($"  Discovery: {finding.Item.Evidence}{declared}.");
-            text.AppendLine("  TalkBack touch: " + string.Join(" ", finding.ExploreByTouch));
-            text.AppendLine("  Tab: " + string.Join(" ", finding.Tab));
-            text.AppendLine("  Direct touch: " + string.Join(" ", finding.DirectTouch));
-        }
-        return text.ToString();
     }
 }

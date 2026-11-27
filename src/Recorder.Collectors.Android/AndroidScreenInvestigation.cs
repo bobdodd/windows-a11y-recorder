@@ -9,10 +9,17 @@ public sealed record AndroidInvestigationCandidate(AndroidInteractionCandidate I
 public sealed record AndroidInvestigationInventory(IReadOnlyList<AndroidInvestigationCandidate> Candidates, string Coverage);
 
 public sealed record AndroidInvestigationFinding(AndroidInteractionCandidate Item,
-    IReadOnlyList<string> ExploreByTouch, IReadOnlyList<string> Tab, IReadOnlyList<string> DirectTouch);
+    IReadOnlyList<string> ExploreByTouch, IReadOnlyList<string> Tab, IReadOnlyList<string> DirectTouch)
+{
+    public AndroidInvestigationCrop? StartingLocation { get; init; }
+    public IReadOnlyList<AndroidInvestigationTapPictures> TapPictures { get; init; } = [];
+}
 
 public sealed record AndroidInvestigationReport(string Status, string Coverage, string TalkBack, string Tab, string DirectTouch,
-    IReadOnlyList<AndroidInvestigationFinding> Findings, string? Restoration, long? Tree, ulong? Frame);
+    IReadOnlyList<AndroidInvestigationFinding> Findings, string? Restoration, long? Tree, ulong? Frame)
+{
+    public AndroidLivePreviewFrame? StartingPicture { get; init; }
+}
 
 public sealed partial class AndroidInteractionExploration
 {
@@ -303,7 +310,8 @@ public sealed partial class AndroidInteractionExploration
                     direct = $"{tapped} completed taps; {clicks} matched clicks; {visual} local visual changes. Pass interrupted.";
                     await _settle(token).ConfigureAwait(false);
                     var events = Events(before);
-                    var result = ClickOrPicture(before, Capture(), events, reply.Started, box, point);
+                    var after = Capture();
+                    var result = ClickOrPicture(before, after, events, reply.Started, box, point);
                     clicks += result.ClickEvent.HasValue ? 1 : 0;
                     visual += result.AfterFrame.HasValue ? 1 : 0;
                     Note(targets, AndroidInvestigationInput.Tap, $"At ({point.X}, {point.Y}): {result.Evidence}");
@@ -314,6 +322,15 @@ public sealed partial class AndroidInteractionExploration
                     if (FrameChangedOutside(before.Frame!, phase.Frame!, before.App.Window.Bounds, box))
                     {
                         throw new InvestigationStop("The picture changed beyond the tapped target. Remaining points were not tested.");
+                    }
+                    if (after is not null && result.AfterFrame.HasValue &&
+                        !FrameChangedOutside(before.Frame!, after.Frame!, before.App.Window.Bounds, box) &&
+                        AndroidInvestigationPictures.TapPair(before, after, box) is { } pictures)
+                    {
+                        foreach (var row in targets)
+                        {
+                            row.Pictures.Add(pictures);
+                        }
                     }
                 }
                 if (tapped == 0 && skipped > 0 && skipped == tapPoints.Length)
@@ -355,8 +372,13 @@ public sealed partial class AndroidInteractionExploration
                 Volatile.Write(ref _investigating, 0);
             }
         }
-        return new(status, coverage, talkBack, keyboard, direct, rows.Select(row => row.Result()).ToArray(), restoration,
-            start?.App.Items?.SnapshotIndex, start?.Frame?.Sequence);
+        var picture = start is not null && AndroidInvestigationPictures.CanUse(start) ? start : null;
+        var findings = rows.Select(row => row.Result(picture)).ToArray();
+        return new(status, coverage, talkBack, keyboard, direct, findings, restoration,
+            start?.App.Items?.SnapshotIndex, picture?.Frame?.Sequence)
+        {
+            StartingPicture = findings.Any(finding => finding.StartingLocation is not null) ? picture?.Frame : null
+        };
     }
 
     private AndroidInteractionSnapshot Verify(InvestigationViewport viewport, long? since = null,
@@ -570,7 +592,8 @@ public sealed partial class AndroidInteractionExploration
             return existing;
         }
         var result = new Finding(new(new(label, "No matching Android action declaration in the inventory",
-            [node.Bounds], node.Enabled, index, node.ClassName), false, false)) { Observed = key };
+            [index.HasValue ? matching[0].Bounds : node.Bounds], node.Enabled, index, node.ClassName), false, false))
+        { Observed = key, HasStartingLocation = index.HasValue };
         rows.Add(result);
         return result;
     }
@@ -606,15 +629,22 @@ public sealed partial class AndroidInteractionExploration
     {
         public AndroidInvestigationCandidate Candidate { get; } = candidate;
         public NodeKey? Observed { get; init; }
+        public bool HasStartingLocation { get; init; } = true;
         public List<string> Explore { get; } = [];
         public List<string> Tab { get; } = [];
         public List<string> Touch { get; } = [];
+        public List<AndroidInvestigationTapPictures> Pictures { get; } = [];
 
-        public AndroidInvestigationFinding Result() => new(Candidate.Item,
+        public AndroidInvestigationFinding Result(AndroidInteractionSnapshot? picture) => new(Candidate.Item,
             Explore.Count > 0 ? Explore : [Candidate.SampleByTouch ? "Not sampled in this run." : "Not sampled for this item."],
             Tab.Count > 0 ? Tab : ["Not verified by Tab in this run."],
             Touch.Count > 0 ? Touch : [Candidate.Item.Enabled == false ? "Not tapped: Android reports disabled." :
-                Candidate.Tap ? "Not tested in this run." : "Not a direct-tap candidate."]);
+                Candidate.Tap ? "Not tested in this run." : "Not a direct-tap candidate."])
+        {
+            StartingLocation = HasStartingLocation && picture is not null ?
+                AndroidInvestigationPictures.Locate(picture, Candidate.Item.Boxes) : null,
+            TapPictures = Pictures.ToArray()
+        };
     }
 
     private sealed class InvestigationViewport(AndroidInteractionSnapshot start, AndroidLiveTreeItems original)

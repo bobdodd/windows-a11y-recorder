@@ -544,8 +544,15 @@ slice's full test goes into a validation plan,
   a warning without overwriting unrelated setting changes. This does not
   restore app state or either focus position.
   One selectable report shows each evidenced item and what was not tested
-  or not verified. It does not prove completeness, negative reachability
-  or screen-reader activation, and does not test off-screen targets, swipes,
+  or not verified. The report annotates mapped close-ups of the starting
+  picture with candidate bounds. A direct tap with corroborated local
+  picture change can show before and after crops of the same region,
+  each labelled with its recorded frame. Bounds remain distinct from
+  focus and activation. Unmappable, covered or password-overlapping
+  target regions do not get an image. Images share the original
+  starting frame in memory; later crop pairs have bounded resolution
+  and are not written to new files. The report does not prove completeness,
+  negative reachability or screen-reader activation, and does not test off-screen targets, swipes,
   or long presses. Paired recording markers summarize the run; the per-item
   report is live and not automatically filed under playback Checks.
 - **Player.** The phone's frame takes the desktop's place, fitted to the

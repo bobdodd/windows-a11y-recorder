@@ -15,9 +15,13 @@
     </Grid.RowDefinitions>
     <local:SelectableText x:Name="RunStatus" Margin="0,0,0,10" TextWrapping="Wrap" IsTabStop="True"
                           FontWeight="SemiBold" AutomationProperties.LiveSetting="Polite" />
-    <TextBox Grid.Row="1" x:Name="Report" IsReadOnly="True" IsUndoEnabled="False" TextWrapping="Wrap"
-             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="9"
-             AutomationProperties.Name="Screen interactivity report" />
+    <RichTextBox Grid.Row="1" x:Name="Report" IsReadOnly="True" IsUndoEnabled="False" AllowDrop="False"
+                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="9"
+                 CommandManager.PreviewExecuted="Report_PreviewExecuted"
+                 AutomationProperties.Name="Screen interactivity report"
+                 AutomationProperties.HelpText="Select text and use Ctrl+C to copy. Screenshot captions state which item and frame are shown.">
+      <FlowDocument PagePadding="0" />
+    </RichTextBox>
     <Button Grid.Row="2" x:Name="CloseReport" Margin="0,10,0,0" MinHeight="44" Padding="14,0"
             HorizontalAlignment="Right" Content="_Stop investigation" Click="Close_Click" />
   </Grid>

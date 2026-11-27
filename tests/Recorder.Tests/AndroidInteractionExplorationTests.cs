@@ -284,8 +284,77 @@ public sealed class AndroidInteractionExplorationTests
         Assert.Contains("no app item focus was verified", Assert.Single(result.Findings[1].ExploreByTouch));
         Assert.Contains("Not verified by Tab", Assert.Single(result.Findings[1].Tab));
         Assert.Contains("no Android click was matched", Assert.Single(result.Findings[1].DirectTouch));
+        Assert.Equal(1UL, result.StartingPicture?.Sequence);
+        Assert.Equal(control.Bounds, Assert.Single(result.Findings[0].StartingLocation!.Outlines));
+        Assert.Empty(result.Findings[0].TapPictures);
+        Assert.Equal(Canvas, Assert.Single(result.Findings[1].StartingLocation!.Outlines));
+        var pair = Assert.Single(result.Findings[1].TapPictures);
+        Assert.Equal((1UL, 2UL), (pair.Before.Sequence, pair.After.Sequence));
+        Assert.Equal((pair.Before.Width, pair.Before.Height), (pair.After.Width, pair.After.Height));
+        Assert.Equal(Canvas, Assert.Single(pair.Crop.Outlines));
+        var target = ((Canvas.Top - pair.Crop.Region.Top) * pair.Before.Width + Canvas.Left - pair.Crop.Region.Left) * 3;
+        Assert.Equal(0, pair.Before.Rgb.Span[target]);
+        Assert.Equal(255, pair.After.Rgb.Span[target]);
+        Assert.Equal(0, pair.After.Rgb.Span[0]); // The crop preserves surrounding pixels, without marking them.
         Assert.Equal(2, rig.Markers.Count);
         Assert.Equal(rig.Markers[0].Split(' ')[3], rig.Markers[1].Split(' ')[3]);
+    }
+
+    [Fact]
+    public void ReportCropClipsToTheViewportAndOutlinesLinkFragmentsIndividually()
+    {
+        var rig = new Rig();
+        var first = new AndroidNodeBounds(-5, 20, 30, 32);
+        var second = new AndroidNodeBounds(10, 34, 55, 46);
+        var snapshot = rig.Service(() => throw new InvalidOperationException()).Capture()!;
+        var crop = Assert.IsType<AndroidInvestigationCrop>(
+            AndroidInvestigationPictures.Locate(snapshot, [first, second, new(301, 2, 320, 12), second]));
+
+        Assert.Equal(new AndroidNodeBounds(0, 7, 68, 59), crop.Region);
+        Assert.Equal(new[] { new AndroidNodeBounds(0, 20, 30, 32), second }, crop.Outlines);
+    }
+
+    [Fact]
+    public void ReportCropOmitsCoveredUnmappedAndPasswordPixels()
+    {
+        var rig = new Rig();
+        var service = rig.Service(() => throw new InvalidOperationException());
+        var adjacent = new AndroidNodeBounds(75, 126, 175, 144);
+        rig.Publish(2, overlay: true);
+        Assert.Null(AndroidInvestigationPictures.Locate(service.Capture()!, [Canvas]));
+        // Preserve the target when only the surrounding context would include protected pixels.
+        Assert.Equal(adjacent, AndroidInvestigationPictures.Locate(service.Capture()!, [adjacent])?.Region);
+
+        rig.Publish(3, nodes: [Node(0, Viewport), Node(1, Canvas) with { Password = true }]);
+        Assert.Null(AndroidInvestigationPictures.Locate(service.Capture()!, [Canvas]));
+        Assert.Equal(adjacent, AndroidInvestigationPictures.Locate(service.Capture()!, [adjacent])?.Region);
+
+        rig.Display = rig.Display with { ShownWidth = 301 };
+        Assert.Null(AndroidInvestigationPictures.Locate(service.Capture()!, [adjacent]));
+    }
+
+    [Fact]
+    public void TapPicturePairBoundsPixelCostAndRequiresMatchingFrameGeometry()
+    {
+        var rig = new Rig();
+        var service = rig.Service(() => throw new InvalidOperationException());
+        rig.Preview.Publish(1, 2, 800, 1000, new byte[800 * 1000 * 3], Started);
+        rig.Display = rig.Display with { ShownWidth = 800, ShownHeight = 1000 };
+        rig.Publish(2, bounds: new(0, 0, 800, 1000));
+        var before = service.Capture()!;
+        rig.Preview.Publish(1, 3, 800, 1000, new byte[800 * 1000 * 3], Started + 100_000_000);
+        var box = new AndroidNodeBounds(100, 100, 700, 800);
+        var pair = Assert.IsType<AndroidInvestigationTapPictures>(AndroidInvestigationPictures.TapPair(before, service.Capture()!, box));
+        Assert.Equal((417, 480), (pair.Before.Width, pair.Before.Height));
+        Assert.Equal(pair.Before.Rgb.Length, pair.After.Rgb.Length);
+        Assert.Equal(box, Assert.Single(pair.Crop.Outlines));
+
+        rig.Display = rig.Display with { Rotation = 180 };
+        var rotated = service.Capture()!;
+        Assert.Equal(0, before.Display!.Rotation);
+        Assert.Equal(180, rotated.Display!.Rotation);
+        Assert.True(rotated.HasScreenCoordinates);
+        Assert.Null(AndroidInvestigationPictures.TapPair(before, rotated, box));
     }
 
     [Theory]
@@ -479,9 +548,10 @@ public sealed class AndroidInteractionExplorationTests
             }, _ => Task.CompletedTask);
 
         internal void Publish(long index, bool overlay = false, IReadOnlyList<AndroidTreeNode>? nodes = null,
-            long at = Started - 30_000_000, bool accessibilityFocused = false)
+            long at = Started - 30_000_000, bool accessibilityFocused = false, AndroidNodeBounds? bounds = null)
         {
-            var app = App with { Items = nodes ?? [Node(0, Viewport)], Focused = true, AccessibilityFocused = accessibilityFocused };
+            var app = App with { Items = nodes ?? [Node(0, Viewport)], Focused = true,
+                AccessibilityFocused = accessibilityFocused, Bounds = bounds ?? App.Bounds };
             _tree.Publish(new AndroidAccessibilityTree
             {
                 Index = index, EveryWindow = true, StartedPhoneNanoseconds = at,
