@@ -51,45 +51,6 @@ public sealed class AndroidInteractionExplorationTests
     }
 
     [Fact]
-    public void VisualPassFindsFixtureCanvasTextInsideScrollContainerAndKeepsStaticTextUnverified()
-    {
-        var snapshot = Window(
-            Node(0, Viewport) with { Scrollable = true },
-            Node(1, new(0, 29, 280, 99)) with { Text = "Native action", Clickable = true },
-            Node(2, new(0, 385, 300, 425)) with { Editable = true, Password = true });
-        var entries = AndroidInteractionInventory.Visual(snapshot, AndroidInteractionInventory.Declared(snapshot),
-            [new("Native", new(10, 49, 70, 59), 0), new("action", new(72, 49, 101, 59), 0),
-                new("Canvas-only", new(75, 146, 126, 176), 1), new("action", new(129, 146, 174, 176), 1),
-                new("Fixture status", new(10, 205, 160, 234), 2), new("Covered", new(5, 255, 85, 285), 3),
-                new("Fixture secret", new(20, 395, 130, 410), 4), new("Outside", new(10, 501, 120, 520), 5)],
-            Viewport, [new(0, 245, 300, 300)]);
-        Assert.Equal(new[] { "Canvas-only action", "Fixture status" }, entries.Select(item => item.Label));
-        Assert.All(entries, entry =>
-        {
-            Assert.Null(entry.NodeIndex);
-            Assert.Null(entry.Enabled);
-            Assert.Contains("may be static", entry.Evidence);
-        });
-    }
-
-    [Fact]
-    public void VisualOutlineCanFindAnUnlabelledShapeButHonorsKnownControlsAndOcclusion()
-    {
-        var stroke = new AndroidNodeBounds(42, 70, 80, 110);
-        var frame = new AndroidLivePreviewFrame(1, 300, 500, Paint(stroke));
-        var snapshot = Window(Node(0, Viewport));
-        var outline = Assert.Single(AndroidInteractionShapes.Find(frame, snapshot, [], [], out var limited));
-        Assert.False(limited);
-        Assert.Contains("may be decoration", outline.Evidence);
-        Assert.Null(outline.Enabled);
-        var bounds = Assert.Single(outline.Boxes);
-        Assert.Equal(new AndroidNodeBounds(41, 69, 81, 111), bounds);
-        Assert.Empty(AndroidInteractionShapes.Find(frame, snapshot, [], [stroke], out _));
-        Assert.Empty(AndroidInteractionShapes.Find(frame, snapshot,
-            [new("Fixture control", "Activate", [stroke], true, 1)], [], out _));
-    }
-
-    [Fact]
     public void LocalPictureEvidencePicksUpFixtureBackgroundChangeWithoutNewTextInTheCrop()
     {
         var surface = new AndroidNodeBounds(16, 130, 284, 185);
@@ -267,10 +228,17 @@ public sealed class AndroidInteractionExplorationTests
             }
             return Task.FromResult(new CompanionNavigationReply(1, action == AndroidInvestigationInput.Tab ? "ready" : "dispatched", started));
         }, () => modes, _ => Task.CompletedTask);
-        var result = await service.InvestigateAsync((_, _) => Task.FromResult(new AndroidInvestigationInventory(
-            [new(new("Fixture control", "Activate", [control.Bounds], true, 1), true, true),
-                new(new("Canvas target", "Outline", [Canvas], null, null), true, true)], "Deterministic.")),
-            rig.Marker, null, TestContext.Current.CancellationToken);
+        var model = new TaskCompletionSource<IReadOnlyList<(AndroidNodeBounds, string)>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var run = service.InvestigateAsync(async (snapshot, token) =>
+        {
+            var suggestions = await model.Task.WaitAsync(token);
+            return new(AndroidInvestigationCandidates.Map(snapshot, suggestions).Candidates, "Fixture image model.");
+        }, rig.Marker, null, TestContext.Current.CancellationToken);
+        Assert.Single(rig.Markers);
+        Assert.Empty(modes.Changes);
+        Assert.Equal((0, 0, 0, 0), (touchTests, tabs, nativeTaps, canvasTaps));
+        model.SetResult([(control.Bounds, "Fixture control"), (Canvas, "Canvas target")]);
+        var result = await run;
 
         Assert.Equal("Investigation finished on the selected viewport.", result.Status);
         Assert.Equal(new[] { "on", "off", "restored" }, modes.Changes);
@@ -278,6 +246,8 @@ public sealed class AndroidInteractionExplorationTests
         Assert.Contains("2 corroborated as touch exploration", result.TalkBack);
         Assert.Contains("1 items verified", result.Tab);
         Assert.Contains("1 matched clicks; 1 local visual changes", result.DirectTouch);
+        Assert.Contains("matched to Android", result.Findings[0].Item.Evidence);
+        Assert.Contains("no matching Android tree node", result.Findings[1].Item.Evidence);
         Assert.Contains("Reached at", Assert.Single(result.Findings[0].ExploreByTouch));
         Assert.Contains("input focus", Assert.Single(result.Findings[0].Tab));
         Assert.Contains("Android click source", Assert.Single(result.Findings[0].DirectTouch));
@@ -403,23 +373,75 @@ public sealed class AndroidInteractionExplorationTests
     }
 
     [Fact]
-    public void VisualDiscoveryPairsAWideCanvasControlWithItsLabelWithoutTreatingTextAloneAsActionable()
+    public void ModelSuggestionsAreMatchedWithoutTurningNoisyFeedPixelsOrStaticTextIntoTargets()
     {
         var rig = new Rig();
-        var canvas = new AndroidNodeBounds(10, 130, 290, 176);
-        rig.Preview.Publish(1, 2, 300, 500, Paint(canvas), Started);
+        var native = new AndroidNodeBounds(10, 35, 100, 85);
+        var link = new AndroidNodeBounds(25, 290, 71, 315);
+        var image = Paint();
+        // Synthetic feed full of high-contrast shapes that are not controls.
+        for (var y = 320; y < 490; y++)
+        {
+            for (var x = 10; x < 290; x++)
+            {
+                image.AsSpan((y * 300 + x) * 3, 3).Fill((byte)(((x / 11 + y / 13) % 2) * 255));
+            }
+        }
+        rig.Preview.Publish(1, 2, 300, 500, image, Started);
+        rig.Publish(3, nodes:
+        [
+            Node(0, Viewport) with { Scrollable = true, ChildCount = 5 },
+            Node(1, native) with { Clickable = true, Text = "Native", ContentDescription = "Native fixture action" },
+            Node(2, new(10, 210, 170, 243)) with { Text = "Status", Focusable = true },
+            Node(3, new(5, 275, 280, 317)) with { Text = "See help", Links = [new(4, 8, "url", null, "located", 4, [link])] },
+            Node(4, new(230, 10, 270, 50)) with { Clickable = true, Text = "Tree only" },
+            Node(5, new(110, 90, 240, 128)) with { Text = "Settings" }
+        ]);
         var baseline = rig.Service(() => throw new InvalidOperationException()).Capture()!;
-        var scan = AndroidInvestigationCandidates.Find(baseline,
-            [new("Canvas control", new(18, 145, 122, 159), 1), new("Status", new(20, 208, 91, 230), 2)]);
+        var scan = AndroidInvestigationCandidates.Map(baseline, [
+            (new(18, 48, 73, 72), "Native"), (Canvas, "Canvas control"), (Canvas, "Duplicate canvas"),
+            (link, "help"), (new(126, 94, 205, 120), "Settings"), (Viewport, "Container"),
+            (new(12, 320, 15, 325), "Too small")]);
+        Assert.Equal((3, 1, 2, 3), (scan.Matched, scan.ModelOnly, scan.TreeOnly, scan.NotUsed));
         var candidate = Assert.Single(scan.Candidates, row => row.Item.Label == "Canvas control");
         Assert.True(candidate.Tap);
         Assert.Null(candidate.Item.NodeIndex);
-        Assert.Equal("Status", Assert.Single(scan.UnresolvedText).Label);
-        Assert.True(scan.NeedsVision);
-        var proposed = scan.WithProposals(baseline,
-            [(canvas, "Duplicate canvas"), (new(196, 200, 222, 231), "Custom icon"), (Viewport, "Bad bounds")]);
-        Assert.Equal(scan.Candidates.Count + 1, proposed.Count);
-        Assert.Contains(proposed, entry => entry.Item.Label == "Custom icon" && entry.Tap);
+        Assert.Contains("no matching", candidate.Item.Evidence);
+        Assert.Contains("matched to Android", Assert.Single(scan.Candidates, row => row.Item.NodeIndex == 1).Item.Evidence);
+        Assert.Contains("matched to Android", Assert.Single(scan.Candidates, row => row.Item.Role == "Inline link").Item.Evidence);
+        Assert.Contains("no declared action", Assert.Single(scan.Candidates, row => row.Item.NodeIndex == 5).Item.Evidence);
+        Assert.DoesNotContain(scan.Candidates, row => row.Item.NodeIndex == 2);
+
+        var unavailable = AndroidInvestigationCandidates.Map(baseline, []);
+        Assert.Equal((0, 0, 4), (unavailable.Matched, unavailable.ModelOnly, unavailable.TreeOnly));
+        Assert.All(unavailable.Candidates, row => Assert.Contains("Android tree only", row.Item.Evidence));
+    }
+
+    [Fact]
+    public void AmbiguousMatchesAndProtectedAreasDoNotBecomeUnrestrictedDirectTaps()
+    {
+        var rig = new Rig();
+        var ambiguous = new AndroidNodeBounds(20, 40, 100, 80);
+        var unique = new AndroidNodeBounds(20, 90, 100, 130);
+        var password = new AndroidNodeBounds(20, 240, 100, 280);
+        rig.Publish(3, overlay: true, nodes:
+        [
+            Node(0, Viewport) with { ChildCount = 4 },
+            Node(1, ambiguous) with { Clickable = true, Text = "First" },
+            Node(2, ambiguous) with { Clickable = true, Enabled = false, Text = "Second" },
+            Node(3, unique) with { Clickable = true, Enabled = false, Text = "Disabled" },
+            Node(4, password) with { Password = true, Text = "Secret", Editable = true }
+        ]);
+        var snapshot = rig.Service(() => throw new InvalidOperationException()).Capture()!;
+        var map = AndroidInvestigationCandidates.Map(snapshot, [(ambiguous, "An icon"), (unique, "Disabled"),
+            (Canvas, "Covered"), (password, "Private")]);
+        Assert.Equal((1, 1, 3, 2), (map.Matched, map.ModelOnly, map.TreeOnly, map.NotUsed));
+        var unresolved = Assert.Single(map.Candidates, row => row.Item.NodeIndex is null);
+        Assert.Contains("ambiguous", unresolved.Item.Evidence);
+        Assert.False(unresolved.Tap);
+        Assert.False(Assert.Single(map.Candidates, row => row.Item.NodeIndex == 3).Item.Enabled);
+        Assert.DoesNotContain(map.Candidates, row => row.VisionLabel is "Covered" or "Private");
+        Assert.DoesNotContain(map.Candidates, row => row.Item.Label.Contains("Secret", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -432,6 +454,11 @@ public sealed class AndroidInteractionExplorationTests
             """{"targets":[{"label":"Tool","box":[200,100,900,400],"command":"tap"}]}""", Viewport));
         Assert.Null(AndroidInvestigationCandidates.ParseProposals(
             """{"targets":[{"label":"Tool","box":[200,100,1001,400]}]}""", Viewport));
+        Assert.Null(AndroidInvestigationCandidates.ParseProposals(
+            """{"targets":[{"label":"Tool","box":[200,100,900,400],"label":"Repeated"}]}""", Viewport));
+        Assert.Null(AndroidInvestigationCandidates.ParseProposals(
+            JsonSerializer.Serialize(new { targets = Enumerable.Repeat(new { label = "Tool", box = new[] { 200, 100, 900, 400 } },
+                AndroidInvestigationCandidates.ProposalLimit + 1) }), Viewport));
     }
 
     [Fact]

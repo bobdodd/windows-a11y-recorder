@@ -4,7 +4,10 @@ using NodeKey = Recorder.Collectors.Android.AndroidTalkBackExploration.NodeKey;
 
 namespace Recorder.Collectors.Android;
 
-public sealed record AndroidInvestigationCandidate(AndroidInteractionCandidate Item, bool SampleByTouch, bool Tap);
+public sealed record AndroidInvestigationCandidate(AndroidInteractionCandidate Item, bool SampleByTouch, bool Tap)
+{
+    public string? VisionLabel { get; init; }
+}
 
 public sealed record AndroidInvestigationInventory(IReadOnlyList<AndroidInvestigationCandidate> Candidates, string Coverage);
 
@@ -70,6 +73,17 @@ public sealed partial class AndroidInteractionExploration
         var status = "Investigation finished on the selected viewport.";
         string? restoration = null;
         var rows = new List<Finding>();
+        var lastCount = Stopwatch.GetTimestamp();
+        bool CountDue()
+        {
+            if (progress is null || Stopwatch.GetElapsedTime(lastCount) < TimeSpan.FromSeconds(4))
+            {
+                return false;
+            }
+            lastCount = Stopwatch.GetTimestamp();
+            return true;
+        }
+
         try
         {
             if (start?.App.Items is not { } original)
@@ -83,7 +97,7 @@ public sealed partial class AndroidInteractionExploration
                 return new("The recording no longer accepts markers. No input was sent.", "", talkBack, keyboard, direct, [],
                     null, original.SnapshotIndex, start.Frame?.Sequence);
             }
-            progress?.Report("Finding interactive candidates in the Android tree and recorded picture.");
+            progress?.Report("Starting screenshot discovery. Leave the phone untouched.");
             var found = await inventory(start, token).ConfigureAwait(false);
             rows.AddRange(found.Candidates.Take(ReportLimit).Select(candidate => new Finding(candidate)));
             coverage = found.Coverage + (found.Candidates.Count > ReportLimit ?
@@ -113,7 +127,7 @@ public sealed partial class AndroidInteractionExploration
                 .GroupBy(entry => Center(entry.Box)).Select(group =>
                     (Box: group.First().Box, Rows: group.Select(entry => entry.Row).Distinct().ToArray())).ToArray();
 
-            progress?.Report("Testing TalkBack Explore by Touch. Leave the phone untouched.");
+            progress?.Report($"Testing TalkBack Explore by Touch ({Math.Min(ExploreLimit, explorePoints.Length)} point limit). Leave the phone untouched.");
             token.ThrowIfCancellationRequested();
             var mode = await modes.SetTalkBackAsync(true, token).ConfigureAwait(false);
             await _modeSettle(token).ConfigureAwait(false);
@@ -131,6 +145,10 @@ public sealed partial class AndroidInteractionExploration
                     if (sent >= ExploreLimit)
                     {
                         break;
+                    }
+                    if (CountDue())
+                    {
+                        progress?.Report($"TalkBack Explore by Touch: {sent} sampled, {skipped} skipped, {explorePoints.Length} planned.");
                     }
                     var before = Verify(viewport, phase.Cursor);
                     if (!TryPoint(before, box, out var point))
@@ -212,6 +230,10 @@ public sealed partial class AndroidInteractionExploration
                 keyboard = "No Tab key sent.";
                 for (var step = 1; step <= TabLimit; step++)
                 {
+                    if (CountDue())
+                    {
+                        progress?.Report($"Keyboard Tab: {sent} keys sent, {seen.Count} input-focus stops verified.");
+                    }
                     var before = Verify(viewport, phase.Cursor);
                     if (!TryPoint(before, before.App.Window.Bounds, out var point, checkOverlay: false))
                     {
@@ -270,7 +292,7 @@ public sealed partial class AndroidInteractionExploration
                         (step == TabLimit ? $" Stopped at the {TabLimit}-key limit." : "");
                 }
 
-                progress?.Report("Testing apparent controls with direct taps. The app can react to these touches.");
+                progress?.Report($"Testing apparent controls with direct taps ({Math.Min(TapLimit, tapPoints.Length)} tap limit). The app can react.");
                 int tapped = 0, clicks = 0, visual = 0, skipped = 0;
                 direct = "No direct-tap points were available.";
                 foreach (var (box, targets) in tapPoints)
@@ -279,8 +301,22 @@ public sealed partial class AndroidInteractionExploration
                     {
                         break;
                     }
+                    if (CountDue())
+                    {
+                        progress?.Report($"Direct touch: {tapped} completed, {skipped} skipped, {tapPoints.Length} planned.");
+                    }
                     var before = Verify(viewport, phase.Cursor);
-                    if (targets.Any(row => SensitiveAction(row.Candidate.Item.Label)))
+                    var at = Center(box);
+                    if (rows.Any(row => row.Candidate.Item.Enabled == false &&
+                        row.Candidate.Item.Boxes.Any(bounds => at.X >= bounds.Left && at.X < bounds.Right &&
+                            at.Y >= bounds.Top && at.Y < bounds.Bottom)))
+                    {
+                        skipped++;
+                        Note(targets, AndroidInvestigationInput.Tap, "Not tapped: the location overlaps a disabled Android item.");
+                        continue;
+                    }
+                    if (targets.Any(row => SensitiveAction(row.Candidate.Item.Label) ||
+                        (row.Candidate.VisionLabel is { } label && SensitiveAction(label))))
                     {
                         skipped++;
                         Note(targets, AndroidInvestigationInput.Tap, "Not tapped: label suggests a consequential action.");

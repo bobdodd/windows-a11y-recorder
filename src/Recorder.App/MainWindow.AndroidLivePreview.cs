@@ -1,4 +1,5 @@
 using System.Windows;
+using Recorder.Analysis;
 using Recorder.Collectors.Android;
 using Recorder.Coordinator;
 
@@ -81,18 +82,25 @@ public partial class MainWindow
         window.Show();
     }
 
-    private Task<Recorder.Analysis.ModelProfile?> InvestigationVisionProfileAsync(CancellationToken cancellation)
+    private Task<(ModelProfile? Profile, LocalServerSettings? Server, string? Problem)> InvestigationVisionProfileAsync(
+        CancellationToken cancellation)
     {
         var settings = _analysisSettings;
         var project = _androidInvestigationProject;
         var catalog = AnalysisCatalogOrNull;
         return ReadProfileAsync();
 
-        async Task<Recorder.Analysis.ModelProfile?> ReadProfileAsync()
+        async Task<(ModelProfile?, LocalServerSettings?, string?)> ReadProfileAsync()
         {
             var models = project is { } id && catalog is not null
                 ? await catalog.ProjectModelsAsync(id, cancellation).ConfigureAwait(false) : null;
-            return models?.VisionChecks is { } selection ? settings.Profile(selection) : null;
+            if (models?.VisionChecks is not { } selection)
+            {
+                return (null, null, null);
+            }
+            var choices = models.Choices(settings);
+            return ProjectModels.Problem(choices, ModelUses.VisionChecks, selection) is { } problem
+                ? (null, null, problem) : (choices.Profile(selection), settings.LocalServer, null);
         }
     }
 }

@@ -189,44 +189,51 @@ public sealed class LocalModelServer : IAsyncDisposable
             throw new ModelEndpointException($"The local model server {settings.Executable} could not be started: {exception.Message}", exception);
         }
 
-        await File.WriteAllTextAsync(pidPath, process.Id.ToString(CultureInfo.InvariantCulture), cancellationToken).ConfigureAwait(false);
-        var logPath = Path.Combine(directory, "llama-server.log");
-        var log = TextWriter.Synchronized(new StreamWriter(logPath, append: false, Encoding.UTF8) { AutoFlush = true });
-        var logCopy = Task.WhenAll(
-            CopyAsync(process.StandardOutput, log),
-            CopyAsync(process.StandardError, log))
-            .ContinueWith(_ => log.Dispose(), TaskScheduler.Default);
-        var server = new LocalModelServer(process, pidPath, logCopy);
-
-        var health = new Uri($"http://127.0.0.1:{settings.Port}/health");
-        var deadline = DateTime.UtcNow + timeout;
-        while (true)
+        LocalModelServer? server = null;
+        try
         {
-            if (process.HasExited)
-            {
-                await server.DisposeAsync().ConfigureAwait(false);
-                throw new ModelEndpointException($"The local model server stopped as it started, with exit code {process.ExitCode}. Its log is {logPath}.");
-            }
+            var logPath = Path.Combine(directory, "llama-server.log");
+            var log = TextWriter.Synchronized(new StreamWriter(logPath, append: false, Encoding.UTF8) { AutoFlush = true });
+            var logCopy = Task.WhenAll(
+                CopyAsync(process.StandardOutput, log),
+                CopyAsync(process.StandardError, log))
+                .ContinueWith(_ => log.Dispose(), TaskScheduler.Default);
+            server = new LocalModelServer(process, pidPath, logCopy);
+            await File.WriteAllTextAsync(pidPath, process.Id.ToString(CultureInfo.InvariantCulture), cancellationToken).ConfigureAwait(false);
 
-            try
+            var health = new Uri($"http://127.0.0.1:{settings.Port}/health");
+            var deadline = DateTime.UtcNow + timeout;
+            while (true)
             {
-                using var response = await client.GetAsync(health, cancellationToken).ConfigureAwait(false);
-                if (response.IsSuccessStatusCode)
+                if (process.HasExited)
                 {
-                    return server;
+                    throw new ModelEndpointException($"The local model server stopped as it started, with exit code {process.ExitCode}. Its log is {logPath}.");
                 }
-            }
-            catch (HttpRequestException)
-            {
-            }
 
-            if (DateTime.UtcNow > deadline)
-            {
-                await server.DisposeAsync().ConfigureAwait(false);
-                throw new ModelEndpointException($"The local model server did not answer within {timeout.TotalSeconds:0} seconds. Its log is {logPath}.");
-            }
+                try
+                {
+                    using var response = await client.GetAsync(health, cancellationToken).ConfigureAwait(false);
+                    if (response.IsSuccessStatusCode && !process.HasExited)
+                    {
+                        return server;
+                    }
+                }
+                catch (HttpRequestException)
+                {
+                }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
+                if (DateTime.UtcNow > deadline)
+                {
+                    throw new ModelEndpointException($"The local model server did not answer within {timeout.TotalSeconds:0} seconds. Its log is {logPath}.");
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            await (server ?? new LocalModelServer(process, pidPath, Task.CompletedTask)).DisposeAsync().ConfigureAwait(false);
+            throw;
         }
     }
 

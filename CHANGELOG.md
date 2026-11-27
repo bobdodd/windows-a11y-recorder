@@ -33,9 +33,12 @@ Changes on `main` since 1.1.0, not yet released.
   without TalkBack interception, and directly taps apparent controls.
   The copyable report separates Android declarations, accessibility and
   input focus, matched Android clicks, local picture changes, and untested
-  targets. Windows OCR and outlines run first; an eligible local vision
-  model can propose additional targets where discovery leaves gaps. Nothing
-  is sent to a LAN or cloud model.
+  targets. The recording project's model for vision-based checks reads the
+  starting app screenshot first. The recorder then distinguishes matches
+  from model-only suggestions and independently declared Android controls.
+  There is no standalone OCR or outline detection for discovery. If the
+  selected model cannot run, the report explicitly marks visual discovery
+  as unassessed and uses tree declarations and observed input only.
 - The screen investigation report shows outlined close-ups of recorded
   targets next to their findings. For corroborated local picture changes,
   it shows matching before and after tap crops when the screen still maps.

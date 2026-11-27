@@ -17,7 +17,7 @@ public partial class AndroidLivePreviewWindow : Window
     private readonly AndroidLivePreview _preview;
     private readonly AndroidLiveTree _liveTree;
     private readonly AndroidInteractionExploration _interactions;
-    private readonly Func<CancellationToken, Task<ModelProfile?>> _visionProfile;
+    private readonly Func<CancellationToken, Task<(ModelProfile? Profile, LocalServerSettings? Server, string? Problem)>> _visionProfile;
     private readonly Func<string, bool> _recordMarker;
     private readonly Action<Task> _trackExploration;
     private readonly DispatcherTimer _timer;
@@ -30,7 +30,8 @@ public partial class AndroidLivePreviewWindow : Window
     private bool _renderFailed;
 
     public AndroidLivePreviewWindow(AndroidLivePreview preview, AndroidLiveTree liveTree,
-        AndroidInteractionExploration interactions, Func<CancellationToken, Task<ModelProfile?>> visionProfile,
+        AndroidInteractionExploration interactions,
+        Func<CancellationToken, Task<(ModelProfile? Profile, LocalServerSettings? Server, string? Problem)>> visionProfile,
         Func<string, bool> recordMarker, Action<Task> trackExploration)
     {
         _preview = preview;

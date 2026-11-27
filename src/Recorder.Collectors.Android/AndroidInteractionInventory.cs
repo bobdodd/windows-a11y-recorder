@@ -3,8 +3,6 @@ using Recorder.Contracts;
 
 namespace Recorder.Collectors.Android;
 
-public sealed record AndroidInteractionWord(string Text, AndroidNodeBounds Bounds, int Line);
-
 public sealed record AndroidInteractionCandidate(string Label, string Evidence,
     IReadOnlyList<AndroidNodeBounds> Boxes, bool? Enabled, int? NodeIndex, string? Role = null);
 
@@ -96,63 +94,10 @@ public static class AndroidInteractionInventory
         return result;
     }
 
-    public static IReadOnlyList<AndroidInteractionCandidate> Visual(AndroidLiveWindowSnapshot app,
-        IReadOnlyList<AndroidInteractionCandidate> declared, IEnumerable<AndroidInteractionWord> words,
-        AndroidNodeBounds picture, IEnumerable<AndroidNodeBounds> occluders)
-    {
-        var overlays = occluders.ToArray();
-        var controls = declared.Select(item => (item.Boxes,
-            Words: item.Label.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Select(Normalized)
-                .Where(word => word.Length > 0).ToHashSet(StringComparer.Ordinal))).ToArray();
-        var privateBoxes = app.Items?.Nodes.Where(node => node.Password).Select(node => node.Bounds).ToArray() ?? [];
-        var result = new List<AndroidInteractionCandidate>();
-        foreach (var line in words.Where(word => Contains(app.Window.Bounds, word.Bounds) && Contains(picture, word.Bounds) &&
-                     !overlays.Any(overlay => Intersection(overlay, word.Bounds) is not null) &&
-                     !privateBoxes.Any(box => Intersection(box, word.Bounds) is not null)).GroupBy(word => word.Line))
-        {
-            var run = new List<AndroidInteractionWord>();
-            void AddRun()
-            {
-                if (run.Count == 0)
-                {
-                    return;
-                }
-                var bounds = new AndroidNodeBounds(run.Min(word => word.Bounds.Left), run.Min(word => word.Bounds.Top),
-                    run.Max(word => word.Bounds.Right), run.Max(word => word.Bounds.Bottom));
-                var text = string.Join(" ", run.Select(word => word.Text));
-                if (!overlays.Any(overlay => Intersection(overlay, bounds) is not null))
-                {
-                    result.Add(new(text, "Visible OCR text without a matching declared control label at that location; may be static",
-                        [bounds], null, null));
-                }
-                run.Clear();
-            }
-
-            foreach (var word in line)
-            {
-                var normalized = Normalized(word.Text);
-                if (controls.Any(control => control.Words.Contains(normalized) &&
-                    control.Boxes.Any(box => CoversMost(box, word.Bounds))))
-                {
-                    AddRun();
-                    continue;
-                }
-                if (run.Count > 0 && Math.Max(word.Bounds.Left - run[^1].Bounds.Right, run[^1].Bounds.Left - word.Bounds.Right) >
-                    1.5 * (word.Bounds.Bottom - word.Bounds.Top))
-                {
-                    AddRun();
-                }
-                run.Add(word);
-            }
-            AddRun();
-        }
-        return result;
-    }
-
     internal static string Normalized(string value) => string.Concat(value.Normalize(NormalizationForm.FormKC)
         .Where(char.IsLetterOrDigit)).ToUpperInvariant();
 
-    internal static AndroidNodeBounds? Intersection(AndroidNodeBounds a, AndroidNodeBounds b)
+    public static AndroidNodeBounds? Intersection(AndroidNodeBounds a, AndroidNodeBounds b)
     {
         var box = new AndroidNodeBounds(Math.Max(a.Left, b.Left), Math.Max(a.Top, b.Top),
             Math.Min(a.Right, b.Right), Math.Min(a.Bottom, b.Bottom));
@@ -162,9 +107,6 @@ public static class AndroidInteractionInventory
     internal static bool Contains(AndroidNodeBounds outer, AndroidNodeBounds inner) =>
         Area(inner) > 0 && outer.Left <= inner.Left && outer.Top <= inner.Top && outer.Right >= inner.Right &&
         outer.Bottom >= inner.Bottom;
-
-    private static bool CoversMost(AndroidNodeBounds control, AndroidNodeBounds word) =>
-        Intersection(control, word) is { } overlap && Area(overlap) >= Area(word) * .8;
 
     private static long Area(AndroidNodeBounds box) =>
         Math.Max(0L, (long)box.Right - box.Left) * Math.Max(0L, (long)box.Bottom - box.Top);

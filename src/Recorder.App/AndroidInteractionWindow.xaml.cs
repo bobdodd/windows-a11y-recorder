@@ -13,7 +13,8 @@ public partial class AndroidInteractionWindow : Window
     private bool _running = true;
     private bool _isClosed;
 
-    public AndroidInteractionWindow(AndroidInteractionExploration exploration, Func<CancellationToken, Task<ModelProfile?>> vision,
+    public AndroidInteractionWindow(AndroidInteractionExploration exploration,
+        Func<CancellationToken, Task<(ModelProfile? Profile, LocalServerSettings? Server, string? Problem)>> vision,
         Func<string, bool> marker, Action<Task> track)
     {
         InitializeComponent();
@@ -41,7 +42,7 @@ public partial class AndroidInteractionWindow : Window
                 }
             });
             var task = exploration.InvestigateAsync(
-                (snapshot, token) => AndroidInteractionScan.ReadAsync(snapshot, vision, token), marker, progress, _closed.Token);
+                (snapshot, token) => AndroidInteractionScan.ReadAsync(snapshot, vision, progress, token), marker, progress, _closed.Token);
             track(task.ContinueWith(_ => { }, CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default));
             try

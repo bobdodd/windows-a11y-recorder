@@ -516,12 +516,23 @@ slice's full test goes into a validation plan,
   elements or reachability by other navigation modes. No model is used.
 - **Live screen investigation.** The preview's **Investigate this screen**
   command starts one bounded run on the current test viewport with no
-  per-target prompts. The picture itself remains view-only. Discovery merges
-  Android actions, inline links, labelled or focusable nodes, and Windows OCR
-  with contrast outlines. Unmatched OCR alone does not authorize a tap.
-  Where this leaves visual gaps, the recording project's already-running
-  loopback vision profile may add bounded proposals, not findings. No LAN or
-  cloud endpoint is used; a reported password field suppresses the model.
+  per-target prompts. The picture itself remains view-only. The recording
+  project's simple vision-based checks model reads one frozen app viewport
+  before candidate discovery from the tree; overlay windows are masked.
+  The model reads visible labels itself. The recorder does not run standalone
+  OCR or promote contrast shapes, image fragments, or static text on its own.
+  The model returns at most 40 labelled rectangles. Strict validation,
+  duplicate removal and scope checks precede matching by bounds and label
+  to the starting Android nodes and inline links. The report distinguishes
+  matched, model-only, and independently tree-declared controls. A model
+  suggestion, with or without a match, is not proof of activation.
+  The selected model follows the project's normal local, LAN, or opt-in
+  Anthropic route and uses the provider's response format. A managed local
+  model can start cold if the analysis worker does not hold the server;
+  the live scan does not evict an analysis model. The model stage is limited
+  to 55 seconds. With no usable model response, unmappable coordinates,
+  an incomplete tree, or a reported password field, visual discovery is
+  listed as unassessed and no replacement visual heuristics are run.
   Protocol 12 adds point exploration and a guard for keyboard input. The
   companion dispatches a stationary single-finger gesture only when verified
   TalkBack and touch exploration are active. The report needs Android
@@ -532,8 +543,9 @@ slice's full test goes into a validation plan,
   matched to a fresh tree counts. Initial focus is not a verified stop.
   One run samples up to 44 exploration points, sends up to 40 Tabs from the
   current focus and tries up to 36 direct-tap points. The three-minute
-  run limit excludes bounded restoration. For taps, a scoped Android
-  click at the point is distinct from a later local picture change.
+  run limit includes model discovery and excludes bounded restoration.
+  Progress shows the current stage and attempted points or keys. For taps,
+  a scoped Android click at the point is distinct from a later local picture change.
   Disabled, covered and obviously consequential points are not tapped.
   Same-window changes, loss of scope/evidence, and physical input can end
   the run; it does not navigate back to resume. Before each touch the

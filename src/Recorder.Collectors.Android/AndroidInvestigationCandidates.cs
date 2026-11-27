@@ -3,49 +3,19 @@ using Recorder.Contracts;
 
 namespace Recorder.Collectors.Android;
 
-public sealed record AndroidVisualInvestigation(IReadOnlyList<AndroidInvestigationCandidate> Candidates,
-    IReadOnlyList<AndroidInteractionCandidate> UnresolvedText, bool NeedsVision, bool ShapeLimit)
-{
-    public IReadOnlyList<AndroidInvestigationCandidate> WithProposals(AndroidInteractionSnapshot snapshot,
-        IEnumerable<(AndroidNodeBounds Box, string Label)> proposals)
-    {
-        var result = Candidates.ToList();
-        var screen = snapshot.Frame!;
-        var privateBounds = snapshot.App.Items!.Nodes.Where(node => node.Password).Select(node => node.Bounds).ToArray();
-        foreach (var (box, label) in proposals.Take(24))
-        {
-            if (Area(box) > Area(snapshot.App.Window.Bounds) / 3 || box.Right - box.Left < 16 || box.Bottom - box.Top < 16 ||
-                !AndroidInteractionInventory.Contains(snapshot.App.Window.Bounds, box) ||
-                !AndroidInteractionInventory.Contains(new(0, 0, screen.Width, screen.Height), box) ||
-                snapshot.Occluders.Concat(privateBounds).Any(overlay => AndroidInteractionInventory.Intersection(overlay, box) is not null) ||
-                result.Where(candidate => candidate.Tap || candidate.Item.Role == "Inline link" || candidate.Item.Enabled == false)
-                    .SelectMany(candidate => candidate.Item.Boxes).Any(other => Similar(box, other)))
-            {
-                continue;
-            }
-            var read = UnresolvedText.FirstOrDefault(candidate =>
-                candidate.Boxes.Any(other => AndroidInteractionInventory.Contains(box, other)));
-            result.Add(new(new(read?.Label ?? label, "Possible control proposed by local vision; not Android-declared",
-                [box], null, null), true, true));
-        }
-        return result;
-    }
-
-    internal static bool Similar(AndroidNodeBounds a, AndroidNodeBounds b) =>
-        AndroidInteractionInventory.Intersection(a, b) is { } overlap &&
-        Area(overlap) >= .65 * Math.Min(Area(a), Area(b)) && Math.Max(Area(a), Area(b)) <= 5 * Math.Min(Area(a), Area(b));
-
-    internal static long Area(AndroidNodeBounds box) => (long)(box.Right - box.Left) * (box.Bottom - box.Top);
-}
+public sealed record AndroidVisionMapping(IReadOnlyList<AndroidInvestigationCandidate> Candidates,
+    int Matched, int ModelOnly, int TreeOnly, int NotUsed);
 
 public static class AndroidInvestigationCandidates
 {
+    public const int ProposalLimit = 40;
+
     public static IReadOnlyList<(AndroidNodeBounds Box, string Label)>? ParseProposals(string content, AndroidNodeBounds crop)
     {
         using var json = JsonDocument.Parse(content, new JsonDocumentOptions { MaxDepth = 6 });
         var root = json.RootElement;
         if (root.ValueKind != JsonValueKind.Object || root.EnumerateObject().Count() != 1 ||
-            !root.TryGetProperty("targets", out var entries) || entries.ValueKind != JsonValueKind.Array || entries.GetArrayLength() > 24)
+            !root.TryGetProperty("targets", out var entries) || entries.ValueKind != JsonValueKind.Array || entries.GetArrayLength() > ProposalLimit)
         {
             return null;
         }
@@ -79,72 +49,142 @@ public static class AndroidInvestigationCandidates
         return result;
     }
 
-    public static AndroidVisualInvestigation Find(AndroidInteractionSnapshot snapshot, IEnumerable<AndroidInteractionWord> words)
+    public static AndroidVisionMapping Map(AndroidInteractionSnapshot snapshot,
+        IReadOnlyList<(AndroidNodeBounds Box, string Label)> proposals)
     {
         var declared = AndroidInteractionInventory.Declared(snapshot.App);
-        var indices = declared.Where(item => item.Role != "Inline link").Select(item => item.NodeIndex).ToHashSet();
         var nodes = snapshot.App.Items!.Nodes.ToDictionary(item => item.Index);
-        var rows = new List<AndroidInvestigationCandidate>();
-        foreach (var item in declared)
+        var declaredRows = declared.Select(item =>
         {
             var node = nodes[item.NodeIndex!.Value];
-            rows.Add(new(item, SampleByTouch: true, Tap: item.Role == "Inline link" ||
-                node.Clickable || node.Checkable || node.Editable || node.Actions.Any(action => action.Id == 16) || ApparentRole(node.ClassName)));
-        }
-        foreach (var node in nodes.Values)
-        {
-            if (!node.VisibleToUser || indices.Contains(node.Index) ||
-                AndroidInteractionInventory.Intersection(node.Bounds, snapshot.App.Window.Bounds) is not { } box)
+            return new AndroidInvestigationCandidate(item, SampleByTouch: true, Tap: item.Role == "Inline link" ||
+                node.Clickable || node.Checkable || node.Editable || node.Actions.Any(action => action.Id == 16));
+        }).ToArray();
+        var declaredNodes = declared.Where(item => item.Role != "Inline link").Select(item => item.NodeIndex!.Value).ToHashSet();
+        // Match against visible nodes, not just nodes that declare an action. A
+        // label in the tree may map to a model target without declaring a click.
+        var otherRows = nodes.Values.Where(node => !node.Password && node.VisibleToUser && !declaredNodes.Contains(node.Index))
+            .Select(node => (Node: node, Bounds: AndroidInteractionInventory.Intersection(node.Bounds, snapshot.App.Window.Bounds)))
+            .Where(entry => entry.Bounds is not null && (entry.Node.Depth > 0 || entry.Node.ChildCount == 0))
+            .Select(entry => new AndroidInvestigationCandidate(new(AndroidTalkBackExploration.ItemLabel(entry.Node),
+                    "Android node has no declared action", [entry.Bounds!], entry.Node.Enabled, entry.Node.Index, entry.Node.ClassName),
+                SampleByTouch: true, Tap: false))
+            .ToArray();
+        var declaredSet = declaredRows.ToHashSet();
+        var comparable = declaredRows.Concat(otherRows).Where(row => !nodes[row.Item.NodeIndex!.Value].Password)
+            .Select(row =>
             {
+                var node = nodes[row.Item.NodeIndex!.Value];
+                var names = row.Item.Role == "Inline link" ? [row.Item.Label] :
+                    new[] { row.Item.Label, node.Text, node.ContentDescription, node.Hint };
+                return (Row: row, Names: names.Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Select(name => Normalized(name!)).Where(name => name.Length > 0).ToHashSet(StringComparer.Ordinal));
+            }).ToArray();
+        var protectedAreas = snapshot.Occluders.Concat(nodes.Values.Where(node => node.Password).Select(node => node.Bounds)).ToArray();
+        var used = new HashSet<AndroidInvestigationCandidate>();
+        var accepted = new List<(AndroidNodeBounds Box, string Name)>();
+        var selected = new List<AndroidInvestigationCandidate>();
+        var matched = 0;
+        var modelOnly = 0;
+        var notUsed = 0;
+        foreach (var (box, label) in proposals.Take(ProposalLimit))
+        {
+            var name = Normalized(label);
+            if (!snapshot.HasScreenCoordinates || snapshot.Frame is not { } frame ||
+                box.Right - box.Left < 10 || box.Bottom - box.Top < 10 ||
+                Area(box) > Area(snapshot.App.Window.Bounds) / 3 ||
+                !AndroidInteractionInventory.Contains(snapshot.App.Window.Bounds, box) ||
+                !AndroidInteractionInventory.Contains(new(0, 0, frame.Width, frame.Height), box) ||
+                protectedAreas.Any(other => AndroidInteractionInventory.Intersection(other, box) is not null) ||
+                accepted.Any(previous => Duplicate(box, name, previous.Box, previous.Name)))
+            {
+                notUsed++;
                 continue;
             }
-            var apparent = ApparentRole(node.ClassName);
-            if (apparent || node.Focusable || node.ScreenReaderFocusable || node.Heading ||
-                !string.IsNullOrWhiteSpace(node.Text) || !string.IsNullOrWhiteSpace(node.ContentDescription) ||
-                !string.IsNullOrWhiteSpace(node.Hint))
+            var ranked = comparable.Select(entry => (entry.Row, Score: entry.Row.Item.Boxes
+                    .Select(bounds => MatchScore(box, bounds, entry.Names.Contains(name), entry.Row.Tap))
+                    .DefaultIfEmpty(0).Max()))
+                .Where(entry => entry.Score > 0).OrderByDescending(entry => entry.Score).ToArray();
+            var nearDisabled = ranked.Any(entry => entry.Row.Item.Enabled == false);
+            if (ranked.Length == 1 || (ranked.Length > 1 && ranked[0].Score - ranked[1].Score >= .12))
             {
-                rows.Add(new(new(AndroidTalkBackExploration.ItemLabel(node), apparent ?
-                    "Android reports a control class without a declared activation action" :
-                    "Visible Android item with no declared action", [box], node.Enabled, node.Index, node.ClassName), true, apparent));
+                var row = ranked[0].Row;
+                if (!used.Add(row))
+                {
+                    // A repeated proposal for the same uniquely matched node
+                    // is never tested a second time.
+                    notUsed++;
+                    continue;
+                }
+                var hasAction = declaredSet.Contains(row);
+                var target = row.Item.Boxes.Select(bounds => AndroidInteractionInventory.Intersection(box, bounds))
+                    .OfType<AndroidNodeBounds>().OrderByDescending(Area).First();
+                selected.Add(row with
+                {
+                    Item = row.Item with
+                    {
+                        Evidence = $"Model suggestion \"{label}\" matched to Android; {row.Item.Evidence}" +
+                            (nearDisabled && row.Item.Enabled != false ? "; nearby plausible tree match is disabled" : ""),
+                        Boxes = [target]
+                    },
+                    VisionLabel = label,
+                    // An explicit scroll/long-press-only declaration is not a declaration of a tap.
+                    Tap = (row.Tap || !hasAction) && (!nearDisabled || row.Item.Enabled == false)
+                });
+                matched++;
             }
-        }
-        if (!snapshot.HasScreenCoordinates || snapshot.Frame is not { } frame)
-        {
-            return new(rows, [], false, false);
-        }
-        var occluders = snapshot.Occluders;
-        var uncovered = AndroidInteractionInventory.Visual(snapshot.App,
-            rows.Select(row => row.Item).ToArray(), words, new(0, 0, frame.Width, frame.Height), occluders);
-        var shapes = AndroidInteractionShapes.Find(frame, snapshot.App,
-            rows.Where(row => row.Tap).Select(row => row.Item), occluders, out var limited);
-        var paired = new HashSet<AndroidInteractionCandidate>();
-        foreach (var shape in shapes.OrderBy(item => AndroidVisualInvestigation.Area(item.Boxes[0])))
-        {
-            var outline = shape.Boxes[0];
-            if (uncovered.Any(text => text.Boxes.Any(box => AndroidInteractionInventory.Contains(box, outline))))
+            else
             {
-                continue; // Letter strokes are not standalone icons.
+                var evidence = ranked.Length > 0 ? "Model suggestion; Android tree match was ambiguous" :
+                    "Model suggestion; no matching Android tree node";
+                if (nearDisabled)
+                {
+                    evidence += "; a plausible Android match is disabled";
+                }
+                selected.Add(new(new(label, evidence, [box], null, null), true, !nearDisabled) { VisionLabel = label });
+                modelOnly++;
             }
-            var labels = uncovered.Where(text => !paired.Contains(text) &&
-                text.Boxes.Any(box => AndroidInteractionInventory.Contains(outline, box))).ToArray();
-            foreach (var label in labels)
-            {
-                paired.Add(label);
-            }
-            var evidence = labels.Length > 0 ? "Visible label inside a contrast outline; possible control" :
-                "Unlabelled contrast outline; possible control or decoration";
-            rows.Add(new(shape with { Label = labels.Length == 0 ? shape.Label :
-                string.Join(" ", labels.Select(label => label.Label)), Evidence = evidence }, true, true));
+            accepted.Add((box, name));
         }
-        var unresolved = uncovered.Where(item => !paired.Contains(item)).ToArray();
-        return new(rows, unresolved, limited || unresolved.Length > 0 ||
-            rows.Any(row => row.Item.NodeIndex is null && row.Item.Label == "Unlabelled screen shape") ||
-            nodes.Values.Any(node => node.Depth > 0 && node.VisibleToUser && node.ChildCount == 0 &&
-                !indices.Contains(node.Index) && !node.Focusable && !node.ScreenReaderFocusable &&
-                string.IsNullOrWhiteSpace(node.Text) && string.IsNullOrWhiteSpace(node.ContentDescription) &&
-                AndroidVisualInvestigation.Area(node.Bounds) > 2500), limited);
+        var treeOnly = declaredRows.Where(row => !used.Contains(row)).Select(row =>
+            row with { Item = row.Item with { Evidence = $"Android tree only; {row.Item.Evidence}" } }).ToArray();
+        selected.AddRange(treeOnly);
+        return new(selected, matched, modelOnly, treeOnly.Length, notUsed + Math.Max(0, proposals.Count - ProposalLimit));
     }
 
-    private static bool ApparentRole(string? role) => role?.Split('.').LastOrDefault() is
-        "Button" or "ImageButton" or "ToggleButton" or "Switch" or "CheckBox" or "RadioButton" or "EditText" or "Spinner";
+    private static string Normalized(string label) => AndroidInteractionInventory.Normalized(label);
+
+    private static double MatchScore(AndroidNodeBounds model, AndroidNodeBounds tree, bool sameName, bool actionable)
+    {
+        if (AndroidInteractionInventory.Intersection(model, tree) is not { } intersection)
+        {
+            return 0;
+        }
+        var modelArea = Area(model);
+        var treeArea = Area(tree);
+        var overlap = Area(intersection);
+        var ratio = (double)Math.Min(modelArea, treeArea) / Math.Max(modelArea, treeArea);
+        var iou = (double)overlap / (modelArea + treeArea - overlap);
+        if (sameName && ratio >= .16 && overlap >= .75 * Math.Min(modelArea, treeArea))
+        {
+            return 1 + iou + (actionable ? .15 : 0);
+        }
+        if (iou < (actionable ? .46 : .72))
+        {
+            return 0;
+        }
+        return iou + (actionable ? .12 : 0);
+    }
+
+    private static bool Duplicate(AndroidNodeBounds first, string firstName, AndroidNodeBounds second, string secondName)
+    {
+        if (AndroidInteractionInventory.Intersection(first, second) is not { } intersection)
+        {
+            return false;
+        }
+        var area = Area(intersection);
+        return (double)area / (Area(first) + Area(second) - area) >= (firstName == secondName ? .65 : .88);
+    }
+
+    private static long Area(AndroidNodeBounds box) => (long)(box.Right - box.Left) * (box.Bottom - box.Top);
 }
