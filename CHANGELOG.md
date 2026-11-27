@@ -22,8 +22,9 @@ Changes on `main` since 1.1.0, not yet released.
   updates to inspect a snapshot without stopping capture. The
   inspector shows when each window’s nodes were received and warns
   when snapshots or nodes are missing.
-- The live tree marks Android’s **Accessibility focus** and **Input focus**
-  separately from the selected row. The companion refreshes the affected
+- The live tree marks Android’s **Accessibility focus** with a filled circle
+  and **Input focus** with an outlined square. A row can show both labelled
+  markers, independently of selection. The companion refreshes the affected
   window when Android sends focus events, including accessibility focus
   clearing, even if the layout has not changed.
 

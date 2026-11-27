@@ -473,9 +473,11 @@ slice's full test goes into a validation plan,
   phone data nor sends actions, and its snapshots are not synchronized
   to individual video frames. Password text is not displayed in the
   inspector; opening the inspector does not change what is archived.
-- **Phone focus in the live tree.** A bold row with a border and text
-  identifies accessibility focus, input focus, or both, in the selected
-  phone window. The inspector expands the ancestors of a focused node
+- **Phone focus in the live tree.** In the selected phone window, a
+  filled circle identifies accessibility focus and an outlined square
+  identifies input focus. Both have text labels and are explained in
+  the legend. A node with both has both markers. The inspector expands
+  the ancestors of a focused node
   in a fresh snapshot, without selecting it, moving PC keyboard focus
   to it, or forcing a scroll. On carried nodes, matching window-level
   focus can keep a **Last observed** marker, but does not verify that

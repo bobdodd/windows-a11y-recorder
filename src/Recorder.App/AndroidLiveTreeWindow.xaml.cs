@@ -351,16 +351,20 @@ public partial class AndroidLiveTreeWindow : Window
 
     private sealed class TreeRow(AndroidTreeNode node) : INotifyPropertyChanged
     {
-        private string? _focusLabel;
-
         public AndroidTreeNode Node { get; } = node;
         public string Caption { get; } =
             (node.Password ? "Password field" :
                 Short(node.ContentDescription) ?? Short(node.Text) ?? Short(node.Hint) ??
                 node.ClassName?.Split('.').Last() ?? "Unnamed node") +
             $" (node {node.Index}{(node.Heading ? ", heading" : "")})";
-        public string DisplayCaption => _focusLabel is { } label ? Caption + "\n" + label : Caption;
-        public bool HasPhoneFocus => _focusLabel is not null;
+        public string AccessibleCaption => Caption +
+            (AccessibilityFocusLabel is { } accessibility ? ", " + accessibility : "") +
+            (InputFocusLabel is { } input ? ", " + input : "");
+        public string? AccessibilityFocusLabel { get; private set; }
+        public string? InputFocusLabel { get; private set; }
+        public bool HasAccessibilityFocus => AccessibilityFocusLabel is not null;
+        public bool HasInputFocus => InputFocusLabel is not null;
+        public bool HasPhoneFocus => HasAccessibilityFocus || HasInputFocus;
         public TreeRow? Parent { get; set; }
         public List<TreeRow> Children { get; } = [];
         public bool Expanded { get; set; }
@@ -370,20 +374,21 @@ public partial class AndroidLiveTreeWindow : Window
         public void ApplyFocus(AndroidLiveFocus focus)
         {
             var kind = focus.ForNode(Node);
-            var label = (kind, focus.FromEarlierSnapshot) switch
+            var accessibility = (kind & AndroidLiveFocusKind.Accessibility) != 0
+                ? (focus.FromEarlierSnapshot ? "Last observed accessibility focus" : "Accessibility focus")
+                : null;
+            var input = (kind & AndroidLiveFocusKind.Input) != 0
+                ? (focus.FromEarlierSnapshot ? "Last observed input focus" : "Input focus")
+                : null;
+            if (AccessibilityFocusLabel != accessibility || InputFocusLabel != input)
             {
-                (AndroidLiveFocusKind.Accessibility, false) => "Accessibility focus",
-                (AndroidLiveFocusKind.Input, false) => "Input focus",
-                (AndroidLiveFocusKind.Accessibility | AndroidLiveFocusKind.Input, false) => "Accessibility and input focus",
-                (AndroidLiveFocusKind.Accessibility, true) => "Last observed accessibility focus",
-                (AndroidLiveFocusKind.Input, true) => "Last observed input focus",
-                (AndroidLiveFocusKind.Accessibility | AndroidLiveFocusKind.Input, true) => "Last observed accessibility and input focus",
-                _ => null
-            };
-            if (_focusLabel != label)
-            {
-                _focusLabel = label;
-                PropertyChanged?.Invoke(this, new(nameof(DisplayCaption)));
+                AccessibilityFocusLabel = accessibility;
+                InputFocusLabel = input;
+                PropertyChanged?.Invoke(this, new(nameof(AccessibilityFocusLabel)));
+                PropertyChanged?.Invoke(this, new(nameof(InputFocusLabel)));
+                PropertyChanged?.Invoke(this, new(nameof(HasAccessibilityFocus)));
+                PropertyChanged?.Invoke(this, new(nameof(HasInputFocus)));
+                PropertyChanged?.Invoke(this, new(nameof(AccessibleCaption)));
                 PropertyChanged?.Invoke(this, new(nameof(HasPhoneFocus)));
             }
         }

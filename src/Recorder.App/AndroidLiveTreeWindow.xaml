@@ -8,6 +8,25 @@
         Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
         Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
         PreviewKeyDown="Window_PreviewKeyDown">
+  <Window.Resources>
+    <BooleanToVisibilityConverter x:Key="ShowWhenTrue" />
+    <Style x:Key="FocusGlyph" TargetType="Shape">
+      <Setter Property="Width" Value="11" />
+      <Setter Property="Height" Value="11" />
+      <Setter Property="Margin" Value="0,3,6,0" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+      <Setter Property="StrokeThickness" Value="1.5" />
+      <Setter Property="IsHitTestVisible" Value="False" />
+    </Style>
+    <Style x:Key="AccessibilityFocusGlyph" TargetType="Ellipse" BasedOn="{StaticResource FocusGlyph}">
+      <Setter Property="Fill" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+      <Setter Property="Stroke" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
+    </Style>
+    <Style x:Key="InputFocusGlyph" TargetType="Rectangle" BasedOn="{StaticResource FocusGlyph}">
+      <Setter Property="Fill" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+      <Setter Property="Stroke" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+    </Style>
+  </Window.Resources>
   <Grid Margin="12">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
@@ -16,8 +35,20 @@
       <RowDefinition Height="*" />
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
-    <local:SelectableText Margin="0,0,0,6" TextWrapping="Wrap"
-                          Text="View only. These are Android’s latest observed accessibility snapshots, not a transcript or a frame-synchronized tree." />
+    <StackPanel Margin="0,0,0,6">
+      <local:SelectableText TextWrapping="Wrap"
+                            Text="View only. These are Android’s latest observed accessibility snapshots, not a transcript or a frame-synchronized tree." />
+      <WrapPanel Margin="0,4,0,0">
+        <StackPanel Orientation="Horizontal" Margin="0,0,16,2">
+          <Ellipse Style="{StaticResource AccessibilityFocusGlyph}" />
+          <local:SelectableText Text="Accessibility focus (screen reader)" TextWrapping="Wrap" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
+          <Rectangle Style="{StaticResource InputFocusGlyph}" />
+          <local:SelectableText Text="Input focus (keyboard)" TextWrapping="Wrap" />
+        </StackPanel>
+      </WrapPanel>
+    </StackPanel>
     <local:SelectableText x:Name="TreeStatus" Grid.Row="1" Margin="0,0,0,8"
                           TextWrapping="Wrap" FontWeight="SemiBold"
                           AutomationProperties.LiveSetting="Polite" />
@@ -50,13 +81,13 @@
       </Grid.ColumnDefinitions>
       <TreeView x:Name="NodeTree" SelectedItemChanged="NodeTree_SelectedItemChanged"
                 AutomationProperties.Name="Android accessibility nodes"
-                AutomationProperties.HelpText="Phone focus is marked separately from the row you select. Expand or collapse nodes with the arrow keys. The selected node’s reported properties are in Node details."
+                AutomationProperties.HelpText="Accessibility focus follows the screen reader. Input focus receives keyboard input. Both are separate from the row you select. Expand or collapse nodes with the arrow keys. The selected node’s reported properties are in Node details."
                 ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.CanContentScroll="True"
                 VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                 HorizontalContentAlignment="Stretch">
         <TreeView.ItemContainerStyle>
           <Style TargetType="{x:Type TreeViewItem}">
-            <Setter Property="AutomationProperties.Name" Value="{Binding DisplayCaption}" />
+            <Setter Property="AutomationProperties.Name" Value="{Binding AccessibleCaption}" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="MinHeight" Value="28" />
             <Setter Property="IsExpanded" Value="{Binding Expanded, Mode=TwoWay}" />
@@ -64,13 +95,22 @@
         </TreeView.ItemContainerStyle>
         <TreeView.ItemTemplate>
           <HierarchicalDataTemplate ItemsSource="{Binding Children}">
-            <Border x:Name="FocusMarker" BorderThickness="3,0,0,0" Padding="5,2,3,2">
-              <local:SelectableText x:Name="RowText" Text="{Binding DisplayCaption, Mode=OneWay}"
+            <StackPanel Margin="5,2,3,2">
+              <local:SelectableText x:Name="RowText" Text="{Binding Caption, Mode=OneWay}"
                                     TextWrapping="Wrap" VerticalAlignment="Center" />
-            </Border>
+              <DockPanel Visibility="{Binding HasAccessibilityFocus, Converter={StaticResource ShowWhenTrue}}">
+                <Ellipse DockPanel.Dock="Left" Style="{StaticResource AccessibilityFocusGlyph}" />
+                <local:SelectableText Text="{Binding AccessibilityFocusLabel, Mode=OneWay}"
+                                      TextWrapping="Wrap" FontWeight="SemiBold" />
+              </DockPanel>
+              <DockPanel Visibility="{Binding HasInputFocus, Converter={StaticResource ShowWhenTrue}}">
+                <Rectangle DockPanel.Dock="Left" Style="{StaticResource InputFocusGlyph}" />
+                <local:SelectableText Text="{Binding InputFocusLabel, Mode=OneWay}"
+                                      TextWrapping="Wrap" FontWeight="SemiBold" />
+              </DockPanel>
+            </StackPanel>
             <HierarchicalDataTemplate.Triggers>
               <DataTrigger Binding="{Binding HasPhoneFocus}" Value="True">
-                <Setter TargetName="FocusMarker" Property="BorderBrush" Value="{Binding Foreground, ElementName=RowText}" />
                 <Setter TargetName="RowText" Property="FontWeight" Value="Bold" />
               </DataTrigger>
             </HierarchicalDataTemplate.Triggers>

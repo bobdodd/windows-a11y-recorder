@@ -3479,9 +3479,10 @@ stays on the paused node and moves to the newly focused node on resume.
 3. With TalkBack on, move accessibility focus to the other control
    without activating it. Then move it away from the app window.
 
-**On screen:** input focus is labelled on the text field. If Android
-reports simultaneous accessibility focus, the second label appears on
-the other control, or both labels appear together when the flags
-describe the same node. When the app loses accessibility focus, its
-current accessibility-focus mark clears. No PC row acquires keyboard
-focus or selection as a result of those markers.
+**On screen:** the text field has the outlined square and **Input
+focus** label. If Android reports simultaneous accessibility focus,
+the other control has the filled circle and **Accessibility focus**
+label. If both flags describe the same node, both markers and labels
+are on that row. The legend explains both shapes. When the app loses
+accessibility focus, its current accessibility-focus marker clears.
+Neither marker gives a PC row keyboard focus or selection.
