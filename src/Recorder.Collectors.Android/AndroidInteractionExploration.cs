@@ -7,7 +7,7 @@ public sealed class AndroidInteractionSnapshot
 {
     internal AndroidInteractionSnapshot(AndroidLiveTreeSnapshot tree, AndroidLiveWindowSnapshot app,
         AndroidTalkBackScope scope, AndroidLivePreviewSnapshot preview, AndroidDisplayState? display,
-        AndroidTalkBackInput input, long cursor)
+        AndroidTalkBackInput input, long cursor, bool feedsReady = true)
     {
         Tree = tree;
         App = app;
@@ -16,6 +16,7 @@ public sealed class AndroidInteractionSnapshot
         Display = display;
         Input = input;
         Cursor = cursor;
+        FeedsReady = feedsReady;
     }
 
     public AndroidLiveTreeSnapshot Tree { get; }
@@ -35,6 +36,7 @@ public sealed class AndroidInteractionSnapshot
     internal AndroidDisplayState? Display { get; }
     internal AndroidTalkBackInput Input { get; }
     internal long Cursor { get; }
+    internal bool FeedsReady { get; }
 }
 
 public sealed record AndroidInteractionTapResult(string Evidence, long? ClickEvent = null, ulong? AfterFrame = null);
@@ -61,6 +63,7 @@ public sealed partial class AndroidInteractionExploration
             cancellation => Task.Delay(1100, cancellation))
     {
         _investigationDispatch = companion.CheckInvestigationInputAsync;
+        _investigationSwipe = companion.NavigateTalkBackAsync;
         _investigationModes = () => new AndroidInvestigationModes(adb, serial);
         _investigationSupported = () => companion.SupportsScreenInvestigation;
     }
@@ -82,8 +85,10 @@ public sealed partial class AndroidInteractionExploration
 
     public AndroidInteractionSnapshot? Capture()
     {
+        var ready = _ready();
         var input = _input();
         var cursor = _signals.Cursor;
+        var picture = _preview.Current;
         var current = _tree.Current;
         var app = AndroidTalkBackScope.ActiveApp(current);
         if (current.State != AndroidLiveTreeState.Observed ||
@@ -91,9 +96,8 @@ public sealed partial class AndroidInteractionExploration
         {
             return null;
         }
-        var picture = _preview.Current;
         var display = picture.Frame?.PhoneNanoseconds is { } time ? _displayAt(time) : null;
-        return new(current, app, new(app.Window, package), picture, display, input, cursor);
+        return new(current, app, new(app.Window, package), picture, display, input, cursor, ready);
     }
 
     public string? TapProblem(AndroidInteractionSnapshot snapshot, AndroidNodeBounds box)

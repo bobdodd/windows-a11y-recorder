@@ -26,8 +26,31 @@ internal static class AndroidInteractionReportDocument
         {
             Line(document, $"Complex vision model: {model}.");
         }
-        Line(document, "Model proposals and Android tree matches are not proof of interaction. TalkBack Explore by Touch, Tab and direct touch were not tested.", bottom: 8);
+        Line(document, "Model proposals and Android declarations are not proof of interaction. Focus is not activation. Proposals that share an Android node are not verified as separate controls. Untested or unverified does not mean unreachable.", bottom: 8);
         Line(document, report.Tree?.Summary ?? "Android tree matching not run. There was no usable model proposal list.", bottom: 8);
+        var observed = new Dictionary<int, AndroidInvestigationFinding>();
+        if (report.Input is { } tested)
+        {
+            Line(document, $"TalkBack swipes: {tested.Swipe}");
+            Line(document, $"TalkBack Explore by Touch: {tested.TalkBack}");
+            Line(document, $"Keyboard Tab: {tested.Tab}");
+            Line(document, $"Direct touch: {tested.DirectTouch}");
+            if (tested.Restoration is { } restoration)
+            {
+                Line(document, restoration);
+            }
+            foreach (var finding in tested.Findings)
+            {
+                if (finding.ProposalIndex is { } index)
+                {
+                    observed[index] = finding;
+                }
+            }
+        }
+        else
+        {
+            Line(document, report.InputUnavailable ?? "No input was tested.");
+        }
         if (report.InputPng is not { } png)
         {
             return document;
@@ -81,6 +104,11 @@ internal static class AndroidInteractionReportDocument
             {
                 Line(document, "No clear match in the captured app tree.", bottom: 4);
             }
+            observed.TryGetValue(index, out var finding);
+            Line(document, $"TalkBack swipes: {Evidence(finding?.Swipe)}");
+            Line(document, $"TalkBack Explore by Touch: {Evidence(finding?.ExploreByTouch)}");
+            Line(document, $"Keyboard Tab: {Evidence(finding?.Tab)}");
+            Line(document, $"Direct touch: {Evidence(finding?.DirectTouch)}", bottom: 4);
             var tight = treeOutline is { } treeBox
                 ? new AndroidNodeBounds(Math.Min(outline.Left, treeBox.Left), Math.Min(outline.Top, treeBox.Top),
                     Math.Max(outline.Right, treeBox.Right), Math.Max(outline.Bottom, treeBox.Bottom))
@@ -89,8 +117,33 @@ internal static class AndroidInteractionReportDocument
             var crop = new AndroidNodeBounds(Math.Max(0, tight.Left - pad), Math.Max(0, tight.Top - pad),
                 Math.Min(full.Right, tight.Right + pad), Math.Min(full.Bottom, tight.Bottom + pad));
             Picture(document, $"{title}. {caption}{alt}", bitmap, crop, outline, treeOutline, maxHeight: 320);
+            if (finding is not null)
+            {
+                foreach (var pair in finding.TapPictures)
+                {
+                    TapCrop(document, pair.Before, pair.Crop, "Before tap");
+                    TapCrop(document, pair.After, pair.Crop, "After tap");
+                }
+            }
         }
         return document;
+    }
+
+    private static string Evidence(IReadOnlyList<string>? evidence) =>
+        evidence is { Count: > 0 } ? string.Join(" ", evidence) : "Not tested for this proposal.";
+
+    private static void TapCrop(FlowDocument document, AndroidLivePreviewFrame frame, AndroidInvestigationCrop crop, string caption)
+    {
+        var bitmap = BitmapSource.Create(frame.Width, frame.Height, 96, 96, PixelFormats.Rgb24, null,
+            frame.Rgb.ToArray(), frame.Width * 3);
+        var entire = new AndroidNodeBounds(0, 0, frame.Width, frame.Height);
+        var region = crop.Region;
+        var box = crop.Outlines[0];
+        var outline = Scale(new(box.Left - region.Left, box.Top - region.Top, box.Right - region.Left,
+            box.Bottom - region.Top), (region.Right - region.Left, region.Bottom - region.Top), entire);
+        var name = $"{caption}: recording frame {frame.Sequence}, with the sampled region outlined.";
+        Line(document, name, top: 4);
+        Picture(document, name, bitmap, entire, outline, null, maxHeight: 240);
     }
 
     private static string Describe(AndroidProposalTreeCandidate candidate)

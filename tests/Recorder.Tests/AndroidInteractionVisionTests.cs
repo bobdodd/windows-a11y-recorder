@@ -67,6 +67,10 @@ public sealed class AndroidInteractionVisionTests
         Assert.Contains("using the app by touch", instructions, StringComparison.Ordinal);
         Assert.Contains("Count distinct actions, not visual parts", instructions, StringComparison.Ordinal);
         Assert.Contains("compare your boxes for nesting and shared pixels", instructions, StringComparison.Ordinal);
+        Assert.Contains("fully or almost enclosed", instructions, StringComparison.Ordinal);
+        Assert.Contains("a small badge that straddles the border", instructions, StringComparison.Ordinal);
+        Assert.Contains("a plus button on the edge of an otherwise static profile photo is one target, not two", instructions, StringComparison.Ordinal);
+        Assert.Contains("independently looks operable outside the small button", instructions, StringComparison.Ordinal);
         Assert.Contains("Repeated controls at different locations", instructions, StringComparison.Ordinal);
     }
 

@@ -19,7 +19,7 @@
                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="9"
                  CommandManager.PreviewExecuted="Report_PreviewExecuted"
                  AutomationProperties.Name="Screen investigation report"
-                 AutomationProperties.HelpText="Select text and use Ctrl+C to copy. Captions identify the input screenshot, model boxes and any Android tree matches.">
+                 AutomationProperties.HelpText="Select text and use Ctrl+C to copy. Each proposal lists its Android tree match and separate swipe, Explore by Touch, Tab, and direct-touch findings.">
       <FlowDocument PagePadding="0" />
     </RichTextBox>
     <Button Grid.Row="2" x:Name="CloseReport" Margin="0,10,0,0" MinHeight="44" Padding="14,0"

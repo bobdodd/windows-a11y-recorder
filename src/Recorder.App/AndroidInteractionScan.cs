@@ -13,6 +13,8 @@ internal sealed record AndroidModelDiscoveryReport(string Status, string? Model 
 {
     public (int Width, int Height) ScreenSize { get; init; }
     public AndroidProposalTreeReport? Tree { get; init; }
+    public AndroidInvestigationReport? Input { get; init; }
+    public string? InputUnavailable { get; init; }
 }
 
 internal static class AndroidInteractionScan

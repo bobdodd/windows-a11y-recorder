@@ -520,8 +520,10 @@ slice's full test goes into a validation plan,
   The explicitly selected complex vision model is told this is an Android
   phone app and asked to propose
   likely touch targets: one box per distinct apparent action rather than
-  per visual part. The model reads visible labels itself. The recorder
-  does not run OCR or shape-based discovery. It validates the structured
+  per visual part. Fully or mostly enclosed regions and boundary badges
+  are separate proposals only when each has an independent visible cue
+  and a distinct likely touch location. The model reads visible labels
+  itself. The recorder does not run OCR or shape-based discovery. It validates the structured
   answer of at most 40 proposals, then displays the exact input PNG, every
   returned label and normalized box in its original order, and an outlined
   close-up for each proposal. Overlapping and identical proposals are not
@@ -552,44 +554,36 @@ slice's full test goes into a validation plan,
   to 55 seconds. With no usable screenshot or model response, visual
   discovery is unassessed. There is no inherited simple-model or tree
   fallback.
-- **Deferred live input investigation.** The preview does not run the
-  input implementation. Its separate candidate planner can select a
-  supported whole-control proposal over a duplicate fragment without
-  merging different declared hit locations or losing alias tap guards.
-  Protocol 12 adds point exploration and a guard for keyboard input. The
-  companion dispatches a stationary single-finger gesture only when verified
-  TalkBack and touch exploration are active. The report needs Android
-  exploration start/end events plus scoped accessibility-focus evidence
-  matched to a fresh tree; this is not the earlier next/previous swipe
-  check. A real ADB Tab key goes to the default display after checking the
-  active focused app and ordinary input mode; only an input-focus event
-  matched to a fresh tree counts. Initial focus is not a verified stop.
-  One run samples up to 44 exploration points, sends up to 40 Tabs from the
-  current focus and tries up to 36 direct-tap points. The three-minute
-  run limit includes model discovery and excludes bounded restoration.
-  Progress shows the current stage and attempted points or keys. For taps,
-  a scoped Android click at the point is distinct from a later local picture change.
-  Disabled, covered and obviously consequential points are not tapped.
-  Same-window changes, loss of scope/evidence, and physical input can end
-  the run; it does not navigate back to resume. Before each touch the
-  phone checks app, bounds, display dimensions, rotation, overlays and
-  magnification. It verifies the selected input mode. Enabling or disabling
-  TalkBack changes only that recognized service in the settings list. On
-  exit, the recorder verifies the original list was restored or reports
-  a warning without overwriting unrelated setting changes. This does not
-  restore app state or either focus position.
-  The deferred input report design shows each evidenced item and what was not tested
-  or not verified. The report annotates mapped close-ups of the starting
-  picture with candidate bounds. A direct tap with corroborated local
-  picture change can show before and after crops of the same region,
-  each labelled with its recorded frame. Bounds remain distinct from
-  focus and activation. Unmappable, covered or password-overlapping
-  target regions do not get an image. Images share the original
-  starting frame in memory; later crop pairs have bounded resolution
-  and are not written to new files. The report does not prove completeness,
-  negative reachability or screen-reader activation, and does not test off-screen targets, swipes,
-  or long presses. Paired recording markers summarize the run; the per-item
-  report is live and not automatically filed under playback Checks.
+- **Live input evidence after discovery.** The same command proceeds without
+  further prompts after the model and tree matching. It runs only with
+  nonempty proposals and an aligned, still-current starting viewport under
+  protocol 12. It does not substitute a later starting snapshot. Stationary
+  Explore by Touch requires a verified TalkBack mode, exploration boundaries
+  and scoped accessibility-focus evidence in a fresh tree. When there is a
+  single starting TalkBack focus, a bounded right/left swipe pass separately
+  requires a fresh accessibility-focus event on a different item. Tab sends
+  a real ADB key to the focused app on the default display with TalkBack
+  off; it requires an input-focus event and fresh tree. Initial focus is not
+  a verified stop. A focus stop is only attributed to the matching starting
+  Android node, never a nearby box or an inline link's host. Unproposed
+  stops do not become report entries.
+  The input phase has a three-minute limit, excluding bounded restoration.
+  It samples up to 44 exploration points, sends up to 24 TalkBack swipes
+  and 40 Tabs, and tries up to 36 direct-tap points. Direct taps can activate
+  the app. The planner keeps the original proposals visible while avoiding
+  ambiguous or duplicate tap locations and checking overlapping proposal
+  labels and actionable Android nodes for disabled or consequential actions.
+  Clicks from the matched node, clicks with another or unknown source,
+  local pixel changes without a matched click, and no corroborated response
+  are distinct. Bounded before/after crops may illustrate a local change.
+  The run stops on navigation, scrolling, lost evidence or physical input
+  and does not replay the screen. It temporarily changes only the recognized
+  TalkBack service, verifies restoration or reports a warning, and does not
+  overwrite separate settings changes or restore app state. Paired markers
+  summarize stages; the copyable per-proposal report remains live and is not
+  automatically filed under playback Checks. It does not prove completeness
+  or negative reachability and does not test screen-reader activation,
+  off-screen targets or long presses.
 - **Player.** The phone's frame takes the desktop's place, fitted to the
   height of the frame area.
 - **MP4 export.** Uses the phone's frames as the picture. The export

@@ -38,7 +38,7 @@
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
     <StackPanel Margin="0,0,0,10">
-      <local:SelectableText Text="Investigate this screen sends one full phone screenshot to the project's complex vision model, then compares its proposed touch targets with the Android accessibility tree. It does not send phone input." />
+      <local:SelectableText Text="Investigate this screen sends one full phone screenshot to the project's complex vision model, then checks the suggestions against the Android tree and tests how they can be reached. Use a test screen only: this sends phone input, may activate controls, and may temporarily change TalkBack. Leave the phone untouched during the investigation." />
       <local:SelectableText x:Name="PreviewStatus"
                             Margin="0,6,0,0" FontWeight="SemiBold"
                             AutomationProperties.LiveSetting="Polite" />
@@ -53,7 +53,7 @@
               AutomationProperties.HelpText="Opens the Android accessibility tree observed during recording." />
       <Button x:Name="InteractionsButton" MinHeight="44" Padding="12,0" Margin="0,0,8,0"
               Content="_Investigate this screen" Click="InteractionsButton_Click"
-              AutomationProperties.HelpText="Reports the complex vision model's suggestions and their matches in the captured Android tree. No phone input is sent." />
+              AutomationProperties.HelpText="Reports model proposals, Android tree matches, TalkBack swipe and Explore by Touch, Tab, and direct-tap evidence. This sends input and can activate controls. Use only on a test screen." />
       <Button x:Name="CloseButton" MinHeight="44" MinWidth="110"
               Content="_Close preview" Click="CloseButton_Click" />
     </WrapPanel>

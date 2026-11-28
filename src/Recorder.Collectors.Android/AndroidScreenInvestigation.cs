@@ -8,13 +8,21 @@ public sealed record AndroidInvestigationCandidate(AndroidInteractionCandidate I
 {
     public string? VisionLabel { get; init; }
     public string? DuplicateTapRestriction { get; init; }
+    public int? ProposalIndex { get; init; }
+    public AndroidNodeBounds? OriginalProposalBox { get; init; }
+    public string? TapSkipReason { get; init; }
 }
 
-public sealed record AndroidInvestigationInventory(IReadOnlyList<AndroidInvestigationCandidate> Candidates, string Coverage);
+public sealed record AndroidInvestigationInventory(IReadOnlyList<AndroidInvestigationCandidate> Candidates, string Coverage)
+{
+    public bool ProposalsOnly { get; init; }
+}
 
 public sealed record AndroidInvestigationFinding(AndroidInteractionCandidate Item,
     IReadOnlyList<string> ExploreByTouch, IReadOnlyList<string> Tab, IReadOnlyList<string> DirectTouch)
 {
+    public int? ProposalIndex { get; init; }
+    public IReadOnlyList<string> Swipe { get; init; } = [];
     public AndroidInvestigationCrop? StartingLocation { get; init; }
     public IReadOnlyList<AndroidInvestigationTapPictures> TapPictures { get; init; } = [];
 }
@@ -22,6 +30,7 @@ public sealed record AndroidInvestigationFinding(AndroidInteractionCandidate Ite
 public sealed record AndroidInvestigationReport(string Status, string Coverage, string TalkBack, string Tab, string DirectTouch,
     IReadOnlyList<AndroidInvestigationFinding> Findings, string? Restoration, long? Tree, ulong? Frame)
 {
+    public string Swipe { get; init; } = "Not run.";
     public AndroidLivePreviewFrame? StartingPicture { get; init; }
 }
 
@@ -38,21 +47,33 @@ public sealed partial class AndroidInteractionExploration
     private int _investigating;
     private Func<AndroidTalkBackScope, AndroidInteractionPoint, AndroidInvestigationInput, CancellationToken,
         Task<CompanionNavigationReply>>? _investigationDispatch;
+    private Func<bool, AndroidTalkBackScope, CancellationToken, Task<CompanionNavigationReply>>? _investigationSwipe;
     private Func<IAndroidInvestigationModes>? _investigationModes;
     private Func<bool> _investigationSupported = () => true;
     private Func<CancellationToken, Task> _modeSettle = token => Task.Delay(1200, token);
 
     internal void ConfigureInvestigation(
         Func<AndroidTalkBackScope, AndroidInteractionPoint, AndroidInvestigationInput, CancellationToken, Task<CompanionNavigationReply>> dispatch,
-        Func<IAndroidInvestigationModes> modes, Func<CancellationToken, Task> settleMode)
+        Func<IAndroidInvestigationModes> modes, Func<CancellationToken, Task> settleMode,
+        Func<bool, AndroidTalkBackScope, CancellationToken, Task<CompanionNavigationReply>>? swipe = null)
     {
         _investigationDispatch = dispatch;
         _investigationModes = modes;
         _modeSettle = settleMode;
+        _investigationSwipe = swipe;
     }
 
     /// <summary>One recording-bound investigation of the viewport selected at invocation.</summary>
-    public async Task<AndroidInvestigationReport> InvestigateAsync(
+    public Task<AndroidInvestigationReport> InvestigateAsync(
+        Func<AndroidInteractionSnapshot, CancellationToken, Task<AndroidInvestigationInventory>> inventory,
+        Func<string, bool> marker, IProgress<string>? progress, CancellationToken cancellation) =>
+        InvestigateFromAsync(Capture(), inventory, marker, progress, cancellation);
+
+    public Task<AndroidInvestigationReport> InvestigateProposalsAsync(AndroidInteractionSnapshot start,
+        AndroidInvestigationInventory inventory, Func<string, bool> marker, IProgress<string>? progress, CancellationToken cancellation) =>
+        InvestigateFromAsync(start, (_, _) => Task.FromResult(inventory), marker, progress, cancellation);
+
+    private async Task<AndroidInvestigationReport> InvestigateFromAsync(AndroidInteractionSnapshot? start,
         Func<AndroidInteractionSnapshot, CancellationToken, Task<AndroidInvestigationInventory>> inventory,
         Func<string, bool> marker, IProgress<string>? progress, CancellationToken cancellation)
     {
@@ -63,16 +84,18 @@ public sealed partial class AndroidInteractionExploration
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         limit.CancelAfter(TimeSpan.FromMinutes(3));
         var token = limit.Token;
-        var start = Capture();
         var modes = _investigationModes?.Invoke();
         var tag = Guid.NewGuid().ToString("N")[..8];
         var began = false;
         var coverage = "";
         var talkBack = "Not run.";
+        var swipe = "Not run.";
         var keyboard = "Not run.";
         var direct = "Not run.";
         var status = "Investigation finished on the selected viewport.";
         string? restoration = null;
+        var modeTouched = false;
+        var modelProposalsOnly = false;
         var rows = new List<Finding>();
         var lastCount = Stopwatch.GetTimestamp();
         bool CountDue()
@@ -98,11 +121,16 @@ public sealed partial class AndroidInteractionExploration
                 return new("The recording no longer accepts markers. No input was sent.", "", talkBack, keyboard, direct, [],
                     null, original.SnapshotIndex, start.Frame?.Sequence);
             }
-            progress?.Report("Starting screenshot discovery. Leave the phone untouched.");
             var found = await inventory(start, token).ConfigureAwait(false);
+            modelProposalsOnly = found.ProposalsOnly;
             rows.AddRange(found.Candidates.Take(ReportLimit).Select(candidate => new Finding(candidate)));
             coverage = found.Coverage + (found.Candidates.Count > ReportLimit ?
                 $" Report capped at {ReportLimit} candidates; {found.Candidates.Count - ReportLimit} additional candidates were not listed or tested." : "");
+            token.ThrowIfCancellationRequested();
+            if (rows.Count == 0)
+            {
+                throw new InvestigationStop("No model proposals were available for input testing. No input was sent.");
+            }
             if (modes is null || _investigationDispatch is null)
             {
                 throw new InvestigationStop("Input controls were unavailable. Only the inventory was produced.");
@@ -110,6 +138,11 @@ public sealed partial class AndroidInteractionExploration
             if (!_investigationSupported())
             {
                 throw new InvestigationStop("The protocol 12 recorder companion is not connected. Only the inventory was produced.");
+            }
+            if (!start.FeedsReady || start.Tree.Problem is not null || start.Tree.EarlierUpdateMissing ||
+                original.Truncated || original.MissingChildren > 0)
+            {
+                throw new InvestigationStop("The starting app tree or input evidence feed was incomplete. No input was sent.");
             }
 
             var viewport = new InvestigationViewport(start, original);
@@ -127,15 +160,18 @@ public sealed partial class AndroidInteractionExploration
                 .OrderBy(entry => TapPriority(entry.Row.Candidate.Item))
                 .GroupBy(entry => Center(entry.Box)).Select(group =>
                     (Box: group.First().Box, Rows: group.Select(entry => entry.Row).Distinct().ToArray())).ToArray();
+            var clickCountLabel = modelProposalsOnly ? "clicks at sampled points" : "matched clicks";
 
             progress?.Report($"Testing TalkBack Explore by Touch ({Math.Min(ExploreLimit, explorePoints.Length)} point limit). Leave the phone untouched.");
             token.ThrowIfCancellationRequested();
+            modeTouched = true;
             var mode = await modes.SetTalkBackAsync(true, token).ConfigureAwait(false);
             await _modeSettle(token).ConfigureAwait(false);
-            var phase = Verify(viewport);
+            var phase = Verify(viewport, verifiedStart.Cursor, changingMode: true);
             if (mode is not null)
             {
                 talkBack = "Unavailable. " + mode;
+                swipe = "Unavailable. " + mode;
             }
             else
             {
@@ -172,7 +208,7 @@ public sealed partial class AndroidInteractionExploration
                         var unavailable = InputProblem(reply.Status);
                         Note(targets, AndroidInvestigationInput.Explore, unavailable);
                         talkBack = $"{sent} completed point samples; {reached} mapped focus observations. {unavailable}";
-                        if (reply.Status == "scope-changed")
+                        if (UnsafeReply(reply))
                         {
                             throw new InvestigationStop(unavailable);
                         }
@@ -192,11 +228,20 @@ public sealed partial class AndroidInteractionExploration
                     if (focus is { } hit && AndroidInteractionInventory.Contains(hit.Node.Bounds,
                         new(point.X, point.Y, point.X + 1, point.Y + 1)))
                     {
-                        reached++;
-                        var matched = FocusRow(rows, original, hit.Node);
-                        matched.Explore.Add($"Reached at ({point.X}, {point.Y}); event {hit.Event}, tree {hit.Tree}.");
-                        Note(targets.Where(row => row != matched), AndroidInvestigationInput.Explore,
-                            $"At ({point.X}, {point.Y}), TalkBack reached {matched.Candidate.Item.Label}, not this candidate.");
+                        var matched = FocusTargets(rows, original, hit.Node, modelProposalsOnly);
+                        if (matched.Count > 0)
+                        {
+                            reached++;
+                            foreach (var target in matched)
+                            {
+                                target.Explore.Add(modelProposalsOnly
+                                    ? $"Matched Android node reached at ({point.X}, {point.Y}); event {hit.Event}, tree {hit.Tree}."
+                                    : $"Reached at ({point.X}, {point.Y}); event {hit.Event}, tree {hit.Tree}.");
+                            }
+                        }
+                        Note(targets.Except(matched), AndroidInvestigationInput.Explore,
+                            $"At ({point.X}, {point.Y}), TalkBack reached {AndroidTalkBackExploration.ItemLabel(hit.Node)} " +
+                            $"(event {hit.Event}, tree {hit.Tree}); this proposal was not verified.");
                     }
                     else
                     {
@@ -212,14 +257,19 @@ public sealed partial class AndroidInteractionExploration
                 {
                     talkBack = "No verifiable points were available to sample.";
                 }
+                if (_investigationSwipe is not null)
+                {
+                    phase = await InvestigateSwipesAsync(viewport, phase, original, rows, modelProposalsOnly,
+                        summary => swipe = summary, progress, token).ConfigureAwait(false);
+                }
             }
 
-            Verify(viewport, phase.Cursor);
+            phase = Verify(viewport, phase.Cursor);
             progress?.Report("Testing keyboard Tab without TalkBack intercepting it.");
             token.ThrowIfCancellationRequested();
             mode = await modes.SetTalkBackAsync(false, token).ConfigureAwait(false);
             await _modeSettle(token).ConfigureAwait(false);
-            phase = Verify(viewport);
+            phase = Verify(viewport, phase.Cursor, changingMode: true);
             if (mode is not null)
             {
                 keyboard = direct = "Unavailable. " + mode;
@@ -252,13 +302,13 @@ public sealed partial class AndroidInteractionExploration
                     {
                         var unavailable = InputProblem(reply.Status);
                         keyboard = $"{sent} Tab keys sent; {seen.Count} items verified. {unavailable}";
-                        if (reply.Status == "scope-changed")
+                        if (UnsafeReply(reply))
                         {
                             throw new InvestigationStop(unavailable);
                         }
                         break;
                     }
-                    Verify(viewport, before.Cursor);
+                    before = Verify(viewport, before.Cursor);
                     token.ThrowIfCancellationRequested();
                     // Wait for a command already sent before restoring TalkBack.
                     // The mode implementation has its own short ADB timeout.
@@ -275,8 +325,11 @@ public sealed partial class AndroidInteractionExploration
                     phase = Verify(viewport, before.Cursor);
                     if (VerifiedFocus(phase, before, events, reply.Started, explore: false) is { } hit)
                     {
-                        var matched = FocusRow(rows, original, hit.Node);
-                        matched.Tab.Add($"Reached on Tab {step}; input focus (event {hit.Event}, tree {hit.Tree}).");
+                        foreach (var matched in FocusTargets(rows, original, hit.Node, modelProposalsOnly))
+                        {
+                            matched.Tab.Add($"{(modelProposalsOnly ? "Matched Android node reached" : "Reached")} on Tab {step}; " +
+                                $"input focus (event {hit.Event}, tree {hit.Tree}).");
+                        }
                         if (!seen.Add(NodeKey.Of(hit.Node)))
                         {
                             keyboard = $"{sent} Tab keys sent; {seen.Count} items verified. A previous input-focus stop was revisited.";
@@ -308,7 +361,9 @@ public sealed partial class AndroidInteractionExploration
                     }
                     var before = Verify(viewport, phase.Cursor);
                     var at = Center(box);
-                    var overlapping = rows.Where(row => row.Candidate.Item.Boxes.Any(bounds =>
+                    var overlapping = rows.Where(row => (row.Candidate.OriginalProposalBox is { } originalBox
+                        ? new[] { originalBox }
+                        : row.Candidate.Item.Boxes).Any(bounds =>
                         at.X >= bounds.Left && at.X < bounds.Right && at.Y >= bounds.Top && at.Y < bounds.Bottom));
                     if (overlapping.Select(row => row.Candidate.DuplicateTapRestriction).FirstOrDefault(reason => reason is not null)
                         is { } restriction)
@@ -323,15 +378,21 @@ public sealed partial class AndroidInteractionExploration
                         Note(targets, AndroidInvestigationInput.Tap, "Not tapped: the location overlaps a disabled Android item.");
                         continue;
                     }
-                    if (targets.Any(row => SensitiveAction(row.Candidate.Item.Label) ||
+                    if (overlapping.Any(row => SensitiveAction(row.Candidate.Item.Label) ||
                         (row.Candidate.VisionLabel is { } label && SensitiveAction(label))))
                     {
                         skipped++;
                         Note(targets, AndroidInvestigationInput.Tap, "Not tapped: label suggests a consequential action.");
                         continue;
                     }
+                    if (modelProposalsOnly && TreeTapRestriction(before, at) is { } treeRestriction)
+                    {
+                        skipped++;
+                        Note(targets, AndroidInvestigationInput.Tap, $"Not tapped: {treeRestriction}.");
+                        continue;
+                    }
                     if (!TryPoint(before, box, out var point) ||
-                        (targets.All(row => row.Candidate.Item.NodeIndex is null || row.Candidate.Item.Role == "Inline link") &&
+                        ((modelProposalsOnly || targets.All(row => row.Candidate.Item.NodeIndex is null || row.Candidate.Item.Role == "Inline link")) &&
                          PixelsChanged(start.Frame!, before.Frame!, box)))
                     {
                         skipped++;
@@ -343,23 +404,27 @@ public sealed partial class AndroidInteractionExploration
                     {
                         var unavailable = InputProblem(reply.Status);
                         Note(targets, AndroidInvestigationInput.Tap, unavailable);
-                        direct = $"{tapped} completed taps; {clicks} matched clicks; {visual} local visual changes. {unavailable}";
-                        if (reply.Status == "scope-changed")
+                        direct = $"{tapped} completed taps; {clicks} {clickCountLabel}; {visual} local visual changes. {unavailable}";
+                        if (UnsafeReply(reply))
                         {
                             throw new InvestigationStop(unavailable);
                         }
                         break;
                     }
                     tapped++;
-                    direct = $"{tapped} completed taps; {clicks} matched clicks; {visual} local visual changes. Pass interrupted.";
+                    direct = $"{tapped} completed taps; {clicks} {clickCountLabel}; {visual} local visual changes. Pass interrupted.";
                     await _settle(token).ConfigureAwait(false);
                     var events = Events(before);
                     var after = Capture();
-                    var result = ClickOrPicture(before, after, events, reply.Started, box, point);
+                    var result = ClickOrPicture(before, after, events, reply.Started, box, point, modelProposalsOnly);
                     clicks += result.ClickEvent.HasValue ? 1 : 0;
                     visual += result.AfterFrame.HasValue ? 1 : 0;
-                    Note(targets, AndroidInvestigationInput.Tap, $"At ({point.X}, {point.Y}): {result.Evidence}");
-                    direct = $"{tapped} completed taps; {clicks} matched clicks; {visual} local visual changes." +
+                    foreach (var target in targets)
+                    {
+                        var evidence = modelProposalsOnly ? AttributeClick(result, events, original, target.Candidate) : result.Evidence;
+                        target.Touch.Add($"At ({point.X}, {point.Y}): {evidence}");
+                    }
+                    direct = $"{tapped} completed taps; {clicks} {clickCountLabel}; {visual} local visual changes." +
                         (skipped > 0 ? $" {skipped} points skipped." : "") +
                         (tapped + skipped < tapPoints.Length ? $" {tapPoints.Length - tapped - skipped} planned points not tested." : "");
                     phase = Verify(viewport, before.Cursor, afterTap: true, expectedClick: result.ClickEvent);
@@ -399,15 +464,16 @@ public sealed partial class AndroidInteractionExploration
         {
             try
             {
-                if (modes is not null)
+                if (modes is not null && modeTouched)
                 {
                     progress?.Report("Verifying restoration of the original TalkBack setting.");
-                    restoration = await modes.RestoreAsync().ConfigureAwait(false);
+                    restoration = await modes.RestoreAsync().ConfigureAwait(false) ??
+                        (modelProposalsOnly ? "The original TalkBack setting was verified or no setting change was made." : null);
                 }
                 if (began)
                 {
                     // The result text may include live app names. Keep only stage summaries in recording markers.
-                    marker($"Recorder screen investigation {tag}: ended. {status} TalkBack: {talkBack} " +
+                    marker($"Recorder screen investigation {tag}: ended. {status} Swipe: {swipe} Explore by Touch: {talkBack} " +
                         $"Keyboard: {keyboard} Direct touch: {direct}" + (restoration is null ? "" : " " + restoration));
                 }
             }
@@ -416,17 +482,18 @@ public sealed partial class AndroidInteractionExploration
                 Volatile.Write(ref _investigating, 0);
             }
         }
-        var picture = start is not null && AndroidInvestigationPictures.CanUse(start) ? start : null;
+        var picture = !modelProposalsOnly && start is not null && AndroidInvestigationPictures.CanUse(start) ? start : null;
         var findings = rows.Select(row => row.Result(picture)).ToArray();
         return new(status, coverage, talkBack, keyboard, direct, findings, restoration,
             start?.App.Items?.SnapshotIndex, picture?.Frame?.Sequence)
         {
+            Swipe = swipe,
             StartingPicture = findings.Any(finding => finding.StartingLocation is not null) ? picture?.Frame : null
         };
     }
 
-    private AndroidInteractionSnapshot Verify(InvestigationViewport viewport, long? since = null,
-        bool afterTap = false, long? expectedClick = null)
+    private AndroidInteractionSnapshot Verify(InvestigationViewport viewport, long since,
+        bool afterTap = false, long? expectedClick = null, bool changingMode = false)
     {
         var current = Capture();
         if (!_ready() || current is null || current.Tree.Problem is not null || current.Tree.EarlierUpdateMissing ||
@@ -449,23 +516,24 @@ public sealed partial class AndroidInteractionExploration
         {
             throw new InvestigationStop("The window, display or visible app structure changed. Remaining input was not sent.");
         }
-        if (since is { } cursor)
+        var batch = _signals.After(since);
+        if (batch.Gap || batch.Events.Any(entry => entry is null))
         {
-            var batch = _signals.After(cursor);
-            if (batch.Gap || batch.Events.Any(entry => entry is null))
-            {
-                throw new InvestigationStop("Accessibility events were missing. Remaining input was not sent.");
-            }
-            if (batch.Events.OfType<AndroidAccessibilityEvent>().Any(entry =>
-                entry.EventTypeName is AndroidAccessibilityRecords.WindowStateChangedName or AndroidAccessibilityRecords.WindowsChangedName
-                    or "TYPE_VIEW_SCROLLED" or "TYPE_VIEW_LONG_CLICKED" or "TYPE_VIEW_TEXT_CHANGED" ||
-                (entry.EventTypeName is "TYPE_VIEW_CLICKED" && (!afterTap || entry.Index != expectedClick))))
-            {
-                throw new InvestigationStop("Android reported a window change, scroll or unexpected action. Remaining input was not sent.");
-            }
-            return new(current.Tree, current.App, current.Scope, current.Preview, current.Display, current.Input, batch.Cursor);
+            throw new InvestigationStop("Accessibility events were missing. Remaining input was not sent.");
         }
-        return current;
+        if (batch.Events.OfType<AndroidAccessibilityEvent>().Any(entry =>
+            ((entry.EventTypeName is AndroidAccessibilityRecords.WindowStateChangedName or AndroidAccessibilityRecords.WindowsChangedName) &&
+                (!changingMode || entry.PackageName == current.PackageName)) ||
+            entry.EventTypeName is "TYPE_VIEW_SCROLLED" or "TYPE_VIEW_LONG_CLICKED" or "TYPE_VIEW_TEXT_CHANGED" ||
+            (entry.EventTypeName is "TYPE_VIEW_CLICKED" && (!afterTap || entry.Index != expectedClick))))
+        {
+            throw new InvestigationStop("Android reported a window change, scroll or unexpected action. Remaining input was not sent.");
+        }
+        if (changingMode && FrameChangedOutside(viewport.Start.Frame!, current.Frame!, current.App.Window.Bounds))
+        {
+            throw new InvestigationStop("The app picture changed while switching TalkBack modes. Remaining input was not sent.");
+        }
+        return new(current.Tree, current.App, current.Scope, current.Preview, current.Display, current.Input, batch.Cursor);
     }
 
     private AndroidAccessibilityEvent[] Events(AndroidInteractionSnapshot before)
@@ -533,7 +601,8 @@ public sealed partial class AndroidInteractionExploration
         item.EventTimeMilliseconds >= (started - 500_000) / 1_000_000;
 
     internal static (AndroidTreeNode Node, long Event, long Tree)? VerifiedFocus(AndroidInteractionSnapshot after,
-        AndroidInteractionSnapshot before, IReadOnlyList<AndroidAccessibilityEvent> events, long started, bool explore)
+        AndroidInteractionSnapshot before, IReadOnlyList<AndroidAccessibilityEvent> events, long started, bool explore,
+        bool allowHover = true)
     {
         if (after.App.Items is not { } items || items.SnapshotIndex <= before.App.Items!.SnapshotIndex ||
             !SameWindow(before, after.App) || !(explore ? after.App.Window.AccessibilityFocused : after.App.Window.Focused))
@@ -549,7 +618,8 @@ public sealed partial class AndroidInteractionExploration
         var matches = events.Where(entry => Timed(entry, started) && entry.WindowId == before.App.Window.Id &&
             entry.PackageName == before.PackageName && entry.Source is not null &&
             entry.ReceivedPhoneNanoseconds <= items.StartedPhoneNanoseconds &&
-            (explore ? entry.EventTypeName is AndroidTalkBackSignals.Focus or HoverEnter : entry.EventTypeName == InputFocus))
+            (explore ? entry.EventTypeName == AndroidTalkBackSignals.Focus || allowHover && entry.EventTypeName == HoverEnter
+                : entry.EventTypeName == InputFocus))
             .ToArray();
         var preferred = matches.Where(entry => entry.EventTypeName == (explore ? AndroidTalkBackSignals.Focus : InputFocus)).ToArray();
         var candidates = preferred.Length > 0 ? preferred : matches.Where(entry => NodeKey.Of(entry.Source!) == key).ToArray();
@@ -559,7 +629,8 @@ public sealed partial class AndroidInteractionExploration
     }
 
     private static AndroidInteractionTapResult ClickOrPicture(AndroidInteractionSnapshot before, AndroidInteractionSnapshot? after,
-        AndroidAccessibilityEvent[] events, long started, AndroidNodeBounds box, AndroidInteractionPoint point)
+        AndroidAccessibilityEvent[] events, long started, AndroidNodeBounds box, AndroidInteractionPoint point,
+        bool explicitProposal)
     {
         var clicks = events.Where(entry => MatchesClick(entry, before.Scope, started, point.X, point.Y)).Take(2).ToArray();
         if (clicks.Length == 1)
@@ -570,11 +641,19 @@ public sealed partial class AndroidInteractionExploration
         {
             return new("More than one matching click followed the tap; attribution is uncertain.");
         }
+        if (explicitProposal && events.Any(entry => entry.EventTypeName == "TYPE_VIEW_CLICKED" && Timed(entry, started)))
+        {
+            return new("Android reported a click, but its source could not be tied to the sampled point.");
+        }
         if (after?.Frame is { } picture && after.HasScreenCoordinates && SameWindow(before, after.App) &&
             before.Preview.StreamSession == after.Preview.StreamSession && before.Display?.Rotation == after.Display?.Rotation &&
             picture.Sequence > before.Frame!.Sequence && picture.PhoneNanoseconds >= started + 55_000_000 &&
             PixelsChanged(before.Frame, picture, box))
         {
+            if (explicitProposal && FrameChangedOutside(before.Frame, picture, before.App.Window.Bounds, box))
+            {
+                return new($"The picture changed at and beyond the sampled region (frame {picture.Sequence}); no target activation was verified.");
+            }
             return new($"Pixels at the target changed after the tap (frame {picture.Sequence}); no Android click was matched.",
                 AfterFrame: picture.Sequence);
         }
@@ -623,6 +702,59 @@ public sealed partial class AndroidInteractionExploration
     private static int TapPriority(AndroidInteractionCandidate item) =>
         item.Role == "Inline link" || item.Evidence.Split(", ").Contains("Editable", StringComparer.Ordinal) ? 1 : 0;
 
+    private static IReadOnlyList<Finding> FocusTargets(List<Finding> findings, AndroidLiveTreeItems original,
+        AndroidTreeNode focused, bool proposalsOnly)
+    {
+        if (!proposalsOnly)
+        {
+            return [FocusRow(findings, original, focused)];
+        }
+        var key = NodeKey.Of(focused);
+        var nodes = original.Nodes.Where(node => node.VisibleToUser && NodeKey.Of(node) == key).Take(2).ToArray();
+        return nodes.Length != 1 ? [] : findings.Where(finding => finding.Candidate.Item.NodeIndex == nodes[0].Index &&
+            finding.Candidate.Item.Role != "Inline link").ToArray();
+    }
+
+    private static string AttributeClick(AndroidInteractionTapResult result, AndroidAccessibilityEvent[] events,
+        AndroidLiveTreeItems original, AndroidInvestigationCandidate candidate)
+    {
+        if (result.ClickEvent is not { } index || events.FirstOrDefault(item => item.Index == index)?.Source is not { } source)
+        {
+            return result.Evidence;
+        }
+        if (candidate.Item.NodeIndex is not { } expected || candidate.Item.Role == "Inline link")
+        {
+            return $"{result.Evidence} This establishes a click at the sampled point, not the identity of a separate control.";
+        }
+        var key = NodeKey.Of(source);
+        var nodes = original.Nodes.Where(node => node.VisibleToUser && NodeKey.Of(node) == key).Take(2).ToArray();
+        if (nodes.Length != 1)
+        {
+            return $"Android reported a click at the point (event {index}), but the matched Android node was not uniquely identified.";
+        }
+        return nodes[0].Index == expected ? $"Android reported a click on the matched node (event {index})." :
+            $"Android reported a click on another starting node ({nodes[0].Index}, event {index}), not on the matched node.";
+    }
+
+    private static string? TreeTapRestriction(AndroidInteractionSnapshot start, (int X, int Y) point)
+    {
+        var at = new AndroidNodeBounds(point.X, point.Y, point.X + 1, point.Y + 1);
+        foreach (var node in start.App.Items!.Nodes.Where(node => node.VisibleToUser &&
+            AndroidProposalInputPlan.AcceptsTouch(node) && AndroidInteractionInventory.Contains(node.Bounds, at)))
+        {
+            if (!node.Enabled)
+            {
+                return "Android reports a disabled control at the point";
+            }
+            if (new[] { node.Text, node.ContentDescription, node.Hint }.OfType<string>().Any(SensitiveAction) ||
+                node.Actions.Any(action => action.Label is { } label && SensitiveAction(label)))
+            {
+                return "an Android control at the point suggests a consequential action";
+            }
+        }
+        return null;
+    }
+
     private static Finding FocusRow(List<Finding> rows, AndroidLiveTreeItems original, AndroidTreeNode node)
     {
         var key = NodeKey.Of(node);
@@ -657,17 +789,29 @@ public sealed partial class AndroidInteractionExploration
         "direct-touch-unavailable" => "The phone did not confirm ordinary input mode without touch exploration or magnification.",
         "gesture-cancelled" => "Android cancelled the gesture. Its response is unknown.",
         "connection-lost" => "The phone companion connection was lost.",
+        "expired-or-busy" => "The phone companion was busy or the input request expired.",
         "companion-update-required" => "Update the phone companion to run this investigation.",
         _ => "The companion did not confirm this input.",
     };
 
+    private static bool UnsafeReply(CompanionNavigationReply reply) => reply.Started > 0 ||
+        reply.Status is "scope-changed" or "connection-lost" or "expired-or-busy" or "companion-update-required" or "gesture-cancelled";
+
     internal static bool SensitiveAction(string label)
     {
-        var words = label.Split([' ', '\t', '\r', '\n', ',', '.', ':', ';', '!', '?', '(', ')', '-', '/'],
-            StringSplitOptions.RemoveEmptyEntries);
-        return words.Any(word => new[] { "delete", "erase", "destroy", "purchase", "buy", "pay", "send",
-            "submit", "transfer", "factory", "uninstall", "publish", "checkout" }.Contains(word, StringComparer.OrdinalIgnoreCase));
+        var words = string.Concat(label.Select(character => char.IsLetterOrDigit(character) ? character : ' '))
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return words.Any(word => SensitiveWords.Contains(word));
     }
+
+    private static readonly HashSet<string> SensitiveWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "delete", "erase", "destroy", "purchase", "buy", "pay", "send", "submit", "transfer", "factory", "uninstall",
+        "publish", "checkout", "follow", "following", "unfollow", "subscribe", "subscribed", "unsubscribe", "like",
+        "liked", "unlike", "share", "repost",
+        "post", "favorite", "unfavorite", "block", "unblock", "report", "message", "call", "login", "logout", "approve",
+        "accept", "invite", "donate", "upload", "grant", "allow", "confirm", "bookmark", "save", "remove"
+    };
 
     private sealed class Finding(AndroidInvestigationCandidate candidate)
     {
@@ -675,6 +819,7 @@ public sealed partial class AndroidInteractionExploration
         public NodeKey? Observed { get; init; }
         public bool HasStartingLocation { get; init; } = true;
         public List<string> Explore { get; } = [];
+        public List<string> Swipe { get; } = [];
         public List<string> Tab { get; } = [];
         public List<string> Touch { get; } = [];
         public List<AndroidInvestigationTapPictures> Pictures { get; } = [];
@@ -682,9 +827,12 @@ public sealed partial class AndroidInteractionExploration
         public AndroidInvestigationFinding Result(AndroidInteractionSnapshot? picture) => new(Candidate.Item,
             Explore.Count > 0 ? Explore : [Candidate.SampleByTouch ? "Not sampled in this run." : "Not sampled for this item."],
             Tab.Count > 0 ? Tab : ["Not verified by Tab in this run."],
-            Touch.Count > 0 ? Touch : [Candidate.Item.Enabled == false ? "Not tapped: Android reports disabled." :
+            Touch.Count > 0 ? Touch : [Candidate.TapSkipReason is { } reason ? $"Not tapped: {reason}." :
+                Candidate.Item.Enabled == false ? "Not tapped: Android reports disabled." :
                 Candidate.Tap ? "Not tested in this run." : "Not a direct-tap candidate."])
         {
+            ProposalIndex = Candidate.ProposalIndex,
+            Swipe = Swipe.Count > 0 ? Swipe : ["Not verified by TalkBack swipe in this run."],
             StartingLocation = HasStartingLocation && picture is not null ?
                 AndroidInvestigationPictures.Locate(picture, Candidate.Item.Boxes) : null,
             TapPictures = Pictures.ToArray()

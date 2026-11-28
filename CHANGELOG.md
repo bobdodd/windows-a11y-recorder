@@ -35,9 +35,17 @@ Changes on `main` since 1.1.0, not yet released.
   adds the Android node, declared actions and enabled state, and a dashed
   outline beside the solid model outline. Ambiguous, unmatched, and
   unavailable tree evidence remain distinct. The tree is not sent to the
-  model and supplies no extra proposals or fallback. This test-data
-  diagnostic does not mask the image or send phone input. Paired recording
-  markers remain.
+  model and supplies no extra proposals or fallback. The model now keeps
+  enclosed or overlapping regions separate only when each has its own
+  visible interaction cue and touch location.
+- The same **Investigate this screen** command now runs bounded input
+  tests on an unchanged test viewport: TalkBack Explore by Touch,
+  right/left swipes, keyboard Tab, and direct taps. Evidence is separate
+  for each method and may be unverified, skipped or not tested. Direct
+  taps can activate app controls; the recorder skips ambiguous or
+  consequential points and stops rather than continuing on another
+  screen. The report keeps the illustrated proposals even when no input
+  can be sent and reports any TalkBack restoration warning.
 
 ### Native Android accessibility preflight research
 

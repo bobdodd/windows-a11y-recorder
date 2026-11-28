@@ -372,6 +372,7 @@ public partial class MainWindow : Window
         _androidLiveTree = trees.LiveTree;
         var touch = new AndroidTouchCollector(adb, serial, companion, companion);
         var accessibility = new AndroidAccessibilityCollector(serial, companion, companion);
+        _androidInteractionExploration = new(screen.LivePreview, trees.LiveTree, accessibility, touch, companion, adb, serial);
         _androidInvestigationProject = project;
         return
         [

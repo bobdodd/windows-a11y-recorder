@@ -92,7 +92,7 @@ internal sealed partial class AndroidInvestigationModes(IAdb adb, string serial)
 
     public async Task<string?> RestoreAsync()
     {
-        if (_original is null || (_expected == _original && _pending is null))
+        if (_original is null)
         {
             return null;
         }

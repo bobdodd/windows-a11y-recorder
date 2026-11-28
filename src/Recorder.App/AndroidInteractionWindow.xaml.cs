@@ -15,6 +15,7 @@ public partial class AndroidInteractionWindow : Window
 
     public AndroidInteractionWindow(AndroidLivePreviewFrame? frame,
         AndroidLiveTreeSnapshot tree, IPhoneDisplay? display,
+        AndroidInteractionExploration? exploration, AndroidInteractionSnapshot? start,
         Func<CancellationToken, Task<(ModelProfile? Profile, LocalServerSettings? Server, string? Problem)>> vision,
         Func<string, bool> marker, Action<Task> track)
     {
@@ -87,31 +88,43 @@ public partial class AndroidInteractionWindow : Window
                 return new("Visual discovery not assessed. No recorded phone screenshot was available.");
             }
             var tag = Guid.NewGuid().ToString("N")[..8];
-            if (!marker($"Recorder screen investigation {tag}: started; frame {frame.Sequence}."))
+            if (!marker($"Recorder model discovery {tag}: started; frame {frame.Sequence}."))
             {
                 return new("Visual discovery not assessed. The recording no longer accepts annotations.");
             }
+            var token = _closed.Token;
+            AndroidModelDiscoveryReport discovered;
             try
             {
-                var token = _closed.Token;
-                var result = await AndroidInteractionScan.ReadAsync(frame, vision, progress, token).ConfigureAwait(false);
+                discovered = await AndroidInteractionScan.ReadAsync(frame, vision, progress, token).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
-                if (result.Proposals is not { } proposals)
-                {
-                    return result;
-                }
-                if (proposals.Count > 0)
+                if (discovered.Proposals is { } modelProposals)
                 {
                     progress.Report("Comparing the model's proposals with the starting Android accessibility tree.");
+                    var matching = await Task.Run(() => AndroidProposalTreeMatching.Compare(frame, tree, display, modelProposals, token), token)
+                        .ConfigureAwait(false);
+                    discovered = discovered with { ScreenSize = (frame.Width, frame.Height), Tree = matching };
                 }
-                var matching = await Task.Run(() => AndroidProposalTreeMatching.Compare(frame, tree, display, proposals, token), token)
-                    .ConfigureAwait(false);
-                return result with { ScreenSize = (frame.Width, frame.Height), Tree = matching };
             }
             finally
             {
-                marker($"Recorder screen investigation {tag}: ended; frame {frame.Sequence}.");
+                marker($"Recorder model discovery {tag}: ended; frame {frame.Sequence}.");
             }
+            if (discovered.Proposals is not { Count: > 0 } proposals)
+            {
+                return discovered with { InputUnavailable = "No model proposals were available. No phone input was sent." };
+            }
+            if (exploration is null || start is null || discovered.Tree is not { } match)
+            {
+                return discovered with { InputUnavailable = "The starting app viewport was not available for input testing. No phone input was sent." };
+            }
+            var plan = AndroidProposalInputPlan.Build(start, proposals, match);
+            if (plan.Candidates.Count == 0)
+            {
+                return discovered with { InputUnavailable = plan.Coverage + " No phone input was sent." };
+            }
+            var input = await exploration.InvestigateProposalsAsync(start, plan, marker, progress, token).ConfigureAwait(false);
+            return discovered with { Status = input.Status, Input = input };
         }
     }
 

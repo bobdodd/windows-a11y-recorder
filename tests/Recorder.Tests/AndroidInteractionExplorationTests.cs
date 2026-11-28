@@ -560,6 +560,20 @@ public sealed class AndroidInteractionExplorationTests
         }
     }
 
+    [Fact]
+    public async Task RestorationReportsIndependentChangeAfterTalkBackReturnedToItsStartingMode()
+    {
+        var adb = new SettingsAdb();
+        var modes = new AndroidInvestigationModes(adb, "fixture");
+        var token = TestContext.Current.CancellationToken;
+        Assert.Null(await modes.SetTalkBackAsync(true, token));
+        Assert.Null(await modes.SetTalkBackAsync(false, token));
+        adb.Services += ":org.example.synthetic/.OtherService";
+        var expected = adb.Services;
+        Assert.Contains("without overwriting a separate change", await modes.RestoreAsync());
+        Assert.Equal(expected, adb.Services);
+    }
+
     private static AndroidLiveWindowSnapshot Window(params AndroidTreeNode[] nodes) =>
         new(App, new(1, 0, nodes, false, 0, Started - 30_000_000));
 
@@ -568,6 +582,240 @@ public sealed class AndroidInteractionExplorationTests
         Index = index, WindowId = App.Id, Bounds = bounds, PackageName = PackageName,
         VisibleToUser = true, Checked = "unchecked", Enabled = true
     };
+
+    [Theory]
+    [InlineData("empty")]
+    [InlineData("physical")]
+    [InlineData("scroll")]
+    [InlineData("picture")]
+    [InlineData("feeds")]
+    [InlineData("unaligned")]
+    public async Task FrozenModelInvestigationDoesNotSendInputIfStartingEvidenceIsLost(string failure)
+    {
+        var rig = new Rig { Ready = failure != "feeds" };
+        var modes = new ModeRig();
+        var service = rig.Service(() => throw new InvalidOperationException());
+        service.ConfigureInvestigation((_, _, _, _) => throw new InvalidOperationException("Unexpected input"),
+            () => modes, _ => Task.CompletedTask);
+        var model = new TaskCompletionSource<IReadOnlyList<AndroidVisionProposal>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var start = service.Capture()!;
+        var run = AfterModelAsync();
+        Assert.Empty(modes.Changes);
+        Assert.Empty(rig.Markers);
+        switch (failure)
+        {
+            case "physical": rig.Input = new(1, 0, false); break;
+            case "scroll": rig.Event("TYPE_VIEW_SCROLLED", null); break;
+            case "picture": rig.Preview.Publish(1, 2, 300, 500, Paint(Viewport), Started); break;
+            case "feeds": rig.Ready = true; break;
+        }
+        model.SetResult(failure == "empty" ? [] : [Proposal("Canvas switch", Canvas)]);
+        var report = await run;
+        Assert.Empty(modes.Changes);
+        Assert.Equal("Not run.", report.Swipe);
+        Assert.Equal("Not run.", report.TalkBack);
+        Assert.Equal("Not run.", report.Tab);
+        Assert.Equal("Not run.", report.DirectTouch);
+        if (failure is "unaligned" or "empty")
+        {
+            Assert.Empty(report.Findings);
+        }
+        else
+        {
+            Assert.Equal(0, Assert.Single(report.Findings).ProposalIndex);
+        }
+
+        async Task<AndroidInvestigationReport> AfterModelAsync()
+        {
+            var proposals = await model.Task.WaitAsync(TestContext.Current.CancellationToken);
+            var matches = failure == "unaligned"
+                ? new AndroidProposalTreeReport("Not aligned", [])
+                : new AndroidProposalTreeReport("Fixture tree", proposals.Select(_ => NoMatch).ToArray());
+            var plan = AndroidProposalInputPlan.Build(start, proposals, matches);
+            return await service.InvestigateProposalsAsync(start, plan, rig.Marker, null, TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task ProposalInputObservationsUseExactNodeAndSourceAndKeepFourMethodsSeparate()
+    {
+        var rig = new Rig();
+        var root = Node(0, Viewport);
+        var first = Node(1, new(15, 35, 120, 85)) with { Text = "First switch", Clickable = true, Focusable = true };
+        var second = Node(2, Canvas) with { Text = "Second switch", Clickable = true, Focusable = true };
+        var other = Node(3, new(40, 245, 120, 295)) with { Text = "Fixture other", Focusable = true };
+        int tree = 2, tab = 0;
+        long started = Started;
+        rig.Publish(tree, nodes: [root, first, second, other]);
+        var modes = new ModeRig
+        {
+            OnTab = () =>
+            {
+                switch (++tab)
+                {
+                    case 1: Focus(first, AndroidTalkBackSignals.Focus, true); break;
+                    case 2: Focus(second, AndroidInteractionExploration.InputFocus, false); break;
+                }
+            }
+        };
+        var service = rig.Service(() => throw new InvalidOperationException());
+        var start = service.Capture()!;
+        var plan = AndroidProposalInputPlan.Build(start,
+            [Proposal(first.Text, first.Bounds), Proposal(second.Text, second.Bounds), Proposal("Overlay glyph", first.Bounds)],
+            new("Fixture tree", [Match(first), Match(second), NoMatch]));
+        int explored = 0, swipe = 0, tap = 0;
+        service.ConfigureInvestigation((_, _, kind, _) =>
+        {
+            started += 2_000_000_000;
+            if (kind == AndroidInvestigationInput.Explore)
+            {
+                rig.Event(AndroidInteractionExploration.ExploreStart, null, started);
+                Focus(++explored == 1 ? first : second, AndroidTalkBackSignals.Focus, true);
+                rig.Event(AndroidInteractionExploration.ExploreEnd, null, started);
+            }
+            if (kind == AndroidInvestigationInput.Tap)
+            {
+                // Only the first click comes from its matched Android node.
+                rig.Event("TYPE_VIEW_CLICKED", ++tap == 1 ? first : root, started);
+            }
+            return Task.FromResult(new CompanionNavigationReply(1, kind == AndroidInvestigationInput.Tab ? "ready" : "dispatched", started));
+        }, () => modes, _ => Task.CompletedTask, (right, _, _) =>
+        {
+            started += 2_000_000_000;
+            Assert.Equal(swipe < 2, right);
+            switch (++swipe)
+            {
+                case 1: Focus(other, AndroidTalkBackSignals.Focus, true); break;
+                case 2: Focus(second, AndroidInteractionExploration.HoverEnter, true); break;
+                case 3: Focus(first, AndroidTalkBackSignals.Focus, true); break;
+                case 4: Focus(first, AndroidTalkBackSignals.Focus, true); break; // same focus re-emitted
+            }
+            return Task.FromResult(new CompanionNavigationReply(1, "dispatched", started));
+        });
+        var report = await service.InvestigateProposalsAsync(start, plan, rig.Marker, null, TestContext.Current.CancellationToken);
+        Assert.Equal((2, 4, 4, 2), (explored, swipe, tab, tap));
+        Assert.Equal(["on", "off", "restored"], modes.Changes);
+        Assert.Equal([0, 1, 2], report.Findings.Select(finding => finding.ProposalIndex!.Value));
+        Assert.Contains("2 focus stops observed; 1 matched", report.Swipe);
+        Assert.Contains("left", Assert.Single(report.Findings[0].Swipe));
+        Assert.Contains("Not verified", Assert.Single(report.Findings[1].Swipe));
+        Assert.Contains("reached at", Assert.Single(report.Findings[0].ExploreByTouch));
+        Assert.Contains("this proposal was not verified", Assert.Single(report.Findings[2].ExploreByTouch));
+        Assert.Contains("Not verified", Assert.Single(report.Findings[0].Tab));
+        Assert.Contains("on Tab 2; input focus", Assert.Single(report.Findings[1].Tab));
+        Assert.Contains("click on the matched node", Assert.Single(report.Findings[0].DirectTouch));
+        Assert.Contains("click on another starting node", Assert.Single(report.Findings[1].DirectTouch));
+        Assert.Contains("overlaps proposal 1", Assert.Single(report.Findings[2].DirectTouch));
+        Assert.All(rig.Markers, marker => Assert.DoesNotContain("Fixture other", marker));
+
+        void Focus(AndroidTreeNode target, string eventName, bool accessibility)
+        {
+            rig.Event(eventName, target, started);
+            rig.Publish(++tree, nodes: new[] { root, first, second, other }.Select(node => node with
+            {
+                AccessibilityFocused = accessibility && node.Index == target.Index,
+                Focused = !accessibility && node.Index == target.Index
+            }).ToArray(), at: started + 70_000_000, accessibilityFocused: accessibility);
+        }
+    }
+
+    [Fact]
+    public async Task DirectTouchRejectsConsequentialUnderlyingNodeAndUnmatchedOverlappingAlias()
+    {
+        var rig = new Rig();
+        var top = Node(1, new(15, 35, 120, 85)) with { Clickable = true, Actions = [new(16, "Follow")] };
+        var bottom = Node(2, Canvas) with { Clickable = true, Text = "Fixture switch" };
+        var badge = new AndroidNodeBounds(110, 156, 140, 167);
+        rig.Publish(2, nodes: [Node(0, Viewport), top, bottom]);
+        var service = rig.Service(() => throw new InvalidOperationException());
+        var start = service.Capture()!;
+        var plan = AndroidProposalInputPlan.Build(start,
+            [Proposal("Top symbol", top.Bounds), Proposal(bottom.Text, bottom.Bounds), Proposal("Share", badge)],
+            new("Fixture tree", [NoMatch, Match(bottom), NoMatch]));
+        service.ConfigureInvestigation((_, _, kind, _) =>
+        {
+            Assert.NotEqual(AndroidInvestigationInput.Tap, kind);
+            return Task.FromResult(new CompanionNavigationReply(1, kind == AndroidInvestigationInput.Tab ? "ready" : "dispatched", Started));
+        }, () => new ModeRig(), _ => Task.CompletedTask);
+        var report = await service.InvestigateProposalsAsync(start, plan, rig.Marker, null, TestContext.Current.CancellationToken);
+        Assert.Contains("Android control at the point suggests a consequential action", Assert.Single(report.Findings[0].DirectTouch));
+        Assert.Contains("label suggests a consequential action", Assert.Single(report.Findings[1].DirectTouch));
+        Assert.Contains("overlaps proposal 2", Assert.Single(report.Findings[2].DirectTouch));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task InterruptedSwipeStopsOtherInputsAndStillRestoresTalkBack(bool cancelledByUser)
+    {
+        var rig = new Rig();
+        var node = Node(1, Canvas) with { AccessibilityFocused = true, Text = "Fixture switch", Clickable = true };
+        rig.Publish(2, nodes: [Node(0, Viewport), node], accessibilityFocused: true);
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var modes = new ModeRig();
+        var service = rig.Service(() => throw new InvalidOperationException());
+        var start = service.Capture()!;
+        var plan = AndroidProposalInputPlan.Build(start, [Proposal(node.Text, node.Bounds)], new("Fixture tree", [Match(node)]));
+        service.ConfigureInvestigation((_, _, input, _) =>
+        {
+            Assert.Equal(AndroidInvestigationInput.Explore, input);
+            return Task.FromResult(new CompanionNavigationReply(1, "dispatched", Started));
+        }, () => modes, _ => Task.CompletedTask, (_, _, _) =>
+        {
+            if (cancelledByUser)
+            {
+                cancel.Cancel();
+            }
+            return Task.FromResult(new CompanionNavigationReply(1, "gesture-cancelled", Started));
+        });
+        var report = await service.InvestigateProposalsAsync(start, plan, rig.Marker, null, cancel.Token);
+        Assert.Contains(cancelledByUser ? "Investigation stopped" : "Android cancelled the gesture", report.Status);
+        Assert.Equal("Not run.", report.Tab);
+        Assert.Equal("Not run.", report.DirectTouch);
+        Assert.Equal(["on", "restored"], modes.Changes);
+        Assert.Equal(2, rig.Markers.Count);
+    }
+
+    [Fact]
+    public void NestedTapPlanKeepsSeparateControlsAndPreservesDuplicateProposals()
+    {
+        var rig = new Rig();
+        var outer = Node(1, Canvas) with { Clickable = true, Text = "Large switch" };
+        var inner = Node(2, new(77, 148, 96, 174)) with { Clickable = true, Text = "Small switch" };
+        rig.Publish(2, nodes: [Node(0, Viewport), outer, inner]);
+        var plan = AndroidProposalInputPlan.Build(rig.Service(() => throw new InvalidOperationException()).Capture()!,
+            [Proposal(outer.Text, outer.Bounds), Proposal(inner.Text, inner.Bounds), Proposal(inner.Text, inner.Bounds)],
+            new("Fixture tree", [Match(outer), Match(inner), Match(inner)]));
+        Assert.Equal([0, 1, 2], plan.Candidates.Select(candidate => candidate.ProposalIndex!.Value));
+        Assert.All(plan.Candidates, candidate => Assert.True(candidate.Tap));
+        Assert.Equal(plan.Candidates[1].Item.Boxes, plan.Candidates[2].Item.Boxes);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EdgeBadgeGetsSeparateTapOnlyWithSeparateAndroidControl(bool separatelyDeclared)
+    {
+        var rig = new Rig();
+        var outer = Node(1, Canvas) with { Clickable = true, Text = "Large switch" };
+        var edge = Node(2, new(156, 150, 188, 172)) with { Clickable = true, Text = "Small switch" };
+        rig.Publish(2, nodes: separatelyDeclared ? [Node(0, Viewport), outer, edge] : [Node(0, Viewport), outer]);
+        var plan = AndroidProposalInputPlan.Build(rig.Service(() => throw new InvalidOperationException()).Capture()!,
+            [Proposal(outer.Text, outer.Bounds), Proposal(edge.Text, edge.Bounds)],
+            new("Fixture tree", [Match(outer), separatelyDeclared ? Match(edge) : NoMatch]));
+        Assert.Equal(2, plan.Candidates.Count);
+        Assert.True(plan.Candidates[0].Tap);
+        Assert.Equal(separatelyDeclared, plan.Candidates[1].Tap);
+    }
+
+    private static AndroidVisionProposal Proposal(string? label, AndroidNodeBounds box) =>
+        new(label!, new(box.Left * 10 / 3, box.Top * 2, (box.Right * 10 + 2) / 3, box.Bottom * 2));
+
+    private static AndroidProposalTreeMatch Match(AndroidTreeNode node) =>
+        new(AndroidProposalTreeMatchKind.Matched,
+            [new(new(node.Text!, "Activate", [node.Bounds], node.Enabled, node.Index), node.Bounds)]);
+
+    private static AndroidProposalTreeMatch NoMatch { get; } = new(AndroidProposalTreeMatchKind.NoMatch, []);
 
     private static byte[] Paint(AndroidNodeBounds? box = null, byte r = 255, byte g = 255, byte b = 255)
     {
