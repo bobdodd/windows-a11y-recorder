@@ -9,7 +9,11 @@ using Recorder.Collectors.Android;
 namespace Recorder.App;
 
 internal sealed record AndroidModelDiscoveryReport(string Status, string? Model = null, ulong? Frame = null,
-    byte[]? InputPng = null, IReadOnlyList<AndroidVisionProposal>? Proposals = null);
+    byte[]? InputPng = null, IReadOnlyList<AndroidVisionProposal>? Proposals = null)
+{
+    public (int Width, int Height) ScreenSize { get; init; }
+    public AndroidProposalTreeReport? Tree { get; init; }
+}
 
 internal static class AndroidInteractionScan
 {

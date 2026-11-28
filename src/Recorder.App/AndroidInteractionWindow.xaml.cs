@@ -14,11 +14,12 @@ public partial class AndroidInteractionWindow : Window
     private bool _isClosed;
 
     public AndroidInteractionWindow(AndroidLivePreviewFrame? frame,
+        AndroidLiveTreeSnapshot tree, IPhoneDisplay? display,
         Func<CancellationToken, Task<(ModelProfile? Profile, LocalServerSettings? Server, string? Problem)>> vision,
         Func<string, bool> marker, Action<Task> track)
     {
         InitializeComponent();
-        RunStatus.Text = "Preparing one screenshot for model-only discovery.";
+        RunStatus.Text = "Preparing one screenshot for model discovery.";
         Closed += (_, _) =>
         {
             _isClosed = true;
@@ -57,15 +58,15 @@ public partial class AndroidInteractionWindow : Window
             {
                 if (!_isClosed)
                 {
-                    ShowStatus("Model discovery was cancelled.");
+                    ShowStatus("Screen investigation was cancelled.");
                 }
             }
             catch (Exception ex)
             {
-                Trace.TraceWarning("Android model discovery stopped: {0}", ex.GetType().Name);
+                Trace.TraceWarning("Android screen investigation stopped: {0}", ex.GetType().Name);
                 if (!_isClosed)
                 {
-                    ShowStatus("The model discovery report could not be completed.");
+                    ShowStatus("The screen investigation report could not be completed.");
                 }
             }
             finally
@@ -86,17 +87,30 @@ public partial class AndroidInteractionWindow : Window
                 return new("Visual discovery not assessed. No recorded phone screenshot was available.");
             }
             var tag = Guid.NewGuid().ToString("N")[..8];
-            if (!marker($"Recorder model discovery {tag}: started; frame {frame.Sequence}."))
+            if (!marker($"Recorder screen investigation {tag}: started; frame {frame.Sequence}."))
             {
                 return new("Visual discovery not assessed. The recording no longer accepts annotations.");
             }
             try
             {
-                return await AndroidInteractionScan.ReadAsync(frame, vision, progress, _closed.Token);
+                var token = _closed.Token;
+                var result = await AndroidInteractionScan.ReadAsync(frame, vision, progress, token).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                if (result.Proposals is not { } proposals)
+                {
+                    return result;
+                }
+                if (proposals.Count > 0)
+                {
+                    progress.Report("Comparing the model's proposals with the starting Android accessibility tree.");
+                }
+                var matching = await Task.Run(() => AndroidProposalTreeMatching.Compare(frame, tree, display, proposals, token), token)
+                    .ConfigureAwait(false);
+                return result with { ScreenSize = (frame.Width, frame.Height), Tree = matching };
             }
             finally
             {
-                marker($"Recorder model discovery {tag}: ended; frame {frame.Sequence}.");
+                marker($"Recorder screen investigation {tag}: ended; frame {frame.Sequence}.");
             }
         }
     }
@@ -109,7 +123,7 @@ public partial class AndroidInteractionWindow : Window
         {
             Stop();
             CloseReport.IsEnabled = false;
-            ShowStatus("Stopping model discovery.");
+            ShowStatus("Stopping screen investigation.");
         }
         else
         {

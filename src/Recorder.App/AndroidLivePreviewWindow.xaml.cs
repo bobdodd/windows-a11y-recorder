@@ -16,6 +16,7 @@ public partial class AndroidLivePreviewWindow : Window
     private static readonly Duration NoWait = new(TimeSpan.Zero);
     private readonly AndroidLivePreview _preview;
     private readonly AndroidLiveTree _liveTree;
+    private readonly IPhoneDisplay? _display;
     private readonly Func<CancellationToken, Task<(ModelProfile? Profile, LocalServerSettings? Server, string? Problem)>> _visionProfile;
     private readonly Func<string, bool> _recordMarker;
     private readonly Action<Task> _trackExploration;
@@ -28,12 +29,13 @@ public partial class AndroidLivePreviewWindow : Window
     private ulong? _sequence;
     private bool _renderFailed;
 
-    public AndroidLivePreviewWindow(AndroidLivePreview preview, AndroidLiveTree liveTree,
+    public AndroidLivePreviewWindow(AndroidLivePreview preview, AndroidLiveTree liveTree, IPhoneDisplay? display,
         Func<CancellationToken, Task<(ModelProfile? Profile, LocalServerSettings? Server, string? Problem)>> visionProfile,
         Func<string, bool> recordMarker, Action<Task> trackExploration)
     {
         _preview = preview;
         _liveTree = liveTree;
+        _display = display;
         _visionProfile = visionProfile;
         _recordMarker = recordMarker;
         _trackExploration = trackExploration;
@@ -180,7 +182,11 @@ public partial class AndroidLivePreviewWindow : Window
             open.Activate();
             return;
         }
-        var window = new AndroidInteractionWindow(_preview.Current.Frame, _visionProfile, _recordMarker, _trackExploration) { Owner = this };
+        // Keep the existing tree beside the starting frame. Do not interpret it
+        // before the model returns or substitute a later tree during matching.
+        var frame = _preview.Current.Frame;
+        var tree = _liveTree.Current;
+        var window = new AndroidInteractionWindow(frame, tree, _display, _visionProfile, _recordMarker, _trackExploration) { Owner = this };
         PlaceTreeWindow(window);
         _interactionsWindow = window;
         window.Closed += (_, _) =>

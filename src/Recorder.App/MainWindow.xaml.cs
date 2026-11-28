@@ -366,6 +366,7 @@ public partial class MainWindow : Window
         var server = Path.Combine(AndroidTools.BundledFolder(AppContext.BaseDirectory), AndroidTools.ScrcpyServer.Name);
         var screen = new AndroidScreenCollector(adb, serial, server, companion);
         _androidLivePreview = screen.LivePreview;
+        _androidLiveDisplay = companion;
         _talkBack = new AndroidTalkBackCollector(adb, serial, companion);
         var trees = new AndroidAccessibilityTreeCollector(serial, companion, companion);
         _androidLiveTree = trees.LiveTree;

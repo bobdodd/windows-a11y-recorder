@@ -515,21 +515,36 @@ slice's full test goes into a validation plan,
   The result does not establish activation, grouping speech, visual-only
   elements or reachability by other navigation modes. No model is used.
 - **Live screen investigation.** The preview's **Investigate this screen**
-  command currently runs model discovery only. It uses one full recorded
-  phone frame from the live preview. The test-data diagnostic does not
-  crop or mask it or consult the Android tree. The explicitly selected complex
-  vision model is told this is an Android phone app and asked to propose
+  command sends one full recorded phone frame from the live preview.
+  The test-data diagnostic does not crop or mask it or send tree data.
+  The explicitly selected complex vision model is told this is an Android
+  phone app and asked to propose
   likely touch targets: one box per distinct apparent action rather than
   per visual part. The model reads visible labels itself. The recorder
   does not run OCR or shape-based discovery. It validates the structured
   answer of at most 40 proposals, then displays the exact input PNG, every
   returned label and normalized box in its original order, and an outlined
   close-up for each proposal. Overlapping and identical proposals are not
-  suppressed. The report shows no tree entries, tree-derived outlines, or
-  input evidence.
-  The separate live tree inspector is unchanged. Neither a proposal nor an
-  outline establishes interactivity. The report is live and copyable;
-  paired markers record its frame reference, not its labels or images.
+  suppressed.
+  After a valid model answer, the recorder compares the proposed boxes
+  with visible nodes and located inline links in the active app window on
+  the default display. It compares bounds and, when they agree spatially,
+  labels. It uses the already available tree held at invocation, not an
+  update received while the model was running. The reported display
+  geometry must agree at the frame and tree times. If the tree was taken
+  more than 500 ms after the frame, the app window transitioned after
+  either capture, or coordinates cannot be aligned, matching is
+  unavailable. Event-driven snapshots can be older than the frame; the
+  report shows the node snapshot, timing, carried-forward or incomplete
+  evidence. It does not assert frame-exact synchronization.
+  The original proposal remains separate from a clear match, plausible
+  alternatives, or a lack of a clear match in the captured app tree.
+  Clear matches add a dashed outline to the original solid model box
+  and report the Android label, class, declared actions and enabled
+  state. Tree-only items do not become proposals.
+  The separate live tree inspector is unchanged. A proposal, outline or
+  declared action does not establish activation. The report is live and
+  copyable; paired markers record its frame reference, not labels or images.
   The selected model follows the project's normal local, LAN, or opt-in
   Anthropic route and uses the provider's response format. A managed local
   model can start cold if the analysis worker does not hold the server;
@@ -537,10 +552,8 @@ slice's full test goes into a validation plan,
   to 55 seconds. With no usable screenshot or model response, visual
   discovery is unassessed. There is no inherited simple-model or tree
   fallback.
-- **Deferred live input investigation.** Keep the matching and input
-  implementation for a later stage. The preview does not call either
-  while the model diagnostic is active. The matcher reconciles proposals
-  by bounds and label to Android nodes and inline links. It can select a
+- **Deferred live input investigation.** The preview does not run the
+  input implementation. Its separate candidate planner can select a
   supported whole-control proposal over a duplicate fragment without
   merging different declared hit locations or losing alias tap guards.
   Protocol 12 adds point exploration and a guard for keyboard input. The

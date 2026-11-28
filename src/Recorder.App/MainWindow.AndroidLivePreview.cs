@@ -9,6 +9,7 @@ public partial class MainWindow
 {
     private AndroidLivePreview? _androidLivePreview;
     private AndroidLiveTree? _androidLiveTree;
+    private IPhoneDisplay? _androidLiveDisplay;
     private Guid? _androidInvestigationProject;
     private AndroidLivePreviewWindow? _androidLivePreviewWindow;
     private Task _androidExplorationCompletion = Task.CompletedTask;
@@ -24,6 +25,7 @@ public partial class MainWindow
     {
         _androidLivePreview = null;
         _androidLiveTree = null;
+        _androidLiveDisplay = null;
         _androidInvestigationProject = null;
         AndroidLivePreviewMenuItem.IsEnabled = false;
         AndroidLivePreviewButton.Visibility = Visibility.Collapsed;
@@ -51,7 +53,7 @@ public partial class MainWindow
         }
 
         var coordinator = _coordinator;
-        var window = new AndroidLivePreviewWindow(preview, tree, InvestigationVisionProfileAsync,
+        var window = new AndroidLivePreviewWindow(preview, tree, _androidLiveDisplay, InvestigationVisionProfileAsync,
             coordinator.AddMarker, task =>
         {
             // If the preview was just reopened, keep waiting for any previous

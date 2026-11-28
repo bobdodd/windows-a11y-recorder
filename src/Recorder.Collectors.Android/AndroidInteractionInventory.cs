@@ -32,7 +32,11 @@ public static class AndroidInteractionInventory
     private static bool NavigationOnly(int id) => id is
         0 or 1 or 2 or 64 or 128 or 256 or 512 or 1024 or 2048 or 0x01020036 or 0x01020044 or 0x01020045;
 
-    public static IReadOnlyList<AndroidInteractionCandidate> Declared(AndroidLiveWindowSnapshot app)
+    public static IReadOnlyList<AndroidInteractionCandidate> Declared(AndroidLiveWindowSnapshot app) =>
+        Describe(app, includeWithoutActions: false, redactPasswords: true);
+
+    internal static IReadOnlyList<AndroidInteractionCandidate> Describe(AndroidLiveWindowSnapshot app,
+        bool includeWithoutActions, bool redactPasswords)
     {
         if (app.Items is not { } items)
         {
@@ -68,16 +72,18 @@ public static class AndroidInteractionInventory
                 string.IsNullOrWhiteSpace(action.Label)
                     ? ActionNames.GetValueOrDefault(action.Id, $"Action {action.Id}")
                     : $"{action.Label} (action {action.Id})"));
-            if (actions.Count > 0)
+            var protect = redactPasswords && node.Password;
+            var linkedLabels = node.LabeledBy.Select(index => labels.GetValueOrDefault(index))
+                .OfType<AndroidTreeNode>().Where(label => !redactPasswords || !label.Password)
+                .Select(label => First(label.ContentDescription, label.Text));
+            var name = protect ? First(node.Hint, "Password item") :
+                First(node.ContentDescription, node.Text, string.Join(" ", linkedLabels), node.Hint);
+            if (actions.Count > 0 || (includeWithoutActions && (name.Length > 0 || node.ChildCount == 0)))
             {
-                var linkedLabels = node.LabeledBy.Select(index => labels.GetValueOrDefault(index))
-                    .OfType<AndroidTreeNode>().Where(label => !label.Password).Select(label => First(label.ContentDescription, label.Text));
-                var label = node.Password ? First(node.Hint, "Password item") : First(node.ContentDescription, node.Text,
-                    string.Join(" ", linkedLabels), node.Hint, node.ViewId, "Unnamed item");
-                result.Add(new(label,
+                result.Add(new(First(name, node.ViewId, "Unnamed item"),
                     string.Join(", ", actions.Distinct()), [box], node.Enabled, node.Index, node.ClassName));
             }
-            foreach (var link in node.Password ? [] : node.Links ?? [])
+            foreach (var link in protect ? [] : node.Links ?? [])
             {
                 var boxes = link.Boxes.Select(part => Intersection(part, box)).OfType<AndroidNodeBounds>().ToArray();
                 if (link.Boxes.Count > 0 && boxes.Length == 0)

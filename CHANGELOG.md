@@ -27,15 +27,17 @@ Changes on `main` since 1.1.0, not yet released.
   markers, independently of selection. The companion refreshes the affected
   window when Android sends focus events, including accessibility focus
   clearing, even if the layout has not changed.
-- **Investigate this screen** is currently a model-only diagnostic in the
-  live Android preview. It asks the explicitly selected complex vision
-  model to identify likely app touch targets on one full recorded phone frame.
-  The copyable report shows the exact submitted screenshot and each valid
-  proposal's label, original coordinates, and outlined close-up in model
-  order. It keeps repeated and overlapping proposals visible for debugging.
-  This test-data diagnostic does not mask or screen the image. Tree matching
-  and phone-input passes are deferred. Paired recording markers remain.
-  An unavailable model yields no proposals, with no fallback.
+- **Investigate this screen** asks the explicitly selected complex vision
+  model for likely touch targets on one full recorded phone frame, then
+  compares those proposals with the Android tree held at invocation.
+  The copyable report keeps the exact submitted screenshot and the
+  model's original labels, order, boxes, and duplicates. A clear match
+  adds the Android node, declared actions and enabled state, and a dashed
+  outline beside the solid model outline. Ambiguous, unmatched, and
+  unavailable tree evidence remain distinct. The tree is not sent to the
+  model and supplies no extra proposals or fallback. This test-data
+  diagnostic does not mask the image or send phone input. Paired recording
+  markers remain.
 
 ### Native Android accessibility preflight research
 

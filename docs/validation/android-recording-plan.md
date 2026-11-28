@@ -3539,18 +3539,19 @@ notes with the same pass ID. A single-swipe run uses `automated
 verification` in its start note. The full-pass stop count and reason
 were not supplied for this result.
 
-## Live screen investigation: model-only report
+## Live screen investigation: model proposals with Android tree matching
 
-These physical tests are pending. Use the **TalkBack Navigation Fixture** in
-**APK Evidence Fixtures** or a synthetic Android screen with known controls.
-The separately implemented tree matcher and input passes are deferred and
-not reachable from the model diagnostic.
+Use the **TalkBack Navigation Fixture** in **APK Evidence Fixtures** or a
+synthetic Android screen with known controls. The tester reported that the
+model-only diagnostic identified and described likely touch targets well
+with Opus 5.5 selected. That result precedes tree matching and does not
+validate it or any input pass. Input passes remain deferred.
 
 ### Test 91: discover without phone input
 
 1. With TalkBack off and the fixture showing **No fixture action**, start Android recording with a complex image model selected.
 2. Open **Live Android preview...** and choose **Investigate this screen** once.
-3. Check that the report has no Android tree entries or TalkBack, Tab, or direct-touch results. The fixture still shows **No fixture action**.
+3. Check that the report says TalkBack Explore by Touch, Tab and direct touch were not tested. The fixture still shows **No fixture action**.
 4. Check on the phone that TalkBack is still off.
 
 ### Test 92: read the model input and proposal images
@@ -3576,3 +3577,16 @@ not reachable from the model diagnostic.
 1. Select a test model endpoint that returns a fixed valid list with a nested box and a repeated box.
 2. Choose **Investigate this screen** once.
 3. Check that all proposals appear in the supplied order at their original coordinates, including the nested and repeated boxes.
+
+### Test 96: compare one proposed button with its Android declaration
+
+1. Start an Android recording, then open the synthetic fixture screen with a named button. Let the picture settle.
+2. In **Live Android preview...**, choose **Investigate this screen** once.
+3. Find the model's proposal for the button. Check that the Android match shows its reported name and **Activate**, with a dashed tree outline distinct from the solid model outline.
+4. Check that the button has not activated and that the report has not added a second proposal for the matched tree node.
+
+### Test 97: keep the starting tree while the model runs
+
+1. While recording, open a synthetic fixture screen and let the picture settle.
+2. Choose **Investigate this screen**. While the model is reading the screenshot, move to a different fixture screen.
+3. Check that the report still shows the starting screenshot and does not match its proposals to the second screen's nodes.
