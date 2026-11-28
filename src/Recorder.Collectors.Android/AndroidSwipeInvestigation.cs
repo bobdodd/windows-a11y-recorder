@@ -48,7 +48,8 @@ public sealed partial class AndroidInteractionExploration
             await _settle(token).ConfigureAwait(false);
             var events = Events(before);
             var after = Verify(viewport, before.Cursor);
-            var hit = VerifiedFocus(after, before, events, reply.Started, explore: true, allowHover: false);
+            var hit = VerifiedFocus(after, before, events, reply.Started, explore: true, allowHover: false,
+                compareLayer: !proposalsOnly);
             var previous = before.App.Items!.Nodes.Where(node => node.VisibleToUser && node.AccessibilityFocused).Take(2).ToArray();
             if (hit is { } same && previous.Length == 1 && NodeKey.Of(same.Node) == NodeKey.Of(previous[0]))
             {

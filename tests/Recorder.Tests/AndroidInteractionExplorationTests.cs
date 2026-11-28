@@ -584,13 +584,20 @@ public sealed class AndroidInteractionExplorationTests
     };
 
     [Theory]
-    [InlineData("empty")]
-    [InlineData("physical")]
-    [InlineData("scroll")]
-    [InlineData("picture")]
-    [InlineData("feeds")]
-    [InlineData("unaligned")]
-    public async Task FrozenModelInvestigationDoesNotSendInputIfStartingEvidenceIsLost(string failure)
+    [InlineData("empty", "No model proposals")]
+    [InlineData("physical", "Physical phone input was detected")]
+    [InlineData("scroll", "Android reported scrolling")]
+    [InlineData("picture", "picture changed substantially during discovery")]
+    [InlineData("feeds", "starting app tree or input evidence feed was incomplete")]
+    [InlineData("unaligned", "No model proposals")]
+    [InlineData("window", "app window moved or resized")]
+    [InlineData("transition", "new transition for the active app window")]
+    [InlineData("rotation", "phone display rotated")]
+    [InlineData("display", "could not be aligned")]
+    [InlineData("stream", "video stream stopped or changed")]
+    [InlineData("navigation", "Android reported a window change")]
+    [InlineData("missing event", "Accessibility events were missing")]
+    public async Task FrozenModelInvestigationDoesNotSendInputIfStartingEvidenceIsLost(string failure, string reason)
     {
         var rig = new Rig { Ready = failure != "feeds" };
         var modes = new ModeRig();
@@ -608,10 +615,21 @@ public sealed class AndroidInteractionExplorationTests
             case "scroll": rig.Event("TYPE_VIEW_SCROLLED", null); break;
             case "picture": rig.Preview.Publish(1, 2, 300, 500, Paint(Viewport), Started); break;
             case "feeds": rig.Ready = true; break;
+            case "window": rig.Publish(2, bounds: new(0, 10, 300, 500)); break;
+            case "transition": rig.Publish(2, transition: Started / 1_000_000); break;
+            case "rotation": rig.Display = rig.Display with { Rotation = 90 }; break;
+            case "display": rig.Display = rig.Display with { ShownWidth = 299 }; break;
+            case "stream":
+                rig.Preview.BeginSession(2);
+                rig.Preview.Publish(2, 2, 300, 500, Paint(), Started);
+                break;
+            case "navigation": rig.Event(AndroidAccessibilityRecords.WindowStateChangedName, null); break;
+            case "missing event": rig.Signals.Observe(null); break;
         }
         model.SetResult(failure == "empty" ? [] : [Proposal("Canvas switch", Canvas)]);
         var report = await run;
         Assert.Empty(modes.Changes);
+        Assert.Contains(reason, report.Status);
         Assert.Equal("Not run.", report.Swipe);
         Assert.Equal("Not run.", report.TalkBack);
         Assert.Equal("Not run.", report.Tab);
@@ -644,6 +662,8 @@ public sealed class AndroidInteractionExplorationTests
         var first = Node(1, new(15, 35, 120, 85)) with { Text = "First switch", Clickable = true, Focusable = true };
         var second = Node(2, Canvas) with { Text = "Second switch", Clickable = true, Focusable = true };
         var other = Node(3, new(40, 245, 120, 295)) with { Text = "Fixture other", Focusable = true };
+        var refreshed = new[] { root, other with { Text = "Fixture updated detail", Index = 1 },
+            second with { Depth = 3 }, first with { Index = 3, Depth = 2 } };
         int tree = 2, tab = 0;
         long started = Started;
         rig.Publish(tree, nodes: [root, first, second, other]);
@@ -663,6 +683,9 @@ public sealed class AndroidInteractionExplorationTests
         var plan = AndroidProposalInputPlan.Build(start,
             [Proposal(first.Text, first.Bounds), Proposal(second.Text, second.Bounds), Proposal("Overlay glyph", first.Bounds)],
             new("Fixture tree", [Match(first), Match(second), NoMatch]));
+        // A fresh tree during discovery reindexes siblings, changes depth and
+        // refreshes an unrelated focusable label outside the proposal points.
+        rig.Publish(++tree, nodes: refreshed);
         int explored = 0, swipe = 0, tap = 0;
         service.ConfigureInvestigation((_, _, kind, _) =>
         {
@@ -679,13 +702,19 @@ public sealed class AndroidInteractionExplorationTests
                 rig.Event("TYPE_VIEW_CLICKED", ++tap == 1 ? first : root, started);
             }
             return Task.FromResult(new CompanionNavigationReply(1, kind == AndroidInvestigationInput.Tab ? "ready" : "dispatched", started));
-        }, () => modes, _ => Task.CompletedTask, (right, _, _) =>
+        }, () => modes, _ =>
+        {
+            var enabling = modes.Changes[^1] == "on";
+            rig.Publish(++tree, nodes: refreshed, layer: enabling ? 2 : 0);
+            rig.Event(AndroidAccessibilityRecords.WindowsChangedName, null, started, windowChanges: 0x90);
+            return Task.CompletedTask;
+        }, (right, _, _) =>
         {
             started += 2_000_000_000;
             Assert.Equal(swipe < 2, right);
             switch (++swipe)
             {
-                case 1: Focus(other, AndroidTalkBackSignals.Focus, true); break;
+                case 1: Focus(refreshed[1], AndroidTalkBackSignals.Focus, true); break;
                 case 2: Focus(second, AndroidInteractionExploration.HoverEnter, true); break;
                 case 3: Focus(first, AndroidTalkBackSignals.Focus, true); break;
                 case 4: Focus(first, AndroidTalkBackSignals.Focus, true); break; // same focus re-emitted
@@ -711,12 +740,97 @@ public sealed class AndroidInteractionExplorationTests
         void Focus(AndroidTreeNode target, string eventName, bool accessibility)
         {
             rig.Event(eventName, target, started);
-            rig.Publish(++tree, nodes: new[] { root, first, second, other }.Select(node => node with
+            rig.Publish(++tree, nodes: refreshed.Select(node => node with
             {
-                AccessibilityFocused = accessibility && node.Index == target.Index,
-                Focused = !accessibility && node.Index == target.Index
-            }).ToArray(), at: started + 70_000_000, accessibilityFocused: accessibility);
+                AccessibilityFocused = accessibility && node.Bounds == target.Bounds,
+                Focused = !accessibility && node.Bounds == target.Bounds
+            }).ToArray(), at: started + 70_000_000, accessibilityFocused: accessibility, layer: accessibility ? 2 : 0);
         }
+    }
+
+    [Theory]
+    [InlineData("moved", "matched Android node changed")]
+    [InlineData("duplicate", "not uniquely identifiable")]
+    [InlineData("local pixels", "picture at this point changed")]
+    [InlineData("new hit", "Android touch targets at this point changed")]
+    public async Task ProposalWithLocalDriftIsSkippedWithoutBlockingAnUnchangedPoint(string change, string reason)
+    {
+        var rig = new Rig();
+        var root = Node(0, Viewport);
+        var first = Node(1, new(15, 35, 103, 75)) with { Text = "First switch", Clickable = true };
+        var second = Node(2, Canvas) with { Text = "Second switch", Clickable = true };
+        rig.Publish(2, nodes: [root, first, second]);
+        var service = rig.Service(() => throw new InvalidOperationException());
+        var start = service.Capture()!;
+        var plan = AndroidProposalInputPlan.Build(start, [Proposal(first.Text, first.Bounds), Proposal(second.Text, second.Bounds)],
+            new("Fixture tree", [change == "new hit" ? NoMatch : Match(first), Match(second)]));
+        var modes = new ModeRig();
+        var points = new List<AndroidInvestigationInput>();
+        service.ConfigureInvestigation((_, point, kind, _) =>
+        {
+            if (kind is AndroidInvestigationInput.Explore or AndroidInvestigationInput.Tap)
+            {
+                Assert.Equal((125, 161), (point.X, point.Y));
+                points.Add(kind);
+            }
+            return Task.FromResult(new CompanionNavigationReply(1, kind == AndroidInvestigationInput.Tab ? "ready" : "dispatched", Started));
+        }, () => modes, _ => Task.CompletedTask);
+        switch (change)
+        {
+            case "moved":
+                rig.Publish(3, nodes: [root, first with { Bounds = new(15, 80, 103, 120) }, second]);
+                break;
+            case "duplicate":
+                rig.Publish(3, nodes: [root, first, second, first with { Index = 3 }]);
+                break;
+            case "local pixels":
+                rig.Preview.Publish(1, 2, 300, 500, Paint(first.Bounds), Started);
+                break;
+            case "new hit":
+                rig.Publish(3, nodes: [root, first, second, Node(3, first.Bounds) with { Clickable = true, Text = "New switch" }]);
+                break;
+        }
+
+        var report = await service.InvestigateProposalsAsync(start, plan, rig.Marker, null, TestContext.Current.CancellationToken);
+        Assert.Equal([AndroidInvestigationInput.Explore, AndroidInvestigationInput.Tap], points);
+        Assert.Contains("2 Tab keys sent", report.Tab);
+        Assert.Contains(reason, Assert.Single(report.Findings[0].ExploreByTouch));
+        Assert.Contains(reason, Assert.Single(report.Findings[0].DirectTouch));
+        Assert.Equal(["on", "off", "restored"], modes.Changes);
+    }
+
+    [Theory]
+    [InlineData(false, "Most of the original matched controls moved")]
+    [InlineData(true, "Android reported a window change")]
+    public async Task InvestigationDoesNotSendInputWhenTheScreenChangesWhileTalkBackSettles(bool navigation, string reason)
+    {
+        var rig = new Rig();
+        var root = Node(0, Viewport);
+        var first = Node(1, new(15, 35, 103, 75)) with { Text = "First switch", Clickable = true };
+        var second = Node(2, Canvas) with { Text = "Second switch", Clickable = true };
+        rig.Publish(2, nodes: [root, first, second]);
+        var service = rig.Service(() => throw new InvalidOperationException());
+        var start = service.Capture()!;
+        var plan = AndroidProposalInputPlan.Build(start, [Proposal(first.Text, first.Bounds), Proposal(second.Text, second.Bounds)],
+            new("Fixture tree", [Match(first), Match(second)]));
+        var modes = new ModeRig();
+        service.ConfigureInvestigation((_, _, _, _) => throw new InvalidOperationException("Unexpected input"), () => modes, _ =>
+        {
+            if (navigation)
+            {
+                rig.Event(AndroidAccessibilityRecords.WindowStateChangedName, null, windowId: 12, package: "org.example.other");
+            }
+            else
+            {
+                rig.Publish(3, nodes: [root, first with { Bounds = new(15, 80, 103, 120) }, second with { Text = "Replacement" }]);
+            }
+            return Task.CompletedTask;
+        });
+        var report = await service.InvestigateProposalsAsync(start, plan, rig.Marker, null, TestContext.Current.CancellationToken);
+        Assert.Contains(reason, report.Status);
+        Assert.Equal("Not run.", report.TalkBack);
+        Assert.Equal("Not run.", report.Tab);
+        Assert.Equal(["on", "restored"], modes.Changes);
     }
 
     [Fact]
@@ -866,10 +980,12 @@ public sealed class AndroidInteractionExplorationTests
             }, _ => Task.CompletedTask);
 
         internal void Publish(long index, bool overlay = false, IReadOnlyList<AndroidTreeNode>? nodes = null,
-            long at = Started - 30_000_000, bool accessibilityFocused = false, AndroidNodeBounds? bounds = null)
+            long at = Started - 30_000_000, bool accessibilityFocused = false, AndroidNodeBounds? bounds = null,
+            int layer = 0, long? transition = null)
         {
             var app = App with { Items = nodes ?? [Node(0, Viewport)], Focused = true,
-                AccessibilityFocused = accessibilityFocused, Bounds = bounds ?? App.Bounds };
+                AccessibilityFocused = accessibilityFocused, Bounds = bounds ?? App.Bounds, Layer = layer,
+                TransitionTimeMilliseconds = transition };
             _tree.Publish(new AndroidAccessibilityTree
             {
                 Index = index, EveryWindow = true, StartedPhoneNanoseconds = at,
@@ -879,11 +995,12 @@ public sealed class AndroidInteractionExplorationTests
             });
         }
 
-        internal void Event(string name, AndroidAccessibilityNode? source, long started = Started) => Signals.Observe(new()
+        internal void Event(string name, AndroidAccessibilityNode? source, long started = Started,
+            int windowChanges = 0, int? windowId = null, string package = PackageName) => Signals.Observe(new()
         {
             Index = ++_eventIndex, EventType = 1, EventTypeName = name, EventTimeMilliseconds = started / 1_000_000 + 60,
             ReceivedPhoneNanoseconds = started + 61_000_000, HandledPhoneNanoseconds = started + 63_000_000,
-            WindowId = App.Id, DisplayId = 0, PackageName = PackageName, Source = source
+            WindowId = windowId ?? App.Id, DisplayId = 0, PackageName = package, Source = source, WindowChanges = windowChanges
         });
 
         internal bool Marker(string marker)

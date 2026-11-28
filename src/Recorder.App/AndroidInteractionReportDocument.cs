@@ -31,6 +31,7 @@ internal static class AndroidInteractionReportDocument
         var observed = new Dictionary<int, AndroidInvestigationFinding>();
         if (report.Input is { } tested)
         {
+            Line(document, $"Input testing: {tested.Status}");
             Line(document, $"TalkBack swipes: {tested.Swipe}");
             Line(document, $"TalkBack Explore by Touch: {tested.TalkBack}");
             Line(document, $"Keyboard Tab: {tested.Tab}");

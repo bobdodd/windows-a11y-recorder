@@ -3591,4 +3591,15 @@ checks a change of screen.
 1. While recording, open a synthetic fixture screen and let the picture settle.
 2. Choose **Investigate this screen**. While the model is reading the screenshot, move to a different fixture screen.
 3. Check that the report still shows the starting screenshot and does not match its proposals to the second screen's nodes.
-4. Check that no input test runs on the second screen and the report says why the pass stopped.
+4. Check that no input test runs on the second screen. Select and copy the **Input testing** line beside the four method summaries with Ctrl+C. It should say which guard stopped the run.
+
+### Automated regression: tolerate an unrelated tree refresh
+
+`AndroidInteractionExplorationTests` reorders and reindexes the Android
+tree, updates an unrelated label while proposals are pending, and changes
+app window layer metadata as TalkBack starts. The same four input stages
+still run, and focus and click attribution remain tied to the starting
+Android identities. Tests separately check that a moved or duplicated
+node, changed local pixels or a new hit target skips the affected point,
+while lost events, scrolling, viewport-wide drift and navigation stop
+input with a specific reason.

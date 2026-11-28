@@ -46,6 +46,10 @@ Changes on `main` since 1.1.0, not yet released.
   consequential points and stops rather than continuing on another
   screen. The report keeps the illustrated proposals even when no input
   can be sent and reports any TalkBack restoration warning.
+- Model-led input tests no longer stop just because Android reordered the
+  tree or refreshed unrelated nodes. A changed or obscured target can be
+  skipped without blocking unchanged targets. The copyable report names
+  the reason an input test stopped and why individual points were skipped.
 
 ### Native Android accessibility preflight research
 

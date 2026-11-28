@@ -567,6 +567,18 @@ slice's full test goes into a validation plan,
   a verified stop. A focus stop is only attributed to the matching starting
   Android node, never a nearby box or an inline link's host. Unproposed
   stops do not become report entries.
+  The live guard does not require identical tree order, indexes, or wrapper
+  depth. It checks the original app window and display, major pixel drift,
+  and whether most of the originally unique matched control identities were
+  lost (when at least two were available). An isolated change skips an
+  exploration or tap point if its original matched Android node, touch
+  declarations, link boxes or local picture no longer agree, or a live
+  overlay covers it. Unmatched targets still need stable point evidence.
+  Layer and accessibility-focus flags alone do not mean the app navigated.
+  During the requested TalkBack mode switch, recognized overlay lifecycle
+  events can settle without treating them as app navigation. App window
+  transitions, bounds changes, and scroll events still stop tests. The
+  copyable report places the stop reason next to the four method summaries.
   The input phase has a three-minute limit, excluding bounded restoration.
   It samples up to 44 exploration points, sends up to 24 TalkBack swipes
   and 40 Tabs, and tries up to 36 direct-tap points. Direct taps can activate

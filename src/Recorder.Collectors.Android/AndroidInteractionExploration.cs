@@ -245,9 +245,9 @@ public sealed partial class AndroidInteractionExploration
         }
     }
 
-    private static bool SameWindow(AndroidInteractionSnapshot before, AndroidLiveWindowSnapshot? after) =>
+    private static bool SameWindow(AndroidInteractionSnapshot before, AndroidLiveWindowSnapshot? after, bool compareLayer = true) =>
         after?.Window is { } window && before.App.Window.Id == window.Id &&
-        before.App.Window.Bounds == window.Bounds && before.App.Window.Layer == window.Layer &&
+        before.App.Window.Bounds == window.Bounds && (!compareLayer || before.App.Window.Layer == window.Layer) &&
         before.App.Window.TransitionTimeMilliseconds == window.TransitionTimeMilliseconds &&
         string.Equals(before.PackageName, after.Items?.Nodes.FirstOrDefault()?.PackageName, StringComparison.Ordinal);
 
