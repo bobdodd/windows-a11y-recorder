@@ -1,5 +1,8 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Recorder.Analysis;
+using Recorder.Collectors.Android;
+using Recorder.Contracts;
 
 namespace Recorder.Tests;
 
@@ -38,7 +41,7 @@ public sealed class AndroidInteractionVisionTests
         Assert.Equal(profile.Model, request["model"]!.GetValue<string>());
         var messages = request["messages"]!.AsArray();
         var content = messages[^1]!["content"]!.AsArray();
-        Assert.Equal("Identify the apparent controls in this app viewport.", content[0]!["text"]!.GetValue<string>());
+        Assert.Equal("Identify likely touch targets in this Android app screenshot.", content[0]!["text"]!.GetValue<string>());
         Assert.Equal(3, content.Count);
         JsonNode? schema;
         if (anthropic)
@@ -60,10 +63,44 @@ public sealed class AndroidInteractionVisionTests
         Assert.Equal("integer", schema["properties"]!["targets"]!["items"]!["properties"]!["box"]!["items"]!["type"]!.GetValue<string>());
         Assert.DoesNotContain("known rectangles", request.ToJsonString(), StringComparison.OrdinalIgnoreCase);
         var instructions = (anthropic ? request["system"] : messages[0]!["content"])!.GetValue<string>();
-        Assert.Contains("Count controls, not visual parts", instructions, StringComparison.Ordinal);
+        Assert.Contains("Android app on a phone", instructions, StringComparison.Ordinal);
+        Assert.Contains("using the app by touch", instructions, StringComparison.Ordinal);
+        Assert.Contains("Count distinct actions, not visual parts", instructions, StringComparison.Ordinal);
         Assert.Contains("compare your boxes for nesting and shared pixels", instructions, StringComparison.Ordinal);
-        Assert.Contains("different rows at different locations", instructions, StringComparison.Ordinal);
+        Assert.Contains("Repeated controls at different locations", instructions, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void DiagnosticPreservesOverlappingAndRepeatedProposalsInModelOrder()
+    {
+        var proposals = AndroidVisionProposals.Parse("""
+            {"targets":[{"label":"Icon","box":[250,900,350,950]},{"label":" Whole surface ","box":[200,800,400,975]},
+                        {"label":"Icon","box":[250,900,350,950]},{"label":"Near edge","box":[999,0,1000,1]}]}
+            """);
+        Assert.NotNull(proposals);
+        Assert.Equal(4, proposals.Count);
+        Assert.Equal(" Whole surface ", proposals[1].Label);
+        Assert.Equal(new AndroidNodeBounds(200, 800, 400, 975), proposals[1].NormalizedBox);
+        Assert.Equal(proposals[0], proposals[2]);
+        Assert.Equal(new AndroidNodeBounds(99, 0, 100, 1), proposals[3].ImageBounds(100, 400));
+        Assert.Empty(AndroidVisionProposals.Parse("""{"targets":[]}""")!);
+    }
+
+    [Theory]
+    [InlineData("""{"targets":[{"label":"Tool","box":[200,100,900,400],"command":"tap"}]}""")]
+    [InlineData("""{"targets":[{"label":"Tool","box":[200,100,1001,400]}]}""")]
+    [InlineData("""{"targets":[{"label":"Tool","box":[200,100,900,400],"label":"Repeated"}]}""")]
+    [InlineData("""{"targets":[{"label":"Tool","box":[200,100,200,400]}]}""")]
+    [InlineData("""{"targets":[""")]
+    public void RejectsMalformedAndNonLocationOutput(string output) => Assert.Null(AndroidVisionProposals.Parse(output));
+
+    [Fact]
+    public void RejectsOutputBeyondTheProposalLimit() =>
+        Assert.Null(AndroidVisionProposals.Parse(JsonSerializer.Serialize(new
+        {
+            targets = Enumerable.Repeat(new { label = "Tool", box = new[] { 200, 100, 900, 400 } },
+                AndroidVisionProposals.Limit + 1)
+        })));
 
     [Theory]
     [InlineData("stop", null, true)]

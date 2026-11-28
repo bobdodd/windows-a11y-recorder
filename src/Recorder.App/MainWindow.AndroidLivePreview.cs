@@ -9,7 +9,6 @@ public partial class MainWindow
 {
     private AndroidLivePreview? _androidLivePreview;
     private AndroidLiveTree? _androidLiveTree;
-    private AndroidInteractionExploration? _androidInteractions;
     private Guid? _androidInvestigationProject;
     private AndroidLivePreviewWindow? _androidLivePreviewWindow;
     private Task _androidExplorationCompletion = Task.CompletedTask;
@@ -25,7 +24,6 @@ public partial class MainWindow
     {
         _androidLivePreview = null;
         _androidLiveTree = null;
-        _androidInteractions = null;
         _androidInvestigationProject = null;
         AndroidLivePreviewMenuItem.IsEnabled = false;
         AndroidLivePreviewButton.Visibility = Visibility.Collapsed;
@@ -37,8 +35,7 @@ public partial class MainWindow
     private void AndroidLivePreview_Click(object sender, RoutedEventArgs e)
     {
         if (_transitioning || _coordinator?.State != RecordingSessionState.Recording ||
-            _androidLivePreview is not { } preview || _androidLiveTree is not { } tree ||
-            _androidInteractions is not { } interactions)
+            _androidLivePreview is not { } preview || _androidLiveTree is not { } tree)
         {
             return;
         }
@@ -54,11 +51,11 @@ public partial class MainWindow
         }
 
         var coordinator = _coordinator;
-        var window = new AndroidLivePreviewWindow(preview, tree, interactions, InvestigationVisionProfileAsync,
+        var window = new AndroidLivePreviewWindow(preview, tree, InvestigationVisionProfileAsync,
             coordinator.AddMarker, task =>
         {
             // If the preview was just reopened, keep waiting for any previous
-            // scan's pending gesture/end marker as well.
+            // scan's cancellation and end marker as well.
             _androidExplorationCompletion = _androidExplorationCompletion.IsCompleted
                 ? task : Task.WhenAll(_androidExplorationCompletion, task);
         }) { Owner = this };

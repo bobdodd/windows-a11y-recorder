@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:Recorder.App"
-        Title="Screen interactivity report" Width="730" Height="650" MinWidth="390" MinHeight="340"
+        Title="Screen investigation: model proposals" Width="730" Height="650" MinWidth="390" MinHeight="340"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
         Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
@@ -18,11 +18,11 @@
     <RichTextBox Grid.Row="1" x:Name="Report" IsReadOnly="True" IsUndoEnabled="False" AllowDrop="False"
                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="9"
                  CommandManager.PreviewExecuted="Report_PreviewExecuted"
-                 AutomationProperties.Name="Screen interactivity report"
-                 AutomationProperties.HelpText="Select text and use Ctrl+C to copy. Screenshot captions state which item and frame are shown.">
+                 AutomationProperties.Name="Screen investigation: model proposals"
+                 AutomationProperties.HelpText="Select text and use Ctrl+C to copy. Captions identify the input screenshot and the model's boxes.">
       <FlowDocument PagePadding="0" />
     </RichTextBox>
     <Button Grid.Row="2" x:Name="CloseReport" Margin="0,10,0,0" MinHeight="44" Padding="14,0"
-            HorizontalAlignment="Right" Content="_Stop investigation" Click="Close_Click" />
+            HorizontalAlignment="Right" Content="_Stop model scan" Click="Close_Click" />
   </Grid>
 </Window>

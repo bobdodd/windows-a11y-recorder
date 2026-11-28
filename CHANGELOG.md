@@ -27,33 +27,15 @@ Changes on `main` since 1.1.0, not yet released.
   markers, independently of selection. The companion refreshes the affected
   window when Android sends focus events, including accessibility focus
   clearing, even if the layout has not changed.
-- **Investigate this screen** replaces the separate TalkBack swipe and
-  manual tap tools in the preview. One run inventories the current
-  viewport, samples TalkBack Explore by Touch, sends real keyboard Tabs
-  without TalkBack interception, and directly taps apparent controls.
-  The copyable report separates Android declarations, accessibility and
-  input focus, matched Android clicks, local picture changes, and untested
-  targets. The recording project's explicitly selected complex vision model
-  reads the starting app screenshot first and reviews its proposed controls
-  for repeated content. The recorder removes overlapping or nested proposals
-  for the same target without collapsing independently declared controls at
-  distinct locations. The report counts removed duplicates and distinguishes
-  matched, model-only, and independently declared Android controls.
-  There is no standalone OCR or outline detection for discovery. If the
-  complex model cannot run, the report marks visual discovery as unassessed
-  and uses tree declarations and observed input only; it does not inherit
-  the simple model.
-- The screen investigation report shows outlined close-ups of recorded
-  targets next to their findings. For corroborated local picture changes,
-  it shows matching before and after tap crops when the screen still maps.
-  Captions identify the frames and bounds; the outline is not evidence of
-  focus or activation. The images are live report content, not new files.
-- The recorder stops input if the viewport or required evidence changes.
-  It restores the original TalkBack service setting where it can verify
-  a safe restoration, and adds paired investigation markers to the
-  recording. This requires companion protocol 12. The earlier directional
-  swipe check passed on a phone; the new end-to-end investigation still
-  needs physical-device validation.
+- **Investigate this screen** is currently a model-only diagnostic in the
+  live Android preview. It asks the explicitly selected complex vision
+  model to identify likely app touch targets on one full recorded phone frame.
+  The copyable report shows the exact submitted screenshot and each valid
+  proposal's label, original coordinates, and outlined close-up in model
+  order. It keeps repeated and overlapping proposals visible for debugging.
+  This test-data diagnostic does not mask or screen the image. Tree matching
+  and phone-input passes are deferred. Paired recording markers remain.
+  An unavailable model yields no proposals, with no fallback.
 
 ### Native Android accessibility preflight research
 

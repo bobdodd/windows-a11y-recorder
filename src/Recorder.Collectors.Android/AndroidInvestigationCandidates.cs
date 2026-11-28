@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Recorder.Contracts;
 
 namespace Recorder.Collectors.Android;
@@ -8,47 +7,6 @@ public sealed record AndroidVisionMapping(IReadOnlyList<AndroidInvestigationCand
 
 public static class AndroidInvestigationCandidates
 {
-    public const int ProposalLimit = 40;
-
-    public static IReadOnlyList<(AndroidNodeBounds Box, string Label)>? ParseProposals(string content, AndroidNodeBounds crop)
-    {
-        using var json = JsonDocument.Parse(content, new JsonDocumentOptions { MaxDepth = 6 });
-        var root = json.RootElement;
-        if (root.ValueKind != JsonValueKind.Object || root.EnumerateObject().Count() != 1 ||
-            !root.TryGetProperty("targets", out var entries) || entries.ValueKind != JsonValueKind.Array || entries.GetArrayLength() > ProposalLimit)
-        {
-            return null;
-        }
-        var width = crop.Right - crop.Left;
-        var height = crop.Bottom - crop.Top;
-        var result = new List<(AndroidNodeBounds, string)>();
-        foreach (var target in entries.EnumerateArray())
-        {
-            if (target.ValueKind != JsonValueKind.Object || target.EnumerateObject().Count() != 2 ||
-                !target.TryGetProperty("box", out var box) || box.ValueKind != JsonValueKind.Array || box.GetArrayLength() != 4 ||
-                !target.TryGetProperty("label", out var named) || named.ValueKind != JsonValueKind.String || named.GetString() is not { } label ||
-                label.Length is 0 or > 80 || label.Any(char.IsControl) || !label.Any(char.IsLetterOrDigit))
-            {
-                return null;
-            }
-            var coords = new int[4];
-            for (var i = 0; i < coords.Length; i++)
-            {
-                if (box[i].ValueKind != JsonValueKind.Number || !box[i].TryGetInt32(out coords[i]) || coords[i] is < 0 or > 1000)
-                {
-                    return null;
-                }
-            }
-            if (coords[0] >= coords[2] || coords[1] >= coords[3])
-            {
-                return null;
-            }
-            result.Add((new(crop.Left + (int)((long)coords[0] * width / 1000), crop.Top + (int)((long)coords[1] * height / 1000),
-                crop.Left + (int)((long)coords[2] * width / 1000), crop.Top + (int)((long)coords[3] * height / 1000)), label.Trim()));
-        }
-        return result;
-    }
-
     public static AndroidVisionMapping Map(AndroidInteractionSnapshot snapshot,
         IReadOnlyList<(AndroidNodeBounds Box, string Label)> proposals)
     {
@@ -82,8 +40,8 @@ public static class AndroidInvestigationCandidates
             }).ToArray();
         var protectedAreas = snapshot.Occluders.Concat(nodes.Values.Where(node => node.Password).Select(node => node.Bounds)).ToArray();
         var eligible = new List<VisionProposal>();
-        var omitted = Math.Max(0, proposals.Count - ProposalLimit);
-        foreach (var (box, label) in proposals.Take(ProposalLimit))
+        var omitted = Math.Max(0, proposals.Count - AndroidVisionProposals.Limit);
+        foreach (var (box, label) in proposals.Take(AndroidVisionProposals.Limit))
         {
             if (!snapshot.HasScreenCoordinates || snapshot.Frame is not { } frame ||
                 box.Right - box.Left < 10 || box.Bottom - box.Top < 10 ||

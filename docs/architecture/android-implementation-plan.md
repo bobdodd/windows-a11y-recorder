@@ -515,30 +515,34 @@ slice's full test goes into a validation plan,
   The result does not establish activation, grouping speech, visual-only
   elements or reachability by other navigation modes. No model is used.
 - **Live screen investigation.** The preview's **Investigate this screen**
-  command starts one bounded run on the current test viewport with no
-  per-target prompts. The picture itself remains view-only. The recording
-  project's explicitly selected model for complex vision-based checks reads
-  one frozen app viewport before candidate discovery from the tree; overlay
-  windows are masked. The simple model is not used as an inherited fallback.
-  The model reads visible labels itself. The recorder does not run standalone
-  OCR or promote contrast shapes, image fragments, or static text on its own.
-  The model returns at most 40 labelled rectangles. It is asked to treat the
-  visual parts of a single control as one target and review nested and
-  overlapping proposals for reuse of the same content. Valid, in-scope
-  rectangles are matched by bounds and label to Android nodes and inline
-  links. The recorder prefers a supported whole-control proposal over a
-  fragment and removes duplicates without merging distinct declared hit
-  locations. A removed alias cannot strip a direct-tap safeguard. The report
-  counts removed duplicates and distinguishes matched, model-only, and
-  independently tree-declared controls. A model suggestion, with or without
-  a match, is not proof of activation.
+  command currently runs model discovery only. It uses one full recorded
+  phone frame from the live preview. The test-data diagnostic does not
+  crop or mask it or consult the Android tree. The explicitly selected complex
+  vision model is told this is an Android phone app and asked to propose
+  likely touch targets: one box per distinct apparent action rather than
+  per visual part. The model reads visible labels itself. The recorder
+  does not run OCR or shape-based discovery. It validates the structured
+  answer of at most 40 proposals, then displays the exact input PNG, every
+  returned label and normalized box in its original order, and an outlined
+  close-up for each proposal. Overlapping and identical proposals are not
+  suppressed. The report shows no tree entries, tree-derived outlines, or
+  input evidence.
+  The separate live tree inspector is unchanged. Neither a proposal nor an
+  outline establishes interactivity. The report is live and copyable;
+  paired markers record its frame reference, not its labels or images.
   The selected model follows the project's normal local, LAN, or opt-in
   Anthropic route and uses the provider's response format. A managed local
   model can start cold if the analysis worker does not hold the server;
   the live scan does not evict an analysis model. The model stage is limited
-  to 55 seconds. With no usable model response, unmappable coordinates,
-  an incomplete tree, or a reported password field, visual discovery is
-  listed as unassessed and no replacement visual heuristics are run.
+  to 55 seconds. With no usable screenshot or model response, visual
+  discovery is unassessed. There is no inherited simple-model or tree
+  fallback.
+- **Deferred live input investigation.** Keep the matching and input
+  implementation for a later stage. The preview does not call either
+  while the model diagnostic is active. The matcher reconciles proposals
+  by bounds and label to Android nodes and inline links. It can select a
+  supported whole-control proposal over a duplicate fragment without
+  merging different declared hit locations or losing alias tap guards.
   Protocol 12 adds point exploration and a guard for keyboard input. The
   companion dispatches a stationary single-finger gesture only when verified
   TalkBack and touch exploration are active. The report needs Android
@@ -561,7 +565,7 @@ slice's full test goes into a validation plan,
   exit, the recorder verifies the original list was restored or reports
   a warning without overwriting unrelated setting changes. This does not
   restore app state or either focus position.
-  One selectable report shows each evidenced item and what was not tested
+  The deferred input report design shows each evidenced item and what was not tested
   or not verified. The report annotates mapped close-ups of the starting
   picture with candidate bounds. A direct tap with corroborated local
   picture change can show before and after crops of the same region,

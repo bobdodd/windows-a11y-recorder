@@ -38,7 +38,7 @@
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
     <StackPanel Margin="0,0,0,10">
-      <local:SelectableText Text="The picture does not send input. Investigate this screen temporarily switches TalkBack, presses Tab and taps controls. Use only a test screen where controls can be activated safely. Leave the phone untouched during the run." />
+      <local:SelectableText Text="Investigate this screen sends one full phone screenshot to the project's complex vision model to suggest likely touch targets. It does not send phone input." />
       <local:SelectableText x:Name="PreviewStatus"
                             Margin="0,6,0,0" FontWeight="SemiBold"
                             AutomationProperties.LiveSetting="Polite" />
@@ -53,7 +53,7 @@
               AutomationProperties.HelpText="Opens the Android accessibility tree observed during recording." />
       <Button x:Name="InteractionsButton" MinHeight="44" Padding="12,0" Margin="0,0,8,0"
               Content="_Investigate this screen" Click="InteractionsButton_Click"
-              AutomationProperties.HelpText="Starts one investigation of the current app viewport. The recorder temporarily changes TalkBack mode, sends Tab keys and may activate controls by tapping them." />
+              AutomationProperties.HelpText="Reports only the complex vision model's suggestions for the current phone screenshot. No tree matching or phone input is performed." />
       <Button x:Name="CloseButton" MinHeight="44" MinWidth="110"
               Content="_Close preview" Click="CloseButton_Click" />
     </WrapPanel>

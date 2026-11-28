@@ -3539,53 +3539,40 @@ notes with the same pass ID. A single-swipe run uses `automated
 verification` in its start note. The full-pass stop count and reason
 were not supplied for this result.
 
-## Live screen investigation
+## Live screen investigation: model-only report
 
-The following physical test is pending. Use the protocol 12 recorder and
-companion, with Google TalkBack installed and previously set up, and the
-**TalkBack Navigation Fixture** in **APK Evidence Fixtures**. The older
-directional swipe result does not validate these input modes.
-For Tests 91 and 92, the recording project must have an available image model
-explicitly selected for **Model for vision-based checks, complex questions**
-to identify the canvas target.
+These physical tests are pending. Use the **TalkBack Navigation Fixture** in
+**APK Evidence Fixtures** or a synthetic Android screen with known controls.
+The separately implemented tree matcher and input passes are deferred and
+not reachable from the model diagnostic.
 
-### Test 91: one automatically run investigation
+### Test 91: discover without phone input
 
-1. With TalkBack off, open the fixture and start Android recording.
-2. Open **Live Android preview...** and choose **Investigate this screen** once. Leave the phone untouched until the report finishes.
-3. In the report, check that a native control has distinct TalkBack touch and Tab observations, the group is not reported as an activated button, and the native click and canvas picture-change results are distinguished.
-4. Check that the fixture shows **Canvas-only action activated** and that TalkBack is off in the phone's accessibility settings. Select part of the report and Ctrl+C to verify that normal copying works.
-5. Stop and open the recording. In **Markers**, check the investigation's start and end share the same ID.
+1. With TalkBack off and the fixture showing **No fixture action**, start Android recording with a complex image model selected.
+2. Open **Live Android preview...** and choose **Investigate this screen** once.
+3. Check that the report has no Android tree entries or TalkBack, Tab, or direct-touch results. The fixture still shows **No fixture action**.
+4. Check on the phone that TalkBack is still off.
 
-A TalkBack swipe observation is not a substitute for an Explore by Touch
-result. A Tab key with no corroborated input focus, a missing canvas
-candidate, or an unresolved restoration warning is not a pass. Verification
-of a deliberate navigation/interruption belongs to a separate test.
+### Test 92: read the model input and proposal images
 
-### Test 92: read the highlighted report screenshots
+1. Open a fixture screen with a visible test overlay during recording and choose **Investigate this screen**.
+2. Check that the report shows the full input screenshot, including the overlay, and each model proposal's label, coordinates, and outlined close-up of that screenshot.
+3. Narrow the report and check that captions wrap and can still be selected and copied with Ctrl+C.
 
-1. Start Android recording with **TalkBack Navigation Fixture** open.
-2. In **Live Android preview...**, choose **Investigate this screen** once and wait for the report.
-3. Check that the native button and canvas-only target get separate starting close-ups with the outline on the matching control, leaving the label visible.
-4. Find the canvas target's local picture change. Check that the before and after close-ups show the same outlined region, different frames, and the visible change. Narrow the report and verify that the captions wrap and can still be selected and copied with Ctrl+C.
+### Test 93: use the explicitly selected complex model
 
-**On screen:** starting close-ups and tap crops are labelled separately.
-A starting outline does not imply an observed focus stop or activation.
-
-### Test 93: match screenshot suggestions to the live tree
-
-1. With a different image model selected for **Model for vision-based checks, complex questions** than for simple questions, start Android recording on **TalkBack Navigation Fixture**.
-2. Choose **Investigate this screen** once in **Live Android preview...**. Check that progress names the complex model before the input passes, then leave the phone untouched.
-3. In the report, check that the native action is matched to Android, the canvas action is model-only, and the static status is not proposed as a direct-tap target. The candidate's source must be separate from any observed result.
+1. Select distinct simple and complex models for vision-based checks in the recording project's settings.
+2. Choose **Investigate this screen** once in **Live Android preview...**.
+3. Check that the report names the complex model, not the simple model.
 
 ### Test 94: disclose visual discovery that was not run
 
 1. With an image model selected for simple vision-based checks but no separate model for **Model for vision-based checks, complex questions**, start Android recording on **TalkBack Navigation Fixture**.
-2. Choose **Investigate this screen** once in **Live Android preview...**. Leave the phone untouched until it finishes.
-3. Check that the report says **Visual discovery not assessed**, keeps Android declarations and any verified input results, and does not create a canvas candidate from pixels or text alone.
+2. Choose **Investigate this screen** once in **Live Android preview...**.
+3. Check that the report says **Visual discovery not assessed** and shows no substitute proposals.
 
-### Test 95: list a composite control once
+### Test 95: inspect overlapping proposals without deduplication
 
-1. With the complex vision model selected, start Android recording on a test screen with an icon and label on one button, plus a similar control in a different location.
-2. Choose **Investigate this screen** once and leave the phone untouched.
-3. Check that the icon, label, and button outline are not three candidates for the same action, and that the separate control has its own row and close-up. If the model proposed duplicate boxes, the report counts the ones removed.
+1. Select a test model endpoint that returns a fixed valid list with a nested box and a repeated box.
+2. Choose **Investigate this screen** once.
+3. Check that all proposals appear in the supplied order at their original coordinates, including the nested and repeated boxes.

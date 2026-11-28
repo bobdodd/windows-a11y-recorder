@@ -13,12 +13,12 @@ public partial class AndroidInteractionWindow : Window
     private bool _running = true;
     private bool _isClosed;
 
-    public AndroidInteractionWindow(AndroidInteractionExploration exploration,
+    public AndroidInteractionWindow(AndroidLivePreviewFrame? frame,
         Func<CancellationToken, Task<(ModelProfile? Profile, LocalServerSettings? Server, string? Problem)>> vision,
         Func<string, bool> marker, Action<Task> track)
     {
         InitializeComponent();
-        RunStatus.Text = "Starting the screen investigation. Leave the phone untouched.";
+        RunStatus.Text = "Preparing one screenshot for model-only discovery.";
         Closed += (_, _) =>
         {
             _isClosed = true;
@@ -41,8 +41,7 @@ public partial class AndroidInteractionWindow : Window
                     ShowStatus(status);
                 }
             });
-            var task = exploration.InvestigateAsync(
-                (snapshot, token) => AndroidInteractionScan.ReadAsync(snapshot, vision, progress, token), marker, progress, _closed.Token);
+            var task = RunAsync(progress);
             track(task.ContinueWith(_ => { }, CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default));
             try
@@ -51,15 +50,22 @@ public partial class AndroidInteractionWindow : Window
                 if (!_isClosed)
                 {
                     Report.Document = AndroidInteractionReportDocument.Create(result);
-                    ShowStatus(result.Restoration is null ? result.Status : result.Status + " " + result.Restoration);
+                    ShowStatus(result.Status);
+                }
+            }
+            catch (OperationCanceledException) when (_closed.IsCancellationRequested)
+            {
+                if (!_isClosed)
+                {
+                    ShowStatus("Model discovery was cancelled.");
                 }
             }
             catch (Exception ex)
             {
-                Trace.TraceWarning("Android investigation stopped: {0}", ex.GetType().Name);
+                Trace.TraceWarning("Android model discovery stopped: {0}", ex.GetType().Name);
                 if (!_isClosed)
                 {
-                    ShowStatus("The investigation could not finish. Check the phone's TalkBack setting before continuing.");
+                    ShowStatus("The model discovery report could not be completed.");
                 }
             }
             finally
@@ -72,6 +78,27 @@ public partial class AndroidInteractionWindow : Window
                 }
             }
         }
+
+        async Task<AndroidModelDiscoveryReport> RunAsync(IProgress<string> progress)
+        {
+            if (frame is null)
+            {
+                return new("Visual discovery not assessed. No recorded phone screenshot was available.");
+            }
+            var tag = Guid.NewGuid().ToString("N")[..8];
+            if (!marker($"Recorder model discovery {tag}: started; frame {frame.Sequence}."))
+            {
+                return new("Visual discovery not assessed. The recording no longer accepts annotations.");
+            }
+            try
+            {
+                return await AndroidInteractionScan.ReadAsync(frame, vision, progress, _closed.Token);
+            }
+            finally
+            {
+                marker($"Recorder model discovery {tag}: ended; frame {frame.Sequence}.");
+            }
+        }
     }
 
     internal void Stop() => _closed.Cancel();
@@ -82,7 +109,7 @@ public partial class AndroidInteractionWindow : Window
         {
             Stop();
             CloseReport.IsEnabled = false;
-            ShowStatus("Stopping the investigation and restoring the original TalkBack setting.");
+            ShowStatus("Stopping model discovery.");
         }
         else
         {
@@ -105,8 +132,7 @@ public partial class AndroidInteractionWindow : Window
         {
             return;
         }
-        // The report still copies selected text and captions, not WPF rich data
-        // that could carry the original frame behind a clipped drawing.
+        // Copy selected text and captions without adding screenshots to the clipboard.
         e.Handled = true;
         var text = Report.Selection.Text;
         if (!string.IsNullOrEmpty(text))

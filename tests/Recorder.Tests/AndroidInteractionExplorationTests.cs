@@ -505,23 +505,6 @@ public sealed class AndroidInteractionExplorationTests
     }
 
     [Fact]
-    public void VisionParsesStrictLocationsAndNeverAcceptsModelActionCommands()
-    {
-        var proposed = AndroidInvestigationCandidates.ParseProposals(
-            """{"targets":[{"label":"Tool","box":[200,100,900,400]}]}""", new(25, 50, 225, 450));
-        Assert.Equal((new AndroidNodeBounds(65, 90, 205, 210), "Tool"), Assert.Single(proposed!));
-        Assert.Null(AndroidInvestigationCandidates.ParseProposals(
-            """{"targets":[{"label":"Tool","box":[200,100,900,400],"command":"tap"}]}""", Viewport));
-        Assert.Null(AndroidInvestigationCandidates.ParseProposals(
-            """{"targets":[{"label":"Tool","box":[200,100,1001,400]}]}""", Viewport));
-        Assert.Null(AndroidInvestigationCandidates.ParseProposals(
-            """{"targets":[{"label":"Tool","box":[200,100,900,400],"label":"Repeated"}]}""", Viewport));
-        Assert.Null(AndroidInvestigationCandidates.ParseProposals(
-            JsonSerializer.Serialize(new { targets = Enumerable.Repeat(new { label = "Tool", box = new[] { 200, 100, 900, 400 } },
-                AndroidInvestigationCandidates.ProposalLimit + 1) }), Viewport));
-    }
-
-    [Fact]
     public void LargeUnexplainedPictureChangeStopsRemainingTapTargets()
     {
         var before = new AndroidLivePreviewFrame(1, 300, 500, Paint());
